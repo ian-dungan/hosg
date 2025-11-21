@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.3</title>
+  <title>Heroes of Shady Grove v1.0.4</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.3 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.4 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -696,7 +696,7 @@
   <div id="chat-panel">
     <div id="chat-log"></div>
     <div id="chat-input-row">
-      <input id="chat-input" placeholder="Type to chat (local only for now)..." />
+      <input id="chat-input" placeholder="Type to chat..." />
       <button id="chat-send">Send</button>
     </div>
   </div>
@@ -1040,6 +1040,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
 
   mpSocket.addEventListener("open", function () {
     mpConnected = true;
+    mpUpdateStatusLabel();
     mpLog("Connected to multiplayer server");
     if (!playerState) loadPlayerState();
     const hello = {
@@ -1051,6 +1052,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
 
   mpSocket.addEventListener("close", function () {
     mpConnected = false;
+    mpUpdateStatusLabel();
     mpLog("Disconnected from multiplayer server");
     // Clean up remote heroes
     Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
@@ -1058,6 +1060,8 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
 
   mpSocket.addEventListener("error", function (err) {
     console.warn("Multiplayer socket error", err);
+    mpConnected = false;
+    mpUpdateStatusLabel();
   });
 
   mpSocket.addEventListener("message", function (ev) {
