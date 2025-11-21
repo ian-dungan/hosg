@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.7</title>
+  <title>Heroes of Shady Grove v1.0.8</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.7 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.8 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -954,45 +954,131 @@ function mpHexToColor3(hex) {
 function createRemoteHero(scene, shadowGenerator, id, player) {
   const root = new BABYLON.TransformNode("remoteRoot_" + id, scene);
 
-  const body = BABYLON.MeshBuilder.CreateCapsule(
-    "remoteBody_" + id,
-    { height: 2.6, radius: 0.55, tessellation: 8, subdivisions: 1 },
+  // --- Appearance + materials ---
+  const app = player.appearance || {};
+  const skinColor = mpHexToColor3(app.skin || "#f3dec0");
+  const tunicColor = mpHexToColor3(app.tunic || "#344fba");
+  const pantsColor = mpHexToColor3(app.pants || "#1f2937");
+  const bootColor = new BABYLON.Color3(0.08, 0.08, 0.12);
+
+  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
+  skinMat.diffuseColor = skinColor;
+
+  const tunicMat = new BABYLON.StandardMaterial("remoteTunic_" + id, scene);
+  tunicMat.diffuseColor = tunicColor;
+
+  const pantsMat = new BABYLON.StandardMaterial("remotePants_" + id, scene);
+  pantsMat.diffuseColor = pantsColor;
+
+  const bootMat = new BABYLON.StandardMaterial("remoteBoot_" + id, scene);
+  bootMat.diffuseColor = bootColor;
+
+  // --- Torso & hips ---
+  const torso = BABYLON.MeshBuilder.CreateBox(
+    "remoteTorso_" + id,
+    { width: 1.1, height: 1.4, depth: 0.7 },
     scene
   );
-  body.parent = root;
-  body.position = new BABYLON.Vector3(0, 1.4, 0);
+  torso.parent = root;
+  torso.position = new BABYLON.Vector3(0, 1.9, 0);
+  torso.material = tunicMat;
 
+  const hips = BABYLON.MeshBuilder.CreateBox(
+    "remoteHips_" + id,
+    { width: 0.9, height: 0.6, depth: 0.7 },
+    scene
+  );
+  hips.parent = root;
+  hips.position = new BABYLON.Vector3(0, 1.2, 0);
+  hips.material = pantsMat;
+
+  // --- Head ---
   const head = BABYLON.MeshBuilder.CreateSphere(
     "remoteHead_" + id,
     { diameter: 0.85, segments: 8 },
     scene
   );
   head.parent = root;
-  head.position = new BABYLON.Vector3(0, 2.4, 0);
-
-  const tunicMat = new BABYLON.StandardMaterial("remoteTunic_" + id, scene);
-  const pantsMat = new BABYLON.StandardMaterial("remotePants_" + id, scene);
-  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
-
-  const app = player.appearance || {};
-  tunicMat.diffuseColor = mpHexToColor3(app.tunic || "#344fba");
-  pantsMat.diffuseColor = mpHexToColor3(app.pants || "#1f2937");
-  skinMat.diffuseColor = mpHexToColor3(app.skin || "#f3dec0");
-
-  body.material = tunicMat;
+  head.position = new BABYLON.Vector3(0, 2.8, 0);
   head.material = skinMat;
 
-  shadowGenerator.addShadowCaster(body);
+  // --- Arms ---
+  function createArm(side) {
+    const sx = side === "L" ? -0.75 : 0.75;
+    const shoulder = new BABYLON.TransformNode("remoteShoulder_" + side + "_" + id, scene);
+    shoulder.parent = root;
+    shoulder.position = new BABYLON.Vector3(sx, 2.5, 0);
+
+    const upper = BABYLON.MeshBuilder.CreateBox(
+      "remoteUpperArm_" + side + "_" + id,
+      { width: 0.4, height: 0.9, depth: 0.4 },
+      scene
+    );
+    upper.parent = shoulder;
+    upper.position = new BABYLON.Vector3(0, -0.45, 0);
+    upper.material = tunicMat;
+
+    const lower = BABYLON.MeshBuilder.CreateBox(
+      "remoteLowerArm_" + side + "_" + id,
+      { width: 0.35, height: 0.8, depth: 0.35 },
+      scene
+    );
+    lower.parent = upper;
+    lower.position = new BABYLON.Vector3(0, -0.85, 0);
+    lower.material = skinMat;
+
+    shadowGenerator.addShadowCaster(upper);
+    shadowGenerator.addShadowCaster(lower);
+  }
+
+  createArm("L");
+  createArm("R");
+
+  // --- Legs ---
+  function createLeg(side) {
+    const sx = side === "L" ? -0.35 : 0.35;
+    const hipJoint = new BABYLON.TransformNode("remoteHipJoint_" + side + "_" + id, scene);
+    hipJoint.parent = root;
+    hipJoint.position = new BABYLON.Vector3(sx, 1.0, 0.08);
+
+    const upper = BABYLON.MeshBuilder.CreateBox(
+      "remoteUpperLeg_" + side + "_" + id,
+      { width: 0.45, height: 1.0, depth: 0.5 },
+      scene
+    );
+    upper.parent = hipJoint;
+    upper.position = new BABYLON.Vector3(0, -0.5, 0);
+    upper.material = pantsMat;
+
+    const boot = BABYLON.MeshBuilder.CreateBox(
+      "remoteBoot_" + side + "_" + id,
+      { width: 0.5, height: 0.4, depth: 0.7 },
+      scene
+    );
+    boot.parent = hipJoint;
+    boot.position = new BABYLON.Vector3(0, -1.25, 0.12);
+    boot.material = bootMat;
+
+    shadowGenerator.addShadowCaster(upper);
+    shadowGenerator.addShadowCaster(boot);
+  }
+
+  createLeg("L");
+  createLeg("R");
+
+  // Add torso/hips/head to shadows
+  shadowGenerator.addShadowCaster(torso);
+  shadowGenerator.addShadowCaster(hips);
   shadowGenerator.addShadowCaster(head);
 
-  // Floating name label
+  // --- Floating name label ---
   const plate = BABYLON.MeshBuilder.CreatePlane(
     "remoteName_" + id,
     { width: 3, height: 0.6 },
     scene
   );
   plate.parent = root;
-  plate.position = new BABYLON.Vector3(0, 3.1, 0);
+  plate.position = new BABYLON.Vector3(0, 3.3, 0);
   plate.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
 
   const tex = new BABYLON.DynamicTexture(
@@ -1018,7 +1104,7 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   plateMat.backFaceCulling = false;
   plate.material = plateMat;
 
-  remotePlayers[id] = { root, body, head, plate, tex };
+  remotePlayers[id] = { root, torso, head, plate, tex };
   return remotePlayers[id];
 }
 
