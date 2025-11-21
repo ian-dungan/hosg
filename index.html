@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.9</title>
+  <title>Heroes of Shady Grove v1.0.10</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.9 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.10 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -935,6 +935,12 @@ function mpHexToColor3(hex) {
   const b = parseInt(h.substring(4, 6), 16) / 255;
   return new BABYLON.Color3(r, g, b);
 }
+
+// Global HUD/player stats used by HUD and multiplayer
+let hp = 100, maxHp = 100;
+let mp = 60, maxMp = 100;
+let xp = 25, level = 1;
+
 
 function createRemoteHero(scene, shadowGenerator, id, player) {
   const root = new BABYLON.TransformNode("remoteRoot_" + id, scene);
@@ -1945,9 +1951,9 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         const xpLabel = document.getElementById("xp-label");
         const levelLabel = document.getElementById("level-label");
 
-        let hp = 100, maxHp = 100;
-        let mp = 60, maxMp = 100;
-        let xp = 25, level = 1;
+        hp = 100; maxHp = 100;
+        mp = 60; maxMp = 100;
+        xp = 25; level = 1;
 
         function updateHud(time) {
           mp = maxMp * (0.4 + 0.1 * Math.sin(time * 0.3));
