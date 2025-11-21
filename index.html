@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.8</title>
+  <title>Heroes of Shady Grove v1.0.9</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.8 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.9 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -908,21 +908,6 @@ let mpConnected = false;
 let mpLocalId = null;
 const remotePlayers = {}; // id -> { body, head, nameplate, labelTex }
 
-// Multiplayer reconnect & shared state
-let mpReconnectTimer = null;
-let mpReconnectDelay = 2000;
-const mpReconnectDelayMax = 20000;
-
-let mpScene = null;
-let mpHeroBody = null;
-let mpShadowGenerator = null;
-let mpGetRuntimeStats = null;
-
-// Global HUD/player stats so multiplayer and HUD share the same values
-let hp = 100, maxHp = 100;
-let mp = 60, maxMp = 100;
-let xp = 25, level = 1;
-
 function mpUpdateStatusLabel() {
   const el = document.getElementById("mp-status-text");
   if (!el) return;
@@ -954,15 +939,11 @@ function mpHexToColor3(hex) {
 function createRemoteHero(scene, shadowGenerator, id, player) {
   const root = new BABYLON.TransformNode("remoteRoot_" + id, scene);
 
-  // --- Appearance + materials ---
+  // Appearance & materials
   const app = player.appearance || {};
-  const skinColor = mpHexToColor3(app.skin || "#f3dec0");
   const tunicColor = mpHexToColor3(app.tunic || "#344fba");
   const pantsColor = mpHexToColor3(app.pants || "#1f2937");
-  const bootColor = new BABYLON.Color3(0.08, 0.08, 0.12);
-
-  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
-  skinMat.diffuseColor = skinColor;
+  const skinColor  = mpHexToColor3(app.skin  || "#f3dec0");
 
   const tunicMat = new BABYLON.StandardMaterial("remoteTunic_" + id, scene);
   tunicMat.diffuseColor = tunicColor;
@@ -970,115 +951,146 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   const pantsMat = new BABYLON.StandardMaterial("remotePants_" + id, scene);
   pantsMat.diffuseColor = pantsColor;
 
-  const bootMat = new BABYLON.StandardMaterial("remoteBoot_" + id, scene);
-  bootMat.diffuseColor = bootColor;
+  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
+  skinMat.diffuseColor = skinColor;
 
-  // --- Torso & hips ---
+  const bootMat = new BABYLON.StandardMaterial("remoteBoot_" + id, scene);
+  bootMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.14);
+
+  // Torso & hips
   const torso = BABYLON.MeshBuilder.CreateBox(
     "remoteTorso_" + id,
-    { width: 1.1, height: 1.4, depth: 0.7 },
+    { height: 1.4, width: 0.9, depth: 0.5 },
     scene
   );
   torso.parent = root;
-  torso.position = new BABYLON.Vector3(0, 1.9, 0);
+  torso.position = new BABYLON.Vector3(0, 1.6, 0);
   torso.material = tunicMat;
 
   const hips = BABYLON.MeshBuilder.CreateBox(
     "remoteHips_" + id,
-    { width: 0.9, height: 0.6, depth: 0.7 },
+    { height: 0.6, width: 0.8, depth: 0.5 },
     scene
   );
   hips.parent = root;
-  hips.position = new BABYLON.Vector3(0, 1.2, 0);
+  hips.position = new BABYLON.Vector3(0, 1.0, 0);
   hips.material = pantsMat;
 
-  // --- Head ---
+  // Head
   const head = BABYLON.MeshBuilder.CreateSphere(
     "remoteHead_" + id,
-    { diameter: 0.85, segments: 8 },
+    { diameter: 0.7, segments: 8 },
     scene
   );
   head.parent = root;
-  head.position = new BABYLON.Vector3(0, 2.8, 0);
+  head.position = new BABYLON.Vector3(0, 2.35, 0);
   head.material = skinMat;
 
-  // --- Arms ---
-  function createArm(side) {
-    const sx = side === "L" ? -0.75 : 0.75;
-    const shoulder = new BABYLON.TransformNode("remoteShoulder_" + side + "_" + id, scene);
-    shoulder.parent = root;
-    shoulder.position = new BABYLON.Vector3(sx, 2.5, 0);
+  // Arms
+  const armLength = 0.9;
+  const armWidth = 0.24;
+  const armDepth = 0.32;
+  const armOffsetX = 0.7;
 
-    const upper = BABYLON.MeshBuilder.CreateBox(
-      "remoteUpperArm_" + side + "_" + id,
-      { width: 0.4, height: 0.9, depth: 0.4 },
-      scene
-    );
-    upper.parent = shoulder;
-    upper.position = new BABYLON.Vector3(0, -0.45, 0);
-    upper.material = tunicMat;
+  const leftArmUpper = BABYLON.MeshBuilder.CreateBox(
+    "remoteArmLUpper_" + id,
+    { height: armLength, width: armWidth, depth: armDepth },
+    scene
+  );
+  leftArmUpper.parent = root;
+  leftArmUpper.position = new BABYLON.Vector3(-armOffsetX, 1.7, 0);
+  leftArmUpper.material = tunicMat;
 
-    const lower = BABYLON.MeshBuilder.CreateBox(
-      "remoteLowerArm_" + side + "_" + id,
-      { width: 0.35, height: 0.8, depth: 0.35 },
-      scene
-    );
-    lower.parent = upper;
-    lower.position = new BABYLON.Vector3(0, -0.85, 0);
-    lower.material = skinMat;
+  const leftArmLower = BABYLON.MeshBuilder.CreateBox(
+    "remoteArmLLower_" + id,
+    { height: 0.7, width: armWidth, depth: armDepth },
+    scene
+  );
+  leftArmLower.parent = root;
+  leftArmLower.position = new BABYLON.Vector3(-armOffsetX, 1.15, 0);
+  leftArmLower.material = skinMat;
 
-    shadowGenerator.addShadowCaster(upper);
-    shadowGenerator.addShadowCaster(lower);
-  }
+  const rightArmUpper = BABYLON.MeshBuilder.CreateBox(
+    "remoteArmRUpper_" + id,
+    { height: armLength, width: armWidth, depth: armDepth },
+    scene
+  );
+  rightArmUpper.parent = root;
+  rightArmUpper.position = new BABYLON.Vector3(armOffsetX, 1.7, 0);
+  rightArmUpper.material = tunicMat;
 
-  createArm("L");
-  createArm("R");
+  const rightArmLower = BABYLON.MeshBuilder.CreateBox(
+    "remoteArmRLower_" + id,
+    { height: 0.7, width: armWidth, depth: armDepth },
+    scene
+  );
+  rightArmLower.parent = root;
+  rightArmLower.position = new BABYLON.Vector3(armOffsetX, 1.15, 0);
+  rightArmLower.material = skinMat;
 
-  // --- Legs ---
-  function createLeg(side) {
-    const sx = side === "L" ? -0.35 : 0.35;
-    const hipJoint = new BABYLON.TransformNode("remoteHipJoint_" + side + "_" + id, scene);
-    hipJoint.parent = root;
-    hipJoint.position = new BABYLON.Vector3(sx, 1.0, 0.08);
+  // Legs
+  const legLength = 0.9;
+  const legWidth = 0.3;
+  const legDepth = 0.34;
+  const legOffsetX = 0.32;
 
-    const upper = BABYLON.MeshBuilder.CreateBox(
-      "remoteUpperLeg_" + side + "_" + id,
-      { width: 0.45, height: 1.0, depth: 0.5 },
-      scene
-    );
-    upper.parent = hipJoint;
-    upper.position = new BABYLON.Vector3(0, -0.5, 0);
-    upper.material = pantsMat;
+  const leftLegUpper = BABYLON.MeshBuilder.CreateBox(
+    "remoteLegLUpper_" + id,
+    { height: legLength, width: legWidth, depth: legDepth },
+    scene
+  );
+  leftLegUpper.parent = root;
+  leftLegUpper.position = new BABYLON.Vector3(-legOffsetX, 0.9, 0);
+  leftLegUpper.material = pantsMat;
 
-    const boot = BABYLON.MeshBuilder.CreateBox(
-      "remoteBoot_" + side + "_" + id,
-      { width: 0.5, height: 0.4, depth: 0.7 },
-      scene
-    );
-    boot.parent = hipJoint;
-    boot.position = new BABYLON.Vector3(0, -1.25, 0.12);
-    boot.material = bootMat;
+  const leftLegLower = BABYLON.MeshBuilder.CreateBox(
+    "remoteLegLLower_" + id,
+    { height: 0.5, width: legWidth, depth: legDepth + 0.04 },
+    scene
+  );
+  leftLegLower.parent = root;
+  leftLegLower.position = new BABYLON.Vector3(-legOffsetX, 0.3, 0);
+  leftLegLower.material = bootMat;
 
-    shadowGenerator.addShadowCaster(upper);
-    shadowGenerator.addShadowCaster(boot);
-  }
+  const rightLegUpper = BABYLON.MeshBuilder.CreateBox(
+    "remoteLegRUpper_" + id,
+    { height: legLength, width: legWidth, depth: legDepth },
+    scene
+  );
+  rightLegUpper.parent = root;
+  rightLegUpper.position = new BABYLON.Vector3(legOffsetX, 0.9, 0);
+  rightLegUpper.material = pantsMat;
 
-  createLeg("L");
-  createLeg("R");
+  const rightLegLower = BABYLON.MeshBuilder.CreateBox(
+    "remoteLegRLower_" + id,
+    { height: 0.5, width: legWidth, depth: legDepth + 0.04 },
+    scene
+  );
+  rightLegLower.parent = root;
+  rightLegLower.position = new BABYLON.Vector3(legOffsetX, 0.3, 0);
+  rightLegLower.material = bootMat;
 
-  // Add torso/hips/head to shadows
-  shadowGenerator.addShadowCaster(torso);
-  shadowGenerator.addShadowCaster(hips);
-  shadowGenerator.addShadowCaster(head);
+  // Shadows for main body parts
+  [
+    torso,
+    hips,
+    head,
+    leftArmUpper,
+    rightArmUpper,
+    leftLegUpper,
+    rightLegUpper,
+    leftLegLower,
+    rightLegLower
+  ].forEach(m => shadowGenerator.addShadowCaster(m));
 
-  // --- Floating name label ---
+  // Floating name label (smaller & with subtle background)
   const plate = BABYLON.MeshBuilder.CreatePlane(
     "remoteName_" + id,
-    { width: 3, height: 0.6 },
+    { width: 2.4, height: 0.48 },
     scene
   );
   plate.parent = root;
-  plate.position = new BABYLON.Vector3(0, 3.3, 0);
+  plate.position = new BABYLON.Vector3(0, 3.0, 0);
   plate.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
 
   const tex = new BABYLON.DynamicTexture(
@@ -1088,23 +1100,40 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
     false
   );
   tex.hasAlpha = true;
-  const ctxName = (player.name || "Hero") + (player.role ? " — " + player.role : "");
+
+  const label = (player.name || "Hero") + (player.role ? " — " + player.role : "");
   tex.drawText(
-    ctxName,
+    label,
     null,
-    42,
-    "20px Segoe UI",
+    40,
+    "18px Segoe UI",
     "#ffffff",
-    "transparent",
+    "rgba(0,0,0,0.45)",
     true
   );
+
   const plateMat = new BABYLON.StandardMaterial("remoteNameMat_" + id, scene);
   plateMat.diffuseTexture = tex;
-  plateMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+  plateMat.emissiveColor = new BABYLON.Color3(0.8, 0.85, 1);
   plateMat.backFaceCulling = false;
   plate.material = plateMat;
 
-  remotePlayers[id] = { root, torso, head, plate, tex };
+  // Simple animation state
+  const anim = {
+    walkTime: 0,
+    idleTime: 0,
+    isMoving: false,
+    lastPos: new BABYLON.Vector3(root.position.x, root.position.y, root.position.z)
+  };
+
+  const limbs = {
+    leftArmUpper,
+    rightArmUpper,
+    leftLegUpper,
+    rightLegUpper
+  };
+
+  remotePlayers[id] = { root, torso, head, plate, tex, limbs, anim };
   return remotePlayers[id];
 }
 
@@ -1112,10 +1141,22 @@ function updateRemoteHero(id, player) {
   const entry = remotePlayers[id];
   if (!entry) return;
   const p = player.position || { x: 0, y: 1.5, z: 0 };
+
+  // Position & facing
   entry.root.position.x = p.x;
   entry.root.position.y = p.y - 1.5;
   entry.root.position.z = p.z;
   entry.root.rotation.y = player.rotationY || 0;
+
+  // Basic movement detection for remote walk animation
+  if (entry.anim) {
+    const last = entry.anim.lastPos || new BABYLON.Vector3(p.x, p.y, p.z);
+    const dx = p.x - last.x;
+    const dz = p.z - last.z;
+    const speedSq = dx * dx + dz * dz;
+    entry.anim.isMoving = speedSq > 0.0005;
+    entry.anim.lastPos = new BABYLON.Vector3(p.x, p.y, p.z);
+  }
 }
 
 function removeRemoteHero(id) {
@@ -1127,50 +1168,22 @@ function removeRemoteHero(id) {
   delete remotePlayers[id];
 }
 
-function mpScheduleReconnect() {
-  if (mpReconnectTimer) return;
-  if (!MP_SERVER_URL) return;
-  if (!mpScene) return;
-
-  mpLog("Scheduling multiplayer reconnect in " + (mpReconnectDelay / 1000).toFixed(1) + "s...");
-  mpReconnectTimer = setTimeout(function () {
-    mpReconnectTimer = null;
-    mpInitSocket();
-  }, mpReconnectDelay);
-  mpReconnectDelay = Math.min(mpReconnectDelay * 2, mpReconnectDelayMax);
-}
-
-function mpInitSocket() {
+function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
   if (!("WebSocket" in window)) {
     mpLog("WebSocket not supported in this browser.");
     return;
   }
-  if (!MP_SERVER_URL) {
-    mpLog("No MP_SERVER_URL configured.");
-    return;
-  }
-  if (mpSocket && (mpSocket.readyState === WebSocket.OPEN || mpSocket.readyState === WebSocket.CONNECTING)) {
-    return;
-  }
-
   try {
     mpSocket = new WebSocket(MP_SERVER_URL);
   } catch (e) {
     console.warn("Failed to create WebSocket", e);
-    mpScheduleReconnect();
     return;
   }
 
   mpSocket.addEventListener("open", function () {
     mpConnected = true;
-    mpReconnectDelay = 2000;
-    if (mpReconnectTimer) {
-      clearTimeout(mpReconnectTimer);
-      mpReconnectTimer = null;
-    }
     mpUpdateStatusLabel();
     mpLog("Connected to multiplayer server");
-    appendChat("System: Connected to multiplayer server.");
     if (!playerState) loadPlayerState();
     const hello = {
       type: "hello",
@@ -1183,18 +1196,14 @@ function mpInitSocket() {
     mpConnected = false;
     mpUpdateStatusLabel();
     mpLog("Disconnected from multiplayer server");
-    appendChat("System: Disconnected from multiplayer server.");
     // Clean up remote heroes
     Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
-    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("error", function (err) {
     console.warn("Multiplayer socket error", err);
     mpConnected = false;
     mpUpdateStatusLabel();
-    appendChat("System: Multiplayer error — see console for details.");
-    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("message", function (ev) {
@@ -1213,7 +1222,7 @@ function mpInitSocket() {
         others.forEach(entry => {
           if (entry.id === mpLocalId) return;
           if (!remotePlayers[entry.id]) {
-            createRemoteHero(mpScene, mpShadowGenerator, entry.id, entry.player);
+            createRemoteHero(scene, shadowGenerator, entry.id, entry.player);
           }
           updateRemoteHero(entry.id, entry.player);
         });
@@ -1222,7 +1231,7 @@ function mpInitSocket() {
       case "playerJoined": {
         if (msg.id === mpLocalId) break;
         if (!remotePlayers[msg.id]) {
-          createRemoteHero(mpScene, mpShadowGenerator, msg.id, msg.player);
+          createRemoteHero(scene, shadowGenerator, msg.id, msg.player);
         }
         updateRemoteHero(msg.id, msg.player);
         break;
@@ -1235,7 +1244,7 @@ function mpInitSocket() {
       case "state": {
         if (msg.id === mpLocalId) break;
         if (!remotePlayers[msg.id]) {
-          createRemoteHero(mpScene, mpShadowGenerator, msg.id, msg.player);
+          createRemoteHero(scene, shadowGenerator, msg.id, msg.player);
         }
         updateRemoteHero(msg.id, msg.player);
         break;
@@ -1248,22 +1257,11 @@ function mpInitSocket() {
       }
     }
   });
-}
-
-function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
-  mpScene = scene;
-  mpHeroBody = heroBody;
-  mpShadowGenerator = shadowGenerator;
-  mpGetRuntimeStats = getRuntimeStats;
-
-  mpInitSocket();
 
   // Return a function to send our current state periodically
   return function sendLocalState() {
     if (!mpConnected || !mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
-    if (!mpGetRuntimeStats) return;
-
-    const stats = mpGetRuntimeStats();
+    const stats = getRuntimeStats();
     const payload = {
       type: "state",
       player: {
@@ -1290,7 +1288,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
   };
 }
 
-function appendChat(text) {
+      function appendChat(text) {
         const log = document.getElementById("chat-log");
         const line = document.createElement("div");
         line.textContent = text;
@@ -1947,9 +1945,9 @@ function appendChat(text) {
         const xpLabel = document.getElementById("xp-label");
         const levelLabel = document.getElementById("level-label");
 
-        hp = 100; maxHp = 100;
-        mp = 60; maxMp = 100;
-        xp = 25; level = 1;
+        let hp = 100, maxHp = 100;
+        let mp = 60, maxMp = 100;
+        let xp = 25, level = 1;
 
         function updateHud(time) {
           mp = maxMp * (0.4 + 0.1 * Math.sin(time * 0.3));
@@ -2098,7 +2096,54 @@ function appendChat(text) {
             }
           }
 
+          // Remote player walk/idle animation
+          for (const id in remotePlayers) {
+            const rp = remotePlayers[id];
+            if (!rp || !rp.anim || !rp.limbs) continue;
+            const anim = rp.anim;
+            const limbs = rp.limbs;
+
+            if (anim.isMoving) {
+              anim.walkTime += dtSec * 4.0;
+              const phaseR = anim.walkTime * Math.PI * 2;
+              const swingR = Math.sin(phaseR);
+              const swingOppR = Math.sin(phaseR + Math.PI);
+              const legSwingR = 0.6;
+              const armSwingR = 0.7;
+
+              if (limbs.leftLegUpper) limbs.leftLegUpper.rotation.x = swingR * legSwingR;
+              if (limbs.rightLegUpper) limbs.rightLegUpper.rotation.x = swingOppR * legSwingR;
+              if (limbs.leftArmUpper) limbs.leftArmUpper.rotation.x = -swingOppR * armSwingR * 0.6;
+              if (limbs.rightArmUpper) limbs.rightArmUpper.rotation.x = -swingR * armSwingR * 0.6;
+
+              const bobR = Math.abs(Math.sin(phaseR)) * 0.06;
+              if (rp.torso) rp.torso.position.y = 1.6 + bobR;
+            } else {
+              anim.idleTime += dtSec;
+              const relaxR = 1 - Math.pow(0.0001, dtSec);
+
+              function dampLimb(mesh) {
+                if (!mesh) return;
+                mesh.rotation.x -= mesh.rotation.x * relaxR;
+                mesh.rotation.z -= mesh.rotation.z * relaxR;
+              }
+
+              dampLimb(limbs.leftLegUpper);
+              dampLimb(limbs.rightLegUpper);
+              dampLimb(limbs.leftArmUpper);
+              dampLimb(limbs.rightArmUpper);
+
+              if (rp.torso) {
+                const baseY = 1.6;
+                rp.torso.position.y += (baseY - rp.torso.position.y) * relaxR;
+                const breathR = Math.sin(anim.idleTime * Math.PI * 2) * 0.01;
+                rp.torso.position.y = baseY + breathR;
+              }
+            }
+          }
+
           camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
+
 
           if (gamepadState.hasPad) {
             const lookSpeed = 0.04;
@@ -2178,13 +2223,6 @@ function appendChat(text) {
       window.addEventListener("resize", function () {
         engine.resize();
       });
-
-      document.addEventListener("visibilitychange", function () {
-        if (!document.hidden && !mpConnected) {
-          mpScheduleReconnect();
-        }
-      });
-      
     })();
   </script>
 </body>
