@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Heroes of Shady Grove v1.0.3</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at top, #141826 0, #05060b 50%, #000 100%);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #f5f5f5;
+    }
+
+    #renderCanvas {
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      display: block;
+    }
+
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 10;
+      gap: 12px;
+    }
+
+    #hud-left, #hud-right {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .hud-panel {
+      background: rgba(5, 5, 15, 0.9);
+      border-radius: 10px;
+      border: 1px solid rgba(130, 180, 255, 0.4);
+      padding: 8px 10px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(6px);
+      min-width: 180px;
+    }
+
+    .hud-title {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+      color: #9bc3ff;
+    }
+
+    .bar {
+      position: relative;
+      width: 100%;
+      height: 14px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.08);
+      margin-bottom: 4px;
+    }
+
+    .bar-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 60%;
+      border-radius: inherit;
+      transition: width 0.15s linear;
+    }
+
+    #hp-fill {
+      background: linear-gradient(90deg, #f74b4b, #ffb347);
+      box-shadow: 0 0 10px rgba(247, 75, 75, 0.6);
+    }
+
+    #mp-fill {
+      background: linear-gradient(90deg, #5b8dff, #b77bff);
+      box-shadow: 0 0 10px rgba(91, 141, 255, 0.6);
+    }
+
+    .bar-label {
+      font-size: 11px;
+      opacity: 0.9;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 1px;
+    }
+
+    #xp-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 11px;
+      margin-top: 2px;
+      opacity: 0.9;
+    }
+
+    #xp-bar {
+      flex: 1;
+      height: 6px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.12);
+      position: relative;
+    }
+
+    #xp-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 25%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #ffe164, #ff9f43);
+      box-shadow: 0 0 6px rgba(255, 225, 100, 0.7);
+    }
+
+    #minimap {
+      width: 180px;
+      height: 180px;
+      border-radius: 999px;
+      border: 2px solid rgba(130, 180, 255, 0.8);
+      background: radial-gradient(circle at 30% 30%, #3b5b4a, #12201b 55%, #050809 100%);
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 0 16px rgba(0, 0, 0, 0.7);
+    }
+
+    #minimap-center {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #ffe164;
+      border: 1px solid #000;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 8px rgba(255, 225, 100, 0.8);
+    }
+
+    #minimap-border {
+      position: absolute;
+      inset: 6px;
+      border-radius: inherit;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      pointer-events: none;
+    }
+
+    
+#char-create-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at top, rgba(15, 20, 45, 0.96), rgba(3, 3, 8, 0.98));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+#char-create-card {
+  width: 360px;
+  max-width: 92%;
+  background: rgba(4, 6, 18, 0.96);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  border: 1px solid rgba(130, 180, 255, 0.65);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
+}
+
+#char-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 4px;
+  color: #ffe164;
+  text-shadow: 0 0 10px rgba(255, 225, 100, 0.8);
+}
+
+#char-subtitle {
+  font-size: 12px;
+  text-align: center;
+  margin-bottom: 12px;
+  color: #cfd8ff;
+}
+
+.char-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.char-field span {
+  color: #9db8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.char-field input,
+.char-field select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(130, 180, 255, 0.6);
+  background: rgba(5, 8, 20, 0.96);
+  color: #f5f5f5;
+  font-size: 12px;
+  outline: none;
+}
+
+#char-colors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+#char-colors label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+#char-colors span {
+  color: #9db8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+#char-colors input[type="color"] {
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 180, 255, 0.7);
+  background: transparent;
+  cursor: pointer;
+}
+
+#char-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#char-buttons button {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 180, 255, 0.8);
+  background: radial-gradient(circle at 30% 0%, #4a7bff, #7a4aff);
+  color: #fff;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
+}
+
+#char-buttons button:hover {
+  filter: brightness(1.1);
+}
+
+#char-note {
+  font-size: 10px;
+  color: #9da8d6;
+  text-align: center;
+}
+
+    #chat-panel {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      width: 320px;
+      max-width: calc(100% - 24px);
+      background: rgba(0, 0, 0, 0.78);
+      border-radius: 10px;
+      border: 1px solid rgba(130, 180, 255, 0.4);
+      box-shadow: 0 0 18px rgba(0, 0, 0, 0.75);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 10;
+      pointer-events: auto;
+    }
+
+    #chat-log {
+      padding: 6px 8px;
+      height: 120px;
+      font-size: 11px;
+      overflow-y: auto;
+      color: #d8e4ff;
+      background: rgba(5, 8, 18, 0.9);
+    }
+
+    #chat-input-row {
+      display: flex;
+      border-top: 1px solid rgba(130, 180, 255, 0.5);
+      background: rgba(10, 14, 26, 0.96);
+    }
+
+    #chat-input {
+      flex: 1;
+      padding: 6px 8px;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: #f5f5f5;
+      font-size: 11px;
+    }
+
+    #chat-input::placeholder {
+      color: rgba(200, 215, 240, 0.7);
+    }
+
+    #chat-send {
+      padding: 0 10px;
+      border: none;
+      background: linear-gradient(135deg, #4a7bff, #7a4aff);
+      color: #fff;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      border-radius: 0;
+    }
+
+    #chat-send:hover {
+      filter: brightness(1.1);
+    }
+
+        #mp-status {
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      z-index: 11;
+      background: rgba(5, 5, 15, 0.9);
+      border-radius: 999px;
+      border: 1px solid rgba(130, 180, 255, 0.6);
+      padding: 4px 10px;
+      font-size: 11px;
+      color: #cfd8ff;
+      pointer-events: auto;
+    }
+
+    #mp-status-text.online {
+      color: #6bff7b;
+    }
+
+    #mp-status-text.offline {
+      color: #ff7070;
+    }
+
+    #helper-keys {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 10;
+      background: rgba(5, 5, 15, 0.9);
+      border-radius: 10px;
+      border: 1px solid rgba(130, 180, 255, 0.4);
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #cfd8ff;
+      pointer-events: auto;
+      max-width: 260px;
+    }
+
+    #helper-keys strong {
+      color: #ffe164;
+    }
+
+    #mobile-controls {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 12px;
+      display: none;
+      justify-content: space-between;
+      align-items: flex-end;
+      z-index: 15;
+      pointer-events: none;
+    }
+
+    #joystick-base {
+      width: 140px;
+      height: 140px;
+      border-radius: 999px;
+      border: 2px solid rgba(130, 180, 255, 0.8);
+      background: radial-gradient(circle at 30% 30%, rgba(120, 200, 255, 0.25), rgba(5, 10, 20, 0.9));
+      box-shadow: 0 0 16px rgba(0, 0, 0, 0.7);
+      position: relative;
+      pointer-events: auto;
+      touch-action: none;
+    }
+
+    #joystick-thumb {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 56px;
+      height: 56px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, #ffe164, #c28b2b);
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 10px rgba(255, 225, 100, 0.8);
+    }
+
+    #mobile-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: auto;
+    }
+
+    #mobile-buttons button {
+      min-width: 86px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(130, 180, 255, 0.7);
+      background: radial-gradient(circle at 30% 0%, #4a7bff, #7a4aff);
+      color: #fff;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      box-shadow: 0 0 14px rgba(0, 0, 0, 0.8);
+      cursor: pointer;
+    }
+
+    #mobile-buttons button:active {
+      transform: scale(0.97);
+      filter: brightness(1.1);
+    }
+
+    @media (max-width: 768px) {
+      
+#char-create-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at top, rgba(15, 20, 45, 0.96), rgba(3, 3, 8, 0.98));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+#char-create-card {
+  width: 360px;
+  max-width: 92%;
+  background: rgba(4, 6, 18, 0.96);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  border: 1px solid rgba(130, 180, 255, 0.65);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
+}
+
+#char-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 4px;
+  color: #ffe164;
+  text-shadow: 0 0 10px rgba(255, 225, 100, 0.8);
+}
+
+#char-subtitle {
+  font-size: 12px;
+  text-align: center;
+  margin-bottom: 12px;
+  color: #cfd8ff;
+}
+
+.char-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.char-field span {
+  color: #9db8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.char-field input,
+.char-field select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(130, 180, 255, 0.6);
+  background: rgba(5, 8, 20, 0.96);
+  color: #f5f5f5;
+  font-size: 12px;
+  outline: none;
+}
+
+#char-colors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+#char-colors label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+#char-colors span {
+  color: #9db8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+#char-colors input[type="color"] {
+  width: 100%;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 180, 255, 0.7);
+  background: transparent;
+  cursor: pointer;
+}
+
+#char-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#char-buttons button {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 180, 255, 0.8);
+  background: radial-gradient(circle at 30% 0%, #4a7bff, #7a4aff);
+  color: #fff;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
+}
+
+#char-buttons button:hover {
+  filter: brightness(1.1);
+}
+
+#char-note {
+  font-size: 10px;
+  color: #9da8d6;
+  text-align: center;
+}
+
+    #chat-panel {
+        width: calc(100% - 24px);
+      }
+          #mp-status {
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      z-index: 11;
+      background: rgba(5, 5, 15, 0.9);
+      border-radius: 999px;
+      border: 1px solid rgba(130, 180, 255, 0.6);
+      padding: 4px 10px;
+      font-size: 11px;
+      color: #cfd8ff;
+      pointer-events: auto;
+    }
+
+    #mp-status-text.online {
+      color: #6bff7b;
+    }
+
+    #mp-status-text.offline {
+      color: #ff7070;
+    }
+
+    #helper-keys {
+        display: none;
+      }
+    }
+  </style>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+</head>
+<body>
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.3 -->
+
+  <canvas id="renderCanvas"></canvas>
+
+  <div id="hud">
+    <div id="hud-left">
+      <div class="hud-panel">
+        <div class="hud-title"><span id="hud-hero-name">Felix of Shady Grove</span></div>
+        <div class="bar">
+          <div id="hp-fill" class="bar-fill"></div>
+        </div>
+        <div class="bar-label">
+          <span>HP</span>
+          <span id="hp-label">100 / 100</span>
+        </div>
+        <div class="bar">
+          <div id="mp-fill" class="bar-fill"></div>
+        </div>
+        <div class="bar-label">
+          <span>MP</span>
+          <span id="mp-label">60 / 100</span>
+        </div>
+        <div id="xp-row">
+          <span>Lv. <span id="level-label">1</span></span>
+          <div id="xp-bar"><div id="xp-fill"></div></div>
+          <span id="xp-label">25%</span>
+        </div>
+      </div>
+    </div>
+    <div id="hud-right">
+      <div id="minimap" class="hud-panel">
+        <div id="minimap-center"></div>
+        <div id="minimap-border"></div>
+      </div>
+    </div>
+  </div>
+
+
+<div id="char-create-overlay">
+  <div id="char-create-card">
+    <div id="char-title">Heroes of Shady Grove</div>
+    <div id="char-subtitle">Create your hero</div>
+    <label class="char-field">
+      <span>Name</span>
+      <input id="cc-name" type="text" maxlength="16" placeholder="Felix" />
+    </label>
+    <label class="char-field">
+      <span>Role</span>
+      <select id="cc-role">
+        <option value="Adventurer">Adventurer</option>
+        <option value="Knight">Knight</option>
+        <option value="Ranger">Ranger</option>
+        <option value="Mage">Mage</option>
+      </select>
+    </label>
+    <div id="char-colors">
+      <label>
+        <span>Tunic</span>
+        <input id="cc-tunic" type="color" value="#344fba" />
+      </label>
+      <label>
+        <span>Pants</span>
+        <input id="cc-pants" type="color" value="#1f2937" />
+      </label>
+      <label>
+        <span>Skin</span>
+        <input id="cc-skin" type="color" value="#f3dec0" />
+      </label>
+    </div>
+    <div id="char-buttons">
+      <button id="cc-random">Randomize</button>
+      <button id="cc-start">Enter the world</button>
+    </div>
+    <div id="char-note">Your hero is saved automatically in this browser.</div>
+  </div>
+</div>
+
+  <div id="chat-panel">
+    <div id="chat-log"></div>
+    <div id="chat-input-row">
+      <input id="chat-input" placeholder="Type to chat (local only for now)..." />
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+
+  <div id="mp-status">MP: <span id="mp-status-text">Offline</span></div>
+
+  <div id="helper-keys">
+    <div><strong>Controls</strong></div>
+    <div>W / A / S / D – Move</div>
+    <div>Right mouse drag – Orbit camera</div>
+    <div>Shift / B – Run</div>
+    <div>Space / A – Jump</div>
+    <div>Scroll – Zoom camera</div>
+  </div>
+
+  <div id="mobile-controls">
+    <div id="joystick-base">
+      <div id="joystick-thumb"></div>
+    </div>
+    <div id="mobile-buttons">
+      <button id="btn-jump">Jump</button>
+      <button id="btn-run">Run</button>
+    </div>
+  </div>
+
+  <script>
+
+// Persistent player state (for online-ready save structure)
+const HOSG_SAVE_KEY = "hosg_player_v1";
+let playerState = null;
+
+function getDefaultPlayerState() {
+  return {
+    name: "Felix",
+    role: "Adventurer",
+    appearance: {
+      tunic: "#344fba",
+      pants: "#1f2937",
+      skin: "#f3dec0",
+      boots: "#3b2313"
+    },
+    stats: {
+      hp: 100,
+      maxHp: 100,
+      mp: 60,
+      maxMp: 100,
+      xp: 25,
+      level: 1
+    },
+    position: { x: 0, y: 1.5, z: 0 },
+    rotationY: 0
+  };
+}
+
+function loadPlayerState() {
+  try {
+    const raw = window.localStorage.getItem(HOSG_SAVE_KEY);
+    if (!raw) {
+      playerState = getDefaultPlayerState();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    playerState = Object.assign(getDefaultPlayerState(), parsed);
+    if (!playerState.appearance) playerState.appearance = getDefaultPlayerState().appearance;
+    if (!playerState.stats) playerState.stats = getDefaultPlayerState().stats;
+    if (!playerState.position) playerState.position = getDefaultPlayerState().position;
+    if (typeof playerState.rotationY !== "number") playerState.rotationY = 0;
+  } catch (e) {
+    console.warn("Failed to load player state, using defaults", e);
+    playerState = getDefaultPlayerState();
+  }
+}
+
+function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
+  if (!playerState) return;
+  try {
+    playerState.stats = { hp, maxHp, mp, maxMp, xp, level };
+    if (heroBody && heroBody.position) {
+      playerState.position = {
+        x: heroBody.position.x,
+        y: heroBody.position.y,
+        z: heroBody.position.z
+      };
+      playerState.rotationY = heroBody.rotation.y;
+    }
+    window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
+  } catch (e) {
+    console.warn("Failed to save player state", e);
+  }
+}
+
+function applyAppearanceToMaterials(scene, mats) {
+  if (!playerState || !playerState.appearance) return;
+  const a = playerState.appearance;
+  function hexToColor3(hex) {
+    if (!hex || typeof hex !== "string") return new BABYLON.Color3(1, 1, 1);
+    const h = hex.replace("#", "");
+    if (h.length !== 6) return new BABYLON.Color3(1, 1, 1);
+    const r = parseInt(h.substring(0, 2), 16) / 255;
+    const g = parseInt(h.substring(2, 4), 16) / 255;
+    const b = parseInt(h.substring(4, 6), 16) / 255;
+    return new BABYLON.Color3(r, g, b);
+  }
+  if (mats.skin) mats.skin.diffuseColor = hexToColor3(a.skin);
+  if (mats.tunic) mats.tunic.diffuseColor = hexToColor3(a.tunic);
+  if (mats.pants) mats.pants.diffuseColor = hexToColor3(a.pants);
+  if (mats.boots) mats.boots.diffuseColor = hexToColor3(a.boots);
+}
+
+function setupCharacterCreationUI() {
+  const overlay = document.getElementById("char-create-overlay");
+  if (!overlay) return;
+
+  const nameInput = document.getElementById("cc-name");
+  const roleSelect = document.getElementById("cc-role");
+  const tunicInput = document.getElementById("cc-tunic");
+  const pantsInput = document.getElementById("cc-pants");
+  const skinInput = document.getElementById("cc-skin");
+  const randomBtn = document.getElementById("cc-random");
+  const startBtn = document.getElementById("cc-start");
+  const hudName = document.getElementById("hud-hero-name");
+
+  if (!playerState) loadPlayerState();
+
+  // Pre-fill from state
+  nameInput.value = playerState.name || "Felix";
+  roleSelect.value = playerState.role || "Adventurer";
+  tunicInput.value = playerState.appearance?.tunic || "#344fba";
+  pantsInput.value = playerState.appearance?.pants || "#1f2937";
+  skinInput.value = playerState.appearance?.skin || "#f3dec0";
+
+  function randomColor() {
+    const h = Math.floor(Math.random() * 360);
+    const s = 40 + Math.random() * 40;
+    const l = 40 + Math.random() * 10;
+    const c = (1 - Math.abs(2 * l / 100 - 1)) * (s / 100);
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l / 100 - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    r = Math.round((r + m) * 255);
+    g = Math.round((g + m) * 255);
+    b = Math.round((b + m) * 255);
+    return "#" + r.toString(16).padStart(2, "0") +
+                 g.toString(16).padStart(2, "0") +
+                 b.toString(16).padStart(2, "0");
+  }
+
+  randomBtn.addEventListener("click", function () {
+    tunicInput.value = randomColor();
+    pantsInput.value = randomColor();
+  });
+
+  function applyFromUI() {
+    const name = (nameInput.value || "Felix").trim();
+    const role = roleSelect.value || "Adventurer";
+    const tunic = tunicInput.value || "#344fba";
+    const pants = pantsInput.value || "#1f2937";
+    const skin = skinInput.value || "#f3dec0";
+
+    playerState.name = name;
+    playerState.role = role;
+    playerState.appearance = Object.assign({}, playerState.appearance || {}, {
+      tunic, pants, skin
+    });
+
+    if (hudName) {
+      hudName.textContent = name + " of Shady Grove";
+    }
+  }
+
+  startBtn.addEventListener("click", function () {
+    applyFromUI();
+    overlay.style.display = "none";
+    // Initial save so the hero exists even if they immediately close the page
+    savePlayerStateRuntime(null, playerState.stats.hp, playerState.stats.maxHp,
+      playerState.stats.mp, playerState.stats.maxMp,
+      playerState.stats.xp, playerState.stats.level);
+  });
+
+  // If we already have a saved hero, let them just hit Enter quickly
+  nameInput.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      startBtn.click();
+    }
+  });
+}
+
+loadPlayerState();
+    (function () {
+      const canvas = document.getElementById("renderCanvas");
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer: true,
+        stencil: true,
+        disableWebGL2Support: false
+      });
+
+// --- Multiplayer networking (client) ---
+const MP_SERVER_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+        ? "ws://localhost:8080"
+        : "wss://YOUR_HOSG_SERVER_DOMAIN_OR_SUBPATH_HERE";
+let mpSocket = null;
+let mpConnected = false;
+let mpLocalId = null;
+const remotePlayers = {}; // id -> { body, head, nameplate, labelTex }
+
+function mpUpdateStatusLabel() {
+  const el = document.getElementById("mp-status-text");
+  if (!el) return;
+  if (mpConnected) {
+    el.textContent = "Online";
+    el.classList.add("online");
+    el.classList.remove("offline");
+  } else {
+    el.textContent = "Offline";
+    el.classList.add("offline");
+    el.classList.remove("online");
+  }
+}
+
+function mpLog(msg) {
+  console.log("[MP]", msg);
+}
+
+function mpHexToColor3(hex) {
+  if (!hex || typeof hex !== "string") return new BABYLON.Color3(1, 1, 1);
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return new BABYLON.Color3(1, 1, 1);
+  const r = parseInt(h.substring(0, 2), 16) / 255;
+  const g = parseInt(h.substring(2, 4), 16) / 255;
+  const b = parseInt(h.substring(4, 6), 16) / 255;
+  return new BABYLON.Color3(r, g, b);
+}
+
+function createRemoteHero(scene, shadowGenerator, id, player) {
+  const root = new BABYLON.TransformNode("remoteRoot_" + id, scene);
+
+  const body = BABYLON.MeshBuilder.CreateCapsule(
+    "remoteBody_" + id,
+    { height: 2.6, radius: 0.55, tessellation: 8, subdivisions: 1 },
+    scene
+  );
+  body.parent = root;
+  body.position = new BABYLON.Vector3(0, 1.4, 0);
+
+  const head = BABYLON.MeshBuilder.CreateSphere(
+    "remoteHead_" + id,
+    { diameter: 0.85, segments: 8 },
+    scene
+  );
+  head.parent = root;
+  head.position = new BABYLON.Vector3(0, 2.4, 0);
+
+  const tunicMat = new BABYLON.StandardMaterial("remoteTunic_" + id, scene);
+  const pantsMat = new BABYLON.StandardMaterial("remotePants_" + id, scene);
+  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
+
+  const app = player.appearance || {};
+  tunicMat.diffuseColor = mpHexToColor3(app.tunic || "#344fba");
+  pantsMat.diffuseColor = mpHexToColor3(app.pants || "#1f2937");
+  skinMat.diffuseColor = mpHexToColor3(app.skin || "#f3dec0");
+
+  body.material = tunicMat;
+  head.material = skinMat;
+
+  shadowGenerator.addShadowCaster(body);
+  shadowGenerator.addShadowCaster(head);
+
+  // Floating name label
+  const plate = BABYLON.MeshBuilder.CreatePlane(
+    "remoteName_" + id,
+    { width: 3, height: 0.6 },
+    scene
+  );
+  plate.parent = root;
+  plate.position = new BABYLON.Vector3(0, 3.1, 0);
+  plate.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+
+  const tex = new BABYLON.DynamicTexture(
+    "remoteNameTex_" + id,
+    { width: 256, height: 64 },
+    scene,
+    false
+  );
+  tex.hasAlpha = true;
+  const ctxName = (player.name || "Hero") + (player.role ? " — " + player.role : "");
+  tex.drawText(
+    ctxName,
+    null,
+    42,
+    "20px Segoe UI",
+    "#ffffff",
+    "transparent",
+    true
+  );
+  const plateMat = new BABYLON.StandardMaterial("remoteNameMat_" + id, scene);
+  plateMat.diffuseTexture = tex;
+  plateMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+  plateMat.backFaceCulling = false;
+  plate.material = plateMat;
+
+  remotePlayers[id] = { root, body, head, plate, tex };
+  return remotePlayers[id];
+}
+
+function updateRemoteHero(id, player) {
+  const entry = remotePlayers[id];
+  if (!entry) return;
+  const p = player.position || { x: 0, y: 1.5, z: 0 };
+  entry.root.position.x = p.x;
+  entry.root.position.y = p.y - 1.5;
+  entry.root.position.z = p.z;
+  entry.root.rotation.y = player.rotationY || 0;
+}
+
+function removeRemoteHero(id) {
+  const entry = remotePlayers[id];
+  if (!entry) return;
+  Object.values(entry).forEach(obj => {
+    if (obj && obj.dispose) obj.dispose();
+  });
+  delete remotePlayers[id];
+}
+
+function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
+  if (!("WebSocket" in window)) {
+    mpLog("WebSocket not supported in this browser.");
+    return;
+  }
+  try {
+    mpSocket = new WebSocket(MP_SERVER_URL);
+  } catch (e) {
+    console.warn("Failed to create WebSocket", e);
+    return;
+  }
+
+  mpSocket.addEventListener("open", function () {
+    mpConnected = true;
+    mpLog("Connected to multiplayer server");
+    if (!playerState) loadPlayerState();
+    const hello = {
+      type: "hello",
+      player: playerState
+    };
+    mpSocket.send(JSON.stringify(hello));
+  });
+
+  mpSocket.addEventListener("close", function () {
+    mpConnected = false;
+    mpLog("Disconnected from multiplayer server");
+    // Clean up remote heroes
+    Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
+  });
+
+  mpSocket.addEventListener("error", function (err) {
+    console.warn("Multiplayer socket error", err);
+  });
+
+  mpSocket.addEventListener("message", function (ev) {
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch (e) {
+      return;
+    }
+    if (!msg || !msg.type) return;
+
+    switch (msg.type) {
+      case "welcome": {
+        mpLocalId = msg.id;
+        const others = msg.players || [];
+        others.forEach(entry => {
+          if (entry.id === mpLocalId) return;
+          if (!remotePlayers[entry.id]) {
+            createRemoteHero(scene, shadowGenerator, entry.id, entry.player);
+          }
+          updateRemoteHero(entry.id, entry.player);
+        });
+        break;
+      }
+      case "playerJoined": {
+        if (msg.id === mpLocalId) break;
+        if (!remotePlayers[msg.id]) {
+          createRemoteHero(scene, shadowGenerator, msg.id, msg.player);
+        }
+        updateRemoteHero(msg.id, msg.player);
+        break;
+      }
+      case "playerLeft": {
+        if (msg.id === mpLocalId) break;
+        removeRemoteHero(msg.id);
+        break;
+      }
+      case "state": {
+        if (msg.id === mpLocalId) break;
+        if (!remotePlayers[msg.id]) {
+          createRemoteHero(scene, shadowGenerator, msg.id, msg.player);
+        }
+        updateRemoteHero(msg.id, msg.player);
+        break;
+      }
+      case "chat": {
+        if (msg.from && msg.text) {
+          appendChat(msg.from + ": " + msg.text);
+        }
+        break;
+      }
+    }
+  });
+
+  // Return a function to send our current state periodically
+  return function sendLocalState() {
+    if (!mpConnected || !mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
+    const stats = getRuntimeStats();
+    const payload = {
+      type: "state",
+      player: {
+        name: playerState?.name,
+        role: playerState?.role,
+        appearance: playerState?.appearance,
+        position: stats.position,
+        rotationY: stats.rotationY,
+        stats: {
+          hp: stats.hp,
+          maxHp: stats.maxHp,
+          mp: stats.mp,
+          maxMp: stats.maxMp,
+          xp: stats.xp,
+          level: stats.level
+        }
+      }
+    };
+    try {
+      mpSocket.send(JSON.stringify(payload));
+    } catch (e) {
+      console.warn("Failed to send state", e);
+    }
+  };
+}
+
+      function appendChat(text) {
+        const log = document.getElementById("chat-log");
+        const line = document.createElement("div");
+        line.textContent = text;
+        log.appendChild(line);
+        log.scrollTop = log.scrollHeight;
+      }
+
+      (function setupChat() {
+        const input = document.getElementById("chat-input");
+        const send = document.getElementById("chat-send");
+
+        function sendMessage() {
+          const value = input.value.trim();
+          if (!value) return;
+
+          // If connected to multiplayer, send chat over the network
+          if (mpConnected && mpSocket && mpSocket.readyState === WebSocket.OPEN) {
+            const msg = {
+              type: "chat",
+              text: value
+            };
+            try {
+              mpSocket.send(JSON.stringify(msg));
+            } catch (e) {
+              console.warn("Failed to send chat", e);
+            }
+          } else {
+            appendChat("You: " + value);
+          }
+
+          input.value = "";
+        }
+
+        send.addEventListener("click", sendMessage);
+        input.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter") {
+            sendMessage();
+          }
+        });
+
+        appendChat("System: Type to chat. If connected to the multiplayer server, your messages will be sent to other players.");
+      })();
+
+      const createScene = function () {
+        const scene = new BABYLON.Scene(engine);
+        scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+        scene.collisionsEnabled = true;
+
+        const envTex = new BABYLON.CubeTexture(
+          "https://playground.babylonjs.com/textures/environment.env",
+          scene
+        );
+        scene.environmentTexture = envTex;
+        scene.createDefaultSkybox(envTex, true, 1000);
+
+        const camera = new BABYLON.ArcRotateCamera(
+          "camera",
+          -Math.PI / 2,
+          0.9,
+          40,
+          new BABYLON.Vector3(0, 3, 0),
+          scene
+        );
+        camera.lowerRadiusLimit = 18;
+        camera.upperRadiusLimit = 70;
+        camera.wheelDeltaPercentage = 0.02;
+        camera.panningSensibility = 0;
+        camera.attachControl(canvas, true);
+        camera.checkCollisions = false;
+
+        const hemiLight = new BABYLON.HemisphericLight(
+          "hemi",
+          new BABYLON.Vector3(0, 1, 0),
+          scene
+        );
+        hemiLight.intensity = 0.6;
+
+        const sun = new BABYLON.DirectionalLight(
+          "sun",
+          new BABYLON.Vector3(-0.5, -1, -0.3),
+          scene
+        );
+        sun.position = new BABYLON.Vector3(60, 80, 60);
+        sun.intensity = 1.1;
+
+        const shadowGenerator = new BABYLON.ShadowGenerator(2048, sun);
+        shadowGenerator.useBlurExponentialShadowMap = true;
+        shadowGenerator.blurKernel = 16;
+        scene.shadowGenerator = shadowGenerator;
+
+        // World: ground, water, trees, simple town plaza
+        const ground = BABYLON.MeshBuilder.CreateGround(
+          "ground",
+          { width: 220, height: 220, subdivisions: 80 },
+          scene
+        );
+        ground.checkCollisions = true;
+        const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+        groundMat.diffuseTexture = new BABYLON.Texture(
+          "https://playground.babylonjs.com/textures/grass.jpg",
+          scene
+        );
+        groundMat.diffuseTexture.uScale = 40;
+        groundMat.diffuseTexture.vScale = 40;
+        groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
+        ground.material = groundMat;
+        ground.receiveShadows = true;
+
+        const water = BABYLON.MeshBuilder.CreateGround(
+          "water",
+          { width: 80, height: 80, subdivisions: 2 },
+          scene
+        );
+        water.position = new BABYLON.Vector3(0, 0.02, -60);
+        const waterMat = new BABYLON.StandardMaterial("waterMat", scene);
+        waterMat.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.6);
+        waterMat.alpha = 0.6;
+        waterMat.specularColor = new BABYLON.Color3(0.6, 0.8, 1);
+        waterMat.backFaceCulling = false;
+        water.material = waterMat;
+
+        const stonePathMat = new BABYLON.StandardMaterial("stoneMat", scene);
+        stonePathMat.diffuseTexture = new BABYLON.Texture(
+          "https://playground.babylonjs.com/textures/rock.png",
+          scene
+        );
+        stonePathMat.diffuseTexture.uScale = 4;
+        stonePathMat.diffuseTexture.vScale = 4;
+        stonePathMat.specularColor = new BABYLON.Color3(0.02, 0.02, 0.02);
+
+        for (let i = -30; i <= 30; i += 5) {
+          const stone = BABYLON.MeshBuilder.CreateBox(
+            "pathStone",
+            { width: 2.5, height: 0.4, depth: 2.5 },
+            scene
+          );
+          stone.position = new BABYLON.Vector3(i, 0.2, 0);
+          stone.material = stonePathMat;
+          stone.checkCollisions = true;
+          stone.receiveShadows = true;
+        }
+
+        const treeTrunkMat = new BABYLON.StandardMaterial("trunkMat", scene);
+        treeTrunkMat.diffuseTexture = new BABYLON.Texture(
+          "https://playground.babylonjs.com/textures/wood.jpg",
+          scene
+        );
+        treeTrunkMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+        const treeLeafMat = new BABYLON.StandardMaterial("leafMat", scene);
+        treeLeafMat.diffuseColor = new BABYLON.Color3(0.22, 0.45, 0.2);
+        treeLeafMat.emissiveColor = new BABYLON.Color3(0.03, 0.08, 0.03);
+
+        function createTree(x, z, scale) {
+          const trunk = BABYLON.MeshBuilder.CreateCylinder(
+            "trunk",
+            { height: 6 * scale, diameterTop: 0.8 * scale, diameterBottom: 1.2 * scale },
+            scene
+          );
+          trunk.position = new BABYLON.Vector3(x, 3 * scale, z);
+          trunk.material = treeTrunkMat;
+          trunk.checkCollisions = true;
+          trunk.receiveShadows = true;
+
+          const canopy = BABYLON.MeshBuilder.CreateSphere(
+            "canopy",
+            { diameter: 6 * scale, segments: 8 },
+            scene
+          );
+          canopy.position = new BABYLON.Vector3(x, 6.5 * scale, z);
+          canopy.material = treeLeafMat;
+          canopy.checkCollisions = true;
+          canopy.receiveShadows = true;
+
+          shadowGenerator.addShadowCaster(trunk);
+          shadowGenerator.addShadowCaster(canopy);
+        }
+
+        for (let i = 0; i < 80; i++) {
+          const radius = 80 + Math.random() * 30;
+          const angle = Math.random() * Math.PI * 2;
+          const x = Math.cos(angle) * radius;
+          const z = Math.sin(angle) * radius;
+          const scale = 0.6 + Math.random() * 0.8;
+          createTree(x, z, scale);
+        }
+
+        const townMat = new BABYLON.StandardMaterial("townMat", scene);
+        townMat.diffuseTexture = new BABYLON.Texture(
+          "https://playground.babylonjs.com/textures/floor.png",
+          scene
+        );
+        townMat.diffuseTexture.uScale = 4;
+        townMat.diffuseTexture.vScale = 4;
+
+        const plaza = BABYLON.MeshBuilder.CreateBox(
+          "plaza",
+          { width: 40, depth: 40, height: 1 },
+          scene
+        );
+        plaza.position = new BABYLON.Vector3(0, 0.5, 30);
+        plaza.material = townMat;
+        plaza.checkCollisions = true;
+        plaza.receiveShadows = true;
+
+        const wallMat = new BABYLON.StandardMaterial("wallMat", scene);
+        wallMat.diffuseTexture = new BABYLON.Texture(
+          "https://playground.babylonjs.com/textures/floor.png",
+          scene
+        );
+        wallMat.diffuseTexture.uScale = 2;
+        wallMat.diffuseTexture.vScale = 1;
+
+        function createWall(from, to, height, thickness) {
+          const length = BABYLON.Vector3.Distance(from, to);
+          const wall = BABYLON.MeshBuilder.CreateBox(
+            "wall",
+            { width: length, depth: thickness, height: height },
+            scene
+          );
+          wall.position = from.add(to).scale(0.5);
+          wall.position.y = height / 2;
+          const dir = to.subtract(from);
+          wall.rotation.y = Math.atan2(dir.z, dir.x);
+          wall.material = wallMat;
+          wall.checkCollisions = true;
+          wall.receiveShadows = true;
+          shadowGenerator.addShadowCaster(wall);
+        }
+
+        const half = 20;
+        const height = 5;
+        const thickness = 1;
+        createWall(
+          new BABYLON.Vector3(-half, 0, 30 - half),
+          new BABYLON.Vector3(half, 0, 30 - half),
+          height,
+          thickness
+        );
+        createWall(
+          new BABYLON.Vector3(-half, 0, 30 + half),
+          new BABYLON.Vector3(half, 0, 30 + half),
+          height,
+          thickness
+        );
+        createWall(
+          new BABYLON.Vector3(-half, 0, 30 - half),
+          new BABYLON.Vector3(-half, 0, 30 + half),
+          height,
+          thickness
+        );
+        createWall(
+          new BABYLON.Vector3(half, 0, 30 - half),
+          new BABYLON.Vector3(half, 0, 30 + half),
+          height,
+          thickness
+        );
+
+        // ----- HERO: new procedural humanoid with smooth walk -----
+        let heroBody = BABYLON.MeshBuilder.CreateCapsule(
+          "heroBody",
+          {
+            height: 2.8,
+            radius: 0.6,
+            tessellation: 10,
+            subdivisions: 2
+          },
+          scene
+        );
+        // Place hero from saved state
+        heroBody.position = new BABYLON.Vector3(
+          playerState.position.x,
+          playerState.position.y,
+          playerState.position.z
+        );
+        heroBody.rotation.y = playerState.rotationY || 0;
+
+        heroBody.ellipsoid = new BABYLON.Vector3(0.8, 1.4, 0.8);
+        heroBody.ellipsoidOffset = new BABYLON.Vector3(0, 1.4, 0);
+        heroBody.checkCollisions = true;
+        heroBody.applyGravity = true;
+        heroBody.visibility = 0.0; // invisible collider
+        scene.heroBody = heroBody;
+
+        const heroSkinMat = new BABYLON.StandardMaterial("heroSkinMat", scene);
+        const heroClothMat = new BABYLON.StandardMaterial("heroClothMat", scene);
+        const heroPantsMat = new BABYLON.StandardMaterial("heroPantsMat", scene);
+        const heroBootMat = new BABYLON.StandardMaterial("heroBootMat", scene);
+
+        applyAppearanceToMaterials(scene, {
+          skin: heroSkinMat,
+          tunic: heroClothMat,
+          pants: heroPantsMat,
+          boots: heroBootMat
+        });
+
+        heroSkinMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+
+        const heroVisualRoot = new BABYLON.TransformNode("heroVisualRoot", scene);
+        heroVisualRoot.parent = heroBody;
+        heroVisualRoot.position = new BABYLON.Vector3(0, -1.5, 0);
+
+        const heroRig = {
+          root: heroVisualRoot,
+          torso: null,
+          head: null,
+          shoulders: null,
+          hips: null,
+          leftArmJoint: null,
+          rightArmJoint: null,
+          leftLegJoint: null,
+          rightLegJoint: null
+        };
+
+        // Torso
+        const torso = BABYLON.MeshBuilder.CreateBox(
+          "heroTorso",
+          { width: 1.1, height: 2, depth: 0.7 },
+          scene
+        );
+        torso.parent = heroVisualRoot;
+        torso.position = new BABYLON.Vector3(0, 1.6, 0);
+        torso.material = heroClothMat;
+        heroRig.torso = torso;
+
+        // Head
+        const head = BABYLON.MeshBuilder.CreateSphere(
+          "heroHead",
+          { diameter: 0.9, segments: 8 },
+          scene
+        );
+        head.parent = torso;
+        head.position = new BABYLON.Vector3(0, 1.4, 0);
+        head.material = heroSkinMat;
+        heroRig.head = head;
+
+        // Hips
+        const hips = new BABYLON.TransformNode("heroHips", scene);
+        hips.parent = heroVisualRoot;
+        hips.position = new BABYLON.Vector3(0, 0.8, 0);
+        heroRig.hips = hips;
+
+        // Legs
+        function createLeg(name, xSign) {
+          const joint = new BABYLON.TransformNode(name + "Joint", scene);
+          joint.parent = hips;
+          joint.position = new BABYLON.Vector3(0.35 * xSign, 0, 0);
+
+          const upper = BABYLON.MeshBuilder.CreateBox(
+            name + "Upper",
+            { width: 0.4, height: 1.7, depth: 0.4 },
+            scene
+          );
+          upper.parent = joint;
+          upper.position = new BABYLON.Vector3(0, -0.85, 0);
+          upper.material = heroPantsMat;
+
+          const boot = BABYLON.MeshBuilder.CreateBox(
+            name + "Boot",
+            { width: 0.5, height: 0.4, depth: 0.7 },
+            scene
+          );
+          boot.parent = joint;
+          boot.position = new BABYLON.Vector3(0, -1.7, 0.12);
+          boot.material = heroBootMat;
+
+          shadowGenerator.addShadowCaster(upper);
+          shadowGenerator.addShadowCaster(boot);
+
+          return joint;
+        }
+
+        heroRig.leftLegJoint = createLeg("heroLeftLeg", -1);
+        heroRig.rightLegJoint = createLeg("heroRightLeg", 1);
+
+        // Shoulders
+        const shoulders = new BABYLON.TransformNode("heroShoulders", scene);
+        shoulders.parent = torso;
+        shoulders.position = new BABYLON.Vector3(0, 1.1, 0);
+        heroRig.shoulders = shoulders;
+
+        // Arms
+        function createArm(name, xSign) {
+          const joint = new BABYLON.TransformNode(name + "Joint", scene);
+          joint.parent = shoulders;
+          joint.position = new BABYLON.Vector3(0.75 * xSign, 0.1, 0);
+
+          const upper = BABYLON.MeshBuilder.CreateBox(
+            name + "Upper",
+            { width: 0.35, height: 1.4, depth: 0.35 },
+            scene
+          );
+          upper.parent = joint;
+          upper.position = new BABYLON.Vector3(0, -0.7, 0);
+          upper.material = heroClothMat;
+
+          const hand = BABYLON.MeshBuilder.CreateBox(
+            name + "Hand",
+            { width: 0.3, height: 0.4, depth: 0.3 },
+            scene
+          );
+          hand.parent = joint;
+          hand.position = new BABYLON.Vector3(0, -1.25, 0);
+          hand.material = heroSkinMat;
+
+          shadowGenerator.addShadowCaster(upper);
+          shadowGenerator.addShadowCaster(hand);
+
+          return joint;
+        }
+
+        heroRig.leftArmJoint = createArm("heroLeftArm", -1);
+        heroRig.rightArmJoint = createArm("heroRightArm", 1);
+
+        shadowGenerator.addShadowCaster(torso);
+        shadowGenerator.addShadowCaster(head);
+
+        camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
+        const hudHeroName = document.getElementById("hud-hero-name");
+        if (hudHeroName && playerState && playerState.name) {
+          hudHeroName.textContent = playerState.name + " of Shady Grove";
+        }
+
+
+        // Simple NPCs (boxes with nameplates)
+        const npcMat = new BABYLON.StandardMaterial("npcMat", scene);
+        npcMat.diffuseColor = new BABYLON.Color3(0.4, 0.7, 1.0);
+        npcMat.emissiveColor = new BABYLON.Color3(0.03, 0.05, 0.09);
+
+        function createNpc(name, position) {
+          const npc = BABYLON.MeshBuilder.CreateBox(
+            name,
+            { width: 1.6, height: 3, depth: 1.2 },
+            scene
+          );
+          npc.position = position.clone();
+          npc.material = npcMat;
+          npc.checkCollisions = true;
+          npc.isPickable = true;
+          shadowGenerator.addShadowCaster(npc);
+
+          const plane = BABYLON.MeshBuilder.CreatePlane(
+            name + "_nameplate",
+            { width: 3, height: 0.6 },
+            scene
+          );
+          plane.parent = npc;
+          plane.position = new BABYLON.Vector3(0, 2.2, 0);
+          plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+
+          const dynamicTex = new BABYLON.DynamicTexture(
+            name + "_dt",
+            { width: 256, height: 64 },
+            scene,
+            false
+          );
+          dynamicTex.hasAlpha = true;
+          dynamicTex.drawText(
+            name,
+            null,
+            42,
+            "20px Segoe UI",
+            "#ffffff",
+            "transparent",
+            true
+          );
+
+          const planeMat = new BABYLON.StandardMaterial(name + "_nameMat", scene);
+          planeMat.diffuseTexture = dynamicTex;
+          planeMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+          planeMat.backFaceCulling = false;
+          plane.material = planeMat;
+
+          return npc;
+        }
+
+        createNpc("Mennonite Merchant", new BABYLON.Vector3(4, 1.5, 34));
+        createNpc("Village Guard", new BABYLON.Vector3(-6, 1.5, 26));
+
+        // -------- Input systems --------
+        const inputMap = {};
+        window.addEventListener("keydown", function (ev) {
+          const key = ev.key.toLowerCase();
+          inputMap[key] = true;
+        });
+        window.addEventListener("keyup", function (ev) {
+          const key = ev.key.toLowerCase();
+          inputMap[key] = false;
+        });
+
+        const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const mobileControls = document.getElementById("mobile-controls");
+        const joystickBase = document.getElementById("joystick-base");
+        const joystickThumb = document.getElementById("joystick-thumb");
+        const btnJump = document.getElementById("btn-jump");
+        const btnRun = document.getElementById("btn-run");
+
+        const joystick = { x: 0, y: 0, active: false };
+        let mobileRunHeld = false;
+        let mobileJumpQueued = false;
+
+        if (isMobile && mobileControls && joystickBase && joystickThumb && btnJump && btnRun) {
+          mobileControls.style.display = "flex";
+
+          let activeTouchId = null;
+          const maxRadius = 60;
+
+          function resetJoystick() {
+            joystick.active = false;
+            joystick.x = 0;
+            joystick.y = 0;
+            activeTouchId = null;
+            joystickThumb.style.transform = "translate(-50%, -50%)";
+          }
+
+          function updateJoystickFromTouch(touch) {
+            const rect = joystickBase.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const dx = touch.clientX - centerX;
+            const dy = touch.clientY - centerY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            let clampedDx = dx;
+            let clampedDy = dy;
+
+            if (distance > maxRadius) {
+              const ratio = maxRadius / distance;
+              clampedDx *= ratio;
+              clampedDy *= ratio;
+            }
+
+            joystickThumb.style.transform = "translate(" + clampedDx + "px, " + clampedDy + "px)";
+            joystick.x = clampedDx / maxRadius;
+            joystick.y = clampedDy / maxRadius;
+            joystick.active = true;
+          }
+
+          joystickBase.addEventListener("touchstart", function (e) {
+            e.preventDefault();
+            const t = e.changedTouches[0];
+            activeTouchId = t.identifier;
+            updateJoystickFromTouch(t);
+          }, { passive: false });
+
+          joystickBase.addEventListener("touchmove", function (e) {
+            e.preventDefault();
+            if (activeTouchId === null) return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+              const t = e.changedTouches[i];
+              if (t.identifier === activeTouchId) {
+                updateJoystickFromTouch(t);
+                break;
+              }
+            }
+          }, { passive: false });
+
+          joystickBase.addEventListener("touchend", function (e) {
+            e.preventDefault();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+              const t = e.changedTouches[i];
+              if (t.identifier === activeTouchId) {
+                resetJoystick();
+                break;
+              }
+            }
+          }, { passive: false });
+
+          joystickBase.addEventListener("touchcancel", function (e) {
+            e.preventDefault();
+            resetJoystick();
+          }, { passive: false });
+
+          btnJump.addEventListener("touchstart", function (e) {
+            e.preventDefault();
+            mobileJumpQueued = true;
+          }, { passive: false });
+
+          btnRun.addEventListener("touchstart", function (e) {
+            e.preventDefault();
+            mobileRunHeld = true;
+          }, { passive: false });
+
+          btnRun.addEventListener("touchend", function (e) {
+            e.preventDefault();
+            mobileRunHeld = false;
+          }, { passive: false });
+
+          btnRun.addEventListener("touchcancel", function (e) {
+            e.preventDefault();
+            mobileRunHeld = false;
+          }, { passive: false });
+        }
+
+        const gamepadState = {
+          hasPad: false,
+          moveX: 0,
+          moveY: 0,
+          lookX: 0,
+          lookY: 0,
+          run: false,
+          jump: false,
+          lastJump: false
+        };
+
+        function updateGamepadState() {
+          const getGamepads = navigator.getGamepads || navigator.webkitGetGamepads || navigator.msGetGamepads;
+          if (!getGamepads) {
+            gamepadState.hasPad = false;
+            return;
+          }
+          const pads = getGamepads.call(navigator);
+          let pad = null;
+          for (let i = 0; i < pads.length; i++) {
+            if (pads[i]) { pad = pads[i]; break; }
+          }
+          if (!pad) {
+            gamepadState.hasPad = false;
+            gamepadState.moveX = gamepadState.moveY = gamepadState.lookX = gamepadState.lookY = 0;
+            gamepadState.run = gamepadState.jump = false;
+            return;
+          }
+          gamepadState.hasPad = true;
+          const axes = pad.axes || [];
+          const buttons = pad.buttons || [];
+          const dead = 0.2;
+          function d(v) { return Math.abs(v) < dead ? 0 : v; }
+          const lx = d(axes[0] || 0);
+          const ly = d(axes[1] || 0);
+          const rx = d(axes[2] || 0);
+          const ry = d(axes[3] || 0);
+          gamepadState.moveX = lx;
+          gamepadState.moveY = ly;
+          gamepadState.lookX = rx;
+          gamepadState.lookY = ry;
+          const jumpNow = buttons[0] && buttons[0].pressed;
+          gamepadState.run = (buttons[1] && buttons[1].pressed) || (buttons[4] && buttons[4].pressed) || (buttons[5] && buttons[5].pressed);
+          gamepadState.jump = !gamepadState.lastJump && !!jumpNow;
+          gamepadState.lastJump = !!jumpNow;
+        }
+
+        function wrapAngle(a) {
+          while (a > Math.PI) a -= Math.PI * 2;
+          while (a < -Math.PI) a += Math.PI * 2;
+          return a;
+        }
+
+        // HUD state
+        let hudTime = 0;
+        const hpFill = document.getElementById("hp-fill");
+        const mpFill = document.getElementById("mp-fill");
+        const hpLabel = document.getElementById("hp-label");
+        const mpLabel = document.getElementById("mp-label");
+        const xpFill = document.getElementById("xp-fill");
+        const xpLabel = document.getElementById("xp-label");
+        const levelLabel = document.getElementById("level-label");
+
+        let hp = 100, maxHp = 100;
+        let mp = 60, maxMp = 100;
+        let xp = 25, level = 1;
+
+        function updateHud(time) {
+          mp = maxMp * (0.4 + 0.1 * Math.sin(time * 0.3));
+          hpFill.style.width = (hp / maxHp * 100) + "%";
+          mpFill.style.width = (mp / maxMp * 100) + "%";
+          xpFill.style.width = Math.min(100, xp) + "%";
+          hpLabel.textContent = Math.round(hp) + " / " + maxHp;
+          mpLabel.textContent = Math.round(mp) + " / " + maxMp;
+          xpLabel.textContent = Math.round(xp) + "%";
+          levelLabel.textContent = level;
+        }
+
+        // Movement/animation state
+        const baseSpeed = 0.16;
+        const runMultiplier = 1.8;
+        const rotationLerp = 0.18;
+        let verticalVelocity = 0;
+        const jumpStrength = 0.22;
+        let isGrounded = false;
+
+        let walkCycleTime = 0;
+        let autosaveTimer = 0;
+        let netSendTimer = 0;
+
+        scene.onBeforeRenderObservable.add(function () {
+          const deltaTime = scene.getEngine().getDeltaTime();
+          const dt = deltaTime / (1000 / 60);
+          const dtSec = deltaTime / 1000;
+
+          hudTime += dtSec;
+          updateHud(hudTime);
+          updateGamepadState();
+
+          autosaveTimer += dtSec;
+          netSendTimer += dtSec;
+
+          let heroSpeed = baseSpeed;
+          if (inputMap["shift"] || (gamepadState.hasPad && gamepadState.run) || mobileRunHeld) {
+            heroSpeed *= runMultiplier;
+          }
+
+          let moveX = 0;
+          let moveZ = 0;
+
+          if (inputMap["w"]) moveZ += 1;
+          if (inputMap["s"]) moveZ -= 1;
+          if (inputMap["d"]) moveX += 1;
+          if (inputMap["a"]) moveX -= 1;
+
+          if (joystick.active) {
+            moveZ += -joystick.y;
+            moveX += joystick.x;
+          }
+
+          if (gamepadState.hasPad) {
+            moveZ += -gamepadState.moveY;
+            moveX += gamepadState.moveX;
+          }
+
+          const moveMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+          let isMoving = moveMagnitude > 0.05;
+
+          // Jump
+          const jumpRequested = (inputMap[" "] || mobileJumpQueued || (gamepadState.hasPad && gamepadState.jump));
+          if (jumpRequested && isGrounded) {
+            verticalVelocity = jumpStrength;
+            isGrounded = false;
+          }
+          mobileJumpQueued = false;
+
+          verticalVelocity += scene.gravity.y * dtSec;
+          let nextPos = heroBody.position.clone();
+          nextPos.y += verticalVelocity * dt;
+
+          if (nextPos.y < 1.5) {
+            nextPos.y = 1.5;
+            verticalVelocity = 0;
+            isGrounded = true;
+          }
+
+          let moveVecWorld = new BABYLON.Vector3(0, 0, 0);
+          if (isMoving) {
+            const normX = moveX / moveMagnitude;
+            const normZ = moveZ / moveMagnitude;
+
+            let forwardDir = camera.getDirection(new BABYLON.Vector3(0, 0, 1));
+            forwardDir.y = 0;
+            forwardDir.normalize();
+
+            let rightDir = camera.getDirection(new BABYLON.Vector3(1, 0, 0));
+            rightDir.y = 0;
+            rightDir.normalize();
+
+            moveVecWorld = forwardDir.scale(normZ).add(rightDir.scale(normX));
+            moveVecWorld.normalize();
+
+            const desiredY = Math.atan2(moveVecWorld.x, moveVecWorld.z);
+            const angleDiff = wrapAngle(desiredY - heroBody.rotation.y);
+            heroBody.rotation.y += angleDiff * rotationLerp * dt;
+          }
+
+          if (isMoving) {
+            const displacement = moveVecWorld.scale(heroSpeed * dt);
+            nextPos.addInPlace(displacement);
+          }
+
+          heroBody.moveWithCollisions(nextPos.subtract(heroBody.position));
+
+          // Procedural walk animation for hero rig
+          if (heroRig.root) {
+            if (isMoving) {
+              walkCycleTime += dtSec * (heroSpeed / baseSpeed) * 4.2;
+              const phase = walkCycleTime * Math.PI * 2;
+              const swing = Math.sin(phase);
+              const swingOpp = Math.sin(phase + Math.PI);
+              const legSwing = 0.7;
+              const armSwing = 0.8;
+
+              heroRig.leftLegJoint.rotation.x = swing * legSwing;
+              heroRig.rightLegJoint.rotation.x = swingOpp * legSwing;
+              heroRig.leftArmJoint.rotation.x = swingOpp * armSwing * 0.6;
+              heroRig.rightArmJoint.rotation.x = swing * armSwing * 0.6;
+
+              const bob = Math.abs(Math.sin(phase)) * 0.06;
+              heroRig.torso.position.y = 1.6 + bob;
+            } else {
+              // Relax to idle pose: arms at sides, legs straight, subtle breathing
+              const relaxFactor = 1 - Math.pow(0.0001, dtSec); // smooth damping
+
+              function dampJoint(joint) {
+                joint.rotation.x -= joint.rotation.x * relaxFactor;
+                joint.rotation.z -= joint.rotation.z * relaxFactor;
+              }
+
+              dampJoint(heroRig.leftLegJoint);
+              dampJoint(heroRig.rightLegJoint);
+              dampJoint(heroRig.leftArmJoint);
+              dampJoint(heroRig.rightArmJoint);
+
+              const baseTorsoY = 1.6;
+              heroRig.torso.position.y += (baseTorsoY - heroRig.torso.position.y) * relaxFactor;
+
+              walkCycleTime += dtSec * 0.5;
+              const breath = Math.sin(walkCycleTime * Math.PI * 2) * 0.01;
+              heroRig.torso.position.y = baseTorsoY + breath;
+            }
+          }
+
+          camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
+
+          if (gamepadState.hasPad) {
+            const lookSpeed = 0.04;
+            camera.alpha -= gamepadState.lookX * lookSpeed * dt;
+            camera.beta -= gamepadState.lookY * lookSpeed * dt;
+            const lowerBetaLimit = 0.3;
+            const upperBetaLimit = Math.PI / 2;
+            if (camera.beta < lowerBetaLimit) camera.beta = lowerBetaLimit;
+            if (camera.beta > upperBetaLimit) camera.beta = upperBetaLimit;
+          }
+
+          // Autosave player state roughly twice per second (online-ready structure)
+          if (autosaveTimer >= 0.5) {
+            autosaveTimer = 0;
+            savePlayerStateRuntime(
+              heroBody,
+              hp, maxHp,
+              mp, maxMp,
+              xp, level
+            );
+          }
+
+          // Send multiplayer position/stats updates ~10x per second
+          if (typeof mpSendLocalState === "function" && netSendTimer >= 0.1) {
+            netSendTimer = 0;
+            mpSendLocalState();
+          }
+        });
+
+        scene.onPointerObservable.add(function (pointerInfo) {
+          if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERPICK) {
+            const pick = pointerInfo.pickInfo;
+            if (pick.hit && pick.pickedMesh && pick.pickedMesh.name.includes("Mennonite")) {
+              appendChat("Mennonite Merchant: 'Fresh bread and shiny swords! Trading coming soon.'");
+            }
+          }
+        });
+
+        return scene;
+      };
+
+      const scene = createScene();
+
+      setupCharacterCreationUI();
+
+      // Hook multiplayer client (requires external Node.js WebSocket server)
+      let mpSendLocalState = null;
+      mpUpdateStatusLabel();
+      if (scene.heroBody && scene.shadowGenerator) {
+        mpSendLocalState = setupMultiplayer(
+          scene,
+          scene.heroBody,
+          scene.shadowGenerator,
+          function getRuntimeStats() {
+            return {
+              position: {
+                x: scene.heroBody.position.x,
+                y: scene.heroBody.position.y,
+                z: scene.heroBody.position.z
+              },
+              rotationY: scene.heroBody.rotation.y,
+              hp,
+              maxHp,
+              mp,
+              maxMp,
+              xp,
+              level
+            };
+          }
+        );
+      }
+
+      engine.runRenderLoop(function () {
+        scene.render();
+      });
+
+      window.addEventListener("resize", function () {
+        engine.resize();
+      });
+    })();
+  </script>
+</body>
+</html>
