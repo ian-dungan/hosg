@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.10</title>
+  <title>Heroes of Shady Grove v1.0.11</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.10 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.11 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -942,6 +942,39 @@ let mp = 60, maxMp = 100;
 let xp = 25, level = 1;
 
 
+// Multiplayer reconnect support
+let mpSetupArgs = null;
+let mpReconnectTimeout = null;
+let mpPingInterval = null;
+
+function mpTryReconnect() {
+  if (!mpSetupArgs) return;
+  if (mpSocket && (mpSocket.readyState === WebSocket.OPEN || mpSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  mpLog("Attempting multiplayer reconnect...");
+  try {
+    setupMultiplayer(
+      mpSetupArgs.scene,
+      mpSetupArgs.heroBody,
+      mpSetupArgs.shadowGenerator,
+      mpSetupArgs.getRuntimeStats
+    );
+  } catch (e) {
+    console.warn("Reconnect failed to start:", e);
+  }
+}
+
+function mpScheduleReconnect() {
+  if (mpReconnectTimeout) return;
+  mpLog("Scheduling multiplayer reconnect in 3.0s...");
+  mpReconnectTimeout = setTimeout(function () {
+    mpReconnectTimeout = null;
+    mpTryReconnect();
+  }, 3000);
+}
+
+
 function createRemoteHero(scene, shadowGenerator, id, player) {
   const root = new BABYLON.TransformNode("remoteRoot_" + id, scene);
 
@@ -1174,42 +1207,122 @@ function removeRemoteHero(id) {
   delete remotePlayers[id];
 }
 
+
 function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
+  // Remember these so we can reconnect later
+  mpSetupArgs = {
+    scene,
+    heroBody,
+    shadowGenerator,
+    getRuntimeStats
+  };
+
   if (!("WebSocket" in window)) {
     mpLog("WebSocket not supported in this browser.");
     return;
   }
+
+  // Avoid creating a second socket if one is already open/connecting
+  if (mpSocket && (mpSocket.readyState === WebSocket.OPEN || mpSocket.readyState === WebSocket.CONNECTING)) {
+    return function sendLocalState() {
+      if (!mpConnected || !mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
+      const stats = getRuntimeStats();
+      const payload = {
+        type: "state",
+        player: {
+          name: playerState?.name,
+          role: playerState?.role,
+          appearance: playerState?.appearance,
+          position: stats.position,
+          rotationY: stats.rotationY,
+          stats: {
+            hp: stats.hp,
+            maxHp: stats.maxHp,
+            mp: stats.mp,
+            maxMp: stats.maxMp,
+            xp: stats.xp,
+            level: stats.level
+          }
+        }
+      };
+      try {
+        mpSocket.send(JSON.stringify(payload));
+      } catch (e) {
+        console.warn("Failed to send state", e);
+      }
+    };
+  }
+
   try {
     mpSocket = new WebSocket(MP_SERVER_URL);
   } catch (e) {
     console.warn("Failed to create WebSocket", e);
+    mpScheduleReconnect();
     return;
+  }
+
+  // Clear any old ping timer
+  if (mpPingInterval) {
+    clearInterval(mpPingInterval);
+    mpPingInterval = null;
   }
 
   mpSocket.addEventListener("open", function () {
     mpConnected = true;
+    if (mpReconnectTimeout) {
+      clearTimeout(mpReconnectTimeout);
+      mpReconnectTimeout = null;
+    }
     mpUpdateStatusLabel();
     mpLog("Connected to multiplayer server");
+    appendChat("System: Connected to multiplayer server.");
     if (!playerState) loadPlayerState();
     const hello = {
       type: "hello",
       player: playerState
     };
-    mpSocket.send(JSON.stringify(hello));
+    try {
+      mpSocket.send(JSON.stringify(hello));
+    } catch (e) {
+      console.warn("Failed to send hello", e);
+    }
+
+    // Start keepalive ping
+    mpPingInterval = setInterval(function () {
+      if (mpSocket && mpSocket.readyState === WebSocket.OPEN) {
+        try {
+          mpSocket.send(JSON.stringify({ type: "ping" }));
+        } catch (e) {
+          console.warn("Failed to send ping", e);
+        }
+      }
+    }, 25000);
   });
 
   mpSocket.addEventListener("close", function () {
     mpConnected = false;
     mpUpdateStatusLabel();
     mpLog("Disconnected from multiplayer server");
+    appendChat("System: Disconnected from multiplayer server.");
+    if (mpPingInterval) {
+      clearInterval(mpPingInterval);
+      mpPingInterval = null;
+    }
     // Clean up remote heroes
     Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
+    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("error", function (err) {
     console.warn("Multiplayer socket error", err);
     mpConnected = false;
     mpUpdateStatusLabel();
+    appendChat("System: Multiplayer error — see console for details.");
+    if (mpPingInterval) {
+      clearInterval(mpPingInterval);
+      mpPingInterval = null;
+    }
+    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("message", function (ev) {
@@ -1261,6 +1374,12 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         }
         break;
       }
+      case "pong": {
+        // ignore
+        break;
+      }
+      default:
+        break;
     }
   });
 
@@ -1293,8 +1412,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     }
   };
 }
-
-      function appendChat(text) {
+function appendChat(text) {
         const log = document.getElementById("chat-log");
         const line = document.createElement("div");
         line.textContent = text;
@@ -2222,7 +2340,20 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         );
       }
 
-      engine.runRenderLoop(function () {
+      
+// Attempt reconnect when tab becomes visible or network returns
+document.addEventListener("visibilitychange", function () {
+  if (!document.hidden && !mpConnected) {
+    mpScheduleReconnect();
+  }
+});
+window.addEventListener("online", function () {
+  if (!mpConnected) {
+    mpScheduleReconnect();
+  }
+});
+
+engine.runRenderLoop(function () {
         scene.render();
       });
 
