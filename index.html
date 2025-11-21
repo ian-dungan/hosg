@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.5</title>
+  <title>Heroes of Shady Grove v1.0.6</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.5 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.6 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -908,6 +908,16 @@ let mpConnected = false;
 let mpLocalId = null;
 const remotePlayers = {}; // id -> { body, head, nameplate, labelTex }
 
+// Multiplayer reconnect & shared state
+let mpReconnectTimer = null;
+let mpReconnectDelay = 2000;
+const mpReconnectDelayMax = 20000;
+
+let mpScene = null;
+let mpHeroBody = null;
+let mpShadowGenerator = null;
+let mpGetRuntimeStats = null;
+
 function mpUpdateStatusLabel() {
   const el = document.getElementById("mp-status-text");
   if (!el) return;
@@ -1026,20 +1036,47 @@ function removeRemoteHero(id) {
   delete remotePlayers[id];
 }
 
-function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
+function mpScheduleReconnect() {
+  if (mpReconnectTimer) return;
+  if (!MP_SERVER_URL) return;
+  if (!mpScene) return;
+
+  mpLog("Scheduling multiplayer reconnect in " + (mpReconnectDelay / 1000).toFixed(1) + "s...");
+  mpReconnectTimer = setTimeout(function () {
+    mpReconnectTimer = null;
+    mpInitSocket();
+  }, mpReconnectDelay);
+  mpReconnectDelay = Math.min(mpReconnectDelay * 2, mpReconnectDelayMax);
+}
+
+function mpInitSocket() {
   if (!("WebSocket" in window)) {
     mpLog("WebSocket not supported in this browser.");
     return;
   }
+  if (!MP_SERVER_URL) {
+    mpLog("No MP_SERVER_URL configured.");
+    return;
+  }
+  if (mpSocket && (mpSocket.readyState === WebSocket.OPEN || mpSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
   try {
     mpSocket = new WebSocket(MP_SERVER_URL);
   } catch (e) {
     console.warn("Failed to create WebSocket", e);
+    mpScheduleReconnect();
     return;
   }
 
   mpSocket.addEventListener("open", function () {
     mpConnected = true;
+    mpReconnectDelay = 2000;
+    if (mpReconnectTimer) {
+      clearTimeout(mpReconnectTimer);
+      mpReconnectTimer = null;
+    }
     mpUpdateStatusLabel();
     mpLog("Connected to multiplayer server");
     appendChat("System: Connected to multiplayer server.");
@@ -1058,6 +1095,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     appendChat("System: Disconnected from multiplayer server.");
     // Clean up remote heroes
     Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
+    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("error", function (err) {
@@ -1065,6 +1103,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     mpConnected = false;
     mpUpdateStatusLabel();
     appendChat("System: Multiplayer error — see console for details.");
+    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("message", function (ev) {
@@ -1083,7 +1122,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         others.forEach(entry => {
           if (entry.id === mpLocalId) return;
           if (!remotePlayers[entry.id]) {
-            createRemoteHero(scene, shadowGenerator, entry.id, entry.player);
+            createRemoteHero(mpScene, mpShadowGenerator, entry.id, entry.player);
           }
           updateRemoteHero(entry.id, entry.player);
         });
@@ -1092,7 +1131,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
       case "playerJoined": {
         if (msg.id === mpLocalId) break;
         if (!remotePlayers[msg.id]) {
-          createRemoteHero(scene, shadowGenerator, msg.id, msg.player);
+          createRemoteHero(mpScene, mpShadowGenerator, msg.id, msg.player);
         }
         updateRemoteHero(msg.id, msg.player);
         break;
@@ -1105,7 +1144,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
       case "state": {
         if (msg.id === mpLocalId) break;
         if (!remotePlayers[msg.id]) {
-          createRemoteHero(scene, shadowGenerator, msg.id, msg.player);
+          createRemoteHero(mpScene, mpShadowGenerator, msg.id, msg.player);
         }
         updateRemoteHero(msg.id, msg.player);
         break;
@@ -1118,11 +1157,22 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
       }
     }
   });
+}
+
+function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
+  mpScene = scene;
+  mpHeroBody = heroBody;
+  mpShadowGenerator = shadowGenerator;
+  mpGetRuntimeStats = getRuntimeStats;
+
+  mpInitSocket();
 
   // Return a function to send our current state periodically
   return function sendLocalState() {
     if (!mpConnected || !mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
-    const stats = getRuntimeStats();
+    if (!mpGetRuntimeStats) return;
+
+    const stats = mpGetRuntimeStats();
     const payload = {
       type: "state",
       player: {
@@ -1149,7 +1199,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
   };
 }
 
-      function appendChat(text) {
+function appendChat(text) {
         const log = document.getElementById("chat-log");
         const line = document.createElement("div");
         line.textContent = text;
@@ -2037,6 +2087,13 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
       window.addEventListener("resize", function () {
         engine.resize();
       });
+
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden && !mpConnected) {
+          mpScheduleReconnect();
+        }
+      });
+      
     })();
   </script>
 </body>
