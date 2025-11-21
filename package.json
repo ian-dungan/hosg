@@ -1,0 +1,11 @@
+{
+  "name": "hosg-server",
+  "version": "1.0.3",
+  "main": "hosg_server_1.0.3.js",
+  "scripts": {
+    "start": "node hosg_server_1.0.3.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  }
+}
