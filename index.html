@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.6</title>
+  <title>Heroes of Shady Grove v1.0.7</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.6 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.7 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -917,6 +917,11 @@ let mpScene = null;
 let mpHeroBody = null;
 let mpShadowGenerator = null;
 let mpGetRuntimeStats = null;
+
+// Global HUD/player stats so multiplayer and HUD share the same values
+let hp = 100, maxHp = 100;
+let mp = 60, maxMp = 100;
+let xp = 25, level = 1;
 
 function mpUpdateStatusLabel() {
   const el = document.getElementById("mp-status-text");
@@ -1856,9 +1861,9 @@ function appendChat(text) {
         const xpLabel = document.getElementById("xp-label");
         const levelLabel = document.getElementById("level-label");
 
-        let hp = 100, maxHp = 100;
-        let mp = 60, maxMp = 100;
-        let xp = 25, level = 1;
+        hp = 100; maxHp = 100;
+        mp = 60; maxMp = 100;
+        xp = 25; level = 1;
 
         function updateHud(time) {
           mp = maxMp * (0.4 + 0.1 * Math.sin(time * 0.3));
