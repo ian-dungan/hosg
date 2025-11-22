@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.13</title>
+  <title>Heroes of Shady Grove v1.0.14</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -612,11 +612,146 @@
         display: none;
       }
     }
-  </style>
+  
+/* Character sheet overlay */
+#char-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, rgba(10, 16, 35, 0.92), rgba(2, 4, 12, 0.96));
+  z-index: 40;
+  pointer-events: none;
+}
+
+#char-sheet-card {
+  pointer-events: auto;
+  width: min(420px, 90vw);
+  max-height: 80vh;
+  background: rgba(4, 8, 20, 0.98);
+  border-radius: 18px;
+  border: 1px solid rgba(130, 180, 255, 0.85);
+  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.9);
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #e4edff;
+}
+
+#char-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+#char-sheet-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+#char-sheet-subtitle {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#char-sheet-close {
+  border: none;
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  line-height: 1;
+  background: rgba(20, 28, 60, 0.9);
+  color: #f8fbff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px rgba(140, 190, 255, 0.7);
+  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+#char-sheet-close:hover {
+  background: rgba(60, 90, 160, 0.95);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+}
+
+#char-sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 12px;
+}
+
+.char-sheet-section {
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(80, 120, 180, 0.35);
+}
+
+.char-sheet-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.char-sheet-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8fb4ff;
+  margin-bottom: 2px;
+}
+
+.char-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px 12px;
+}
+
+.char-sheet-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.char-sheet-label {
+  opacity: 0.8;
+}
+
+.char-sheet-value {
+  font-weight: 600;
+  text-align: right;
+}
+
+#char-sheet-footer {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-top: 4px;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  #char-sheet-card {
+    width: 92vw;
+    padding: 12px;
+  }
+  #char-sheet-name {
+    font-size: 14px;
+  }
+}
+</style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.13 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.14 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -652,6 +787,25 @@
       </div>
     </div>
   </div>
+
+
+<div id="char-sheet-overlay">
+  <div id="char-sheet-card">
+    <div id="char-sheet-header">
+      <div>
+        <div id="char-sheet-name">Hero of Shady Grove</div>
+        <div id="char-sheet-subtitle">Level 1 Adventurer</div>
+      </div>
+      <button id="char-sheet-close" title="Close character sheet">×</button>
+    </div>
+    <div id="char-sheet-body">
+      <!-- Character stats will be injected here -->
+    </div>
+    <div id="char-sheet-footer">Press C to close this window.</div>
+  </div>
+</div>
+
+
 
 
 <div id="char-create-overlay">
@@ -829,6 +983,71 @@ function ensurePlayerStatsShape(state) {
 
 
 
+
+function getCurrentStatsSnapshot() {
+  if (!playerState) return null;
+  if (!playerState.stats) {
+    ensurePlayerStatsShape(playerState);
+  }
+  return playerState.stats;
+}
+
+const ABILITY_DEFS = {
+  basicAttack: {
+    id: "basicAttack",
+    name: "Basic Attack",
+    type: "physical",
+    scale: 1.0,
+    description: "A reliable weapon strike based on Attack Power."
+  },
+  powerStrike: {
+    id: "powerStrike",
+    name: "Power Strike",
+    type: "physical",
+    scale: 1.4,
+    description: "A heavier melee blow with increased damage."
+  },
+  arcaneBolt: {
+    id: "arcaneBolt",
+    name: "Arcane Bolt",
+    type: "spell",
+    scale: 1.1,
+    description: "A focused burst of magic based on Spell Power."
+  }
+};
+
+function getPhysicalDamageRange(scale, statsOverride) {
+  const stats = statsOverride || getCurrentStatsSnapshot();
+  if (!stats || !stats.derived) return { min: 0, max: 0, avg: 0 };
+  const atk = stats.derived.attackPower || 0;
+  const base = atk * (scale || 1);
+  const min = Math.max(1, Math.round(base * 0.85));
+  const max = Math.max(min, Math.round(base * 1.15));
+  const avg = Math.round((min + max) / 2);
+  return { min, max, avg };
+}
+
+function getSpellDamageRange(scale, statsOverride) {
+  const stats = statsOverride || getCurrentStatsSnapshot();
+  if (!stats || !stats.derived) return { min: 0, max: 0, avg: 0 };
+  const sp = stats.derived.spellPower || 0;
+  const base = sp * (scale || 1);
+  const min = Math.max(1, Math.round(base * 0.85));
+  const max = Math.max(min, Math.round(base * 1.15));
+  const avg = Math.round((min + max) / 2);
+  return { min, max, avg };
+}
+
+function getAbilityDamageRange(abilityId, statsOverride) {
+  const def = ABILITY_DEFS[abilityId];
+  if (!def) return { min: 0, max: 0, avg: 0 };
+  if (def.type === "physical") {
+    return getPhysicalDamageRange(def.scale, statsOverride);
+  } else {
+    return getSpellDamageRange(def.scale, statsOverride);
+  }
+}
+
 function getDefaultPlayerState() {
   const role = "Adventurer";
   const stats = buildStatsForClass(role, 1, 0);
@@ -890,7 +1109,6 @@ function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
   } catch (e) {
     console.warn("Failed to save player state", e);
   }
-
 }
 
 function applyAppearanceToMaterials(scene, mats) {
@@ -974,7 +1192,7 @@ function applyFromUI() {
     tunic, pants, skin
   });
 
-  // Refresh class-based stats whenever the hero setup is confirmed
+  // Rebuild stats from chosen class
   ensurePlayerStatsShape(playerState);
 
   if (hudName) {
@@ -1001,6 +1219,13 @@ startBtn.addEventListener("click", function () {
 
 loadPlayerState();
     (function () {
+
+// Runtime player stats (mirrors playerState.stats)
+let hp = 100, maxHp = 100;
+let mp = 60, maxMp = 100;
+let xp = 0, level = 1;
+
+
       const canvas = document.getElementById("renderCanvas");
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer: true,
@@ -1045,243 +1270,74 @@ function mpHexToColor3(hex) {
   return new BABYLON.Color3(r, g, b);
 }
 
-// Global HUD/player stats used by HUD and multiplayer
-let hp = 100, maxHp = 100;
-let mp = 60, maxMp = 100;
-let xp = 25, level = 1;
-
-
-// Multiplayer reconnect support
-let mpSetupArgs = null;
-let mpReconnectTimeout = null;
-let mpPingInterval = null;
-
-function mpTryReconnect() {
-  if (!mpSetupArgs) return;
-  if (mpSocket && (mpSocket.readyState === WebSocket.OPEN || mpSocket.readyState === WebSocket.CONNECTING)) {
-    return;
-  }
-  mpLog("Attempting multiplayer reconnect...");
-  try {
-    setupMultiplayer(
-      mpSetupArgs.scene,
-      mpSetupArgs.heroBody,
-      mpSetupArgs.shadowGenerator,
-      mpSetupArgs.getRuntimeStats
-    );
-  } catch (e) {
-    console.warn("Reconnect failed to start:", e);
-  }
-}
-
-function mpScheduleReconnect() {
-  if (mpReconnectTimeout) return;
-  mpLog("Scheduling multiplayer reconnect in 3.0s...");
-  mpReconnectTimeout = setTimeout(function () {
-    mpReconnectTimeout = null;
-    mpTryReconnect();
-  }, 3000);
-}
-
-
 function createRemoteHero(scene, shadowGenerator, id, player) {
   const root = new BABYLON.TransformNode("remoteRoot_" + id, scene);
 
-  // Appearance & materials
-  const app = player.appearance || {};
-  const tunicColor = mpHexToColor3(app.tunic || "#344fba");
-  const pantsColor = mpHexToColor3(app.pants || "#1f2937");
-  const skinColor  = mpHexToColor3(app.skin  || "#f3dec0");
-
-  const tunicMat = new BABYLON.StandardMaterial("remoteTunic_" + id, scene);
-  tunicMat.diffuseColor = tunicColor;
-
-  const pantsMat = new BABYLON.StandardMaterial("remotePants_" + id, scene);
-  pantsMat.diffuseColor = pantsColor;
-
-  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
-  skinMat.diffuseColor = skinColor;
-
-  const bootMat = new BABYLON.StandardMaterial("remoteBoot_" + id, scene);
-  bootMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.14);
-
-  // Torso & hips
-  const torso = BABYLON.MeshBuilder.CreateBox(
-    "remoteTorso_" + id,
-    { height: 1.4, width: 0.9, depth: 0.5 },
+  const body = BABYLON.MeshBuilder.CreateCapsule(
+    "remoteBody_" + id,
+    { height: 2.6, radius: 0.55, tessellation: 8, subdivisions: 1 },
     scene
   );
-  torso.parent = root;
-  torso.position = new BABYLON.Vector3(0, 1.6, 0);
-  torso.material = tunicMat;
+  body.parent = root;
+  body.position = new BABYLON.Vector3(0, 1.4, 0);
 
-  const hips = BABYLON.MeshBuilder.CreateBox(
-    "remoteHips_" + id,
-    { height: 0.6, width: 0.8, depth: 0.5 },
-    scene
-  );
-  hips.parent = root;
-  hips.position = new BABYLON.Vector3(0, 1.0, 0);
-  hips.material = pantsMat;
-
-  // Head
   const head = BABYLON.MeshBuilder.CreateSphere(
     "remoteHead_" + id,
-    { diameter: 0.7, segments: 8 },
+    { diameter: 0.85, segments: 8 },
     scene
   );
   head.parent = root;
-  head.position = new BABYLON.Vector3(0, 2.35, 0);
+  head.position = new BABYLON.Vector3(0, 2.4, 0);
+
+  const tunicMat = new BABYLON.StandardMaterial("remoteTunic_" + id, scene);
+  const pantsMat = new BABYLON.StandardMaterial("remotePants_" + id, scene);
+  const skinMat = new BABYLON.StandardMaterial("remoteSkin_" + id, scene);
+
+  const app = player.appearance || {};
+  tunicMat.diffuseColor = mpHexToColor3(app.tunic || "#344fba");
+  pantsMat.diffuseColor = mpHexToColor3(app.pants || "#1f2937");
+  skinMat.diffuseColor = mpHexToColor3(app.skin || "#f3dec0");
+
+  body.material = tunicMat;
   head.material = skinMat;
 
-  // Arms
-  const armLength = 0.9;
-  const armWidth = 0.24;
-  const armDepth = 0.32;
-  const armOffsetX = 0.7;
+  shadowGenerator.addShadowCaster(body);
+  shadowGenerator.addShadowCaster(head);
 
-  const leftArmUpper = BABYLON.MeshBuilder.CreateBox(
-    "remoteArmLUpper_" + id,
-    { height: armLength, width: armWidth, depth: armDepth },
-    scene
-  );
-  leftArmUpper.parent = root;
-  leftArmUpper.position = new BABYLON.Vector3(-armOffsetX, 1.7, 0);
-  leftArmUpper.material = tunicMat;
-
-  const leftArmLower = BABYLON.MeshBuilder.CreateBox(
-    "remoteArmLLower_" + id,
-    { height: 0.7, width: armWidth, depth: armDepth },
-    scene
-  );
-  leftArmLower.parent = root;
-  leftArmLower.position = new BABYLON.Vector3(-armOffsetX, 1.15, 0);
-  leftArmLower.material = skinMat;
-
-  const rightArmUpper = BABYLON.MeshBuilder.CreateBox(
-    "remoteArmRUpper_" + id,
-    { height: armLength, width: armWidth, depth: armDepth },
-    scene
-  );
-  rightArmUpper.parent = root;
-  rightArmUpper.position = new BABYLON.Vector3(armOffsetX, 1.7, 0);
-  rightArmUpper.material = tunicMat;
-
-  const rightArmLower = BABYLON.MeshBuilder.CreateBox(
-    "remoteArmRLower_" + id,
-    { height: 0.7, width: armWidth, depth: armDepth },
-    scene
-  );
-  rightArmLower.parent = root;
-  rightArmLower.position = new BABYLON.Vector3(armOffsetX, 1.15, 0);
-  rightArmLower.material = skinMat;
-
-  // Legs
-  const legLength = 0.9;
-  const legWidth = 0.3;
-  const legDepth = 0.34;
-  const legOffsetX = 0.32;
-
-  const leftLegUpper = BABYLON.MeshBuilder.CreateBox(
-    "remoteLegLUpper_" + id,
-    { height: legLength, width: legWidth, depth: legDepth },
-    scene
-  );
-  leftLegUpper.parent = root;
-  leftLegUpper.position = new BABYLON.Vector3(-legOffsetX, 0.9, 0);
-  leftLegUpper.material = pantsMat;
-
-  const leftLegLower = BABYLON.MeshBuilder.CreateBox(
-    "remoteLegLLower_" + id,
-    { height: 0.5, width: legWidth, depth: legDepth + 0.04 },
-    scene
-  );
-  leftLegLower.parent = root;
-  leftLegLower.position = new BABYLON.Vector3(-legOffsetX, 0.3, 0);
-  leftLegLower.material = bootMat;
-
-  const rightLegUpper = BABYLON.MeshBuilder.CreateBox(
-    "remoteLegRUpper_" + id,
-    { height: legLength, width: legWidth, depth: legDepth },
-    scene
-  );
-  rightLegUpper.parent = root;
-  rightLegUpper.position = new BABYLON.Vector3(legOffsetX, 0.9, 0);
-  rightLegUpper.material = pantsMat;
-
-  const rightLegLower = BABYLON.MeshBuilder.CreateBox(
-    "remoteLegRLower_" + id,
-    { height: 0.5, width: legWidth, depth: legDepth + 0.04 },
-    scene
-  );
-  rightLegLower.parent = root;
-  rightLegLower.position = new BABYLON.Vector3(legOffsetX, 0.3, 0);
-  rightLegLower.material = bootMat;
-
-  // Shadows for main body parts
-  [
-    torso,
-    hips,
-    head,
-    leftArmUpper,
-    rightArmUpper,
-    leftLegUpper,
-    rightLegUpper,
-    leftLegLower,
-    rightLegLower
-  ].forEach(m => shadowGenerator.addShadowCaster(m));
-
-  // Floating name label (smaller & with subtle background)
+  // Floating name label
   const plate = BABYLON.MeshBuilder.CreatePlane(
     "remoteName_" + id,
-    { width: 3.6, height: 0.8 },
+    { width: 3, height: 0.6 },
     scene
   );
   plate.parent = root;
-  plate.position = new BABYLON.Vector3(0, 3.0, 0);
+  plate.position = new BABYLON.Vector3(0, 3.1, 0);
   plate.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
 
   const tex = new BABYLON.DynamicTexture(
     "remoteNameTex_" + id,
-    { width: 512, height: 128 },
+    { width: 256, height: 64 },
     scene,
     false
   );
   tex.hasAlpha = true;
-
-  const label = (player.name || "Hero") + (player.role ? " — " + player.role : "");
+  const ctxName = (player.name || "Hero") + (player.role ? " — " + player.role : "");
   tex.drawText(
-    label,
+    ctxName,
     null,
-    80,
-    "26px Segoe UI",
+    42,
+    "20px Segoe UI",
     "#ffffff",
-    "rgba(0,0,0,0.45)",
+    "transparent",
     true
   );
-
   const plateMat = new BABYLON.StandardMaterial("remoteNameMat_" + id, scene);
   plateMat.diffuseTexture = tex;
-  plateMat.emissiveColor = new BABYLON.Color3(0.8, 0.85, 1);
+  plateMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
   plateMat.backFaceCulling = false;
   plate.material = plateMat;
 
-  // Simple animation state
-  const anim = {
-    walkTime: 0,
-    idleTime: 0,
-    isMoving: false,
-    lastPos: new BABYLON.Vector3(root.position.x, root.position.y, root.position.z)
-  };
-
-  const limbs = {
-    leftArmUpper,
-    rightArmUpper,
-    leftLegUpper,
-    rightLegUpper
-  };
-
-  remotePlayers[id] = { root, torso, head, plate, tex, limbs, anim };
+  remotePlayers[id] = { root, body, head, plate, tex };
   return remotePlayers[id];
 }
 
@@ -1289,22 +1345,10 @@ function updateRemoteHero(id, player) {
   const entry = remotePlayers[id];
   if (!entry) return;
   const p = player.position || { x: 0, y: 1.5, z: 0 };
-
-  // Position & facing
   entry.root.position.x = p.x;
   entry.root.position.y = p.y - 1.5;
   entry.root.position.z = p.z;
   entry.root.rotation.y = player.rotationY || 0;
-
-  // Basic movement detection for remote walk animation
-  if (entry.anim) {
-    const last = entry.anim.lastPos || new BABYLON.Vector3(p.x, p.y, p.z);
-    const dx = p.x - last.x;
-    const dz = p.z - last.z;
-    const speedSq = dx * dx + dz * dz;
-    entry.anim.isMoving = speedSq > 0.0005;
-    entry.anim.lastPos = new BABYLON.Vector3(p.x, p.y, p.z);
-  }
 }
 
 function removeRemoteHero(id) {
@@ -1316,122 +1360,42 @@ function removeRemoteHero(id) {
   delete remotePlayers[id];
 }
 
-
 function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
-  // Remember these so we can reconnect later
-  mpSetupArgs = {
-    scene,
-    heroBody,
-    shadowGenerator,
-    getRuntimeStats
-  };
-
   if (!("WebSocket" in window)) {
     mpLog("WebSocket not supported in this browser.");
     return;
   }
-
-  // Avoid creating a second socket if one is already open/connecting
-  if (mpSocket && (mpSocket.readyState === WebSocket.OPEN || mpSocket.readyState === WebSocket.CONNECTING)) {
-    return function sendLocalState() {
-      if (!mpConnected || !mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
-      const stats = getRuntimeStats();
-      const payload = {
-        type: "state",
-        player: {
-          name: playerState?.name,
-          role: playerState?.role,
-          appearance: playerState?.appearance,
-          position: stats.position,
-          rotationY: stats.rotationY,
-          stats: {
-            hp: stats.hp,
-            maxHp: stats.maxHp,
-            mp: stats.mp,
-            maxMp: stats.maxMp,
-            xp: stats.xp,
-            level: stats.level
-          }
-        }
-      };
-      try {
-        mpSocket.send(JSON.stringify(payload));
-      } catch (e) {
-        console.warn("Failed to send state", e);
-      }
-    };
-  }
-
   try {
     mpSocket = new WebSocket(MP_SERVER_URL);
   } catch (e) {
     console.warn("Failed to create WebSocket", e);
-    mpScheduleReconnect();
     return;
-  }
-
-  // Clear any old ping timer
-  if (mpPingInterval) {
-    clearInterval(mpPingInterval);
-    mpPingInterval = null;
   }
 
   mpSocket.addEventListener("open", function () {
     mpConnected = true;
-    if (mpReconnectTimeout) {
-      clearTimeout(mpReconnectTimeout);
-      mpReconnectTimeout = null;
-    }
     mpUpdateStatusLabel();
     mpLog("Connected to multiplayer server");
-    appendChat("System: Connected to multiplayer server.");
     if (!playerState) loadPlayerState();
     const hello = {
       type: "hello",
       player: playerState
     };
-    try {
-      mpSocket.send(JSON.stringify(hello));
-    } catch (e) {
-      console.warn("Failed to send hello", e);
-    }
-
-    // Start keepalive ping
-    mpPingInterval = setInterval(function () {
-      if (mpSocket && mpSocket.readyState === WebSocket.OPEN) {
-        try {
-          mpSocket.send(JSON.stringify({ type: "ping" }));
-        } catch (e) {
-          console.warn("Failed to send ping", e);
-        }
-      }
-    }, 25000);
+    mpSocket.send(JSON.stringify(hello));
   });
 
   mpSocket.addEventListener("close", function () {
     mpConnected = false;
     mpUpdateStatusLabel();
     mpLog("Disconnected from multiplayer server");
-    appendChat("System: Disconnected from multiplayer server.");
-    if (mpPingInterval) {
-      clearInterval(mpPingInterval);
-      mpPingInterval = null;
-    }
     // Clean up remote heroes
     Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
-    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("error", function (err) {
     console.warn("Multiplayer socket error", err);
     mpConnected = false;
     mpUpdateStatusLabel();
-    appendChat("System: Multiplayer error — see console for details.");
-    if (mpPingInterval) {
-      clearInterval(mpPingInterval);
-      mpPingInterval = null;
-    }
-    mpScheduleReconnect();
   });
 
   mpSocket.addEventListener("message", function (ev) {
@@ -1483,12 +1447,6 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         }
         break;
       }
-      case "pong": {
-        // ignore
-        break;
-      }
-      default:
-        break;
     }
   });
 
@@ -1521,7 +1479,8 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     }
   };
 }
-function appendChat(text) {
+
+      function appendChat(text) {
         const log = document.getElementById("chat-log");
         const line = document.createElement("div");
         line.textContent = text;
@@ -1974,7 +1933,7 @@ function appendChat(text) {
 
           const dynamicTex = new BABYLON.DynamicTexture(
             name + "_dt",
-            { width: 512, height: 128 },
+            { width: 256, height: 64 },
             scene,
             false
           );
@@ -2001,12 +1960,151 @@ function appendChat(text) {
         createNpc("Mennonite Merchant", new BABYLON.Vector3(4, 1.5, 34));
         createNpc("Village Guard", new BABYLON.Vector3(-6, 1.5, 26));
 
-        // -------- Input systems --------
+        
+// --- Character sheet in-game panel ---
+const charSheetOverlay = document.getElementById("char-sheet-overlay");
+const charSheetName = document.getElementById("char-sheet-name");
+const charSheetSubtitle = document.getElementById("char-sheet-subtitle");
+const charSheetBody = document.getElementById("char-sheet-body");
+const charSheetClose = document.getElementById("char-sheet-close");
+
+function refreshCharSheetPanel() {
+  if (!charSheetOverlay || !charSheetBody) return;
+  if (!playerState) {
+    loadPlayerState();
+  }
+  ensurePlayerStatsShape(playerState);
+  const stats = playerState.stats;
+  const role = playerState.role || "Adventurer";
+  const roleDef = getClassDef(role);
+
+  if (charSheetName) {
+    charSheetName.textContent = (playerState.name || "Hero") + " of Shady Grove";
+  }
+  if (charSheetSubtitle) {
+    charSheetSubtitle.textContent = "Level " + stats.level + " " + roleDef.name;
+  }
+
+  const physBasic = getAbilityDamageRange("basicAttack", stats);
+  const physPower = getAbilityDamageRange("powerStrike", stats);
+  const spellBolt = getAbilityDamageRange("arcaneBolt", stats);
+
+  const core = stats.core || {};
+  const derived = stats.derived || {};
+
+  charSheetBody.innerHTML = `
+    <div class="char-sheet-section">
+      <div class="char-sheet-section-title">Vitals</div>
+      <div class="char-sheet-grid">
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">Health</span>
+          <span class="char-sheet-value">${stats.hp} / ${stats.maxHp}</span>
+        </div>
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">Mana</span>
+          <span class="char-sheet-value">${stats.mp} / ${stats.maxMp}</span>
+        </div>
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">XP</span>
+          <span class="char-sheet-value">${Math.round(stats.xp)}% to next level</span>
+        </div>
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">Level</span>
+          <span class="char-sheet-value">${stats.level}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="char-sheet-section">
+      <div class="char-sheet-section-title">Core Attributes</div>
+      <div class="char-sheet-grid">
+        <div class="char-sheet-row"><span class="char-sheet-label">Strength</span><span class="char-sheet-value">${Math.round(core.str || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Agility</span><span class="char-sheet-value">${Math.round(core.agi || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Intellect</span><span class="char-sheet-value">${Math.round(core.int || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Vitality</span><span class="char-sheet-value">${Math.round(core.vit || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Willpower</span><span class="char-sheet-value">${Math.round(core.will || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Luck</span><span class="char-sheet-value">${Math.round(core.luck || 0)}</span></div>
+      </div>
+    </div>
+
+    <div class="char-sheet-section">
+      <div class="char-sheet-section-title">Derived Stats</div>
+      <div class="char-sheet-grid">
+        <div class="char-sheet-row"><span class="char-sheet-label">Attack Power</span><span class="char-sheet-value">${Math.round(derived.attackPower || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Spell Power</span><span class="char-sheet-value">${Math.round(derived.spellPower || 0)}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Crit Chance</span><span class="char-sheet-value">${(derived.critChance || 0).toFixed ? derived.critChance.toFixed(1) + "%" : derived.critChance + "%"}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Dodge Chance</span><span class="char-sheet-value">${(derived.dodgeChance || 0).toFixed ? derived.dodgeChance.toFixed(1) + "%" : derived.dodgeChance + "%"}</span></div>
+        <div class="char-sheet-row"><span class="char-sheet-label">Move Speed</span><span class="char-sheet-value">${(derived.moveSpeedMultiplier || 1).toFixed(2)}×</span></div>
+      </div>
+    </div>
+
+    <div class="char-sheet-section">
+      <div class="char-sheet-section-title">Ability Damage (Hooks)</div>
+      <div class="char-sheet-grid">
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">Basic Attack</span>
+          <span class="char-sheet-value">${physBasic.min}–${physBasic.max}</span>
+        </div>
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">Power Strike</span>
+          <span class="char-sheet-value">${physPower.min}–${physPower.max}</span>
+        </div>
+        <div class="char-sheet-row">
+          <span class="char-sheet-label">Arcane Bolt</span>
+          <span class="char-sheet-value">${spellBolt.min}–${spellBolt.max}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openCharSheet() {
+  if (!charSheetOverlay) return;
+  refreshCharSheetPanel();
+  charSheetOverlay.style.display = "flex";
+}
+
+function closeCharSheet() {
+  if (!charSheetOverlay) return;
+  charSheetOverlay.style.display = "none";
+}
+
+function toggleCharSheet() {
+  if (!charSheetOverlay) return;
+  if (charSheetOverlay.style.display === "flex") {
+    closeCharSheet();
+  } else {
+    openCharSheet();
+  }
+}
+
+if (charSheetClose) {
+  charSheetClose.addEventListener("click", function () {
+    closeCharSheet();
+  });
+}
+
+// -------- Input systems --------
         const inputMap = {};
-        window.addEventListener("keydown", function (ev) {
-          const key = ev.key.toLowerCase();
-          inputMap[key] = true;
-        });
+
+window.addEventListener("keydown", function (ev) {
+  const key = ev.key.toLowerCase();
+
+  // Toggle character sheet with C
+  if (key === "c") {
+    ev.preventDefault();
+    toggleCharSheet();
+    return;
+  }
+
+  // Temporary: debug XP gain with K key (25% to next level)
+  if (key === "k") {
+    grantExperience(25, "training");
+    return;
+  }
+
+  inputMap[key] = true;
+});
         window.addEventListener("keyup", function (ev) {
           const key = ev.key.toLowerCase();
           inputMap[key] = false;
@@ -2115,131 +2213,147 @@ function appendChat(text) {
           }, { passive: false });
         }
 
-        
-const gamepadState = {
-  hasPad: false,
-  moveX: 0,
-  moveY: 0,
-  lookX: 0,
-  lookY: 0,
-  run: false,
-  jump: false,
-  lastJump: false,
-  dpadLeft: false,
-  dpadRight: false,
-  lastDpadLeft: false,
-  lastDpadRight: false
-};
+        const gamepadState = {
+          hasPad: false,
+          moveX: 0,
+          moveY: 0,
+          lookX: 0,
+          lookY: 0,
+          run: false,
+          jump: false,
+          lastJump: false
+        };
 
-function updateGamepadState() {
-  const getGamepads = navigator.getGamepads || navigator.webkitGetGamepads || navigator.msGetGamepads;
-  if (!getGamepads) {
-    gamepadState.hasPad = false;
-    gamepadState.moveX = gamepadState.moveY = 0;
-    gamepadState.lookX = gamepadState.lookY = 0;
-    gamepadState.run = gamepadState.jump = false;
-    gamepadState.dpadLeft = gamepadState.dpadRight = false;
-    gamepadState.lastDpadLeft = gamepadState.lastDpadRight = false;
-    gamepadState.lastJump = false;
-    return;
-  }
-  const pads = getGamepads.call(navigator);
-  let pad = null;
-  for (let i = 0; i < pads.length; i++) {
-    if (pads[i]) { pad = pads[i]; break; }
-  }
-  if (!pad) {
-    gamepadState.hasPad = false;
-    gamepadState.moveX = gamepadState.moveY = 0;
-    gamepadState.lookX = gamepadState.lookY = 0;
-    gamepadState.run = gamepadState.jump = false;
-    gamepadState.dpadLeft = gamepadState.dpadRight = false;
-    gamepadState.lastDpadLeft = gamepadState.lastDpadRight = false;
-    gamepadState.lastJump = false;
-    return;
-  }
+        function updateGamepadState() {
+          const getGamepads = navigator.getGamepads || navigator.webkitGetGamepads || navigator.msGetGamepads;
+          if (!getGamepads) {
+            gamepadState.hasPad = false;
+            return;
+          }
+          const pads = getGamepads.call(navigator);
+          let pad = null;
+          for (let i = 0; i < pads.length; i++) {
+            if (pads[i]) { pad = pads[i]; break; }
+          }
+          if (!pad) {
+            gamepadState.hasPad = false;
+            gamepadState.moveX = gamepadState.moveY = gamepadState.lookX = gamepadState.lookY = 0;
+            gamepadState.run = gamepadState.jump = false;
+            return;
+          }
+          gamepadState.hasPad = true;
+          const axes = pad.axes || [];
+          const buttons = pad.buttons || [];
+          const dead = 0.2;
+          function d(v) { return Math.abs(v) < dead ? 0 : v; }
+          const lx = d(axes[0] || 0);
+          const ly = d(axes[1] || 0);
+          const rx = d(axes[2] || 0);
+          const ry = d(axes[3] || 0);
+          gamepadState.moveX = lx;
+          gamepadState.moveY = ly;
+          gamepadState.lookX = rx;
+          gamepadState.lookY = ry;
+          const jumpNow = buttons[0] && buttons[0].pressed;
+          gamepadState.run = (buttons[1] && buttons[1].pressed) || (buttons[4] && buttons[4].pressed) || (buttons[5] && buttons[5].pressed);
+          gamepadState.jump = !gamepadState.lastJump && !!jumpNow;
+          gamepadState.lastJump = !!jumpNow;
+        }
 
-  gamepadState.hasPad = true;
-  const axes = pad.axes || [];
-  const buttons = pad.buttons || [];
-  const dead = 0.2;
-  function d(v) { return Math.abs(v) < dead ? 0 : v; }
-
-  const lx = d(axes[0] || 0);
-  const ly = d(axes[1] || 0);
-  const rx = d(axes[2] || 0);
-  const ry = d(axes[3] || 0);
-
-  gamepadState.moveX = lx;
-  gamepadState.moveY = ly;
-  gamepadState.lookX = rx;
-  gamepadState.lookY = ry;
-
-  const jumpNow = !!(buttons[0] && buttons[0].pressed);
-  gamepadState.run = !!((buttons[1] && buttons[1].pressed) ||
-                        (buttons[4] && buttons[4].pressed) ||
-                        (buttons[5] && buttons[5].pressed));
-
-  const dpadLeftNow = !!(buttons[14] && buttons[14].pressed);
-  const dpadRightNow = !!(buttons[15] && buttons[15].pressed);
-  gamepadState.dpadLeft = dpadLeftNow && !gamepadState.lastDpadLeft;
-  gamepadState.dpadRight = dpadRightNow && !gamepadState.lastDpadRight;
-  gamepadState.lastDpadLeft = dpadLeftNow;
-  gamepadState.lastDpadRight = dpadRightNow;
-
-  gamepadState.jump = jumpNow && !gamepadState.lastJump;
-  gamepadState.lastJump = jumpNow;
-}
-
-function wrapAngle(a) {
+        function wrapAngle(a) {
           while (a > Math.PI) a -= Math.PI * 2;
           while (a < -Math.PI) a += Math.PI * 2;
           return a;
         }
 
+        // HUD state
+        let hudTime = 0;
+        const hpFill = document.getElementById("hp-fill");
+        const mpFill = document.getElementById("mp-fill");
+        const hpLabel = document.getElementById("hp-label");
+        const mpLabel = document.getElementById("mp-label");
+        const xpFill = document.getElementById("xp-fill");
+        const xpLabel = document.getElementById("xp-label");
+        const levelLabel = document.getElementById("level-label");
+
+        // Initialize runtime stats from persistent playerState
+        if (!playerState) {
+          loadPlayerState();
+        } else {
+          ensurePlayerStatsShape(playerState);
+        }
+        hp = playerState.stats.hp;
+        maxHp = playerState.stats.maxHp;
+        mp = playerState.stats.mp;
+        maxMp = playerState.stats.maxMp;
+        xp = playerState.stats.xp;
+        level = playerState.stats.level;
+
         
-// HUD state
-let hudTime = 0;
-const hpFill = document.getElementById("hp-fill");
-const mpFill = document.getElementById("mp-fill");
-const hpLabel = document.getElementById("hp-label");
-const mpLabel = document.getElementById("mp-label");
-const xpFill = document.getElementById("xp-fill");
-const xpLabel = document.getElementById("xp-label");
-const levelLabel = document.getElementById("level-label");
-
-// Initialize runtime stats from persistent class-based stats
-if (!playerState) {
-  loadPlayerState();
-} else {
-  ensurePlayerStatsShape(playerState);
-}
-hp = playerState.stats.hp;
-maxHp = playerState.stats.maxHp;
-mp = playerState.stats.mp;
-maxMp = playerState.stats.maxMp;
-xp = playerState.stats.xp;
-level = playerState.stats.level;
-
-
-
 function updateHud(time) {
-          // MP/HUD now reflect real stats; any regen/consumption should adjust mp elsewhere
-          if (mp > maxMp) mp = maxMp;
-          if (mp < 0) mp = 0;
+          // Clamp HP/MP into valid ranges; any regen/consumption happens elsewhere
           if (hp > maxHp) hp = maxHp;
           if (hp < 0) hp = 0;
+          if (mp > maxMp) mp = maxMp;
+          if (mp < 0) mp = 0;
           hpFill.style.width = (hp / maxHp * 100) + "%";
           mpFill.style.width = (mp / maxMp * 100) + "%";
           xpFill.style.width = Math.min(100, xp) + "%";
-xpFill.style.width = Math.min(100, xp) + "%";
           hpLabel.textContent = Math.round(hp) + " / " + maxHp;
           mpLabel.textContent = Math.round(mp) + " / " + maxMp;
           xpLabel.textContent = Math.round(xp) + "%";
           levelLabel.textContent = level;
         }
 
-        // Movement/animation state
+
+function grantExperience(amount, source) {
+  if (!playerState || !amount) return;
+  const prevHp = hp;
+  const prevMp = mp;
+  const prevMaxHp = maxHp;
+  const prevMaxMp = maxMp;
+  const prevLevel = level;
+
+  xp += amount;
+  let leveled = false;
+  while (xp >= 100) {
+    xp -= 100;
+    level += 1;
+    leveled = true;
+  }
+
+  const role = playerState.role || "Adventurer";
+  const rebuilt = buildStatsForClass(role, level, xp);
+
+  if (leveled) {
+    // On level up, fully restore HP/MP
+    rebuilt.hp = rebuilt.maxHp;
+    rebuilt.mp = rebuilt.maxMp;
+  } else {
+    // Preserve HP/MP ratios when just gaining XP
+    const hpRatio = prevMaxHp > 0 ? prevHp / prevMaxHp : 1;
+    const mpRatio = prevMaxMp > 0 ? prevMp / prevMaxMp : 1;
+    rebuilt.hp = Math.round(rebuilt.maxHp * hpRatio);
+    rebuilt.mp = Math.round(rebuilt.maxMp * mpRatio);
+  }
+
+  playerState.stats = rebuilt;
+  hp = rebuilt.hp;
+  maxHp = rebuilt.maxHp;
+  mp = rebuilt.mp;
+  maxMp = rebuilt.maxMp;
+  xp = rebuilt.xp;
+  level = rebuilt.level;
+
+  const srcText = source ? " from " + source : "";
+  if (typeof appendChat === "function") {
+    appendChat("System: Gained " + amount + " XP" + srcText + (leveled ? " and reached level " + level + "!" : "."));
+  }
+  const hero = scene.heroBody || null;
+  savePlayerStateRuntime(hero, hp, maxHp, mp, maxMp, xp, level);
+}
+
+// Movement/animation state
         const baseSpeed = 0.16;
         const runMultiplier = 1.8;
         const rotationLerp = 0.18;
@@ -2251,107 +2365,7 @@ xpFill.style.width = Math.min(100, xp) + "%";
         let autosaveTimer = 0;
         let netSendTimer = 0;
 
-        
-// Targeting: cycle between nearby entities in front of the hero
-let currentTarget = null; // { type: "player", id: string }
-
-function getTargetableEntities() {
-  const list = [];
-  if (!heroBody) return list;
-
-  const heroPos = heroBody.position;
-  const forward = new BABYLON.Vector3(
-    Math.sin(heroBody.rotation.y),
-    0,
-    Math.cos(heroBody.rotation.y)
-  );
-  const maxDistSq = 60 * 60;
-
-  // For now we only have other players as targetable entities.
-  for (const id in remotePlayers) {
-    const entry = remotePlayers[id];
-    if (!entry || !entry.root) continue;
-    const pos = entry.root.position;
-    const to = new BABYLON.Vector3(
-      pos.x - heroPos.x,
-      0,
-      pos.z - heroPos.z
-    );
-    const distSq = to.lengthSquared();
-    if (distSq < 0.01 || distSq > maxDistSq) continue;
-    to.normalize();
-    const dot = BABYLON.Vector3.Dot(forward, to);
-    if (dot <= 0.15) continue; // only roughly in front
-    list.push({
-      type: "player",
-      id,
-      distSq
-    });
-  }
-
-  list.sort(function (a, b) {
-    return a.distSq - b.distSq;
-  });
-  return list;
-}
-
-function setCurrentTarget(target) {
-  // Clear highlight from all remote players
-  for (const id in remotePlayers) {
-    const entry = remotePlayers[id];
-    if (!entry || !entry.plate || !entry.plate.material) continue;
-    entry.plate.scaling.x = 1;
-    entry.plate.scaling.y = 1;
-    entry.plate.scaling.z = 1;
-    entry.plate.material.emissiveColor = new BABYLON.Color3(0.8, 0.85, 1);
-  }
-
-  currentTarget = target;
-  if (!currentTarget) return;
-
-  if (currentTarget.type === "player") {
-    const entry = remotePlayers[currentTarget.id];
-    if (entry && entry.plate && entry.plate.material) {
-      entry.plate.scaling.x = 1.4;
-      entry.plate.scaling.y = 1.4;
-      entry.plate.scaling.z = 1.4;
-      entry.plate.material.emissiveColor = new BABYLON.Color3(1, 1, 0.6);
-    }
-  }
-}
-
-function cycleTarget(direction) {
-  const entities = getTargetableEntities();
-  if (!entities.length) {
-    setCurrentTarget(null);
-    return;
-  }
-
-  let idx = -1;
-  if (currentTarget) {
-    for (let i = 0; i < entities.length; i++) {
-      const e = entities[i];
-      if (e.type === currentTarget.type && e.id === currentTarget.id) {
-        idx = i;
-        break;
-      }
-    }
-  }
-
-  if (idx === -1) {
-    idx = (direction > 0) ? 0 : (entities.length - 1);
-  } else {
-    idx = (idx + direction + entities.length) % entities.length;
-  }
-
-  const chosen = entities[idx];
-  setCurrentTarget({
-    type: chosen.type,
-    id: chosen.id
-  });
-}
-
-scene.onBeforeRenderObservable.add(function () {
+        scene.onBeforeRenderObservable.add(function () {
           const deltaTime = scene.getEngine().getDeltaTime();
           const dt = deltaTime / (1000 / 60);
           const dtSec = deltaTime / 1000;
@@ -2363,8 +2377,7 @@ scene.onBeforeRenderObservable.add(function () {
           autosaveTimer += dtSec;
           netSendTimer += dtSec;
 
-                    let heroSpeed = baseSpeed * (playerState?.stats?.derived?.moveSpeedMultiplier || 1);
-
+          let heroSpeed = baseSpeed * ((playerState && playerState.stats && playerState.stats.derived && playerState.stats.derived.moveSpeedMultiplier) || 1);
           if (inputMap["shift"] || (gamepadState.hasPad && gamepadState.run) || mobileRunHeld) {
             heroSpeed *= runMultiplier;
           }
@@ -2389,16 +2402,6 @@ scene.onBeforeRenderObservable.add(function () {
 
           const moveMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
           let isMoving = moveMagnitude > 0.05;
-
-          // Gamepad target cycling (D-pad left/right)
-          if (gamepadState.hasPad) {
-            if (gamepadState.dpadRight) {
-              cycleTarget(1);
-            } else if (gamepadState.dpadLeft) {
-              cycleTarget(-1);
-            }
-          }
-
 
           // Jump
           const jumpRequested = (inputMap[" "] || mobileJumpQueued || (gamepadState.hasPad && gamepadState.jump));
@@ -2486,54 +2489,7 @@ scene.onBeforeRenderObservable.add(function () {
             }
           }
 
-          // Remote player walk/idle animation
-          for (const id in remotePlayers) {
-            const rp = remotePlayers[id];
-            if (!rp || !rp.anim || !rp.limbs) continue;
-            const anim = rp.anim;
-            const limbs = rp.limbs;
-
-            if (anim.isMoving) {
-              anim.walkTime += dtSec * 4.0;
-              const phaseR = anim.walkTime * Math.PI * 2;
-              const swingR = Math.sin(phaseR);
-              const swingOppR = Math.sin(phaseR + Math.PI);
-              const legSwingR = 0.6;
-              const armSwingR = 0.7;
-
-              if (limbs.leftLegUpper) limbs.leftLegUpper.rotation.x = swingR * legSwingR;
-              if (limbs.rightLegUpper) limbs.rightLegUpper.rotation.x = swingOppR * legSwingR;
-              if (limbs.leftArmUpper) limbs.leftArmUpper.rotation.x = -swingOppR * armSwingR * 0.6;
-              if (limbs.rightArmUpper) limbs.rightArmUpper.rotation.x = -swingR * armSwingR * 0.6;
-
-              const bobR = Math.abs(Math.sin(phaseR)) * 0.06;
-              if (rp.torso) rp.torso.position.y = 1.6 + bobR;
-            } else {
-              anim.idleTime += dtSec;
-              const relaxR = 1 - Math.pow(0.0001, dtSec);
-
-              function dampLimb(mesh) {
-                if (!mesh) return;
-                mesh.rotation.x -= mesh.rotation.x * relaxR;
-                mesh.rotation.z -= mesh.rotation.z * relaxR;
-              }
-
-              dampLimb(limbs.leftLegUpper);
-              dampLimb(limbs.rightLegUpper);
-              dampLimb(limbs.leftArmUpper);
-              dampLimb(limbs.rightArmUpper);
-
-              if (rp.torso) {
-                const baseY = 1.6;
-                rp.torso.position.y += (baseY - rp.torso.position.y) * relaxR;
-                const breathR = Math.sin(anim.idleTime * Math.PI * 2) * 0.01;
-                rp.torso.position.y = baseY + breathR;
-              }
-            }
-          }
-
           camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
-
 
           if (gamepadState.hasPad) {
             const lookSpeed = 0.04;
@@ -2606,20 +2562,7 @@ scene.onBeforeRenderObservable.add(function () {
         );
       }
 
-      
-// Attempt reconnect when tab becomes visible or network returns
-document.addEventListener("visibilitychange", function () {
-  if (!document.hidden && !mpConnected) {
-    mpScheduleReconnect();
-  }
-});
-window.addEventListener("online", function () {
-  if (!mpConnected) {
-    mpScheduleReconnect();
-  }
-});
-
-engine.runRenderLoop(function () {
+      engine.runRenderLoop(function () {
         scene.render();
       });
 
