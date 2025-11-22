@@ -171,6 +171,94 @@
   z-index: 20;
 }
 
+#account-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at top, rgba(5, 8, 25, 0.98), rgba(2, 3, 10, 0.98));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+#account-card {
+  width: 360px;
+  max-width: 92%;
+  background: rgba(4, 6, 18, 0.96);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  border: 1px solid rgba(130, 180, 255, 0.65);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
+}
+
+#acct-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+#acct-subtitle {
+  font-size: 13px;
+  text-align: center;
+  color: #cdd9ff;
+  margin-bottom: 10px;
+}
+
+.acct-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.acct-field span {
+  color: #9db8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.acct-field input {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(130, 180, 255, 0.6);
+  background: rgba(5, 8, 20, 0.96);
+  color: #f5f5f5;
+  font-size: 13px;
+}
+
+#acct-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+#acct-buttons button {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(90deg, #4f46e5, #818cf8);
+  color: #f5f5f5;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#acct-message {
+  min-height: 16px;
+  font-size: 11px;
+  color: #ffb347;
+  text-align: center;
+  margin-top: 2px;
+}
+
+
 #char-create-card {
   width: 360px;
   max-width: 92%;
@@ -197,6 +285,66 @@
   text-align: center;
   margin-bottom: 12px;
   color: #cfd8ff;
+}
+
+#char-slot-wrapper {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(7, 12, 32, 0.9);
+  border: 1px solid rgba(130, 180, 255, 0.4);
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+#char-slot-header {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9db8ff;
+  margin-bottom: 4px;
+}
+
+.char-slot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.char-slot-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.char-slot-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.char-slot-actions button {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(55, 65, 194, 0.95);
+  color: #f5f5f5;
+  cursor: pointer;
+}
+
+.char-slot-empty {
+  font-size: 12px;
+  color: #cbd5ff;
+}
+
+#char-slot-warning {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #ffb347;
 }
 
 .char-field {
@@ -614,6 +762,7 @@
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
   <!-- Game: Heroes of Shady Grove | Version: 1.0.17 -->
@@ -654,10 +803,35 @@
   </div>
 
 
+<div id="account-overlay">
+  <div id="account-card">
+    <div id="acct-title">Heroes of Shady Grove</div>
+    <div id="acct-subtitle">Sign in or create an account</div>
+    <label class="acct-field">
+      <span>Email</span>
+      <input id="acct-email" type="email" autocomplete="email" />
+    </label>
+    <label class="acct-field">
+      <span>Password</span>
+      <input id="acct-password" type="password" autocomplete="current-password" />
+    </label>
+    <div id="acct-buttons">
+      <button id="acct-signin" type="button">Sign in</button>
+      <button id="acct-signup" type="button">Create account</button>
+    </div>
+    <div id="acct-message"></div>
+  </div>
+</div>
+
 <div id="char-create-overlay">
   <div id="char-create-card">
     <div id="char-title">Heroes of Shady Grove</div>
     <div id="char-subtitle">Create your hero</div>
+    <div id="char-slot-wrapper">
+      <div id="char-slot-header">Your characters</div>
+      <div id="char-slot-list"></div>
+      <div id="char-slot-warning"></div>
+    </div>
     <label class="char-field">
       <span>Name</span>
       <input id="cc-name" type="text" maxlength="16" placeholder="Felix" />
@@ -689,7 +863,7 @@
       <button id="cc-random">Randomize</button>
       <button id="cc-start">Enter the world</button>
     </div>
-    <div id="char-note">Your hero is saved automatically in this browser.</div>
+    <div id="char-note">Up to 10 heroes per account. Heroes are also cached locally on this device.</div>
   </div>
 </div>
 
@@ -728,10 +902,310 @@
 const HOSG_SAVE_KEY = "hosg_player_v1";
 let playerState = null;
 
+// Account & persistence (Supabase) configuration
+const HOSG_MAX_CHARACTERS = 10;
+// Optional: provide these before this script runs, for example:
+// <script>window.HOSG_SUPABASE_URL = "..."; window.HOSG_SUPABASE_ANON_KEY = "...";</script>
+const HOSG_SUPABASE_URL = window.HOSG_SUPABASE_URL || "";
+const HOSG_SUPABASE_ANON_KEY = window.HOSG_SUPABASE_ANON_KEY || "";
+
+// Supabase runtime state
+let hosgSupabase = null;
+let hosgSupabaseUser = null;
+let hosgCharacters = []; // rows from `hosg_characters`
+let hosgCurrentCharacterId = null; // currently active character id in Supabase
+let hosgSupabaseSaveTimer = null;
+
+
 // Runtime stats shared across HUD & multiplayer payloads
 let hp = 100, maxHp = 100;
 let mp = 60, maxMp = 100;
 let xp = 25, level = 1;
+
+
+// Supabase helpers for accounts & characters
+function hosgHasSupabaseConfig() {
+  try {
+    return typeof window !== "undefined" &&
+      typeof window.supabase !== "undefined" &&
+      !!HOSG_SUPABASE_URL &&
+      !!HOSG_SUPABASE_ANON_KEY &&
+      !HOSG_SUPABASE_URL.includes("YOUR-PROJECT") &&
+      !HOSG_SUPABASE_ANON_KEY.includes("YOUR-ANON");
+  } catch (e) {
+    return false;
+  }
+}
+
+async function hosgEnsureSupabase() {
+  if (!hosgHasSupabaseConfig()) return null;
+  if (hosgSupabase) return hosgSupabase;
+  try {
+    hosgSupabase = window.supabase.createClient(HOSG_SUPABASE_URL, HOSG_SUPABASE_ANON_KEY);
+    const { data, error } = await hosgSupabase.auth.getUser();
+    if (!error && data && data.user) {
+      hosgSupabaseUser = data.user;
+    }
+  } catch (e) {
+    console.warn("Supabase init failed", e);
+    hosgSupabase = null;
+  }
+  return hosgSupabase;
+}
+
+async function hosgAuthWithEmailPassword(mode, email, password) {
+  const sb = await hosgEnsureSupabase();
+  if (!sb) {
+    throw new Error("Online accounts are not configured on this build.");
+  }
+  let result;
+  if (mode === "signup") {
+    result = await sb.auth.signUp({ email, password });
+  } else {
+    result = await sb.auth.signInWithPassword({ email, password });
+  }
+  if (result.error) {
+    throw result.error;
+  }
+  hosgSupabaseUser = result.data.user;
+  return hosgSupabaseUser;
+}
+
+async function hosgCreateSupabaseCharacterFromState(state) {
+  const sb = await hosgEnsureSupabase();
+  if (!sb || !hosgSupabaseUser) return null;
+  const payload = {
+    user_id: hosgSupabaseUser.id,
+    name: state.name || "Unnamed hero",
+    state
+  };
+  const { data, error } = await sb
+    .from("hosg_characters")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) {
+    console.warn("Failed to create character", error);
+    alert("Could not create character. Please try again.");
+    return null;
+  }
+  return data;
+}
+
+async function hosgUpdateSupabaseCharacterFromState(id, state) {
+  if (!id) return;
+  const sb = await hosgEnsureSupabase();
+  if (!sb || !hosgSupabaseUser) return;
+  const payload = {
+    name: state.name || "Unnamed hero",
+    state
+  };
+  const { error } = await sb
+    .from("hosg_characters")
+    .update(payload)
+    .eq("id", id)
+    .eq("user_id", hosgSupabaseUser.id);
+  if (error) {
+    console.warn("Failed to update character", error);
+  }
+}
+
+async function hosgLoadCharacters() {
+  const sb = await hosgEnsureSupabase();
+  if (!sb || !hosgSupabaseUser) return [];
+  const { data, error } = await sb
+    .from("hosg_characters")
+    .select("id, name, state, created_at")
+    .eq("user_id", hosgSupabaseUser.id)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.warn("Failed to load characters", error);
+    return [];
+  }
+  hosgCharacters = data || [];
+  hosgRefreshCharacterListUI();
+  return hosgCharacters;
+}
+
+function hosgRefreshCharacterListUI() {
+  const wrapper = document.getElementById("char-slot-list");
+  const warning = document.getElementById("char-slot-warning");
+  if (!wrapper) return;
+
+  wrapper.innerHTML = "";
+  if (!hosgCharacters || hosgCharacters.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "char-slot-empty";
+    empty.textContent = "No characters yet. Use the form below to create your first hero.";
+    wrapper.appendChild(empty);
+  } else {
+    hosgCharacters.forEach(function (c) {
+      const row = document.createElement("div");
+      row.className = "char-slot-row";
+
+      const name = document.createElement("div");
+      name.className = "char-slot-name";
+      name.textContent = c.name || "Unnamed hero";
+
+      const actions = document.createElement("div");
+      actions.className = "char-slot-actions";
+
+      const loadBtn = document.createElement("button");
+      loadBtn.type = "button";
+      loadBtn.textContent = "Load";
+      loadBtn.addEventListener("click", function () {
+        const state = (c.state && typeof c.state === "object") ? c.state : getDefaultPlayerState();
+        playerState = Object.assign(getDefaultPlayerState(), state);
+        hosgCurrentCharacterId = c.id;
+        if (typeof window.applyCharacterStateToUI === "function") {
+          window.applyCharacterStateToUI();
+        }
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", async function () {
+        if (!confirm("Delete this character permanently? This cannot be undone.")) return;
+        const sb = await hosgEnsureSupabase();
+        if (!sb || !hosgSupabaseUser) return;
+        const { error } = await sb
+          .from("hosg_characters")
+          .delete()
+          .eq("id", c.id)
+          .eq("user_id", hosgSupabaseUser.id);
+        if (error) {
+          console.warn("Failed to delete character", error);
+          alert("Could not delete character. Please try again.");
+          return;
+        }
+        hosgCharacters = hosgCharacters.filter(function (ch) { return ch.id !== c.id; });
+        if (hosgCurrentCharacterId === c.id) {
+          hosgCurrentCharacterId = null;
+          playerState = getDefaultPlayerState();
+          if (typeof window.applyCharacterStateToUI === "function") {
+            window.applyCharacterStateToUI();
+          }
+        }
+        hosgRefreshCharacterListUI();
+      });
+
+      actions.appendChild(loadBtn);
+      actions.appendChild(deleteBtn);
+
+      row.appendChild(name);
+      row.appendChild(actions);
+
+      wrapper.appendChild(row);
+    });
+  }
+
+  if (warning) {
+    if (hosgCharacters && hosgCharacters.length >= HOSG_MAX_CHARACTERS) {
+      warning.textContent = "Character limit reached (10/10). Delete a hero to create a new one.";
+    } else {
+      const count = hosgCharacters ? hosgCharacters.length : 0;
+      warning.textContent = "You can have up to 10 characters. Currently: " + count + "/" + HOSG_MAX_CHARACTERS + ".";
+    }
+  }
+}
+
+function hosgScheduleSupabaseStateSave() {
+  if (!hosgHasSupabaseConfig() || !hosgSupabaseUser || !hosgCurrentCharacterId || !playerState) {
+    return;
+  }
+  if (hosgSupabaseSaveTimer) return;
+  hosgSupabaseSaveTimer = setTimeout(async function () {
+    hosgSupabaseSaveTimer = null;
+    try {
+      await hosgUpdateSupabaseCharacterFromState(hosgCurrentCharacterId, playerState);
+    } catch (e) {
+      console.warn("Failed to save character to Supabase", e);
+    }
+  }, 1000);
+}
+
+// Handles whether the account overlay or character creation overlay should be visible
+function setupAccountAndCharacterFlows() {
+  const accountOverlay = document.getElementById("account-overlay");
+  const charOverlay = document.getElementById("char-create-overlay");
+
+  const hasConfig = hosgHasSupabaseConfig();
+  if (!hasConfig) {
+    // No Supabase configuration: hide account UI and just use the original single-hero flow
+    if (accountOverlay) {
+      accountOverlay.style.display = "none";
+    }
+    if (charOverlay) {
+      charOverlay.style.display = "flex";
+    }
+    return;
+  }
+
+  if (!accountOverlay || !charOverlay) return;
+
+  // When Supabase is configured we gate character creation behind an account login.
+  charOverlay.style.display = "none";
+  accountOverlay.style.display = "flex";
+
+  const emailInput = document.getElementById("acct-email");
+  const passwordInput = document.getElementById("acct-password");
+  const messageEl = document.getElementById("acct-message");
+  const signInBtn = document.getElementById("acct-signin");
+  const signUpBtn = document.getElementById("acct-signup");
+
+  function setMessage(text) {
+    if (messageEl) messageEl.textContent = text || "";
+  }
+
+  async function completeLogin(mode) {
+    const email = (emailInput && emailInput.value || "").trim();
+    const password = (passwordInput && passwordInput.value || "").trim();
+    if (!email || !password) {
+      setMessage("Enter an email and password.");
+      return;
+    }
+    setMessage(mode === "signup" ? "Creating account..." : "Signing in...");
+    try {
+      await hosgAuthWithEmailPassword(mode, email, password);
+      setMessage("");
+      accountOverlay.style.display = "none";
+      charOverlay.style.display = "flex";
+      await hosgLoadCharacters();
+    } catch (err) {
+      console.warn("Auth error", err);
+      setMessage(err.message || "Authentication failed.");
+    }
+  }
+
+  if (signInBtn) {
+    signInBtn.addEventListener("click", function () {
+      completeLogin("signin");
+    });
+  }
+  if (signUpBtn) {
+    signUpBtn.addEventListener("click", function () {
+      completeLogin("signup");
+    });
+  }
+  if (passwordInput) {
+    passwordInput.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        completeLogin("signin");
+      }
+    });
+  }
+
+  // If there's already a Supabase session, skip the login screen
+  hosgEnsureSupabase().then(function (sb) {
+    if (!sb) return;
+    if (hosgSupabaseUser) {
+      if (accountOverlay) accountOverlay.style.display = "none";
+      if (charOverlay) charOverlay.style.display = "flex";
+      hosgLoadCharacters();
+    }
+  });
+}
 
 
 function getDefaultPlayerState() {
@@ -789,6 +1263,9 @@ function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
       playerState.rotationY = heroBody.rotation.y;
     }
     window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
+
+    // Also persist to Supabase (if configured & logged in) in the background
+    hosgScheduleSupabaseStateSave();
   } catch (e) {
     console.warn("Failed to save player state", e);
   }
@@ -827,12 +1304,25 @@ function setupCharacterCreationUI() {
 
   if (!playerState) loadPlayerState();
 
-  // Pre-fill from state
-  nameInput.value = playerState.name || "Felix";
-  roleSelect.value = playerState.role || "Adventurer";
-  tunicInput.value = playerState.appearance?.tunic || "#344fba";
-  pantsInput.value = playerState.appearance?.pants || "#1f2937";
-  skinInput.value = playerState.appearance?.skin || "#f3dec0";
+  function applyStateToForm() {
+    if (!playerState) {
+      playerState = getDefaultPlayerState();
+    }
+    const appearance = playerState.appearance || getDefaultPlayerState().appearance;
+    nameInput.value = playerState.name || "Felix";
+    roleSelect.value = playerState.role || "Adventurer";
+    tunicInput.value = appearance.tunic || "#344fba";
+    pantsInput.value = appearance.pants || "#1f2937";
+    skinInput.value = appearance.skin || "#f3dec0";
+    if (hudName) {
+      hudName.textContent = (playerState.name || "Felix") + " of Shady Grove";
+    }
+  }
+
+  // Expose for character-slot UI so it can apply a loaded character into the form
+  window.applyCharacterStateToUI = applyStateToForm;
+
+  applyStateToForm();
 
   function randomColor() {
     const h = Math.floor(Math.random() * 360);
@@ -879,13 +1369,50 @@ function setupCharacterCreationUI() {
     }
   }
 
-  startBtn.addEventListener("click", function () {
+  startBtn.addEventListener("click", async function () {
     applyFromUI();
+
+    // When Supabase is configured and the player is signed in, create / update
+    // the current character server-side before entering the world.
+    if (hosgHasSupabaseConfig() && hosgSupabaseUser) {
+      try {
+        // Enforce max character limit when creating new characters
+        if (!hosgCurrentCharacterId) {
+          if (hosgCharacters && hosgCharacters.length >= HOSG_MAX_CHARACTERS) {
+            alert("You already have 10 characters on this account. Delete one before creating a new hero.");
+            return;
+          }
+          const created = await hosgCreateSupabaseCharacterFromState(playerState);
+          if (created && created.id) {
+            hosgCurrentCharacterId = created.id;
+            hosgCharacters.push(created);
+            hosgRefreshCharacterListUI();
+          }
+        } else {
+          await hosgUpdateSupabaseCharacterFromState(hosgCurrentCharacterId, playerState);
+          if (hosgCharacters) {
+            for (let i = 0; i < hosgCharacters.length; i++) {
+              if (hosgCharacters[i].id === hosgCurrentCharacterId) {
+                hosgCharacters[i].state = playerState;
+                hosgCharacters[i].name = playerState.name;
+                break;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to sync character to Supabase on start", err);
+      }
+    }
+
     overlay.style.display = "none";
     // Initial save so the hero exists even if they immediately close the page
-    savePlayerStateRuntime(null, playerState.stats.hp, playerState.stats.maxHp,
+    savePlayerStateRuntime(
+      null,
+      playerState.stats.hp, playerState.stats.maxHp,
       playerState.stats.mp, playerState.stats.maxMp,
-      playerState.stats.xp, playerState.stats.level);
+      playerState.stats.xp, playerState.stats.level
+    );
   });
 
   // If we already have a saved hero, let them just hit Enter quickly
@@ -2005,6 +2532,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
       const scene = createScene();
 
       setupCharacterCreationUI();
+      setupAccountAndCharacterFlows();
 
       // Hook multiplayer client (requires external Node.js WebSocket server)
       let mpSendLocalState = null;
