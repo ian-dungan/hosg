@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.17</title>
+  <title>Heroes of Shady Grove v1.0.21</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -171,94 +171,6 @@
   z-index: 20;
 }
 
-#account-overlay {
-  position: fixed;
-  inset: 0;
-  background: radial-gradient(circle at top, rgba(5, 8, 25, 0.98), rgba(2, 3, 10, 0.98));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 30;
-}
-
-#account-card {
-  width: 360px;
-  max-width: 92%;
-  background: rgba(4, 6, 18, 0.96);
-  border-radius: 18px;
-  padding: 18px 20px 16px;
-  border: 1px solid rgba(130, 180, 255, 0.65);
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
-}
-
-#acct-title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-align: center;
-  margin-bottom: 6px;
-}
-
-#acct-subtitle {
-  font-size: 13px;
-  text-align: center;
-  color: #cdd9ff;
-  margin-bottom: 10px;
-}
-
-.acct-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.acct-field span {
-  color: #9db8ff;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-}
-
-.acct-field input {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(130, 180, 255, 0.6);
-  background: rgba(5, 8, 20, 0.96);
-  color: #f5f5f5;
-  font-size: 13px;
-}
-
-#acct-buttons {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
-  margin-bottom: 6px;
-}
-
-#acct-buttons button {
-  flex: 1;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: none;
-  background: linear-gradient(90deg, #4f46e5, #818cf8);
-  color: #f5f5f5;
-  font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-#acct-message {
-  min-height: 16px;
-  font-size: 11px;
-  color: #ffb347;
-  text-align: center;
-  margin-top: 2px;
-}
-
-
 #char-create-card {
   width: 360px;
   max-width: 92%;
@@ -285,66 +197,6 @@
   text-align: center;
   margin-bottom: 12px;
   color: #cfd8ff;
-}
-
-#char-slot-wrapper {
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(7, 12, 32, 0.9);
-  border: 1px solid rgba(130, 180, 255, 0.4);
-  max-height: 140px;
-  overflow-y: auto;
-}
-
-#char-slot-header {
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #9db8ff;
-  margin-bottom: 4px;
-}
-
-.char-slot-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-  padding: 4px 0;
-}
-
-.char-slot-name {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.char-slot-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.char-slot-actions button {
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: none;
-  background: rgba(55, 65, 194, 0.95);
-  color: #f5f5f5;
-  cursor: pointer;
-}
-
-.char-slot-empty {
-  font-size: 12px;
-  color: #cbd5ff;
-}
-
-#char-slot-warning {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #ffb347;
 }
 
 .char-field {
@@ -435,6 +287,184 @@
   color: #9da8d6;
   text-align: center;
 }
+
+#char-slot-wrapper {
+  margin-top: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(8, 15, 40, 0.9);
+  border: 1px solid rgba(130, 180, 255, 0.45);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+#char-slot-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9db8ff;
+  margin-bottom: 6px;
+}
+
+#char-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.char-slot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(12, 20, 52, 0.95);
+  border: 1px solid rgba(60, 110, 200, 0.6);
+}
+
+.char-slot-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.char-slot-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8ff;
+}
+
+.char-slot-meta {
+  font-size: 10px;
+  color: #9da8d6;
+}
+
+.char-slot-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.char-slot-actions button {
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(130, 180, 255, 0.7);
+  background: linear-gradient(to bottom, #3047a0, #192044);
+  color: #f8f9ff;
+  cursor: pointer;
+}
+
+.char-slot-actions button:hover {
+  filter: brightness(1.08);
+}
+
+.char-slot-empty {
+  font-size: 11px;
+  color: #9da8d6;
+}
+
+#char-slot-warning {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #ffdd89;
+  text-align: right;
+}
+
+/* Account login overlay */
+#account-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at top, rgba(15, 20, 45, 0.96), rgba(3, 3, 8, 0.98));
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+#account-card {
+  width: 320px;
+  max-width: 92%;
+  background: rgba(4, 6, 18, 0.96);
+  border-radius: 18px;
+  padding: 18px 20px 16px;
+  border: 1px solid rgba(130, 180, 255, 0.65);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
+}
+
+#acct-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 4px;
+  color: #ffe164;
+  text-shadow: 0 0 10px rgba(255, 225, 100, 0.8);
+}
+
+#acct-subtitle {
+  font-size: 12px;
+  text-align: center;
+  margin-bottom: 12px;
+  color: #cfd8ff;
+}
+
+.acct-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.acct-field span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9db8ff;
+}
+
+.acct-field input {
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 180, 255, 0.8);
+  padding: 0 10px;
+  background: rgba(9, 13, 32, 0.95);
+  color: #e2e8ff;
+}
+
+#acct-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#acct-buttons button {
+  flex: 1;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 180, 255, 0.9);
+  background: linear-gradient(to bottom, #3c5ad8, #101632);
+  color: #fdfbff;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+#acct-buttons button:hover {
+  filter: brightness(1.08);
+}
+
+#acct-message {
+  min-height: 16px;
+  font-size: 11px;
+  color: #ffb4b4;
+  text-align: center;
+}
+
 
     #chat-panel {
       position: fixed;
@@ -762,6 +792,7 @@
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
+
   <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
@@ -803,6 +834,7 @@
   </div>
 
 
+
 <div id="account-overlay">
   <div id="account-card">
     <div id="acct-title">Heroes of Shady Grove</div>
@@ -828,7 +860,7 @@
     <div id="char-title">Heroes of Shady Grove</div>
     <div id="char-subtitle">Create your hero</div>
     <div id="char-slot-wrapper">
-      <div id="char-slot-header">Your characters</div>
+      <div id="char-slot-header">Your heroes</div>
       <div id="char-slot-list"></div>
       <div id="char-slot-warning"></div>
     </div>
@@ -863,7 +895,7 @@
       <button id="cc-random">Randomize</button>
       <button id="cc-start">Enter the world</button>
     </div>
-    <div id="char-note">Up to 10 heroes per account. Heroes are also cached locally on this device.</div>
+    <div id="char-note">Heroes are saved automatically; if an online account is configured, they also sync to the server.</div>
   </div>
 </div>
 
@@ -902,36 +934,43 @@
 const HOSG_SAVE_KEY = "hosg_player_v1";
 let playerState = null;
 
-// Account & persistence (Supabase) configuration
+// Online account & character persistence (Supabase-backed)
 const HOSG_MAX_CHARACTERS = 10;
-// Optional: provide these before this script runs, for example:
-// <script>window.HOSG_SUPABASE_URL = "..."; window.HOSG_SUPABASE_ANON_KEY = "...";</script>
-const HOSG_SUPABASE_URL = window.HOSG_SUPABASE_URL || "";
-const HOSG_SUPABASE_ANON_KEY = window.HOSG_SUPABASE_ANON_KEY || "";
+
+// These values must be provided at runtime, for example via:
+// window.HOSG_SUPABASE_URL and window.HOSG_SUPABASE_ANON_KEY.
+// We do NOT hard-code any secrets here.
+const HOSG_SUPABASE_URL = (typeof window !== "undefined" && window.HOSG_SUPABASE_URL) ? window.HOSG_SUPABASE_URL : "";
+const HOSG_SUPABASE_ANON_KEY = (typeof window !== "undefined" && window.HOSG_SUPABASE_ANON_KEY) ? window.HOSG_SUPABASE_ANON_KEY : "";
+
+// Mapping to the persistent schema in Supabase.
+const HOSG_ACCOUNTS_TABLE = "hosg_accounts";
+const HOSG_ACCOUNT_ID_COLUMN = "id";
+const HOSG_ACCOUNT_EMAIL_COLUMN = "email";
+const HOSG_ACCOUNT_USERNAME_COLUMN = "username";
+const HOSG_ACCOUNT_PASSWORD_HASH_COLUMN = "password_hash";
+
+const HOSG_CHARACTERS_TABLE = "hosg_characters";
+const HOSG_CHARACTER_ID_COLUMN = "id";
+const HOSG_CHARACTER_ACCOUNT_ID_COLUMN = "account_id";
 
 // Supabase runtime state
 let hosgSupabase = null;
-let hosgSupabaseUser = null;
-let hosgCharacters = []; // rows from `hosg_characters`
-let hosgCurrentCharacterId = null; // currently active character id in Supabase
+// Current logged-in account row from hosg_accounts
+let hosgAccount = null;
+// Characters loaded for that account (excluding soft-deleted)
+let hosgCharacters = [];
+// Current active character id from hosg_characters
+let hosgCurrentCharacterId = null;
+// Throttling timer so we don't spam updates
 let hosgSupabaseSaveTimer = null;
 
-
-// Runtime stats shared across HUD & multiplayer payloads
-let hp = 100, maxHp = 100;
-let mp = 60, maxMp = 100;
-let xp = 25, level = 1;
-
-
-// Supabase helpers for accounts & characters
 function hosgHasSupabaseConfig() {
   try {
     return typeof window !== "undefined" &&
       typeof window.supabase !== "undefined" &&
       !!HOSG_SUPABASE_URL &&
-      !!HOSG_SUPABASE_ANON_KEY &&
-      !HOSG_SUPABASE_URL.includes("YOUR-PROJECT") &&
-      !HOSG_SUPABASE_ANON_KEY.includes("YOUR-ANON");
+      !!HOSG_SUPABASE_ANON_KEY;
   } catch (e) {
     return false;
   }
@@ -941,271 +980,422 @@ async function hosgEnsureSupabase() {
   if (!hosgHasSupabaseConfig()) return null;
   if (hosgSupabase) return hosgSupabase;
   try {
-    hosgSupabase = window.supabase.createClient(HOSG_SUPABASE_URL, HOSG_SUPABASE_ANON_KEY);
-    const { data, error } = await hosgSupabase.auth.getUser();
-    if (!error && data && data.user) {
-      hosgSupabaseUser = data.user;
-    }
+    hosgSupabase = window.supabase.createClient(
+      HOSG_SUPABASE_URL,
+      HOSG_SUPABASE_ANON_KEY,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false
+        }
+      }
+    );
   } catch (e) {
-    console.warn("Supabase init failed", e);
+    console.warn("[HOSG] Supabase init failed", e);
     hosgSupabase = null;
   }
   return hosgSupabase;
 }
 
+async function hosgHashPassword(plain) {
+  try {
+    if (window.crypto && window.crypto.subtle && window.TextEncoder) {
+      const enc = new TextEncoder().encode(plain);
+      const buf = await window.crypto.subtle.digest("SHA-256", enc);
+      const bytes = Array.from(new Uint8Array(buf));
+      return bytes.map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch (e) {
+    console.warn("[HOSG] Web Crypto unavailable, using fallback hash", e);
+  }
+  // Fallback very simple hash if subtle crypto is unavailable
+  let h = 0;
+  for (let i = 0; i < plain.length; i++) {
+    h = (h * 31 + plain.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
+}
+
 async function hosgAuthWithEmailPassword(mode, email, password) {
   const sb = await hosgEnsureSupabase();
   if (!sb) {
-    throw new Error("Online accounts are not configured on this build.");
+    throw new Error("Online accounts are not available on this build.");
   }
-  let result;
+
+  const trimmedEmail = (email || "").trim().toLowerCase();
+  const trimmedPass = (password || "").trim();
+
+  if (!trimmedEmail || !trimmedPass) {
+    throw new Error("Please enter both email and password.");
+  }
+
+  const passwordHash = await hosgHashPassword(trimmedPass);
+
   if (mode === "signup") {
-    result = await sb.auth.signUp({ email, password });
+    // Check for existing account with this email
+    const { data: existing, error: existingError } = await sb
+      .from(HOSG_ACCOUNTS_TABLE)
+      .select(HOSG_ACCOUNT_ID_COLUMN)
+      .eq(HOSG_ACCOUNT_EMAIL_COLUMN, trimmedEmail)
+      .limit(1);
+
+    if (existingError) {
+      console.warn("[HOSG] Account lookup failed", existingError);
+      throw new Error("Could not check existing accounts.");
+    }
+    if (existing && existing.length > 0) {
+      throw new Error("An account with that email already exists.");
+    }
+
+    // Derive a simple username from email prefix
+    let username = trimmedEmail.split("@")[0] || trimmedEmail;
+    username = username.slice(0, 24);
+
+    const payload = {};
+    payload[HOSG_ACCOUNT_EMAIL_COLUMN] = trimmedEmail;
+    payload[HOSG_ACCOUNT_USERNAME_COLUMN] = username;
+    payload[HOSG_ACCOUNT_PASSWORD_HASH_COLUMN] = passwordHash;
+
+    const { data, error } = await sb
+      .from(HOSG_ACCOUNTS_TABLE)
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      console.warn("[HOSG] Account creation failed", error);
+      throw new Error("Could not create account. Please try again.");
+    }
+
+    hosgAccount = data;
+    // Optionally update last_login_at
+    try {
+      await sb
+        .from(HOSG_ACCOUNTS_TABLE)
+        .update({ last_login_at: new Date().toISOString() })
+        .eq(HOSG_ACCOUNT_ID_COLUMN, hosgAccount[HOSG_ACCOUNT_ID_COLUMN]);
+    } catch (e) {
+      console.warn("[HOSG] Failed to update last_login_at on signup", e);
+    }
+    return hosgAccount;
   } else {
-    result = await sb.auth.signInWithPassword({ email, password });
+    // Sign in to an existing account
+    const { data, error } = await sb
+      .from(HOSG_ACCOUNTS_TABLE)
+      .select("*")
+      .eq(HOSG_ACCOUNT_EMAIL_COLUMN, trimmedEmail)
+      .limit(1);
+
+    if (error) {
+      console.warn("[HOSG] Account lookup failed", error);
+      throw new Error("Could not look up account.");
+    }
+
+    if (!data || data.length === 0) {
+      throw new Error("Account not found.");
+    }
+
+    const account = data[0];
+    const storedHash = account[HOSG_ACCOUNT_PASSWORD_HASH_COLUMN];
+    if (!storedHash || storedHash !== passwordHash) {
+      throw new Error("Incorrect password.");
+    }
+
+    hosgAccount = account;
+    try {
+      await sb
+        .from(HOSG_ACCOUNTS_TABLE)
+        .update({ last_login_at: new Date().toISOString() })
+        .eq(HOSG_ACCOUNT_ID_COLUMN, hosgAccount[HOSG_ACCOUNT_ID_COLUMN]);
+    } catch (e) {
+      console.warn("[HOSG] Failed to update last_login_at on signin", e);
+    }
+    return hosgAccount;
   }
-  if (result.error) {
-    throw result.error;
-  }
-  hosgSupabaseUser = result.data.user;
-  return hosgSupabaseUser;
 }
 
-async function hosgCreateSupabaseCharacterFromState(state) {
-  const sb = await hosgEnsureSupabase();
-  if (!sb || !hosgSupabaseUser) return null;
-  const payload = {
-    user_id: hosgSupabaseUser.id,
-    name: state.name || "Unnamed hero",
-    state
+function hosgBuildCharacterUpdatePayloadFromState(state) {
+  const s = state && state.stats ? state.stats : {};
+  const pos = state && state.position ? state.position : {};
+  const levelVal = (typeof s.level === "number") ? s.level : 1;
+  const xpVal = (s.xp != null) ? s.xp : 0;
+  const currentZoneId = (state && state.currentZoneId != null) ? state.currentZoneId : null;
+
+  return {
+    name: state && state.name ? state.name : "Unnamed hero",
+    level: levelVal,
+    xp: xpVal,
+    appearance: state && state.appearance ? state.appearance : null,
+    stats: s,
+    position_x: pos.x != null ? pos.x : 0,
+    position_y: pos.y != null ? pos.y : 0,
+    position_z: pos.z != null ? pos.z : 0,
+    rotation_y: typeof state.rotationY === "number" ? state.rotationY : 0,
+    current_zone_id: currentZoneId,
+    is_deleted: false
   };
+}
+
+function hosgBuildCharacterInsertPayloadFromState(state, accountId, slotIndex) {
+  const base = hosgBuildCharacterUpdatePayloadFromState(state);
+  base[HOSG_CHARACTER_ACCOUNT_ID_COLUMN] = accountId;
+  base.slot_index = slotIndex;
+  base.created_at = new Date().toISOString();
+  base.updated_at = base.created_at;
+  return base;
+}
+
+async function hosgCreateCharacterFromState(state) {
+  const sb = await hosgEnsureSupabase();
+  if (!sb || !hosgAccount) return null;
+
+  const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+
+  // Determine the next free slot index from 0..HOSG_MAX_CHARACTERS-1
+  const usedSlots = (hosgCharacters || [])
+    .filter(c => !c.is_deleted)
+    .map(c => c.slot_index)
+    .filter(v => typeof v === "number");
+
+  let slotIndex = 0;
+  while (usedSlots.includes(slotIndex) && slotIndex < HOSG_MAX_CHARACTERS) {
+    slotIndex++;
+  }
+  if (slotIndex >= HOSG_MAX_CHARACTERS) {
+    throw new Error("You have reached the maximum number of heroes on this account.");
+  }
+
+  const payload = hosgBuildCharacterInsertPayloadFromState(state, accountIdVal, slotIndex);
+
   const { data, error } = await sb
-    .from("hosg_characters")
+    .from(HOSG_CHARACTERS_TABLE)
     .insert(payload)
     .select()
     .single();
+
   if (error) {
-    console.warn("Failed to create character", error);
-    alert("Could not create character. Please try again.");
-    return null;
+    console.warn("[HOSG] Failed to create character", error);
+    throw new Error("Could not create hero on the server.");
   }
+
   return data;
 }
 
-async function hosgUpdateSupabaseCharacterFromState(id, state) {
+async function hosgUpdateCharacterFromState(id, state) {
   if (!id) return;
   const sb = await hosgEnsureSupabase();
-  if (!sb || !hosgSupabaseUser) return;
-  const payload = {
-    name: state.name || "Unnamed hero",
-    state
-  };
+  if (!sb || !hosgAccount) return;
+
+  const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+  const payload = hosgBuildCharacterUpdatePayloadFromState(state);
+  payload.updated_at = new Date().toISOString();
+
   const { error } = await sb
-    .from("hosg_characters")
+    .from(HOSG_CHARACTERS_TABLE)
     .update(payload)
-    .eq("id", id)
-    .eq("user_id", hosgSupabaseUser.id);
+    .eq(HOSG_CHARACTER_ID_COLUMN, id)
+    .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal)
+    .eq("is_deleted", false);
+
   if (error) {
-    console.warn("Failed to update character", error);
+    console.warn("[HOSG] Failed to update character", error);
   }
 }
 
 async function hosgLoadCharacters() {
   const sb = await hosgEnsureSupabase();
-  if (!sb || !hosgSupabaseUser) return [];
-  const { data, error } = await sb
-    .from("hosg_characters")
-    .select("id, name, state, created_at")
-    .eq("user_id", hosgSupabaseUser.id)
-    .order("created_at", { ascending: true });
-  if (error) {
-    console.warn("Failed to load characters", error);
+  if (!sb || !hosgAccount) {
+    hosgCharacters = [];
     return [];
   }
+
+  const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+
+  const { data, error } = await sb
+    .from(HOSG_CHARACTERS_TABLE)
+    .select("*")
+    .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal)
+    .eq("is_deleted", false)
+    .order("slot_index", { ascending: true });
+
+  if (error) {
+    console.warn("[HOSG] Failed to load characters", error);
+    hosgCharacters = [];
+    return [];
+  }
+
   hosgCharacters = data || [];
-  hosgRefreshCharacterListUI();
+  try {
+    hosgRefreshCharacterListUI();
+  } catch (e) {
+    console.warn("[HOSG] Failed to refresh character list UI", e);
+  }
   return hosgCharacters;
 }
 
-function hosgRefreshCharacterListUI() {
-  const wrapper = document.getElementById("char-slot-list");
-  const warning = document.getElementById("char-slot-warning");
-  if (!wrapper) return;
+function hosgBuildPlayerStateFromCharacter(row) {
+  const base = getDefaultPlayerState();
+  const out = Object.assign({}, base);
 
-  wrapper.innerHTML = "";
+  if (row && row.name) out.name = row.name;
+  if (row && row.stats && typeof row.stats === "object") {
+    out.stats = Object.assign({}, base.stats, row.stats);
+  } else if (row) {
+    // At minimum, map XP and level if present
+    const s = Object.assign({}, base.stats);
+    if (typeof row.level === "number") s.level = row.level;
+    if (row.xp != null) s.xp = Number(row.xp);
+    out.stats = s;
+  }
+
+  if (row && row.appearance && typeof row.appearance === "object") {
+    out.appearance = Object.assign({}, base.appearance, row.appearance);
+  }
+
+  out.position = {
+    x: row && row.position_x != null ? Number(row.position_x) : base.position.x,
+    y: row && row.position_y != null ? Number(row.position_y) : base.position.y,
+    z: row && row.position_z != null ? Number(row.position_z) : base.position.z
+  };
+  out.rotationY = row && row.rotation_y != null ? Number(row.rotation_y) : base.rotationY || 0;
+
+  return out;
+}
+
+function hosgScheduleSupabaseCharacterSave() {
+  if (!hosgHasSupabaseConfig() || !hosgAccount || !hosgCurrentCharacterId || !playerState) {
+    return;
+  }
+  if (hosgSupabaseSaveTimer) return;
+
+  hosgSupabaseSaveTimer = setTimeout(async function () {
+    hosgSupabaseSaveTimer = null;
+    try {
+      await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
+    } catch (e) {
+      console.warn("[HOSG] Failed to save character to Supabase", e);
+    }
+  }, 1000);
+}
+
+function hosgRefreshCharacterListUI() {
+  const listEl = document.getElementById("char-slot-list");
+  const warningEl = document.getElementById("char-slot-warning");
+  if (!listEl || !warningEl) return;
+
+  listEl.innerHTML = "";
+
   if (!hosgCharacters || hosgCharacters.length === 0) {
     const empty = document.createElement("div");
     empty.className = "char-slot-empty";
-    empty.textContent = "No characters yet. Use the form below to create your first hero.";
-    wrapper.appendChild(empty);
+    empty.textContent = "No heroes yet. Create one below.";
+    listEl.appendChild(empty);
   } else {
     hosgCharacters.forEach(function (c) {
+      if (c.is_deleted) return;
+
       const row = document.createElement("div");
       row.className = "char-slot-row";
 
-      const name = document.createElement("div");
-      name.className = "char-slot-name";
-      name.textContent = c.name || "Unnamed hero";
+      const main = document.createElement("div");
+      main.className = "char-slot-main";
+
+      const nameEl = document.createElement("div");
+      nameEl.className = "char-slot-name";
+      nameEl.textContent = c.name || "Unnamed hero";
+
+      const metaEl = document.createElement("div");
+      metaEl.className = "char-slot-meta";
+      const levelVal = (typeof c.level === "number") ? c.level :
+        (c.stats && typeof c.stats.level === "number") ? c.stats.level : 1;
+      metaEl.textContent = "Level " + levelVal + (c.current_zone_id ? " • Zone " + c.current_zone_id : "");
+
+      main.appendChild(nameEl);
+      main.appendChild(metaEl);
 
       const actions = document.createElement("div");
       actions.className = "char-slot-actions";
 
       const loadBtn = document.createElement("button");
-      loadBtn.type = "button";
       loadBtn.textContent = "Load";
       loadBtn.addEventListener("click", function () {
-        const state = (c.state && typeof c.state === "object") ? c.state : getDefaultPlayerState();
-        playerState = Object.assign(getDefaultPlayerState(), state);
-        hosgCurrentCharacterId = c.id;
-        if (typeof window.applyCharacterStateToUI === "function") {
-          window.applyCharacterStateToUI();
+        try {
+          hosgCurrentCharacterId = c[HOSG_CHARACTER_ID_COLUMN];
+          playerState = hosgBuildPlayerStateFromCharacter(c);
+          window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
+          if (typeof window.applyStateToCharacterForm === "function") {
+            window.applyStateToCharacterForm();
+          }
+        } catch (e) {
+          console.warn("[HOSG] Failed to load hero from slot", e);
         }
       });
 
       const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
       deleteBtn.textContent = "Delete";
       deleteBtn.addEventListener("click", async function () {
-        if (!confirm("Delete this character permanently? This cannot be undone.")) return;
-        const sb = await hosgEnsureSupabase();
-        if (!sb || !hosgSupabaseUser) return;
-        const { error } = await sb
-          .from("hosg_characters")
-          .delete()
-          .eq("id", c.id)
-          .eq("user_id", hosgSupabaseUser.id);
-        if (error) {
-          console.warn("Failed to delete character", error);
-          alert("Could not delete character. Please try again.");
-          return;
-        }
-        hosgCharacters = hosgCharacters.filter(function (ch) { return ch.id !== c.id; });
-        if (hosgCurrentCharacterId === c.id) {
-          hosgCurrentCharacterId = null;
-          playerState = getDefaultPlayerState();
-          if (typeof window.applyCharacterStateToUI === "function") {
-            window.applyCharacterStateToUI();
+        const ok = window.confirm("Delete this hero permanently? This cannot be undone.");
+        if (!ok) return;
+        try {
+          const sb = await hosgEnsureSupabase();
+          if (!sb || !hosgAccount) return;
+
+          const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+          const payload = {
+            is_deleted: true,
+            deleted_at: new Date().toISOString(),
+            delete_reason: "Deleted from client"
+          };
+
+          const { error } = await sb
+            .from(HOSG_CHARACTERS_TABLE)
+            .update(payload)
+            .eq(HOSG_CHARACTER_ID_COLUMN, c[HOSG_CHARACTER_ID_COLUMN])
+            .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal);
+
+          if (error) {
+            console.warn("[HOSG] Failed to soft-delete character", error);
+            return;
           }
+
+          hosgCharacters = hosgCharacters.filter(function (ch) {
+            return ch[HOSG_CHARACTER_ID_COLUMN] !== c[HOSG_CHARACTER_ID_COLUMN];
+          });
+          if (hosgCurrentCharacterId === c[HOSG_CHARACTER_ID_COLUMN]) {
+            hosgCurrentCharacterId = null;
+          }
+          hosgRefreshCharacterListUI();
+        } catch (e) {
+          console.warn("[HOSG] Delete hero error", e);
         }
-        hosgRefreshCharacterListUI();
       });
 
       actions.appendChild(loadBtn);
       actions.appendChild(deleteBtn);
 
-      row.appendChild(name);
+      row.appendChild(main);
       row.appendChild(actions);
 
-      wrapper.appendChild(row);
+      listEl.appendChild(row);
     });
   }
 
-  if (warning) {
-    if (hosgCharacters && hosgCharacters.length >= HOSG_MAX_CHARACTERS) {
-      warning.textContent = "Character limit reached (10/10). Delete a hero to create a new one.";
-    } else {
-      const count = hosgCharacters ? hosgCharacters.length : 0;
-      warning.textContent = "You can have up to 10 characters. Currently: " + count + "/" + HOSG_MAX_CHARACTERS + ".";
-    }
+  const activeCount = (hosgCharacters || []).filter(function (c) {
+    return !c.is_deleted;
+  }).length;
+
+  warningEl.textContent = "Heroes on this account: " + activeCount + " / " + HOSG_MAX_CHARACTERS;
+  if (activeCount >= HOSG_MAX_CHARACTERS) {
+    warningEl.textContent += " (maximum reached; delete one to create a new hero)";
   }
 }
 
-function hosgScheduleSupabaseStateSave() {
-  if (!hosgHasSupabaseConfig() || !hosgSupabaseUser || !hosgCurrentCharacterId || !playerState) {
-    return;
-  }
-  if (hosgSupabaseSaveTimer) return;
-  hosgSupabaseSaveTimer = setTimeout(async function () {
-    hosgSupabaseSaveTimer = null;
-    try {
-      await hosgUpdateSupabaseCharacterFromState(hosgCurrentCharacterId, playerState);
-    } catch (e) {
-      console.warn("Failed to save character to Supabase", e);
-    }
-  }, 1000);
-}
 
-// Handles whether the account overlay or character creation overlay should be visible
-function setupAccountAndCharacterFlows() {
-  const accountOverlay = document.getElementById("account-overlay");
-  const charOverlay = document.getElementById("char-create-overlay");
 
-  const hasConfig = hosgHasSupabaseConfig();
-  if (!hasConfig) {
-    // No Supabase configuration: hide account UI and just use the original single-hero flow
-    if (accountOverlay) {
-      accountOverlay.style.display = "none";
-    }
-    if (charOverlay) {
-      charOverlay.style.display = "flex";
-    }
-    return;
-  }
-
-  if (!accountOverlay || !charOverlay) return;
-
-  // When Supabase is configured we gate character creation behind an account login.
-  charOverlay.style.display = "none";
-  accountOverlay.style.display = "flex";
-
-  const emailInput = document.getElementById("acct-email");
-  const passwordInput = document.getElementById("acct-password");
-  const messageEl = document.getElementById("acct-message");
-  const signInBtn = document.getElementById("acct-signin");
-  const signUpBtn = document.getElementById("acct-signup");
-
-  function setMessage(text) {
-    if (messageEl) messageEl.textContent = text || "";
-  }
-
-  async function completeLogin(mode) {
-    const email = (emailInput && emailInput.value || "").trim();
-    const password = (passwordInput && passwordInput.value || "").trim();
-    if (!email || !password) {
-      setMessage("Enter an email and password.");
-      return;
-    }
-    setMessage(mode === "signup" ? "Creating account..." : "Signing in...");
-    try {
-      await hosgAuthWithEmailPassword(mode, email, password);
-      setMessage("");
-      accountOverlay.style.display = "none";
-      charOverlay.style.display = "flex";
-      await hosgLoadCharacters();
-    } catch (err) {
-      console.warn("Auth error", err);
-      setMessage(err.message || "Authentication failed.");
-    }
-  }
-
-  if (signInBtn) {
-    signInBtn.addEventListener("click", function () {
-      completeLogin("signin");
-    });
-  }
-  if (signUpBtn) {
-    signUpBtn.addEventListener("click", function () {
-      completeLogin("signup");
-    });
-  }
-  if (passwordInput) {
-    passwordInput.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") {
-        completeLogin("signin");
-      }
-    });
-  }
-
-  // If there's already a Supabase session, skip the login screen
-  hosgEnsureSupabase().then(function (sb) {
-    if (!sb) return;
-    if (hosgSupabaseUser) {
-      if (accountOverlay) accountOverlay.style.display = "none";
-      if (charOverlay) charOverlay.style.display = "flex";
-      hosgLoadCharacters();
-    }
-  });
-}
+// Runtime stats shared across HUD & multiplayer payloads
+let hp = 100, maxHp = 100;
+let mp = 60, maxMp = 100;
+let xp = 25, level = 1;
 
 
 function getDefaultPlayerState() {
@@ -1263,9 +1453,8 @@ function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
       playerState.rotationY = heroBody.rotation.y;
     }
     window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
-
-    // Also persist to Supabase (if configured & logged in) in the background
-    hosgScheduleSupabaseStateSave();
+    // Also schedule a debounced save to Supabase if online accounts are enabled
+    hosgScheduleSupabaseCharacterSave();
   } catch (e) {
     console.warn("Failed to save player state", e);
   }
@@ -1289,6 +1478,7 @@ function applyAppearanceToMaterials(scene, mats) {
   if (mats.boots) mats.boots.diffuseColor = hexToColor3(a.boots);
 }
 
+
 function setupCharacterCreationUI() {
   const overlay = document.getElementById("char-create-overlay");
   if (!overlay) return;
@@ -1305,24 +1495,19 @@ function setupCharacterCreationUI() {
   if (!playerState) loadPlayerState();
 
   function applyStateToForm() {
-    if (!playerState) {
-      playerState = getDefaultPlayerState();
-    }
-    const appearance = playerState.appearance || getDefaultPlayerState().appearance;
+    if (!playerState) return;
     nameInput.value = playerState.name || "Felix";
     roleSelect.value = playerState.role || "Adventurer";
-    tunicInput.value = appearance.tunic || "#344fba";
-    pantsInput.value = appearance.pants || "#1f2937";
-    skinInput.value = appearance.skin || "#f3dec0";
-    if (hudName) {
-      hudName.textContent = (playerState.name || "Felix") + " of Shady Grove";
-    }
+    const ap = playerState.appearance || {};
+    tunicInput.value = ap.tunic || "#344fba";
+    pantsInput.value = ap.pants || "#1f2937";
+    skinInput.value = ap.skin || "#f3dec0";
   }
 
-  // Expose for character-slot UI so it can apply a loaded character into the form
-  window.applyCharacterStateToUI = applyStateToForm;
-
+  // Pre-fill from state
   applyStateToForm();
+  // Expose so the character slot list can update the form when loading a hero
+  window.applyStateToCharacterForm = applyStateToForm;
 
   function randomColor() {
     const h = Math.floor(Math.random() * 360);
@@ -1372,47 +1557,43 @@ function setupCharacterCreationUI() {
   startBtn.addEventListener("click", async function () {
     applyFromUI();
 
-    // When Supabase is configured and the player is signed in, create / update
-    // the current character server-side before entering the world.
-    if (hosgHasSupabaseConfig() && hosgSupabaseUser) {
+    // If we have an online account, create or update the hero record before entering the world
+    if (hosgHasSupabaseConfig() && hosgAccount && playerState) {
       try {
-        // Enforce max character limit when creating new characters
         if (!hosgCurrentCharacterId) {
-          if (hosgCharacters && hosgCharacters.length >= HOSG_MAX_CHARACTERS) {
-            alert("You already have 10 characters on this account. Delete one before creating a new hero.");
+          // Creating a brand new hero
+          if (hosgCharacters && hosgCharacters.filter(function (c) { return !c.is_deleted; }).length >= HOSG_MAX_CHARACTERS) {
+            window.alert("You have reached the maximum number of heroes on this account. Delete one before creating a new hero.");
             return;
           }
-          const created = await hosgCreateSupabaseCharacterFromState(playerState);
-          if (created && created.id) {
-            hosgCurrentCharacterId = created.id;
+          const created = await hosgCreateCharacterFromState(playerState);
+          if (created && created[HOSG_CHARACTER_ID_COLUMN]) {
+            hosgCurrentCharacterId = created[HOSG_CHARACTER_ID_COLUMN];
             hosgCharacters.push(created);
             hosgRefreshCharacterListUI();
           }
         } else {
-          await hosgUpdateSupabaseCharacterFromState(hosgCurrentCharacterId, playerState);
+          // Updating existing hero
+          await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
           if (hosgCharacters) {
             for (let i = 0; i < hosgCharacters.length; i++) {
-              if (hosgCharacters[i].id === hosgCurrentCharacterId) {
-                hosgCharacters[i].state = playerState;
-                hosgCharacters[i].name = playerState.name;
+              if (hosgCharacters[i][HOSG_CHARACTER_ID_COLUMN] === hosgCurrentCharacterId) {
+                hosgCharacters[i] = Object.assign({}, hosgCharacters[i], hosgBuildCharacterUpdatePayloadFromState(playerState));
                 break;
               }
             }
           }
         }
-      } catch (err) {
-        console.warn("Failed to sync character to Supabase on start", err);
+      } catch (e) {
+        console.warn("[HOSG] Failed to sync hero on start", e);
       }
     }
 
     overlay.style.display = "none";
     // Initial save so the hero exists even if they immediately close the page
-    savePlayerStateRuntime(
-      null,
-      playerState.stats.hp, playerState.stats.maxHp,
+    savePlayerStateRuntime(null, playerState.stats.hp, playerState.stats.maxHp,
       playerState.stats.mp, playerState.stats.maxMp,
-      playerState.stats.xp, playerState.stats.level
-    );
+      playerState.stats.xp, playerState.stats.level);
   });
 
   // If we already have a saved hero, let them just hit Enter quickly
@@ -1422,6 +1603,87 @@ function setupCharacterCreationUI() {
     }
   });
 }
+
+
+
+
+function setupAccountAndCharacterFlows() {
+  const accountOverlay = document.getElementById("account-overlay");
+  const charOverlay = document.getElementById("char-create-overlay");
+
+  const hasSupabase = hosgHasSupabaseConfig();
+
+  // If we don't have Supabase configured, just hide the account overlay and
+  // show the character creator like before.
+  if (!accountOverlay || !charOverlay || !hasSupabase) {
+    if (accountOverlay) {
+      accountOverlay.style.display = "none";
+    }
+    if (charOverlay) {
+      charOverlay.style.display = "flex";
+    }
+    return;
+  }
+
+  // Online mode: force login before character selection
+  charOverlay.style.display = "none";
+  accountOverlay.style.display = "flex";
+
+  const emailInput = document.getElementById("acct-email");
+  const passwordInput = document.getElementById("acct-password");
+  const signinBtn = document.getElementById("acct-signin");
+  const signupBtn = document.getElementById("acct-signup");
+  const msgEl = document.getElementById("acct-message");
+
+  function setMessage(text) {
+    if (!msgEl) return;
+    msgEl.textContent = text || "";
+  }
+
+  async function handle(mode) {
+    const email = emailInput && emailInput.value || "";
+    const password = passwordInput && passwordInput.value || "";
+    try {
+      setMessage(mode === "signup" ? "Creating account..." : "Signing in...");
+      const account = await hosgAuthWithEmailPassword(mode, email, password);
+      if (!account) {
+        setMessage("Authentication failed.");
+        return;
+      }
+      setMessage("");
+      if (accountOverlay) {
+        accountOverlay.style.display = "none";
+      }
+      if (charOverlay) {
+        charOverlay.style.display = "flex";
+      }
+      // Load characters for this account into the slot UI
+      await hosgLoadCharacters();
+    } catch (e) {
+      console.warn("[HOSG] Account auth error", e);
+      setMessage(e && e.message ? e.message : "Authentication failed.");
+    }
+  }
+
+  if (signinBtn) {
+    signinBtn.addEventListener("click", function () {
+      handle("signin");
+    });
+  }
+  if (signupBtn) {
+    signupBtn.addEventListener("click", function () {
+      handle("signup");
+    });
+  }
+  if (passwordInput) {
+    passwordInput.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        handle("signin");
+      }
+    });
+  }
+}
+
 
 loadPlayerState();
     (function () {
