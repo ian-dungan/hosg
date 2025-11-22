@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.26</title>
+  <title>Heroes of Shady Grove v1.0.27</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -797,7 +797,7 @@
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.26 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.27 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -2050,6 +2050,8 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         appearance: playerState?.appearance,
         position: stats.position,
         rotationY: stats.rotationY,
+        accountId: playerState?.accountId || null,
+        characterId: playerState?.characterId || null,
         stats: {
           hp: stats.hp,
           maxHp: stats.maxHp,
@@ -2067,7 +2069,6 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     }
   };
 }
-
       function appendChat(text) {
         const log = document.getElementById("chat-log");
         const line = document.createElement("div");

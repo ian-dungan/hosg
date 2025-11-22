@@ -39,38 +39,12 @@ wss.on("connection", (ws) => {
 
     switch (msg.type) {
       
-      case "hello": {
+            case "hello": {
         const player = msg.player || {};
         const accountId = player.accountId || null;
         const characterId = player.characterId || null;
 
-        // Enforce single active connection per hero (by characterId), falling back to (accountId + name)
-        if (characterId || accountId) {
-          for (const [otherWs, otherClient] of clients) {
-            if (otherWs === ws) continue;
-            if (!otherClient) continue;
-
-            const sameCharacter = characterId && otherClient.characterId === characterId;
-            const sameAccountAndName =
-              !sameCharacter &&
-              accountId &&
-              otherClient.accountId === accountId &&
-              otherClient.state &&
-              otherClient.state.name &&
-              player.name &&
-              otherClient.state.name === player.name;
-
-            if (sameCharacter || sameAccountAndName) {
-              console.log("[MP] Duplicate login for hero:", player.name || characterId, "kicking old client", otherClient.id);
-              try {
-                otherWs.close(4001, "Another login for this hero was started.");
-              } catch (e) {
-                console.warn("[MP] Failed to close old client socket:", e.message);
-              }
-            }
-          }
-        }
-
+        // Store the initial snapshot from this client.
         client.state = player;
         client.accountId = accountId;
         client.characterId = characterId;
@@ -90,9 +64,33 @@ wss.on("connection", (ws) => {
         );
         break;
       }
-case "state": {
+      case "state": {
         // Update this client's state and broadcast to others
         client.state = msg.player || client.state;
+
+        // Keep account/character identifiers in sync with the latest payload, if present
+        if (msg.player) {
+          if (msg.player.accountId) client.accountId = msg.player.accountId;
+          if (msg.player.characterId) client.characterId = msg.player.characterId;
+        }
+
+        // Enforce single active connection per hero ID (characterId) here,
+        // after we know which hero this client actually represents.
+        if (client.characterId) {
+          for (const [otherWs, otherClient] of clients) {
+            if (otherWs === ws) continue;
+            if (!otherClient) continue;
+            if (otherClient.characterId === client.characterId) {
+              console.log("[MP] Duplicate hero session detected for characterId", client.characterId, "- closing older client", otherClient.id);
+              try {
+                otherWs.close(4001, "Another login for this hero was started.");
+              } catch (e) {
+                console.warn("[MP] Failed to close duplicate client socket:", e && e.message);
+              }
+            }
+          }
+        }
+
         broadcast(
           { type: "state", id: client.id, player: client.state },
           ws
