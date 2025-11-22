@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.12</title>
+  <title>Heroes of Shady Grove v1.0.13</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.12 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.13 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -728,28 +728,125 @@
 const HOSG_SAVE_KEY = "hosg_player_v1";
 let playerState = null;
 
+// Class definitions & stat helpers
+const CLASS_DEFS = {
+  Adventurer: {
+    id: "Adventurer",
+    name: "Adventurer",
+    description: "A balanced hero from the quiet lanes of Shady Grove.",
+    coreBase: { str: 5, agi: 5, int: 5, vit: 5, will: 5, luck: 5 },
+    corePerLevel: { str: 1, agi: 1, int: 1, vit: 1, will: 1, luck: 1 },
+    hpPerVit: 10,
+    mpPerInt: 6
+  },
+  Knight: {
+    id: "Knight",
+    name: "Knight",
+    description: "Frontline defender with heavy armor and high vitality.",
+    coreBase: { str: 7, agi: 4, int: 2, vit: 8, will: 4, luck: 3 },
+    corePerLevel: { str: 3, agi: 1, int: 0.5, vit: 3, will: 1.2, luck: 0.5 },
+    hpPerVit: 14,
+    mpPerInt: 3
+  },
+  Ranger: {
+    id: "Ranger",
+    name: "Ranger",
+    description: "Mobile archer with keen senses and high agility.",
+    coreBase: { str: 5, agi: 7, int: 3, vit: 5, will: 4, luck: 4 },
+    corePerLevel: { str: 1.8, agi: 2.8, int: 0.8, vit: 1.6, will: 1, luck: 0.8 },
+    hpPerVit: 11,
+    mpPerInt: 4
+  },
+  Mage: {
+    id: "Mage",
+    name: "Mage",
+    description: "Glass-cannon spellcaster with high intellect and will.",
+    coreBase: { str: 2, agi: 4, int: 8, vit: 4, will: 7, luck: 3 },
+    corePerLevel: { str: 0.5, agi: 1, int: 3.2, vit: 1.4, will: 2.4, luck: 0.6 },
+    hpPerVit: 9,
+    mpPerInt: 10
+  }
+};
+
+function getClassDef(roleOrId) {
+  return CLASS_DEFS[roleOrId] || CLASS_DEFS["Adventurer"];
+}
+
+function buildStatsForClass(roleOrId, levelValue, xpValue) {
+  const def = getClassDef(roleOrId);
+  const lvl = Math.max(1, levelValue || 1);
+  const core = Object.assign({}, def.coreBase);
+  if (lvl > 1) {
+    for (let i = 2; i <= lvl; i++) {
+      for (const key in def.corePerLevel) {
+        core[key] += def.corePerLevel[key];
+      }
+    }
+  }
+
+  const maxHpLocal = Math.round(60 + core.vit * def.hpPerVit);
+  const maxMpLocal = Math.round(30 + core.int * def.mpPerInt);
+
+  const derived = {
+    attackPower: Math.round(core.str * 2 + core.agi * 0.5),
+    spellPower: Math.round(core.int * 2 + core.will * 0.5),
+    critChance: +(5 + core.luck * 0.5).toFixed(1),
+    dodgeChance: +(core.agi * 0.4).toFixed(1),
+    moveSpeedMultiplier: 1 + core.agi * 0.01
+  };
+
+  return {
+    hp: maxHpLocal,
+    maxHp: maxHpLocal,
+    mp: maxMpLocal,
+    maxMp: maxMpLocal,
+    xp: typeof xpValue === "number" ? xpValue : 0,
+    level: lvl,
+    core,
+    derived
+  };
+}
+
+function ensurePlayerStatsShape(state) {
+  if (!state) return;
+  const role = state.role || "Adventurer";
+  const prevStats = state.stats || {};
+  const base = buildStatsForClass(role, prevStats.level || 1, prevStats.xp || 0);
+
+  // Preserve current HP/MP ratios if present
+  if (typeof prevStats.hp === "number" && typeof prevStats.maxHp === "number" && prevStats.maxHp > 0) {
+    const ratio = Math.max(0, Math.min(1, prevStats.hp / prevStats.maxHp));
+    base.hp = Math.round(base.maxHp * ratio);
+  }
+  if (typeof prevStats.mp === "number" && typeof prevStats.maxMp === "number" && prevStats.maxMp > 0) {
+    const ratioM = Math.max(0, Math.min(1, prevStats.mp / prevStats.maxMp));
+    base.mp = Math.round(base.maxMp * ratioM);
+  }
+
+  state.stats = base;
+}
+
+
+
+
 function getDefaultPlayerState() {
+  const role = "Adventurer";
+  const stats = buildStatsForClass(role, 1, 0);
   return {
     name: "Felix",
-    role: "Adventurer",
+    role,
     appearance: {
       tunic: "#344fba",
       pants: "#1f2937",
       skin: "#f3dec0",
       boots: "#3b2313"
     },
-    stats: {
-      hp: 100,
-      maxHp: 100,
-      mp: 60,
-      maxMp: 100,
-      xp: 25,
-      level: 1
-    },
+    stats,
     position: { x: 0, y: 1.5, z: 0 },
     rotationY: 0
   };
 }
+
 
 function loadPlayerState() {
   try {
@@ -764,16 +861,23 @@ function loadPlayerState() {
     if (!playerState.stats) playerState.stats = getDefaultPlayerState().stats;
     if (!playerState.position) playerState.position = getDefaultPlayerState().position;
     if (typeof playerState.rotationY !== "number") playerState.rotationY = 0;
+    ensurePlayerStatsShape(playerState);
   } catch (e) {
     console.warn("Failed to load player state, using defaults", e);
     playerState = getDefaultPlayerState();
   }
 }
 
+
 function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
   if (!playerState) return;
   try {
-    playerState.stats = { hp, maxHp, mp, maxMp, xp, level };
+    const role = playerState.role || "Adventurer";
+    const baseStats = buildStatsForClass(role, level, xp);
+    baseStats.hp = Math.max(0, Math.min(baseStats.maxHp, hp));
+    baseStats.mp = Math.max(0, Math.min(baseStats.maxMp, mp));
+    playerState.stats = baseStats;
+
     if (heroBody && heroBody.position) {
       playerState.position = {
         x: heroBody.position.x,
@@ -786,6 +890,7 @@ function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
   } catch (e) {
     console.warn("Failed to save player state", e);
   }
+
 }
 
 function applyAppearanceToMaterials(scene, mats) {
@@ -855,25 +960,29 @@ function setupCharacterCreationUI() {
     pantsInput.value = randomColor();
   });
 
-  function applyFromUI() {
-    const name = (nameInput.value || "Felix").trim();
-    const role = roleSelect.value || "Adventurer";
-    const tunic = tunicInput.value || "#344fba";
-    const pants = pantsInput.value || "#1f2937";
-    const skin = skinInput.value || "#f3dec0";
+  
+function applyFromUI() {
+  const name = (nameInput.value || "Felix").trim();
+  const role = roleSelect.value || "Adventurer";
+  const tunic = tunicInput.value || "#344fba";
+  const pants = pantsInput.value || "#1f2937";
+  const skin = skinInput.value || "#f3dec0";
 
-    playerState.name = name;
-    playerState.role = role;
-    playerState.appearance = Object.assign({}, playerState.appearance || {}, {
-      tunic, pants, skin
-    });
+  playerState.name = name;
+  playerState.role = role;
+  playerState.appearance = Object.assign({}, playerState.appearance || {}, {
+    tunic, pants, skin
+  });
 
-    if (hudName) {
-      hudName.textContent = name + " of Shady Grove";
-    }
+  // Refresh class-based stats whenever the hero setup is confirmed
+  ensurePlayerStatsShape(playerState);
+
+  if (hudName) {
+    hudName.textContent = name + " of Shady Grove";
   }
+}
 
-  startBtn.addEventListener("click", function () {
+startBtn.addEventListener("click", function () {
     applyFromUI();
     overlay.style.display = "none";
     // Initial save so the hero exists even if they immediately close the page
@@ -2088,25 +2197,42 @@ function wrapAngle(a) {
           return a;
         }
 
-        // HUD state
-        let hudTime = 0;
-        const hpFill = document.getElementById("hp-fill");
-        const mpFill = document.getElementById("mp-fill");
-        const hpLabel = document.getElementById("hp-label");
-        const mpLabel = document.getElementById("mp-label");
-        const xpFill = document.getElementById("xp-fill");
-        const xpLabel = document.getElementById("xp-label");
-        const levelLabel = document.getElementById("level-label");
+        
+// HUD state
+let hudTime = 0;
+const hpFill = document.getElementById("hp-fill");
+const mpFill = document.getElementById("mp-fill");
+const hpLabel = document.getElementById("hp-label");
+const mpLabel = document.getElementById("mp-label");
+const xpFill = document.getElementById("xp-fill");
+const xpLabel = document.getElementById("xp-label");
+const levelLabel = document.getElementById("level-label");
 
-        hp = 100; maxHp = 100;
-        mp = 60; maxMp = 100;
-        xp = 25; level = 1;
+// Initialize runtime stats from persistent class-based stats
+if (!playerState) {
+  loadPlayerState();
+} else {
+  ensurePlayerStatsShape(playerState);
+}
+hp = playerState.stats.hp;
+maxHp = playerState.stats.maxHp;
+mp = playerState.stats.mp;
+maxMp = playerState.stats.maxMp;
+xp = playerState.stats.xp;
+level = playerState.stats.level;
 
-        function updateHud(time) {
-          mp = maxMp * (0.4 + 0.1 * Math.sin(time * 0.3));
+
+
+function updateHud(time) {
+          // MP/HUD now reflect real stats; any regen/consumption should adjust mp elsewhere
+          if (mp > maxMp) mp = maxMp;
+          if (mp < 0) mp = 0;
+          if (hp > maxHp) hp = maxHp;
+          if (hp < 0) hp = 0;
           hpFill.style.width = (hp / maxHp * 100) + "%";
           mpFill.style.width = (mp / maxMp * 100) + "%";
           xpFill.style.width = Math.min(100, xp) + "%";
+xpFill.style.width = Math.min(100, xp) + "%";
           hpLabel.textContent = Math.round(hp) + " / " + maxHp;
           mpLabel.textContent = Math.round(mp) + " / " + maxMp;
           xpLabel.textContent = Math.round(xp) + "%";
@@ -2237,7 +2363,8 @@ scene.onBeforeRenderObservable.add(function () {
           autosaveTimer += dtSec;
           netSendTimer += dtSec;
 
-          let heroSpeed = baseSpeed;
+                    let heroSpeed = baseSpeed * (playerState?.stats?.derived?.moveSpeedMultiplier || 1);
+
           if (inputMap["shift"] || (gamepadState.hasPad && gamepadState.run) || mobileRunHeld) {
             heroSpeed *= runMultiplier;
           }
