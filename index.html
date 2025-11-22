@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.16</title>
+  <title>Heroes of Shady Grove v1.0.17</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.16 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.17 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -727,6 +727,12 @@
 // Persistent player state (for online-ready save structure)
 const HOSG_SAVE_KEY = "hosg_player_v1";
 let playerState = null;
+
+// Runtime stats shared across HUD & multiplayer payloads
+let hp = 100, maxHp = 100;
+let mp = 60, maxMp = 100;
+let xp = 25, level = 1;
+
 
 function getDefaultPlayerState() {
   return {
@@ -1447,7 +1453,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
 
         const heroVisualRoot = new BABYLON.TransformNode("heroVisualRoot", scene);
         heroVisualRoot.parent = heroBody;
-        heroVisualRoot.position = new BABYLON.Vector3(0, -1.5, 0);
+        heroVisualRoot.position = new BABYLON.Vector3(0, -0.4, 0);
 
         const heroRig = {
           root: heroVisualRoot,
@@ -1803,12 +1809,12 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         const xpLabel = document.getElementById("xp-label");
         const levelLabel = document.getElementById("level-label");
 
-        let hp = 100, maxHp = 100;
-        let mp = 60, maxMp = 100;
-        let xp = 25, level = 1;
-
         function updateHud(time) {
-          mp = maxMp * (0.4 + 0.1 * Math.sin(time * 0.3));
+          // Clamp HP/MP into valid ranges; game logic should update hp/mp/xp/level
+          if (hp > maxHp) hp = maxHp;
+          if (hp < 0) hp = 0;
+          if (mp > maxMp) mp = maxMp;
+          if (mp < 0) mp = 0;
           hpFill.style.width = (hp / maxHp * 100) + "%";
           mpFill.style.width = (mp / maxMp * 100) + "%";
           xpFill.style.width = Math.min(100, xp) + "%";
