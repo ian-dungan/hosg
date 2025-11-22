@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.21</title>
+  <title>Heroes of Shady Grove v1.0.24</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -797,7 +797,7 @@
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.17 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.24 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -1588,6 +1588,13 @@ function setupCharacterCreationUI() {
       } catch (e) {
         console.warn("[HOSG] Failed to sync hero on start", e);
       }
+    }
+
+    if (hosgAccount && hosgAccount[HOSG_ACCOUNT_ID_COLUMN] != null) {
+      playerState.accountId = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+    }
+    if (hosgCurrentCharacterId) {
+      playerState.characterId = hosgCurrentCharacterId;
     }
 
     overlay.style.display = "none";

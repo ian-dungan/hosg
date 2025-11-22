@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
 let nextId = 1;
-const clients = new Map(); // ws -> { id, state }
+const clients = new Map(); // ws -> { id, state, accountId, characterId }
 
 function broadcast(obj, exceptWs = null) {
   const data = JSON.stringify(obj);
@@ -21,7 +21,7 @@ function broadcast(obj, exceptWs = null) {
 
 wss.on("connection", (ws) => {
   const id = nextId++;
-  clients.set(ws, { id, state: null });
+  clients.set(ws, { id, state: null, accountId: null, characterId: null });
 
   console.log("[MP] Client connected:", id);
 
@@ -38,8 +38,43 @@ wss.on("connection", (ws) => {
     if (!client) return;
 
     switch (msg.type) {
+      
       case "hello": {
-        client.state = msg.player || {};
+        const player = msg.player || {};
+        const accountId = player.accountId || null;
+        const characterId = player.characterId || null;
+
+        // Enforce single active connection per hero (by characterId), falling back to (accountId + name)
+        if (characterId || accountId) {
+          for (const [otherWs, otherClient] of clients) {
+            if (otherWs === ws) continue;
+            if (!otherClient) continue;
+
+            const sameCharacter = characterId && otherClient.characterId === characterId;
+            const sameAccountAndName =
+              !sameCharacter &&
+              accountId &&
+              otherClient.accountId === accountId &&
+              otherClient.state &&
+              otherClient.state.name &&
+              player.name &&
+              otherClient.state.name === player.name;
+
+            if (sameCharacter || sameAccountAndName) {
+              console.log("[MP] Duplicate login for hero:", player.name || characterId, "kicking old client", otherClient.id);
+              try {
+                otherWs.close(4001, "Another login for this hero was started.");
+              } catch (e) {
+                console.warn("[MP] Failed to close old client socket:", e.message);
+              }
+            }
+          }
+        }
+
+        client.state = player;
+        client.accountId = accountId;
+        client.characterId = characterId;
+
         // Send welcome snapshot back to this client
         const snapshot = [];
         for (const [otherWs, c] of clients) {
@@ -55,7 +90,7 @@ wss.on("connection", (ws) => {
         );
         break;
       }
-      case "state": {
+case "state": {
         // Update this client's state and broadcast to others
         client.state = msg.player || client.state;
         broadcast(
