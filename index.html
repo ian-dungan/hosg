@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.27</title>
+  <title>Heroes of Shady Grove v1.0.17</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -287,184 +287,6 @@
   color: #9da8d6;
   text-align: center;
 }
-
-#char-slot-wrapper {
-  margin-top: 8px;
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(8, 15, 40, 0.9);
-  border: 1px solid rgba(130, 180, 255, 0.45);
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-#char-slot-header {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #9db8ff;
-  margin-bottom: 6px;
-}
-
-#char-slot-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.char-slot-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 6px;
-  border-radius: 6px;
-  background: rgba(12, 20, 52, 0.95);
-  border: 1px solid rgba(60, 110, 200, 0.6);
-}
-
-.char-slot-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.char-slot-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: #e2e8ff;
-}
-
-.char-slot-meta {
-  font-size: 10px;
-  color: #9da8d6;
-}
-
-.char-slot-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.char-slot-actions button {
-  font-size: 10px;
-  padding: 3px 6px;
-  border-radius: 6px;
-  border: 1px solid rgba(130, 180, 255, 0.7);
-  background: linear-gradient(to bottom, #3047a0, #192044);
-  color: #f8f9ff;
-  cursor: pointer;
-}
-
-.char-slot-actions button:hover {
-  filter: brightness(1.08);
-}
-
-.char-slot-empty {
-  font-size: 11px;
-  color: #9da8d6;
-}
-
-#char-slot-warning {
-  margin-top: 4px;
-  font-size: 10px;
-  color: #ffdd89;
-  text-align: right;
-}
-
-/* Account login overlay */
-#account-overlay {
-  position: fixed;
-  inset: 0;
-  background: radial-gradient(circle at top, rgba(15, 20, 45, 0.96), rgba(3, 3, 8, 0.98));
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 30;
-}
-
-#account-card {
-  width: 320px;
-  max-width: 92%;
-  background: rgba(4, 6, 18, 0.96);
-  border-radius: 18px;
-  padding: 18px 20px 16px;
-  border: 1px solid rgba(130, 180, 255, 0.65);
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
-}
-
-#acct-title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-align: center;
-  margin-bottom: 4px;
-  color: #ffe164;
-  text-shadow: 0 0 10px rgba(255, 225, 100, 0.8);
-}
-
-#acct-subtitle {
-  font-size: 12px;
-  text-align: center;
-  margin-bottom: 12px;
-  color: #cfd8ff;
-}
-
-.acct-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.acct-field span {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #9db8ff;
-}
-
-.acct-field input {
-  height: 28px;
-  border-radius: 999px;
-  border: 1px solid rgba(130, 180, 255, 0.8);
-  padding: 0 10px;
-  background: rgba(9, 13, 32, 0.95);
-  color: #e2e8ff;
-}
-
-#acct-buttons {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-#acct-buttons button {
-  flex: 1;
-  height: 30px;
-  border-radius: 999px;
-  border: 1px solid rgba(130, 180, 255, 0.9);
-  background: linear-gradient(to bottom, #3c5ad8, #101632);
-  color: #fdfbff;
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-#acct-buttons button:hover {
-  filter: brightness(1.08);
-}
-
-#acct-message {
-  min-height: 16px;
-  font-size: 11px;
-  color: #ffb4b4;
-  text-align: center;
-}
-
 
     #chat-panel {
       position: fixed;
@@ -792,12 +614,9 @@
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
-
-  <script src="hosg_config.js"></script>
-<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.27 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.17 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -835,36 +654,10 @@
   </div>
 
 
-
-<div id="account-overlay">
-  <div id="account-card">
-    <div id="acct-title">Heroes of Shady Grove</div>
-    <div id="acct-subtitle">Sign in or create an account</div>
-    <label class="acct-field">
-      <span>Email</span>
-      <input id="acct-email" type="email" autocomplete="email" />
-    </label>
-    <label class="acct-field">
-      <span>Password</span>
-      <input id="acct-password" type="password" autocomplete="current-password" />
-    </label>
-    <div id="acct-buttons">
-      <button id="acct-signin" type="button">Sign in</button>
-      <button id="acct-signup" type="button">Create account</button>
-    </div>
-    <div id="acct-message"></div>
-  </div>
-</div>
-
 <div id="char-create-overlay">
   <div id="char-create-card">
     <div id="char-title">Heroes of Shady Grove</div>
     <div id="char-subtitle">Create your hero</div>
-    <div id="char-slot-wrapper">
-      <div id="char-slot-header">Your heroes</div>
-      <div id="char-slot-list"></div>
-      <div id="char-slot-warning"></div>
-    </div>
     <label class="char-field">
       <span>Name</span>
       <input id="cc-name" type="text" maxlength="16" placeholder="Felix" />
@@ -896,7 +689,7 @@
       <button id="cc-random">Randomize</button>
       <button id="cc-start">Enter the world</button>
     </div>
-    <div id="char-note">Heroes are saved automatically; if an online account is configured, they also sync to the server.</div>
+    <div id="char-note">Your hero is saved automatically in this browser.</div>
   </div>
 </div>
 
@@ -934,507 +727,6 @@
 // Persistent player state (for online-ready save structure)
 const HOSG_SAVE_KEY = "hosg_player_v1";
 let playerState = null;
-
-// Online account & character persistence (Supabase-backed)
-const HOSG_MAX_CHARACTERS = 10;
-
-// These values must be provided at runtime, for example via:
-// window.HOSG_SUPABASE_URL and window.HOSG_SUPABASE_ANON_KEY.
-// We do NOT hard-code any secrets here.
-const HOSG_SUPABASE_URL = (typeof window !== "undefined" && window.HOSG_SUPABASE_URL) ? window.HOSG_SUPABASE_URL : "";
-const HOSG_SUPABASE_ANON_KEY = (typeof window !== "undefined" && window.HOSG_SUPABASE_ANON_KEY) ? window.HOSG_SUPABASE_ANON_KEY : "";
-
-// Mapping to the persistent schema in Supabase.
-const HOSG_ACCOUNTS_TABLE = "hosg_accounts";
-const HOSG_ACCOUNT_ID_COLUMN = "id";
-const HOSG_ACCOUNT_EMAIL_COLUMN = "email";
-const HOSG_ACCOUNT_USERNAME_COLUMN = "username";
-const HOSG_ACCOUNT_PASSWORD_HASH_COLUMN = "password_hash";
-
-const HOSG_CHARACTERS_TABLE = "hosg_characters";
-const HOSG_CHARACTER_ID_COLUMN = "id";
-const HOSG_CHARACTER_ACCOUNT_ID_COLUMN = "account_id";
-
-// Supabase runtime state
-let hosgSupabase = null;
-// Current logged-in account row from hosg_accounts
-let hosgAccount = null;
-// Characters loaded for that account (excluding soft-deleted)
-let hosgCharacters = [];
-// Current active character id from hosg_characters
-let hosgCurrentCharacterId = null;
-// Throttling timer so we don't spam updates
-let hosgSupabaseSaveTimer = null;
-
-function hosgHasSupabaseConfig() {
-  try {
-    return typeof window !== "undefined" &&
-      typeof window.supabase !== "undefined" &&
-      !!HOSG_SUPABASE_URL &&
-      !!HOSG_SUPABASE_ANON_KEY;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function hosgEnsureSupabase() {
-  if (!hosgHasSupabaseConfig()) return null;
-  if (hosgSupabase) return hosgSupabase;
-  try {
-    hosgSupabase = window.supabase.createClient(
-      HOSG_SUPABASE_URL,
-      HOSG_SUPABASE_ANON_KEY,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false
-        }
-      }
-    );
-  } catch (e) {
-    console.warn("[HOSG] Supabase init failed", e);
-    hosgSupabase = null;
-  }
-  return hosgSupabase;
-}
-
-async function hosgHashPassword(plain) {
-  try {
-    if (window.crypto && window.crypto.subtle && window.TextEncoder) {
-      const enc = new TextEncoder().encode(plain);
-      const buf = await window.crypto.subtle.digest("SHA-256", enc);
-      const bytes = Array.from(new Uint8Array(buf));
-      return bytes.map(b => b.toString(16).padStart(2, "0")).join("");
-    }
-  } catch (e) {
-    console.warn("[HOSG] Web Crypto unavailable, using fallback hash", e);
-  }
-  // Fallback very simple hash if subtle crypto is unavailable
-  let h = 0;
-  for (let i = 0; i < plain.length; i++) {
-    h = (h * 31 + plain.charCodeAt(i)) >>> 0;
-  }
-  return h.toString(16);
-}
-
-async function hosgAuthWithEmailPassword(mode, email, password) {
-  const sb = await hosgEnsureSupabase();
-  if (!sb) {
-    throw new Error("Online accounts are not available on this build.");
-  }
-
-  const trimmedEmail = (email || "").trim().toLowerCase();
-  const trimmedPass = (password || "").trim();
-
-  if (!trimmedEmail || !trimmedPass) {
-    throw new Error("Please enter both email and password.");
-  }
-
-  const passwordHash = await hosgHashPassword(trimmedPass);
-
-  if (mode === "signup") {
-    // Check for existing account with this email
-    const { data: existing, error: existingError } = await sb
-      .from(HOSG_ACCOUNTS_TABLE)
-      .select(HOSG_ACCOUNT_ID_COLUMN)
-      .eq(HOSG_ACCOUNT_EMAIL_COLUMN, trimmedEmail)
-      .limit(1);
-
-    if (existingError) {
-      console.warn("[HOSG] Account lookup failed", existingError);
-      throw new Error("Could not check existing accounts.");
-    }
-    if (existing && existing.length > 0) {
-      throw new Error("An account with that email already exists.");
-    }
-
-    // Derive a simple username from email prefix
-    let username = trimmedEmail.split("@")[0] || trimmedEmail;
-    username = username.slice(0, 24);
-
-    const payload = {};
-    payload[HOSG_ACCOUNT_EMAIL_COLUMN] = trimmedEmail;
-    payload[HOSG_ACCOUNT_USERNAME_COLUMN] = username;
-    payload[HOSG_ACCOUNT_PASSWORD_HASH_COLUMN] = passwordHash;
-
-    const { data, error } = await sb
-      .from(HOSG_ACCOUNTS_TABLE)
-      .insert(payload)
-      .select()
-      .single();
-
-    if (error) {
-      console.warn("[HOSG] Account creation failed", error);
-      throw new Error("Could not create account. Please try again.");
-    }
-
-    hosgAccount = data;
-    // Optionally update last_login_at
-    try {
-      await sb
-        .from(HOSG_ACCOUNTS_TABLE)
-        .update({ last_login_at: new Date().toISOString() })
-        .eq(HOSG_ACCOUNT_ID_COLUMN, hosgAccount[HOSG_ACCOUNT_ID_COLUMN]);
-    } catch (e) {
-      console.warn("[HOSG] Failed to update last_login_at on signup", e);
-    }
-    return hosgAccount;
-  } else {
-    // Sign in to an existing account
-    const { data, error } = await sb
-      .from(HOSG_ACCOUNTS_TABLE)
-      .select("*")
-      .eq(HOSG_ACCOUNT_EMAIL_COLUMN, trimmedEmail)
-      .limit(1);
-
-    if (error) {
-      console.warn("[HOSG] Account lookup failed", error);
-      throw new Error("Could not look up account.");
-    }
-
-    if (!data || data.length === 0) {
-      throw new Error("Account not found.");
-    }
-
-    const account = data[0];
-    const storedHash = account[HOSG_ACCOUNT_PASSWORD_HASH_COLUMN];
-    if (!storedHash || storedHash !== passwordHash) {
-      throw new Error("Incorrect password.");
-    }
-
-    hosgAccount = account;
-    try {
-      await sb
-        .from(HOSG_ACCOUNTS_TABLE)
-        .update({ last_login_at: new Date().toISOString() })
-        .eq(HOSG_ACCOUNT_ID_COLUMN, hosgAccount[HOSG_ACCOUNT_ID_COLUMN]);
-    } catch (e) {
-      console.warn("[HOSG] Failed to update last_login_at on signin", e);
-    }
-    return hosgAccount;
-  }
-}
-
-function hosgBuildCharacterUpdatePayloadFromState(state) {
-  const s = state && state.stats ? state.stats : {};
-  const pos = state && state.position ? state.position : {};
-  const levelVal = (typeof s.level === "number") ? s.level : 1;
-  const xpVal = (s.xp != null) ? s.xp : 0;
-  const currentZoneId = (state && state.currentZoneId != null) ? state.currentZoneId : null;
-
-  return {
-    name: state && state.name ? state.name : "Unnamed hero",
-    level: levelVal,
-    xp: xpVal,
-    appearance: state && state.appearance ? state.appearance : null,
-    stats: s,
-    position_x: pos.x != null ? pos.x : 0,
-    position_y: pos.y != null ? pos.y : 0,
-    position_z: pos.z != null ? pos.z : 0,
-    rotation_y: typeof state.rotationY === "number" ? state.rotationY : 0,
-    current_zone_id: currentZoneId,
-    is_deleted: false
-  };
-}
-
-function hosgBuildCharacterInsertPayloadFromState(state, accountId, slotIndex) {
-  const base = hosgBuildCharacterUpdatePayloadFromState(state);
-  base[HOSG_CHARACTER_ACCOUNT_ID_COLUMN] = accountId;
-  base.slot_index = slotIndex;
-  base.created_at = new Date().toISOString();
-  base.updated_at = base.created_at;
-  return base;
-}
-
-async function hosgCreateCharacterFromState(state) {
-  const sb = await hosgEnsureSupabase();
-  if (!sb || !hosgAccount) return null;
-
-  const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-
-  // Enforce unique hero names (case-insensitive, not counting soft-deleted heroes)
-  const rawName = state && state.name ? String(state.name) : "";
-  const trimmedName = rawName.trim();
-  if (trimmedName) {
-    const { data: existingByName, error: nameLookupError } = await sb
-      .from(HOSG_CHARACTERS_TABLE)
-      .select(HOSG_CHARACTER_ID_COLUMN)
-      .ilike("name", trimmedName)
-      .eq("is_deleted", false)
-      .limit(1);
-
-    if (nameLookupError) {
-      console.warn("[HOSG] Character name lookup failed", nameLookupError);
-      throw new Error("Could not check hero names. Please try again.");
-    }
-    if (existingByName && existingByName.length > 0) {
-      throw new Error("A hero with that name already exists.");
-    }
-  }
-
-  // Determine the next free slot index from 0..HOSG_MAX_CHARACTERS-1
-
-  const usedSlots = (hosgCharacters || [])
-    .filter(c => !c.is_deleted)
-    .map(c => c.slot_index)
-    .filter(v => typeof v === "number");
-
-  let slotIndex = 0;
-  while (usedSlots.includes(slotIndex) && slotIndex < HOSG_MAX_CHARACTERS) {
-    slotIndex++;
-  }
-  if (slotIndex >= HOSG_MAX_CHARACTERS) {
-    throw new Error("You have reached the maximum number of heroes on this account.");
-  }
-
-  const payload = hosgBuildCharacterInsertPayloadFromState(state, accountIdVal, slotIndex);
-
-  const { data, error } = await sb
-    .from(HOSG_CHARACTERS_TABLE)
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error) {
-    console.warn("[HOSG] Failed to create character", error);
-    throw new Error("Could not create hero on the server.");
-  }
-
-  return data;
-}
-
-async function hosgUpdateCharacterFromState(id, state) {
-  if (!id) return;
-  const sb = await hosgEnsureSupabase();
-  if (!sb || !hosgAccount) return;
-
-  const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-
-  // Enforce unique hero names on rename (case-insensitive, not counting this hero or soft-deleted heroes)
-  const rawName = state && state.name ? String(state.name) : "";
-  const trimmedName = rawName.trim();
-  if (trimmedName) {
-    const { data: existingByName, error: nameLookupError } = await sb
-      .from(HOSG_CHARACTERS_TABLE)
-      .select(HOSG_CHARACTER_ID_COLUMN)
-      .ilike("name", trimmedName)
-      .eq("is_deleted", false)
-      .neq(HOSG_CHARACTER_ID_COLUMN, id)
-      .limit(1);
-
-    if (nameLookupError) {
-      console.warn("[HOSG] Character name lookup failed (update)", nameLookupError);
-      throw new Error("Could not check hero names. Please try again.");
-    }
-    if (existingByName && existingByName.length > 0) {
-      throw new Error("A hero with that name already exists.");
-    }
-  }
-
-  const payload = hosgBuildCharacterUpdatePayloadFromState(state);
-  payload.updated_at = new Date().toISOString();
-
-  const { error } = await sb
-    .from(HOSG_CHARACTERS_TABLE)
-    .update(payload)
-    .eq(HOSG_CHARACTER_ID_COLUMN, id)
-    .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal)
-    .eq("is_deleted", false);
-
-  if (error) {
-    console.warn("[HOSG] Failed to update character", error);
-  }
-}
-
-async function hosgLoadCharacters() {
-  const sb = await hosgEnsureSupabase();
-  if (!sb || !hosgAccount) {
-    hosgCharacters = [];
-    return [];
-  }
-
-  const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-
-  const { data, error } = await sb
-    .from(HOSG_CHARACTERS_TABLE)
-    .select("*")
-    .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal)
-    .eq("is_deleted", false)
-    .order("slot_index", { ascending: true });
-
-  if (error) {
-    console.warn("[HOSG] Failed to load characters", error);
-    hosgCharacters = [];
-    return [];
-  }
-
-  hosgCharacters = data || [];
-  try {
-    hosgRefreshCharacterListUI();
-  } catch (e) {
-    console.warn("[HOSG] Failed to refresh character list UI", e);
-  }
-  return hosgCharacters;
-}
-
-function hosgBuildPlayerStateFromCharacter(row) {
-  const base = getDefaultPlayerState();
-  const out = Object.assign({}, base);
-
-  if (row && row.name) out.name = row.name;
-  if (row && row.stats && typeof row.stats === "object") {
-    out.stats = Object.assign({}, base.stats, row.stats);
-  } else if (row) {
-    // At minimum, map XP and level if present
-    const s = Object.assign({}, base.stats);
-    if (typeof row.level === "number") s.level = row.level;
-    if (row.xp != null) s.xp = Number(row.xp);
-    out.stats = s;
-  }
-
-  if (row && row.appearance && typeof row.appearance === "object") {
-    out.appearance = Object.assign({}, base.appearance, row.appearance);
-  }
-
-  out.position = {
-    x: row && row.position_x != null ? Number(row.position_x) : base.position.x,
-    y: row && row.position_y != null ? Number(row.position_y) : base.position.y,
-    z: row && row.position_z != null ? Number(row.position_z) : base.position.z
-  };
-  out.rotationY = row && row.rotation_y != null ? Number(row.rotation_y) : base.rotationY || 0;
-
-  return out;
-}
-
-function hosgScheduleSupabaseCharacterSave() {
-  if (!hosgHasSupabaseConfig() || !hosgAccount || !hosgCurrentCharacterId || !playerState) {
-    return;
-  }
-  if (hosgSupabaseSaveTimer) return;
-
-  hosgSupabaseSaveTimer = setTimeout(async function () {
-    hosgSupabaseSaveTimer = null;
-    try {
-      await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
-    } catch (e) {
-      console.warn("[HOSG] Failed to save character to Supabase", e);
-    }
-  }, 1000);
-}
-
-function hosgRefreshCharacterListUI() {
-  const listEl = document.getElementById("char-slot-list");
-  const warningEl = document.getElementById("char-slot-warning");
-  if (!listEl || !warningEl) return;
-
-  listEl.innerHTML = "";
-
-  if (!hosgCharacters || hosgCharacters.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "char-slot-empty";
-    empty.textContent = "No heroes yet. Create one below.";
-    listEl.appendChild(empty);
-  } else {
-    hosgCharacters.forEach(function (c) {
-      if (c.is_deleted) return;
-
-      const row = document.createElement("div");
-      row.className = "char-slot-row";
-
-      const main = document.createElement("div");
-      main.className = "char-slot-main";
-
-      const nameEl = document.createElement("div");
-      nameEl.className = "char-slot-name";
-      nameEl.textContent = c.name || "Unnamed hero";
-
-      const metaEl = document.createElement("div");
-      metaEl.className = "char-slot-meta";
-      const levelVal = (typeof c.level === "number") ? c.level :
-        (c.stats && typeof c.stats.level === "number") ? c.stats.level : 1;
-      metaEl.textContent = "Level " + levelVal + (c.current_zone_id ? " • Zone " + c.current_zone_id : "");
-
-      main.appendChild(nameEl);
-      main.appendChild(metaEl);
-
-      const actions = document.createElement("div");
-      actions.className = "char-slot-actions";
-
-      const loadBtn = document.createElement("button");
-      loadBtn.textContent = "Load";
-      loadBtn.addEventListener("click", function () {
-        try {
-          hosgCurrentCharacterId = c[HOSG_CHARACTER_ID_COLUMN];
-          playerState = hosgBuildPlayerStateFromCharacter(c);
-          window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
-          if (typeof window.applyStateToCharacterForm === "function") {
-            window.applyStateToCharacterForm();
-          }
-        } catch (e) {
-          console.warn("[HOSG] Failed to load hero from slot", e);
-        }
-      });
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "Delete";
-      deleteBtn.addEventListener("click", async function () {
-        const ok = window.confirm("Delete this hero permanently? This cannot be undone.");
-        if (!ok) return;
-        try {
-          const sb = await hosgEnsureSupabase();
-          if (!sb || !hosgAccount) return;
-
-          const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-          const payload = {
-            is_deleted: true,
-            deleted_at: new Date().toISOString(),
-            delete_reason: "Deleted from client"
-          };
-
-          const { error } = await sb
-            .from(HOSG_CHARACTERS_TABLE)
-            .update(payload)
-            .eq(HOSG_CHARACTER_ID_COLUMN, c[HOSG_CHARACTER_ID_COLUMN])
-            .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal);
-
-          if (error) {
-            console.warn("[HOSG] Failed to soft-delete character", error);
-            return;
-          }
-
-          hosgCharacters = hosgCharacters.filter(function (ch) {
-            return ch[HOSG_CHARACTER_ID_COLUMN] !== c[HOSG_CHARACTER_ID_COLUMN];
-          });
-          if (hosgCurrentCharacterId === c[HOSG_CHARACTER_ID_COLUMN]) {
-            hosgCurrentCharacterId = null;
-          }
-          hosgRefreshCharacterListUI();
-        } catch (e) {
-          console.warn("[HOSG] Delete hero error", e);
-        }
-      });
-
-      actions.appendChild(loadBtn);
-      actions.appendChild(deleteBtn);
-
-      row.appendChild(main);
-      row.appendChild(actions);
-
-      listEl.appendChild(row);
-    });
-  }
-
-  const activeCount = (hosgCharacters || []).filter(function (c) {
-    return !c.is_deleted;
-  }).length;
-
-  warningEl.textContent = "Heroes on this account: " + activeCount + " / " + HOSG_MAX_CHARACTERS;
-  if (activeCount >= HOSG_MAX_CHARACTERS) {
-    warningEl.textContent += " (maximum reached; delete one to create a new hero)";
-  }
-}
-
-
 
 // Runtime stats shared across HUD & multiplayer payloads
 let hp = 100, maxHp = 100;
@@ -1497,8 +789,6 @@ function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
       playerState.rotationY = heroBody.rotation.y;
     }
     window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
-    // Also schedule a debounced save to Supabase if online accounts are enabled
-    hosgScheduleSupabaseCharacterSave();
   } catch (e) {
     console.warn("Failed to save player state", e);
   }
@@ -1522,7 +812,6 @@ function applyAppearanceToMaterials(scene, mats) {
   if (mats.boots) mats.boots.diffuseColor = hexToColor3(a.boots);
 }
 
-
 function setupCharacterCreationUI() {
   const overlay = document.getElementById("char-create-overlay");
   if (!overlay) return;
@@ -1538,20 +827,12 @@ function setupCharacterCreationUI() {
 
   if (!playerState) loadPlayerState();
 
-  function applyStateToForm() {
-    if (!playerState) return;
-    nameInput.value = playerState.name || "Felix";
-    roleSelect.value = playerState.role || "Adventurer";
-    const ap = playerState.appearance || {};
-    tunicInput.value = ap.tunic || "#344fba";
-    pantsInput.value = ap.pants || "#1f2937";
-    skinInput.value = ap.skin || "#f3dec0";
-  }
-
   // Pre-fill from state
-  applyStateToForm();
-  // Expose so the character slot list can update the form when loading a hero
-  window.applyStateToCharacterForm = applyStateToForm;
+  nameInput.value = playerState.name || "Felix";
+  roleSelect.value = playerState.role || "Adventurer";
+  tunicInput.value = playerState.appearance?.tunic || "#344fba";
+  pantsInput.value = playerState.appearance?.pants || "#1f2937";
+  skinInput.value = playerState.appearance?.skin || "#f3dec0";
 
   function randomColor() {
     const h = Math.floor(Math.random() * 360);
@@ -1598,127 +879,14 @@ function setupCharacterCreationUI() {
     }
   }
 
-  startBtn.addEventListener("click", async function () {
+  startBtn.addEventListener("click", function () {
     applyFromUI();
-
-    // If we have an online account, create or update the hero record before entering the world
-    if (hosgHasSupabaseConfig() && hosgAccount && playerState) {
-      try {
-        const sb = await hosgEnsureSupabase();
-        if (!sb) {
-          throw new Error("Online accounts are not available on this build.");
-        }
-
-        const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-
-        // Normalize current hero name
-        const rawName = (playerState.name || "").trim();
-        let existingForAccount = null;
-
-        // If we don't already have a selected character, see if THIS ACCOUNT
-        // already has a hero with this name. If so, we treat this as "load hero"
-        // instead of "create brand-new hero" to avoid the duplicate-name error.
-        if (!hosgCurrentCharacterId && rawName) {
-          const { data: rows, error: findErr } = await sb
-            .from(HOSG_CHARACTERS_TABLE)
-            .select("*")
-            .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal)
-            .ilike("name", rawName)
-            .eq("is_deleted", false)
-            .limit(1);
-
-          if (findErr) {
-            console.warn("[HOSG] Failed to look up hero by name", findErr);
-          } else if (rows && rows.length > 0) {
-            existingForAccount = rows[0];
-          }
-        }
-
-        if (!hosgCurrentCharacterId && existingForAccount) {
-          // Case 1: Hero with this name already exists on THIS account.
-          // Reuse that hero instead of trying to create a new one.
-          hosgCurrentCharacterId = existingForAccount[HOSG_CHARACTER_ID_COLUMN];
-
-          // Keep local list in sync
-          if (!hosgCharacters) hosgCharacters = [];
-          const idx = hosgCharacters.findIndex(
-            (c) => c[HOSG_CHARACTER_ID_COLUMN] === hosgCurrentCharacterId
-          );
-          if (idx >= 0) {
-            hosgCharacters[idx] = Object.assign(
-              {},
-              hosgCharacters[idx],
-              hosgBuildCharacterUpdatePayloadFromState(playerState)
-            );
-          } else {
-            hosgCharacters.push(
-              Object.assign(
-                {},
-                existingForAccount,
-                hosgBuildCharacterUpdatePayloadFromState(playerState)
-              )
-            );
-          }
-          hosgRefreshCharacterListUI();
-
-          // Persist the latest appearance/position/stats
-          await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
-        } else if (!hosgCurrentCharacterId) {
-          // Case 2: No hero selected and name is new for this account: create one.
-          const activeCount = (hosgCharacters || []).filter((c) => !c.is_deleted).length;
-          if (activeCount >= HOSG_MAX_CHARACTERS) {
-            window.alert("You have reached the maximum number of heroes on this account. Delete one before creating a new hero.");
-            return;
-          }
-
-          const created = await hosgCreateCharacterFromState(playerState);
-          if (created && created[HOSG_CHARACTER_ID_COLUMN]) {
-            hosgCurrentCharacterId = created[HOSG_CHARACTER_ID_COLUMN];
-            if (!hosgCharacters) hosgCharacters = [];
-            hosgCharacters.push(created);
-            hosgRefreshCharacterListUI();
-          }
-        } else {
-          // Case 3: We already have a current character: update it.
-          await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
-          if (hosgCharacters) {
-            for (let i = 0; i < hosgCharacters.length; i++) {
-              if (hosgCharacters[i][HOSG_CHARACTER_ID_COLUMN] === hosgCurrentCharacterId) {
-                hosgCharacters[i] = Object.assign(
-                  {},
-                  hosgCharacters[i],
-                  hosgBuildCharacterUpdatePayloadFromState(playerState)
-                );
-                break;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("[HOSG] Failed to sync hero on start", e);
-        window.alert(e && e.message ? e.message : "Could not sync hero to server.");
-        return; // Don't enter the world if we couldn't sync the hero
-      }
-    }
-
-    // Attach accountId / characterId to the in-memory player state
-    if (hosgAccount && hosgAccount[HOSG_ACCOUNT_ID_COLUMN] != null) {
-      playerState.accountId = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-    }
-    if (hosgCurrentCharacterId) {
-      playerState.characterId = hosgCurrentCharacterId;
-    }
-
     overlay.style.display = "none";
     // Initial save so the hero exists even if they immediately close the page
-    savePlayerStateRuntime(
-      null,
-      playerState.stats.hp, playerState.stats.maxHp,
+    savePlayerStateRuntime(null, playerState.stats.hp, playerState.stats.maxHp,
       playerState.stats.mp, playerState.stats.maxMp,
-      playerState.stats.xp, playerState.stats.level
-    );
+      playerState.stats.xp, playerState.stats.level);
   });
-
 
   // If we already have a saved hero, let them just hit Enter quickly
   nameInput.addEventListener("keydown", function (ev) {
@@ -1728,92 +896,8 @@ function setupCharacterCreationUI() {
   });
 }
 
-
-
-
-function setupAccountAndCharacterFlows() {
-  const accountOverlay = document.getElementById("account-overlay");
-  const charOverlay = document.getElementById("char-create-overlay");
-
-  const hasSupabase = hosgHasSupabaseConfig();
-
-  // If we don't have Supabase configured, just hide the account overlay and
-  // show the character creator like before.
-  if (!accountOverlay || !charOverlay || !hasSupabase) {
-    if (accountOverlay) {
-      accountOverlay.style.display = "none";
-    }
-    if (charOverlay) {
-      charOverlay.style.display = "flex";
-    }
-    return;
-  }
-
-  // Online mode: force login before character selection
-  charOverlay.style.display = "none";
-  accountOverlay.style.display = "flex";
-
-  const emailInput = document.getElementById("acct-email");
-  const passwordInput = document.getElementById("acct-password");
-  const signinBtn = document.getElementById("acct-signin");
-  const signupBtn = document.getElementById("acct-signup");
-  const msgEl = document.getElementById("acct-message");
-
-  function setMessage(text) {
-    if (!msgEl) return;
-    msgEl.textContent = text || "";
-  }
-
-  async function handle(mode) {
-    const email = emailInput && emailInput.value || "";
-    const password = passwordInput && passwordInput.value || "";
-    try {
-      setMessage(mode === "signup" ? "Creating account..." : "Signing in...");
-      const account = await hosgAuthWithEmailPassword(mode, email, password);
-      if (!account) {
-        setMessage("Authentication failed.");
-        return;
-      }
-      setMessage("");
-      if (accountOverlay) {
-        accountOverlay.style.display = "none";
-      }
-      if (charOverlay) {
-        charOverlay.style.display = "flex";
-      }
-      // Load characters for this account into the slot UI
-      await hosgLoadCharacters();
-    } catch (e) {
-      console.warn("[HOSG] Account auth error", e);
-      setMessage(e && e.message ? e.message : "Authentication failed.");
-    }
-  }
-
-  if (signinBtn) {
-    signinBtn.addEventListener("click", function () {
-      handle("signin");
-    });
-  }
-  if (signupBtn) {
-    signupBtn.addEventListener("click", function () {
-      handle("signup");
-    });
-  }
-  if (passwordInput) {
-    passwordInput.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") {
-        handle("signin");
-      }
-    });
-  }
-}
-
-
-
 loadPlayerState();
-    const isMobile = (typeof navigator !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
     (function () {
-
       const canvas = document.getElementById("renderCanvas");
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer: true,
@@ -2050,8 +1134,6 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         appearance: playerState?.appearance,
         position: stats.position,
         rotationY: stats.rotationY,
-        accountId: playerState?.accountId || null,
-        characterId: playerState?.characterId || null,
         stats: {
           hp: stats.hp,
           maxHp: stats.maxHp,
@@ -2069,6 +1151,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     }
   };
 }
+
       function appendChat(text) {
         const log = document.getElementById("chat-log");
         const line = document.createElement("div");
@@ -2328,7 +1411,209 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
           thickness
         );
 
-        // ----- HERO: new procedural humanoid with smooth walk -----
+        
+
+        // ----- Grand starting city: buildings, streets, and points of interest -----
+        const buildingMat = new BABYLON.StandardMaterial("buildingMat", scene);
+        buildingMat.diffuseTexture = new BABYLON.Texture(
+          "https://playground.babylonjs.com/textures/facade.jpg",
+          scene
+        );
+        buildingMat.diffuseTexture.uScale = 1.5;
+        buildingMat.diffuseTexture.vScale = 1.0;
+        buildingMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+        const roofMat = new BABYLON.StandardMaterial("roofMat", scene);
+        roofMat.diffuseColor = new BABYLON.Color3(0.35, 0.12, 0.08);
+        roofMat.specularColor = new BABYLON.Color3(0.08, 0.08, 0.08);
+
+        const trimMat = new BABYLON.StandardMaterial("trimMat", scene);
+        trimMat.diffuseColor = new BABYLON.Color3(0.7, 0.65, 0.55);
+        trimMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+        const bannerMat = new BABYLON.StandardMaterial("bannerMat", scene);
+        bannerMat.diffuseColor = new BABYLON.Color3(0.25, 0.4, 0.75);
+        bannerMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.15);
+
+        function createHouseBlock(name, center, width, depth, height, floors) {
+          const house = BABYLON.MeshBuilder.CreateBox(
+            name + "_body",
+            { width, depth, height },
+            scene
+          );
+          house.position = center.clone();
+          house.position.y = height / 2;
+          house.material = buildingMat;
+          house.checkCollisions = true;
+          house.receiveShadows = true;
+          shadowGenerator.addShadowCaster(house);
+
+          // Slight trim at the base
+          const baseTrim = BABYLON.MeshBuilder.CreateBox(
+            name + "_base",
+            { width: width * 1.02, depth: depth * 1.02, height: 0.4 },
+            scene
+          );
+          baseTrim.position = new BABYLON.Vector3(center.x, 0.2, center.z);
+          baseTrim.material = trimMat;
+          baseTrim.checkCollisions = false;
+          baseTrim.receiveShadows = true;
+          shadowGenerator.addShadowCaster(baseTrim);
+
+          // Simple roof wedge
+          const roof = BABYLON.MeshBuilder.CreateBox(
+            name + "_roof",
+            { width: width * 1.02, depth: depth * 1.02, height: height * 0.4 },
+            scene
+          );
+          roof.position = center.clone();
+          roof.position.y = height + (height * 0.2);
+          roof.rotation.z = Math.PI / 16;
+          roof.material = roofMat;
+          roof.checkCollisions = false;
+          roof.receiveShadows = true;
+          shadowGenerator.addShadowCaster(roof);
+
+          // Optional upper floors as light variations
+          if (floors && floors > 1) {
+            for (let f = 1; f < floors; f++) {
+              const offsetY = f * (height * 0.45);
+              const upper = BABYLON.MeshBuilder.CreateBox(
+                name + "_floor_" + f,
+                { width: width * 0.9, depth: depth * 0.9, height: height * 0.6 },
+                scene
+              );
+              upper.position = center.clone();
+              upper.position.y = height / 2 + offsetY;
+              upper.material = buildingMat;
+              upper.checkCollisions = true;
+              upper.receiveShadows = true;
+              shadowGenerator.addShadowCaster(upper);
+            }
+          }
+
+          return house;
+        }
+
+        function createTower(name, center, radius, height) {
+          const tower = BABYLON.MeshBuilder.CreateCylinder(
+            name + "_tower",
+            { diameter: radius * 2, height },
+            scene
+          );
+          tower.position = center.clone();
+          tower.position.y = height / 2;
+          tower.material = buildingMat;
+          tower.checkCollisions = true;
+          tower.receiveShadows = true;
+          shadowGenerator.addShadowCaster(tower);
+
+          const cap = BABYLON.MeshBuilder.CreateCylinder(
+            name + "_cap",
+            { diameterTop: 0, diameterBottom: radius * 2.2, height: height * 0.25, tessellation: 6 },
+            scene
+          );
+          cap.position = center.clone();
+          cap.position.y = height + (height * 0.12);
+          cap.material = roofMat;
+          cap.receiveShadows = true;
+          shadowGenerator.addShadowCaster(cap);
+
+          return tower;
+        }
+
+        function createGate(name, center, width, height, depth) {
+          const gateBase = BABYLON.MeshBuilder.CreateBox(
+            name + "_arch",
+            { width, depth, height: height * 0.6 },
+            scene
+          );
+          gateBase.position = center.clone();
+          gateBase.position.y = height * 0.3;
+          gateBase.material = buildingMat;
+          gateBase.checkCollisions = true;
+          gateBase.receiveShadows = true;
+          shadowGenerator.addShadowCaster(gateBase);
+
+          // Two side towers framing the gate
+          const sideOffset = (width / 2) - depth;
+          createTower(name + "_left", new BABYLON.Vector3(center.x - sideOffset, 0, center.z - depth * 0.5), depth * 1.2, height * 1.4);
+          createTower(name + "_right", new BABYLON.Vector3(center.x + sideOffset, 0, center.z - depth * 0.5), depth * 1.2, height * 1.4);
+        }
+
+        function createMarketStall(name, center, width, depth) {
+          const table = BABYLON.MeshBuilder.CreateBox(
+            name + "_table",
+            { width, depth, height: 0.4 },
+            scene
+          );
+          table.position = center.clone();
+          table.position.y = 1;
+          table.material = trimMat;
+          table.receiveShadows = true;
+          shadowGenerator.addShadowCaster(table);
+
+          const canopy = BABYLON.MeshBuilder.CreateBox(
+            name + "_canopy",
+            { width: width * 1.05, depth: depth * 1.05, height: 0.2 },
+            scene
+          );
+          canopy.position = center.clone();
+          canopy.position.y = 2.2;
+          canopy.material = bannerMat;
+          canopy.receiveShadows = true;
+          shadowGenerator.addShadowCaster(canopy);
+
+          return table;
+        }
+
+        // Layout: plaza is centered at (0, 0.5, 30) with size 40x40.
+        // We ring the plaza with buildings and push taller structures outward.
+        (function populateStartingCity() {
+          const ringRadiusZ = 56; // just beyond the plaza north edge
+          const ringRadiusZSouth = 4; // south edge near the stone path
+          const blockWidth = 10;
+          const blockDepth = 8;
+          const blockHeight = 6;
+
+          // North row of houses beyond plaza
+          for (let i = -1; i <= 1; i++) {
+            const cx = i * (blockWidth + 2);
+            const cz = ringRadiusZ;
+            createHouseBlock("northHouse_" + i, new BABYLON.Vector3(cx, 0, cz), blockWidth, blockDepth, blockHeight, 2);
+          }
+
+          // South row of houses facing the path into town
+          for (let i = -1; i <= 1; i++) {
+            const cx = i * (blockWidth + 2);
+            const cz = ringRadiusZSouth;
+            createHouseBlock("southHouse_" + i, new BABYLON.Vector3(cx, 0, cz), blockWidth, blockDepth, blockHeight * 0.9, 1);
+          }
+
+          // East and West rows to enclose the plaza
+          const sideZ1 = 18;
+          const sideZ2 = 42;
+          for (let z of [sideZ1, sideZ2]) {
+            createHouseBlock("eastBlock_" + z, new BABYLON.Vector3(26, 0, z), blockWidth, blockDepth, blockHeight, 2);
+            createHouseBlock("westBlock_" + z, new BABYLON.Vector3(-26, 0, z), blockWidth, blockDepth, blockHeight, 2);
+          }
+
+          // A multi-storey inn overlooking the plaza on the north-east corner
+          createHouseBlock("grandInn", new BABYLON.Vector3(20, 0, 52), blockWidth * 1.4, blockDepth * 1.4, blockHeight * 1.3, 3);
+
+          // A mage tower overlooking the water to the south
+          createTower("mageTower", new BABYLON.Vector3(-32, 0, -36), 4, 22);
+
+          // City gate aligned with the stone path to the south
+          createGate("southGate", new BABYLON.Vector3(0, 0, -12), 24, 12, 4);
+
+          // Small market stalls at the north edge of the plaza
+          createMarketStall("fruitStall", new BABYLON.Vector3(-8, 0, 50), 4, 2.5);
+          createMarketStall("armorStall", new BABYLON.Vector3(0, 0, 50), 4, 2.5);
+          createMarketStall("trinketStall", new BABYLON.Vector3(8, 0, 50), 4, 2.5);
+        })();
+
+// ----- HERO: new procedural humanoid with smooth walk -----
         let heroBody = BABYLON.MeshBuilder.CreateCapsule(
           "heroBody",
           {
@@ -2552,15 +1837,15 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         // -------- Input systems --------
         const inputMap = {};
         window.addEventListener("keydown", function (ev) {
-          if (!ev || typeof ev.key !== "string") return;
           const key = ev.key.toLowerCase();
           inputMap[key] = true;
         });
         window.addEventListener("keyup", function (ev) {
-          if (!ev || typeof ev.key !== "string") return;
           const key = ev.key.toLowerCase();
           inputMap[key] = false;
         });
+
+        const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         const mobileControls = document.getElementById("mobile-controls");
         const joystickBase = document.getElementById("joystick-base");
         const joystickThumb = document.getElementById("joystick-thumb");
@@ -2922,7 +2207,6 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
       const scene = createScene();
 
       setupCharacterCreationUI();
-      setupAccountAndCharacterFlows();
 
       // Hook multiplayer client (requires external Node.js WebSocket server)
       let mpSendLocalState = null;

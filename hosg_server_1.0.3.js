@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
 let nextId = 1;
-const clients = new Map(); // ws -> { id, state, accountId, characterId }
+const clients = new Map(); // ws -> { id, state }
 
 function broadcast(obj, exceptWs = null) {
   const data = JSON.stringify(obj);
@@ -21,7 +21,7 @@ function broadcast(obj, exceptWs = null) {
 
 wss.on("connection", (ws) => {
   const id = nextId++;
-  clients.set(ws, { id, state: null, accountId: null, characterId: null });
+  clients.set(ws, { id, state: null });
 
   console.log("[MP] Client connected:", id);
 
@@ -38,17 +38,8 @@ wss.on("connection", (ws) => {
     if (!client) return;
 
     switch (msg.type) {
-      
-            case "hello": {
-        const player = msg.player || {};
-        const accountId = player.accountId || null;
-        const characterId = player.characterId || null;
-
-        // Store the initial snapshot from this client.
-        client.state = player;
-        client.accountId = accountId;
-        client.characterId = characterId;
-
+      case "hello": {
+        client.state = msg.player || {};
         // Send welcome snapshot back to this client
         const snapshot = [];
         for (const [otherWs, c] of clients) {
@@ -67,30 +58,6 @@ wss.on("connection", (ws) => {
       case "state": {
         // Update this client's state and broadcast to others
         client.state = msg.player || client.state;
-
-        // Keep account/character identifiers in sync with the latest payload, if present
-        if (msg.player) {
-          if (msg.player.accountId) client.accountId = msg.player.accountId;
-          if (msg.player.characterId) client.characterId = msg.player.characterId;
-        }
-
-        // Enforce single active connection per hero ID (characterId) here,
-        // after we know which hero this client actually represents.
-        if (client.characterId) {
-          for (const [otherWs, otherClient] of clients) {
-            if (otherWs === ws) continue;
-            if (!otherClient) continue;
-            if (otherClient.characterId === client.characterId) {
-              console.log("[MP] Duplicate hero session detected for characterId", client.characterId, "- closing older client", otherClient.id);
-              try {
-                otherWs.close(4001, "Another login for this hero was started.");
-              } catch (e) {
-                console.warn("[MP] Failed to close duplicate client socket:", e && e.message);
-              }
-            }
-          }
-        }
-
         broadcast(
           { type: "state", id: client.id, player: client.state },
           ws
@@ -114,10 +81,10 @@ wss.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", (code, reason) => {
+  ws.on("close", () => {
     const client = clients.get(ws);
     if (!client) return;
-    console.log("[MP] Client disconnected:", client.id, "code=", code, "reason=", reason && reason.toString());
+    console.log("[MP] Client disconnected:", client.id);
     clients.delete(ws);
     broadcast({ type: "playerLeft", id: client.id });
   });
