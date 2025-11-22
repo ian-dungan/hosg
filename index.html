@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.4</title>
+  <title>Heroes of Shady Grove v1.0.16</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -616,7 +616,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.4 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.16 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -973,7 +973,7 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   // Floating name label
   const plate = BABYLON.MeshBuilder.CreatePlane(
     "remoteName_" + id,
-    { width: 3, height: 0.6 },
+    { width: 3.4, height: 0.8 },
     scene
   );
   plate.parent = root;
@@ -991,10 +991,10 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   tex.drawText(
     ctxName,
     null,
-    42,
-    "20px Segoe UI",
+    46,
+    "26px Segoe UI",
     "#ffffff",
-    "transparent",
+    "rgba(0,0,0,0)",
     true
   );
   const plateMat = new BABYLON.StandardMaterial("remoteNameMat_" + id, scene);
@@ -1447,8 +1447,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
 
         const heroVisualRoot = new BABYLON.TransformNode("heroVisualRoot", scene);
         heroVisualRoot.parent = heroBody;
-        // Raise visual rig so boots sit on top of the ground plane
-        heroVisualRoot.position = new BABYLON.Vector3(0, -0.4, 0);
+        heroVisualRoot.position = new BABYLON.Vector3(0, -1.5, 0);
 
         const heroRig = {
           root: heroVisualRoot,
