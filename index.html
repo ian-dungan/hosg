@@ -2425,15 +2425,15 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         // -------- Input systems --------
         const inputMap = {};
         window.addEventListener("keydown", function (ev) {
+          if (!ev || typeof ev.key !== "string") return;
           const key = ev.key.toLowerCase();
           inputMap[key] = true;
         });
         window.addEventListener("keyup", function (ev) {
+          if (!ev || typeof ev.key !== "string") return;
           const key = ev.key.toLowerCase();
           inputMap[key] = false;
         });
-
-        const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         const mobileControls = document.getElementById("mobile-controls");
         const joystickBase = document.getElementById("joystick-base");
         const joystickThumb = document.getElementById("joystick-thumb");
