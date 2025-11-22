@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.24</title>
+  <title>Heroes of Shady Grove v1.0.25</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -797,7 +797,7 @@
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.24 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.25 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -1152,7 +1152,28 @@ async function hosgCreateCharacterFromState(state) {
 
   const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
 
+  // Enforce unique hero names (case-insensitive, not counting soft-deleted heroes)
+  const rawName = state && state.name ? String(state.name) : "";
+  const trimmedName = rawName.trim();
+  if (trimmedName) {
+    const { data: existingByName, error: nameLookupError } = await sb
+      .from(HOSG_CHARACTERS_TABLE)
+      .select(HOSG_CHARACTER_ID_COLUMN)
+      .ilike("name", trimmedName)
+      .eq("is_deleted", false)
+      .limit(1);
+
+    if (nameLookupError) {
+      console.warn("[HOSG] Character name lookup failed", nameLookupError);
+      throw new Error("Could not check hero names. Please try again.");
+    }
+    if (existingByName && existingByName.length > 0) {
+      throw new Error("A hero with that name already exists.");
+    }
+  }
+
   // Determine the next free slot index from 0..HOSG_MAX_CHARACTERS-1
+
   const usedSlots = (hosgCharacters || [])
     .filter(c => !c.is_deleted)
     .map(c => c.slot_index)
@@ -1188,6 +1209,28 @@ async function hosgUpdateCharacterFromState(id, state) {
   if (!sb || !hosgAccount) return;
 
   const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+
+  // Enforce unique hero names on rename (case-insensitive, not counting this hero or soft-deleted heroes)
+  const rawName = state && state.name ? String(state.name) : "";
+  const trimmedName = rawName.trim();
+  if (trimmedName) {
+    const { data: existingByName, error: nameLookupError } = await sb
+      .from(HOSG_CHARACTERS_TABLE)
+      .select(HOSG_CHARACTER_ID_COLUMN)
+      .ilike("name", trimmedName)
+      .eq("is_deleted", false)
+      .neq(HOSG_CHARACTER_ID_COLUMN, id)
+      .limit(1);
+
+    if (nameLookupError) {
+      console.warn("[HOSG] Character name lookup failed (update)", nameLookupError);
+      throw new Error("Could not check hero names. Please try again.");
+    }
+    if (existingByName && existingByName.length > 0) {
+      throw new Error("A hero with that name already exists.");
+    }
+  }
+
   const payload = hosgBuildCharacterUpdatePayloadFromState(state);
   payload.updated_at = new Date().toISOString();
 
