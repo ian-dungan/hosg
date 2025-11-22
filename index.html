@@ -1686,8 +1686,11 @@ function setupAccountAndCharacterFlows() {
 }
 
 
+
 loadPlayerState();
+    const isMobile = (typeof navigator !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
     (function () {
+
       const canvas = document.getElementById("renderCanvas");
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer: true,
