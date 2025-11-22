@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.25</title>
+  <title>Heroes of Shady Grove v1.0.26</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -797,7 +797,7 @@
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.25 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.26 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -1604,25 +1604,91 @@ function setupCharacterCreationUI() {
     // If we have an online account, create or update the hero record before entering the world
     if (hosgHasSupabaseConfig() && hosgAccount && playerState) {
       try {
-        if (!hosgCurrentCharacterId) {
-          // Creating a brand new hero
-          if (hosgCharacters && hosgCharacters.filter(function (c) { return !c.is_deleted; }).length >= HOSG_MAX_CHARACTERS) {
+        const sb = await hosgEnsureSupabase();
+        if (!sb) {
+          throw new Error("Online accounts are not available on this build.");
+        }
+
+        const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
+
+        // Normalize current hero name
+        const rawName = (playerState.name || "").trim();
+        let existingForAccount = null;
+
+        // If we don't already have a selected character, see if THIS ACCOUNT
+        // already has a hero with this name. If so, we treat this as "load hero"
+        // instead of "create brand-new hero" to avoid the duplicate-name error.
+        if (!hosgCurrentCharacterId && rawName) {
+          const { data: rows, error: findErr } = await sb
+            .from(HOSG_CHARACTERS_TABLE)
+            .select("*")
+            .eq(HOSG_CHARACTER_ACCOUNT_ID_COLUMN, accountIdVal)
+            .ilike("name", rawName)
+            .eq("is_deleted", false)
+            .limit(1);
+
+          if (findErr) {
+            console.warn("[HOSG] Failed to look up hero by name", findErr);
+          } else if (rows && rows.length > 0) {
+            existingForAccount = rows[0];
+          }
+        }
+
+        if (!hosgCurrentCharacterId && existingForAccount) {
+          // Case 1: Hero with this name already exists on THIS account.
+          // Reuse that hero instead of trying to create a new one.
+          hosgCurrentCharacterId = existingForAccount[HOSG_CHARACTER_ID_COLUMN];
+
+          // Keep local list in sync
+          if (!hosgCharacters) hosgCharacters = [];
+          const idx = hosgCharacters.findIndex(
+            (c) => c[HOSG_CHARACTER_ID_COLUMN] === hosgCurrentCharacterId
+          );
+          if (idx >= 0) {
+            hosgCharacters[idx] = Object.assign(
+              {},
+              hosgCharacters[idx],
+              hosgBuildCharacterUpdatePayloadFromState(playerState)
+            );
+          } else {
+            hosgCharacters.push(
+              Object.assign(
+                {},
+                existingForAccount,
+                hosgBuildCharacterUpdatePayloadFromState(playerState)
+              )
+            );
+          }
+          hosgRefreshCharacterListUI();
+
+          // Persist the latest appearance/position/stats
+          await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
+        } else if (!hosgCurrentCharacterId) {
+          // Case 2: No hero selected and name is new for this account: create one.
+          const activeCount = (hosgCharacters || []).filter((c) => !c.is_deleted).length;
+          if (activeCount >= HOSG_MAX_CHARACTERS) {
             window.alert("You have reached the maximum number of heroes on this account. Delete one before creating a new hero.");
             return;
           }
+
           const created = await hosgCreateCharacterFromState(playerState);
           if (created && created[HOSG_CHARACTER_ID_COLUMN]) {
             hosgCurrentCharacterId = created[HOSG_CHARACTER_ID_COLUMN];
+            if (!hosgCharacters) hosgCharacters = [];
             hosgCharacters.push(created);
             hosgRefreshCharacterListUI();
           }
         } else {
-          // Updating existing hero
+          // Case 3: We already have a current character: update it.
           await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
           if (hosgCharacters) {
             for (let i = 0; i < hosgCharacters.length; i++) {
               if (hosgCharacters[i][HOSG_CHARACTER_ID_COLUMN] === hosgCurrentCharacterId) {
-                hosgCharacters[i] = Object.assign({}, hosgCharacters[i], hosgBuildCharacterUpdatePayloadFromState(playerState));
+                hosgCharacters[i] = Object.assign(
+                  {},
+                  hosgCharacters[i],
+                  hosgBuildCharacterUpdatePayloadFromState(playerState)
+                );
                 break;
               }
             }
@@ -1630,9 +1696,12 @@ function setupCharacterCreationUI() {
         }
       } catch (e) {
         console.warn("[HOSG] Failed to sync hero on start", e);
+        window.alert(e && e.message ? e.message : "Could not sync hero to server.");
+        return; // Don't enter the world if we couldn't sync the hero
       }
     }
 
+    // Attach accountId / characterId to the in-memory player state
     if (hosgAccount && hosgAccount[HOSG_ACCOUNT_ID_COLUMN] != null) {
       playerState.accountId = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
     }
@@ -1642,10 +1711,14 @@ function setupCharacterCreationUI() {
 
     overlay.style.display = "none";
     // Initial save so the hero exists even if they immediately close the page
-    savePlayerStateRuntime(null, playerState.stats.hp, playerState.stats.maxHp,
+    savePlayerStateRuntime(
+      null,
+      playerState.stats.hp, playerState.stats.maxHp,
       playerState.stats.mp, playerState.stats.maxMp,
-      playerState.stats.xp, playerState.stats.level);
+      playerState.stats.xp, playerState.stats.level
+    );
   });
+
 
   // If we already have a saved hero, let them just hit Enter quickly
   nameInput.addEventListener("keydown", function (ev) {

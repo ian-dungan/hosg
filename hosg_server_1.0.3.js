@@ -116,10 +116,10 @@ case "state": {
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", (code, reason) => {
     const client = clients.get(ws);
     if (!client) return;
-    console.log("[MP] Client disconnected:", client.id);
+    console.log("[MP] Client disconnected:", client.id, "code=", code, "reason=", reason && reason.toString());
     clients.delete(ws);
     broadcast({ type: "playerLeft", id: client.id });
   });
