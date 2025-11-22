@@ -4,69 +4,6 @@
 
 const WebSocket = require("ws");
 
-const { Pool } = require("pg");
-
-const DATABASE_URL = process.env.DATABASE_URL || null;
-let dbPool = null;
-
-if (DATABASE_URL) {
-  dbPool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: DATABASE_URL.includes("localhost") || DATABASE_URL.includes("127.0.0.1")
-      ? false
-      : { rejectUnauthorized: false }
-  });
-  initDatabase().catch((err) => {
-    console.error("[DB] Failed to initialize database:", err.message);
-  });
-} else {
-  console.warn("[DB] DATABASE_URL not set; running without server-side character persistence.");
-}
-
-async function initDatabase() {
-  if (!dbPool) return;
-  await dbPool.query(`
-    CREATE TABLE IF NOT EXISTS hosg_characters (
-      id SERIAL PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL,
-      data JSONB NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  console.log("[DB] Database schema ready (hosg_characters).");
-}
-
-async function dbLoadCharacterByName(name) {
-  if (!dbPool || !name) return null;
-  const res = await dbPool.query(
-    "SELECT data FROM hosg_characters WHERE name = $1 LIMIT 1",
-    [name]
-  );
-  if (!res.rows.length) return null;
-  return res.rows[0].data;
-}
-
-async function dbUpsertCharacterFromState(player) {
-  if (!dbPool || !player || !player.name) return;
-  const name = player.name.toString().substring(0, 64);
-  const data = {
-    name: player.name,
-    role: player.role || null,
-    appearance: player.appearance || null,
-    stats: player.stats || null,
-    position: player.position || null,
-    rotationY: typeof player.rotationY === "number" ? player.rotationY : 0
-  };
-  await dbPool.query(
-    `INSERT INTO hosg_characters(name, data)
-     VALUES ($1, $2::jsonb)
-     ON CONFLICT (name)
-     DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-    [name, data]
-  );
-}
-
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
@@ -88,7 +25,7 @@ wss.on("connection", (ws) => {
 
   console.log("[MP] Client connected:", id);
 
-  ws.on("message", async (data) => {
+  ws.on("message", (data) => {
     let msg;
     try {
       msg = JSON.parse(data.toString());
@@ -102,24 +39,7 @@ wss.on("connection", (ws) => {
 
     switch (msg.type) {
       case "hello": {
-        const incoming = msg.player || {};
-        let resolved = incoming;
-
-        if (dbPool && incoming && incoming.name) {
-          try {
-            const stored = await dbLoadCharacterByName(incoming.name);
-            if (stored && typeof stored === "object") {
-              resolved = Object.assign({}, incoming, stored);
-            } else {
-              await dbUpsertCharacterFromState(incoming);
-            }
-          } catch (err) {
-            console.warn("[DB] hello handler error:", err.message);
-          }
-        }
-
-        client.state = resolved;
-
+        client.state = msg.player || {};
         // Send welcome snapshot back to this client
         const snapshot = [];
         for (const [otherWs, c] of clients) {
@@ -142,12 +62,6 @@ wss.on("connection", (ws) => {
           { type: "state", id: client.id, player: client.state },
           ws
         );
-
-        if (dbPool && client.state && client.state.name) {
-          dbUpsertCharacterFromState(client.state).catch((err) => {
-            console.warn("[DB] state upsert error:", err.message);
-          });
-        }
         break;
       }
       case "chat": {

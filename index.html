@@ -973,7 +973,7 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   // Floating name label
   const plate = BABYLON.MeshBuilder.CreatePlane(
     "remoteName_" + id,
-    { width: 3.4, height: 0.8 },
+    { width: 3, height: 0.6 },
     scene
   );
   plate.parent = root;
@@ -991,10 +991,10 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   tex.drawText(
     ctxName,
     null,
-    46,
-    "26px Segoe UI",
+    42,
+    "20px Segoe UI",
     "#ffffff",
-    "rgba(0,0,0,0)",
+    "transparent",
     true
   );
   const plateMat = new BABYLON.StandardMaterial("remoteNameMat_" + id, scene);
