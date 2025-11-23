@@ -208,36 +208,66 @@ class NPCManager {
     this.enemies = new Map();
     this.aiUpdateInterval = 200;
     this.lastAIUpdate = 0;
+    
+    // Initialize asset loader
+    if (!window.assetLoaderInstance) {
+      window.assetLoaderInstance = new AssetLoader(scene);
+    }
+    this.assetLoader = window.assetLoaderInstance;
   }
 
-  // Create a test enemy without database
-  createTestEnemy(id, position, name = "Test Wolf", level = 3) {
+  // Create a test enemy with real 3D model support
+  async createTestEnemy(id, position, name = "Test Wolf", level = 3) {
     const scene = this.scene;
-    const root = new BABYLON.TransformNode(id, scene);
+    let meshResult = null;
+    let root = null;
+    let body = null;
+    let animationGroups = [];
     
-    const body = BABYLON.MeshBuilder.CreateCapsule(id + "_body", {
-      height: 2.4, radius: 0.5
-    }, scene);
-    body.parent = root;
-    body.position.y = 1.2;
+    // Try to load real 3D model
+    try {
+      console.log(`[NPC] Attempting to load enemy_wolf model for ${id}`);
+      meshResult = await this.assetLoader.loadAsset('enemy_wolf', { position: position.clone() });
+      
+      if (meshResult && meshResult.rootMesh) {
+        root = meshResult.rootMesh;
+        body = meshResult.meshes[0];
+        animationGroups = meshResult.animationGroups || [];
+        console.log(`[NPC] ✓ Loaded real wolf model for ${id} with ${animationGroups.length} animations`);
+      }
+    } catch (error) {
+      console.warn(`[NPC] Failed to load wolf model, using procedural fallback:`, error.message);
+    }
+    
+    // Fallback to procedural if model loading failed
+    if (!root) {
+      console.log(`[NPC] Using procedural geometry for ${id}`);
+      root = new BABYLON.TransformNode(id, scene);
+      
+      body = BABYLON.MeshBuilder.CreateCapsule(id + "_body", {
+        height: 2.4, radius: 0.5
+      }, scene);
+      body.parent = root;
+      body.position.y = 1.2;
 
-    const head = BABYLON.MeshBuilder.CreateSphere(id + "_head", {
-      diameter: 0.7
-    }, scene);
-    head.parent = root;
-    head.position.y = 2.3;
+      const head = BABYLON.MeshBuilder.CreateSphere(id + "_head", {
+        diameter: 0.7
+      }, scene);
+      head.parent = root;
+      head.position.y = 2.3;
 
-    root.position = position.clone();
+      root.position = position.clone();
 
-    const mat = new BABYLON.StandardMaterial(id + "_mat", scene);
-    mat.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.1);
-    mat.emissiveColor = new BABYLON.Color3(0.1, 0, 0);
-    body.material = mat;
-    head.material = mat;
+      const mat = new BABYLON.StandardMaterial(id + "_mat", scene);
+      mat.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.1);
+      mat.emissiveColor = new BABYLON.Color3(0.1, 0, 0);
+      body.material = mat;
+      head.material = mat;
 
-    if (scene.shadowGenerator) {
-      scene.shadowGenerator.addShadowCaster(body);
-      scene.shadowGenerator.addShadowCaster(head);
+      if (scene.shadowGenerator) {
+        scene.shadowGenerator.addShadowCaster(body);
+        scene.shadowGenerator.addShadowCaster(head);
+      }
     }
 
     const nameplate = this.createNameplate(root, name, level, "hostile");
@@ -272,8 +302,15 @@ class NPCManager {
         lastAction: 0,
         actionCooldown: 1500
       },
-      mesh: { root, body, head, nameplate, healthBar }
+      mesh: { root, body, nameplate, healthBar },
+      animationGroups: animationGroups
     };
+    
+    // Start idle animation if available
+    if (enemy.animationGroups.length > 0) {
+      enemy.animationGroups[0].start(true); // Loop idle animation
+      console.log(`[NPC] Playing idle animation for ${id}`);
+    }
 
     this.enemies.set(id, enemy);
     return enemy;
@@ -366,6 +403,9 @@ class NPCManager {
 
     switch (ai.state) {
       case "idle":
+        // Play idle animation
+        this.playAnimation(enemy, 0); // Animation 0 = idle
+        
         const nearestPlayer = this.findNearestPlayer(enemy, players, ai.aggroRadius);
         if (nearestPlayer) {
           ai.target = nearestPlayer;
@@ -399,9 +439,13 @@ class NPCManager {
         }
 
         if (distToTarget > enemy.stats.attackRange) {
+          // Play walk/run animation while moving
+          this.playAnimation(enemy, 1); // Animation 1 = walk
           this.moveToward(enemy, ai.target.position, deltaTime);
         } else {
           if (now - ai.lastAction > ai.actionCooldown) {
+            // Play attack animation
+            this.playAnimation(enemy, 2, false); // Animation 2 = attack, don't loop
             this.performAttack(enemy, ai.target);
             ai.lastAction = now;
             ai.actionCooldown = 1500 + Math.random() * 500;
@@ -410,6 +454,9 @@ class NPCManager {
         break;
 
       case "returning":
+        // Play walk animation
+        this.playAnimation(enemy, 1); // Animation 1 = walk
+        
         const distHome = BABYLON.Vector3.Distance(
           enemy.mesh.root.position,
           ai.homePosition
@@ -421,6 +468,20 @@ class NPCManager {
           this.moveToward(enemy, ai.homePosition, deltaTime);
         }
         break;
+    }
+  }
+
+  // Helper method to play animations
+  playAnimation(npc, animIndex, loop = true) {
+    if (!npc.animationGroups || npc.animationGroups.length === 0) return;
+    if (animIndex >= npc.animationGroups.length) return;
+    
+    // Stop all animations first
+    npc.animationGroups.forEach(anim => anim.stop());
+    
+    // Play the requested animation
+    if (npc.animationGroups[animIndex]) {
+      npc.animationGroups[animIndex].start(loop);
     }
   }
 
@@ -499,7 +560,7 @@ window.GameSystems = {
     console.log("[HOSG] Game systems initialized");
   },
   
-  spawnTestEnemies: function(scene) {
+  spawnTestEnemies: async function(scene) {
     // Spawn 5 test wolves around the starting area
     const positions = [
       new BABYLON.Vector3(15, 0, 15),
@@ -509,11 +570,14 @@ window.GameSystems = {
       new BABYLON.Vector3(25, 0, 0)
     ];
     
-    positions.forEach((pos, i) => {
-      this.npcManager.createTestEnemy(`enemy_wolf_${i}`, pos, "Gray Wolf", 3);
-    });
+    console.log('[HOSG] Spawning test enemies...');
     
-    console.log("[HOSG] Spawned 5 test enemies");
+    for (let i = 0; i < positions.length; i++) {
+      await this.npcManager.createTestEnemy(`enemy_wolf_${i}`, positions[i], "Gray Wolf", 3);
+      console.log(`[HOSG] Spawned wolf ${i+1}/5`);
+    }
+    
+    console.log("[HOSG] ✓ Spawned 5 test enemies");
   }
 };
 

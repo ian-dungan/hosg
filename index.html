@@ -712,6 +712,7 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="hosg_config.js"></script>
   <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="hosg_asset_loader.js"></script>
   <script src="hosg_game_systems.js"></script>
 </head>
 <body>
@@ -2437,8 +2438,14 @@ const createScene = function () {
   createNpc("Mennonite Merchant", new BABYLON.Vector3(4, 1.5, 34));
   createNpc("Village Guard", new BABYLON.Vector3(-6, 1.5, 26));
 
-  // Spawn test enemies
-  GameSystems.spawnTestEnemies(scene);
+  // Spawn test enemies asynchronously (loads real 3D models!)
+  GameSystems.spawnTestEnemies(scene).then(() => {
+    console.log('[HOSG] ✓ All test enemies spawned with 3D models!');
+    appendChat("Welcome to Shady Grove! Press Tab to target enemies.");
+  }).catch(err => {
+    console.error('[HOSG] Error spawning enemies:', err);
+    appendChat("Game ready! (Some 3D models failed to load, using fallbacks)");
+  });
 
   const inputMap = {};
   window.addEventListener("keydown", function (ev) {
@@ -3006,6 +3013,76 @@ document.addEventListener('keydown', function(e) {
     window.useHotbarSkill(parseInt(e.key));
   }
 });
+
+// ==================== 3D MODEL TESTING ====================
+// This tests if your models are loading correctly from GitHub
+async function testModelLoading() {
+  console.log('🧪 [Model Test] Starting 3D model loading test...');
+  appendChat("🧪 Testing 3D model loading from GitHub...");
+  
+  if (!window.assetLoaderInstance) {
+    window.assetLoaderInstance = new AssetLoader(scene);
+  }
+  const loader = window.assetLoaderInstance;
+  
+  // Test 1: Wolf model
+  try {
+    console.log('[Model Test] Attempting to load wolf model...');
+    const testWolf = await loader.loadAsset('enemy_wolf', {
+      position: new BABYLON.Vector3(30, 0, 30)
+    });
+    
+    if (testWolf && testWolf.rootMesh) {
+      console.log('✅ [Model Test] Wolf model loaded successfully!');
+      console.log(`   - ${testWolf.meshes.length} meshes`);
+      console.log(`   - ${testWolf.animationGroups.length} animations`);
+      appendChat("✅ Wolf 3D model loaded!");
+      
+      // Play animation if available
+      if (testWolf.animationGroups.length > 0) {
+        testWolf.animationGroups[0].start(true);
+        console.log('✅ [Model Test] Wolf animation playing!');
+      }
+    } else {
+      console.log('⚠️ [Model Test] Wolf model loaded but using procedural fallback');
+      appendChat("⚠️ Wolf using fallback geometry");
+    }
+  } catch (error) {
+    console.log('❌ [Model Test] Wolf model failed:', error.message);
+    appendChat("❌ Wolf model failed (check console)");
+  }
+  
+  // Test 2: Tree model
+  try {
+    console.log('[Model Test] Attempting to load tree model...');
+    const testTree = await loader.loadAsset('tree_oak', {
+      position: new BABYLON.Vector3(35, 0, 30)
+    });
+    
+    if (testTree && testTree.rootMesh) {
+      console.log('✅ [Model Test] Tree model loaded successfully!');
+      appendChat("✅ Tree 3D model loaded!");
+    } else {
+      console.log('⚠️ [Model Test] Tree model loaded but using procedural fallback');
+      appendChat("⚠️ Tree using fallback geometry");
+    }
+  } catch (error) {
+    console.log('❌ [Model Test] Tree model failed:', error.message);
+    appendChat("❌ Tree model failed (check console)");
+  }
+  
+  console.log('🎉 [Model Test] Model loading test complete!');
+  console.log('📝 [Model Test] Check above for results. If models failed:');
+  console.log('   1. Make sure you uploaded GLB files to GitHub');
+  console.log('   2. Check URLs match: https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/...');
+  console.log('   3. File names are case-sensitive!');
+  appendChat("Model test complete - check browser console for details");
+}
+
+// Run model test after scene is ready (with delay to let game systems initialize)
+setTimeout(() => {
+  testModelLoading();
+}, 3000); // 3 second delay
 
 scene.onPointerObservable.add(function(pointerInfo) {
   if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
