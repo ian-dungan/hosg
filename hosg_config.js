@@ -7,8 +7,8 @@
 // Get these from: https://app.supabase.com/project/_/settings/api
 const HOSG_CONFIG = {
   supabase: {
-    url: 'YOUR_SUPABASE_URL_HERE',           // e.g., 'https://xxxxx.supabase.co'
-    anonKey: 'YOUR_SUPABASE_ANON_KEY_HERE'   // Your public anon key
+    url: 'https://vaxfoafjjybwcxwhicla.supabase.co',           // e.g., 'https://xxxxx.supabase.co'
+    anonKey: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'   // Your public anon key
   },
 
   multiplayer: {
