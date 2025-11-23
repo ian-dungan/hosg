@@ -797,7 +797,7 @@
 <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.27 -->
+  <!-- Game: Heroes of Shady Grove | Version: 1.0.31 -->
 
   <canvas id="renderCanvas"></canvas>
 
@@ -930,6 +930,23 @@
   </div>
 
   <script>
+
+// NPC registry for the starting city and future zones
+const hosgNpcDefinitions = {};
+
+function hosgRegisterNpc(name, def) {
+  if (!name) return null;
+  const base = {
+    name,
+    role: "",
+    kind: "citizen",
+    lines: [
+      "Hello, adventurer."
+    ]
+  };
+  hosgNpcDefinitions[name] = Object.assign(base, def || {});
+  return hosgNpcDefinitions[name];
+}
 
 // Persistent player state (for online-ready save structure)
 const HOSG_SAVE_KEY = "hosg_player_v1";
@@ -2338,7 +2355,347 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
           thickness
         );
 
-        // ----- HERO: new procedural humanoid with smooth walk -----
+        
+// ----- GRAND STARTING CITY: Shady Grove Landing -----
+const cityBuildingMat = new BABYLON.StandardMaterial("cityBuildingMat", scene);
+cityBuildingMat.diffuseColor = new BABYLON.Color3(0.78, 0.74, 0.65);
+cityBuildingMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+const cityRoofMat = new BABYLON.StandardMaterial("cityRoofMat", scene);
+cityRoofMat.diffuseColor = new BABYLON.Color3(0.42, 0.18, 0.12);
+cityRoofMat.specularColor = new BABYLON.Color3(0.06, 0.06, 0.06);
+
+const cityAccentMat = new BABYLON.StandardMaterial("cityAccentMat", scene);
+cityAccentMat.diffuseColor = new BABYLON.Color3(0.86, 0.82, 0.72);
+cityAccentMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+const cityBannerMat = new BABYLON.StandardMaterial("cityBannerMat", scene);
+cityBannerMat.diffuseColor = new BABYLON.Color3(0.18, 0.32, 0.68);
+cityBannerMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.15);
+
+function createCityHouse(name, center, width, depth, height, floors) {
+  const base = BABYLON.MeshBuilder.CreateBox(
+    name + "_base",
+    { width, depth, height },
+    scene
+  );
+  base.position = center.clone();
+  base.position.y = height / 2;
+  base.material = cityBuildingMat;
+  base.checkCollisions = true;
+  base.receiveShadows = true;
+  shadowGenerator.addShadowCaster(base);
+
+  const roof = BABYLON.MeshBuilder.CreateBox(
+    name + "_roof",
+    { width: width * 1.02, depth: depth * 1.02, height: height * 0.45 },
+    scene
+  );
+  roof.position = center.clone();
+  roof.position.y = height + (height * 0.25);
+  roof.rotation.z = Math.PI / 18;
+  roof.material = cityRoofMat;
+  roof.checkCollisions = false;
+  roof.receiveShadows = true;
+  shadowGenerator.addShadowCaster(roof);
+
+  if (floors && floors > 1) {
+    for (let f = 1; f < floors; f++) {
+      const upper = BABYLON.MeshBuilder.CreateBox(
+        name + "_floor_" + f,
+        { width: width * 0.9, depth: depth * 0.9, height: height * 0.7 },
+        scene
+      );
+      upper.position = center.clone();
+      upper.position.y = height / 2 + f * (height * 0.9);
+      upper.material = cityBuildingMat;
+      upper.checkCollisions = true;
+      upper.receiveShadows = true;
+      shadowGenerator.addShadowCaster(upper);
+    }
+  }
+
+  const trim = BABYLON.MeshBuilder.CreateBox(
+    name + "_trim",
+    { width: width * 1.02, depth: depth * 1.02, height: 0.4 },
+    scene
+  );
+  trim.position = new BABYLON.Vector3(center.x, 0.2, center.z);
+  trim.material = cityAccentMat;
+  trim.checkCollisions = false;
+  trim.receiveShadows = true;
+  shadowGenerator.addShadowCaster(trim);
+
+  return base;
+}
+
+function createCityTower(name, center, radius, height) {
+  const tower = BABYLON.MeshBuilder.CreateCylinder(
+    name + "_tower",
+    { diameter: radius * 2, height },
+    scene
+  );
+  tower.position = center.clone();
+  tower.position.y = height / 2;
+  tower.material = cityBuildingMat;
+  tower.checkCollisions = true;
+  tower.receiveShadows = true;
+  shadowGenerator.addShadowCaster(tower);
+
+  const cap = BABYLON.MeshBuilder.CreateCylinder(
+    name + "_cap",
+    { diameterTop: 0, diameterBottom: radius * 2.3, height: height * 0.3, tessellation: 6 },
+    scene
+  );
+  cap.position = center.clone();
+  cap.position.y = height + (height * 0.2);
+  cap.material = cityRoofMat;
+  cap.receiveShadows = true;
+  shadowGenerator.addShadowCaster(cap);
+
+  return tower;
+}
+
+function createCityGate(name, center, spanWidth, gateHeight, thickness) {
+  const arch = BABYLON.MeshBuilder.CreateBox(
+    name + "_arch",
+    { width: spanWidth, depth: thickness * 1.2, height: gateHeight * 0.6 },
+    scene
+  );
+  arch.position = center.clone();
+  arch.position.y = gateHeight * 0.3;
+  arch.material = cityBuildingMat;
+  arch.checkCollisions = true;
+  arch.receiveShadows = true;
+  shadowGenerator.addShadowCaster(arch);
+
+  const sideOffset = (spanWidth / 2) - thickness * 1.6;
+  createCityTower(
+    name + "_left",
+    new BABYLON.Vector3(center.x - sideOffset, 0, center.z - thickness * 0.6),
+    thickness * 1.6,
+    gateHeight * 1.4
+  );
+  createCityTower(
+    name + "_right",
+    new BABYLON.Vector3(center.x + sideOffset, 0, center.z - thickness * 0.6),
+    thickness * 1.6,
+    gateHeight * 1.4
+  );
+}
+
+function createMarketStall(name, center, width, depth) {
+  const table = BABYLON.MeshBuilder.CreateBox(
+    name + "_table",
+    { width, depth, height: 0.4 },
+    scene
+  );
+  table.position = center.clone();
+  table.position.y = 1;
+  table.material = cityAccentMat;
+  table.receiveShadows = true;
+  shadowGenerator.addShadowCaster(table);
+
+  const canopy = BABYLON.MeshBuilder.CreateBox(
+    name + "_canopy",
+    { width: width * 1.05, depth: depth * 1.05, height: 0.25 },
+    scene
+  );
+  canopy.position = center.clone();
+  canopy.position.y = 2.2;
+  canopy.material = cityBannerMat;
+  canopy.receiveShadows = true;
+  shadowGenerator.addShadowCaster(canopy);
+}
+
+function hosgSpawnNpc(name, position, def) {
+  if (def) {
+    hosgRegisterNpc(name, def);
+  } else if (!hosgNpcDefinitions[name]) {
+    hosgRegisterNpc(name, {});
+  }
+  const npc = createNpc(name, position);
+  npc.metadata = npc.metadata || {};
+  npc.metadata.npcName = name;
+  return npc;
+}
+
+(function buildStartingCity() {
+  // Inside-wall house ring around the central plaza
+  const houseW = 8;
+  const houseD = 6;
+  const houseH = 4.2;
+
+  // North row of houses overlooking the plaza
+  for (let i = -1; i <= 1; i++) {
+    const cx = i * (houseW + 1.5);
+    const cz = 30 + 16; // just inside the north wall at z ~ 46
+    createCityHouse("northHouse_" + i, new BABYLON.Vector3(cx, 0, cz), houseW, houseD, houseH, 2);
+  }
+
+  // South row facing the approach road
+  for (let i = -1; i <= 1; i++) {
+    const cx = i * (houseW + 1.5);
+    const cz = 30 - 16; // inside south wall at z ~ 14
+    createCityHouse("southHouse_" + i, new BABYLON.Vector3(cx, 0, cz), houseW, houseD, houseH * 0.9, 1);
+  }
+
+  // East and west sides of the plaza
+  createCityHouse("eastHouse_1", new BABYLON.Vector3(30 - 5, 0, 30 + 8), houseW, houseD, houseH, 2);
+  createCityHouse("eastHouse_2", new BABYLON.Vector3(30 - 5, 0, 30 - 8), houseW, houseD, houseH, 2);
+  createCityHouse("westHouse_1", new BABYLON.Vector3(-30 + 5, 0, 30 + 8), houseW, houseD, houseH, 2);
+  createCityHouse("westHouse_2", new BABYLON.Vector3(-30 + 5, 0, 30 - 8), houseW, houseD, houseH, 2);
+
+  // A grand hall on the northern interior wall
+  createCityHouse(
+    "grandHall",
+    new BABYLON.Vector3(0, 0, 30 + 18),
+    houseW * 2.4,
+    houseD * 1.6,
+    houseH * 1.6,
+    3
+  );
+
+  // A mage tower watching the river to the west
+  createCityTower("mageTower", new BABYLON.Vector3(-32, 0, 18), 3.2, 18);
+
+  // City gate aligned with the stone path at the south wall
+  createCityGate("southGate", new BABYLON.Vector3(0, 0, 30 - 20), 22, 10, 2.4);
+
+  // Market stalls along the north edge of the plaza
+  createMarketStall("market_weapons", new BABYLON.Vector3(-8, 0, 30 + 10), 3.4, 2.4);
+  createMarketStall("market_armor", new BABYLON.Vector3(0, 0, 30 + 10), 3.4, 2.4);
+  createMarketStall("market_food", new BABYLON.Vector3(8, 0, 30 + 10), 3.4, 2.4);
+
+  // Populate core NPCs for the starting city
+  hosgSpawnNpc(
+    "Captain Roderic",
+    new BABYLON.Vector3(0, 1.5, 12),
+    {
+      role: "Gate Captain",
+      kind: "guard",
+      lines: [
+        "Welcome to Shady Grove Landing. Keep your blade sharp and your wits sharper.",
+        "No monsters past the wall on my watch.",
+        "If you're looking for work, check the notice board in the plaza."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Town Crier Ellyn",
+    new BABYLON.Vector3(-2, 1.5, 30),
+    {
+      role: "Town Crier",
+      kind: "herald",
+      lines: [
+        "Hear ye! Hear ye! New adventurers are arriving from every corner of Shady Grove.",
+        "Quests and bounties will be posted soon. Keep an eye on the plaza!",
+        "Glory and riches await those brave enough to step beyond the walls."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Innkeeper Rhea",
+    new BABYLON.Vector3(10, 1.5, 40),
+    {
+      role: "Innkeeper",
+      kind: "merchant",
+      lines: [
+        "Rooms are full, but I've always got a warm stew for a hungry hero.",
+        "Come back once the coin starts flowing and I'll have a proper tavern menu for you.",
+        "Rest your feet at the Golden Grove when the road gets rough."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Smith Torvald",
+    new BABYLON.Vector3(18, 1.5, 28),
+    {
+      role: "Blacksmith",
+      kind: "merchant",
+      lines: [
+        "Blades, bucklers, and bad ideas. I can help with two of those.",
+        "I'll be reforging gear soon as the forges are hot and the gold is right.",
+        "Steel remembers the hand that swings it. Swing true."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Armorer Brinna",
+    new BABYLON.Vector3(18, 1.5, 32),
+    {
+      role: "Armorer",
+      kind: "merchant",
+      lines: [
+        "Armor's no good if you can't move in it. I build for fighters, not statues.",
+        "I'll fit you for proper plate once you've proven you can survive leather.",
+        "A dented breastplate is just a story with sharp edges."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Magister Selian",
+    new BABYLON.Vector3(-18, 1.5, 32),
+    {
+      role: "Arcane Instructor",
+      kind: "trainer",
+      lines: [
+        "Magic is a pact, not a toy. Break it, and it will break you.",
+        "I'll teach you to bend the elements once you've shown discipline.",
+        "The veil beyond Shady Grove is thin. Best you learn to respect it."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Guild Registrar Mira",
+    new BABYLON.Vector3(0, 1.5, 42),
+    {
+      role: "Guild Registrar",
+      kind: "guild",
+      lines: [
+        "One day, banners from a hundred guilds will hang over this plaza.",
+        "I can see it now: your name etched on the rolls of legend.",
+        "Bring friends, form a company, and I'll see it recognized."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Mennonite Merchant",
+    new BABYLON.Vector3(4, 1.5, 34),
+    {
+      role: "Traveling Merchant",
+      kind: "merchant",
+      lines: [
+        "Fresh bread and shiny swords! Trading coming soon.",
+        "I've got wares from every corner of Shady Grove—once the market opens.",
+        "Coins first, stories later. That's my way of doing business."
+      ]
+    }
+  );
+
+  hosgSpawnNpc(
+    "Village Guard Tomas",
+    new BABYLON.Vector3(-6, 1.5, 26),
+    {
+      role: "City Guard",
+      kind: "guard",
+      lines: [
+        "Stay out of trouble and we won't have a problem.",
+        "The walls are sturdy, but it's the people inside that matter.",
+        "If you see anything strange outside the gates, report to Captain Roderic."
+      ]
+    }
+  );
+})();
+
+// ----- HERO: new procedural humanoid with smooth walk -----
         let heroBody = BABYLON.MeshBuilder.CreateCapsule(
           "heroBody",
           {
@@ -2556,8 +2913,7 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
           return npc;
         }
 
-        createNpc("Mennonite Merchant", new BABYLON.Vector3(4, 1.5, 34));
-        createNpc("Village Guard", new BABYLON.Vector3(-6, 1.5, 26));
+        // NPCs are now spawned as part of the Shady Grove Landing buildStartingCity() helper.
 
         // -------- Input systems --------
         const inputMap = {};
@@ -2918,15 +3274,28 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
         });
 
         scene.onPointerObservable.add(function (pointerInfo) {
-          if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERPICK) {
-            const pick = pointerInfo.pickInfo;
-            if (pick.hit && pick.pickedMesh && pick.pickedMesh.name.includes("Mennonite")) {
-              appendChat("Mennonite Merchant: 'Fresh bread and shiny swords! Trading coming soon.'");
-            }
-          }
-        });
+  if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERPICK) {
+    const pick = pointerInfo.pickInfo;
+    if (pick && pick.hit && pick.pickedMesh) {
+      const mesh = pick.pickedMesh;
+      const npcName =
+        (mesh.metadata && mesh.metadata.npcName) ||
+        (mesh.parent && mesh.parent.metadata && mesh.parent.metadata.npcName) ||
+        mesh.name;
+      const def = hosgNpcDefinitions[npcName];
+      if (def) {
+        const lines = (def.lines && def.lines.length)
+          ? def.lines
+          : ["Hello, adventurer."];
+        const line = lines[Math.floor(Math.random() * lines.length)];
+        const label = def.role ? def.name + " (" + def.role + ")" : def.name;
+        appendChat(label + ": " + line);
+      }
+    }
+  }
+});
 
-        return scene;
+return scene;
       };
 
       const scene = createScene();
