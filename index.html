@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.30</title>
+  <title>Heroes of Shady Grove v1.0.32</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -932,6 +932,35 @@
   <script>
 
 // NPC registry for the starting city and future zones
+
+function hosgInteractWithNearestNpc() {
+  if (!scene || !scene.meshes || !heroBody) return;
+  let best = null;
+  let bestDistSq = Number.POSITIVE_INFINITY;
+  const heroPos = heroBody.position;
+  const maxDistSq = 7 * 7;
+  for (const mesh of scene.meshes) {
+    if (!mesh || !mesh.metadata || !mesh.metadata.npcName) continue;
+    const dx = mesh.position.x - heroPos.x;
+    const dz = mesh.position.z - heroPos.z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < maxDistSq && distSq < bestDistSq) {
+      bestDistSq = distSq;
+      best = mesh;
+    }
+  }
+  if (!best) return;
+  const npcName = best.metadata.npcName;
+  const def = hosgNpcDefinitions[npcName];
+  if (!def) return;
+  const lines = (def.lines && def.lines.length)
+    ? def.lines
+    : ["Hello, adventurer."];
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  const label = def.role ? def.name + " (" + def.role + ")" : def.name;
+  appendChat(label + ": " + line);
+}
+
 const hosgNpcDefinitions = {};
 
 function hosgRegisterNpc(name, def) {
@@ -2520,7 +2549,7 @@ function hosgSpawnNpc(name, position, def) {
   return npc;
 }
 
-(function buildStartingCity() {
+function buildStartingCity() {
   // Inside-wall house ring around the central plaza
   const houseW = 8;
   const houseD = 6;
@@ -2693,7 +2722,7 @@ function hosgSpawnNpc(name, position, def) {
       ]
     }
   );
-})();
+}
 
 // ----- HERO: new procedural humanoid with smooth walk -----
         let heroBody = BABYLON.MeshBuilder.CreateCapsule(
@@ -2914,6 +2943,7 @@ function hosgSpawnNpc(name, position, def) {
         }
 
         // NPCs are now spawned as part of the Shady Grove Landing buildStartingCity() helper.
+        buildStartingCity();
 
         // -------- Input systems --------
         const inputMap = {};
@@ -3295,6 +3325,14 @@ function hosgSpawnNpc(name, position, def) {
   }
 });
 
+
+window.addEventListener("keydown", function (evt) {
+  const chatInput = document.getElementById("chat-input");
+  if (chatInput && chatInput === document.activeElement) return;
+  if (evt.key === "e" || evt.key === "E") {
+    hosgInteractWithNearestNpc();
+  }
+});
 return scene;
       };
 
