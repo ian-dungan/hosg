@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.32</title>
+  <title>Heroes of Shady Grove v2.0.0</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -158,6 +158,75 @@
       border-radius: inherit;
       border: 1px solid rgba(255, 255, 255, 0.35);
       pointer-events: none;
+    }
+
+    #target-frame {
+      display: none;
+      background: rgba(5, 5, 15, 0.95);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 80, 80, 0.6);
+      padding: 8px 10px;
+      box-shadow: 0 0 15px rgba(255, 80, 80, 0.4);
+      backdrop-filter: blur(6px);
+      min-width: 180px;
+    }
+
+    #target-name {
+      font-size: 13px;
+      color: #ff8080;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    #hotbar {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 5px;
+      z-index: 20;
+      pointer-events: auto;
+    }
+
+    .hotbar-slot {
+      width: 50px;
+      height: 50px;
+      background: rgba(10, 10, 30, 0.9);
+      border: 2px solid #4a9eff;
+      border-radius: 8px;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .hotbar-slot:hover {
+      transform: scale(1.1);
+      border-color: #ffd700;
+    }
+
+    .hotbar-slot:active {
+      transform: scale(0.95);
+    }
+
+    .hotbar-slot .skill-icon {
+      font-size: 24px;
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .hotbar-slot .keybind {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      font-size: 10px;
+      color: #aaa;
+      background: rgba(0,0,0,0.5);
+      padding: 1px 3px;
+      border-radius: 2px;
     }
 
     
@@ -371,7 +440,6 @@
   text-align: right;
 }
 
-/* Account login overlay */
 #account-overlay {
   position: fixed;
   inset: 0;
@@ -633,172 +701,20 @@
     }
 
     @media (max-width: 768px) {
-      
-#char-create-overlay {
-  position: fixed;
-  inset: 0;
-  background: radial-gradient(circle at top, rgba(15, 20, 45, 0.96), rgba(3, 3, 8, 0.98));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 20;
-}
-
-#char-create-card {
-  width: 360px;
-  max-width: 92%;
-  background: rgba(4, 6, 18, 0.96);
-  border-radius: 18px;
-  padding: 18px 20px 16px;
-  border: 1px solid rgba(130, 180, 255, 0.65);
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
-}
-
-#char-title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-align: center;
-  margin-bottom: 4px;
-  color: #ffe164;
-  text-shadow: 0 0 10px rgba(255, 225, 100, 0.8);
-}
-
-#char-subtitle {
-  font-size: 12px;
-  text-align: center;
-  margin-bottom: 12px;
-  color: #cfd8ff;
-}
-
-.char-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 10px;
-  font-size: 12px;
-}
-
-.char-field span {
-  color: #9db8ff;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-}
-
-.char-field input,
-.char-field select {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(130, 180, 255, 0.6);
-  background: rgba(5, 8, 20, 0.96);
-  color: #f5f5f5;
-  font-size: 12px;
-  outline: none;
-}
-
-#char-colors {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: 11px;
-}
-
-#char-colors label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: stretch;
-}
-
-#char-colors span {
-  color: #9db8ff;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 10px;
-}
-
-#char-colors input[type="color"] {
-  width: 100%;
-  height: 26px;
-  padding: 0;
-  border-radius: 999px;
-  border: 1px solid rgba(130, 180, 255, 0.7);
-  background: transparent;
-  cursor: pointer;
-}
-
-#char-buttons {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-#char-buttons button {
-  flex: 1;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(130, 180, 255, 0.8);
-  background: radial-gradient(circle at 30% 0%, #4a7bff, #7a4aff);
-  color: #fff;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  cursor: pointer;
-  box-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
-}
-
-#char-buttons button:hover {
-  filter: brightness(1.1);
-}
-
-#char-note {
-  font-size: 10px;
-  color: #9da8d6;
-  text-align: center;
-}
-
     #chat-panel {
         width: calc(100% - 24px);
       }
-          #mp-status {
-      position: fixed;
-      right: 12px;
-      top: 12px;
-      z-index: 11;
-      background: rgba(5, 5, 15, 0.9);
-      border-radius: 999px;
-      border: 1px solid rgba(130, 180, 255, 0.6);
-      padding: 4px 10px;
-      font-size: 11px;
-      color: #cfd8ff;
-      pointer-events: auto;
-    }
-
-    #mp-status-text.online {
-      color: #6bff7b;
-    }
-
-    #mp-status-text.offline {
-      color: #ff7070;
-    }
-
     #helper-keys {
         display: none;
       }
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
-
   <script src="hosg_config.js"></script>
-<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="hosg_game_systems.js"></script>
 </head>
 <body>
-  <!-- Game: Heroes of Shady Grove | Version: 1.0.31 -->
-
   <canvas id="renderCanvas"></canvas>
 
   <div id="hud">
@@ -825,6 +741,17 @@
           <span id="xp-label">25%</span>
         </div>
       </div>
+
+      <div id="target-frame" class="hud-panel">
+        <div id="target-name">No Target</div>
+        <div class="bar">
+          <div id="target-hp-fill" class="bar-fill" style="background: linear-gradient(90deg, #ff4040, #ff8080);"></div>
+        </div>
+        <div class="bar-label">
+          <span>HP</span>
+          <span id="target-hp-label">0 / 0</span>
+        </div>
+      </div>
     </div>
     <div id="hud-right">
       <div id="minimap" class="hud-panel">
@@ -833,8 +760,6 @@
       </div>
     </div>
   </div>
-
-
 
 <div id="account-overlay">
   <div id="account-card">
@@ -900,6 +825,25 @@
   </div>
 </div>
 
+  <div id="hotbar">
+    <div class="hotbar-slot" data-key="1" onclick="window.useHotbarSkill(1)">
+      <div class="skill-icon">⚔️</div>
+      <div class="keybind">1</div>
+    </div>
+    <div class="hotbar-slot" data-key="2" onclick="window.useHotbarSkill(2)">
+      <div class="skill-icon">🔥</div>
+      <div class="keybind">2</div>
+    </div>
+    <div class="hotbar-slot" data-key="3" onclick="window.useHotbarSkill(3)">
+      <div class="skill-icon">❄️</div>
+      <div class="keybind">3</div>
+    </div>
+    <div class="hotbar-slot" data-key="4" onclick="window.useHotbarSkill(4)">
+      <div class="skill-icon">⚡</div>
+      <div class="keybind">4</div>
+    </div>
+  </div>
+
   <div id="chat-panel">
     <div id="chat-log"></div>
     <div id="chat-input-row">
@@ -916,6 +860,8 @@
     <div>Right mouse drag – Orbit camera</div>
     <div>Shift / B – Run</div>
     <div>Space / A – Jump</div>
+    <div>Tab – Target enemy</div>
+    <div>1-4 – Use skills</div>
     <div>Scroll – Zoom camera</div>
   </div>
 
@@ -931,66 +877,14 @@
 
   <script>
 
-// NPC registry for the starting city and future zones
-
-function hosgInteractWithNearestNpc() {
-  if (!scene || !scene.meshes || !heroBody) return;
-  let best = null;
-  let bestDistSq = Number.POSITIVE_INFINITY;
-  const heroPos = heroBody.position;
-  const maxDistSq = 7 * 7;
-  for (const mesh of scene.meshes) {
-    if (!mesh || !mesh.metadata || !mesh.metadata.npcName) continue;
-    const dx = mesh.position.x - heroPos.x;
-    const dz = mesh.position.z - heroPos.z;
-    const distSq = dx * dx + dz * dz;
-    if (distSq < maxDistSq && distSq < bestDistSq) {
-      bestDistSq = distSq;
-      best = mesh;
-    }
-  }
-  if (!best) return;
-  const npcName = best.metadata.npcName;
-  const def = hosgNpcDefinitions[npcName];
-  if (!def) return;
-  const lines = (def.lines && def.lines.length)
-    ? def.lines
-    : ["Hello, adventurer."];
-  const line = lines[Math.floor(Math.random() * lines.length)];
-  const label = def.role ? def.name + " (" + def.role + ")" : def.name;
-  appendChat(label + ": " + line);
-}
-
-const hosgNpcDefinitions = {};
-
-function hosgRegisterNpc(name, def) {
-  if (!name) return null;
-  const base = {
-    name,
-    role: "",
-    kind: "citizen",
-    lines: [
-      "Hello, adventurer."
-    ]
-  };
-  hosgNpcDefinitions[name] = Object.assign(base, def || {});
-  return hosgNpcDefinitions[name];
-}
-
-// Persistent player state (for online-ready save structure)
 const HOSG_SAVE_KEY = "hosg_player_v1";
 let playerState = null;
 
-// Online account & character persistence (Supabase-backed)
 const HOSG_MAX_CHARACTERS = 10;
 
-// These values must be provided at runtime, for example via:
-// window.HOSG_SUPABASE_URL and window.HOSG_SUPABASE_ANON_KEY.
-// We do NOT hard-code any secrets here.
 const HOSG_SUPABASE_URL = (typeof window !== "undefined" && window.HOSG_SUPABASE_URL) ? window.HOSG_SUPABASE_URL : "";
 const HOSG_SUPABASE_ANON_KEY = (typeof window !== "undefined" && window.HOSG_SUPABASE_ANON_KEY) ? window.HOSG_SUPABASE_ANON_KEY : "";
 
-// Mapping to the persistent schema in Supabase.
 const HOSG_ACCOUNTS_TABLE = "hosg_accounts";
 const HOSG_ACCOUNT_ID_COLUMN = "id";
 const HOSG_ACCOUNT_EMAIL_COLUMN = "email";
@@ -1001,15 +895,10 @@ const HOSG_CHARACTERS_TABLE = "hosg_characters";
 const HOSG_CHARACTER_ID_COLUMN = "id";
 const HOSG_CHARACTER_ACCOUNT_ID_COLUMN = "account_id";
 
-// Supabase runtime state
 let hosgSupabase = null;
-// Current logged-in account row from hosg_accounts
 let hosgAccount = null;
-// Characters loaded for that account (excluding soft-deleted)
 let hosgCharacters = [];
-// Current active character id from hosg_characters
 let hosgCurrentCharacterId = null;
-// Throttling timer so we don't spam updates
 let hosgSupabaseSaveTimer = null;
 
 function hosgHasSupabaseConfig() {
@@ -1055,7 +944,6 @@ async function hosgHashPassword(plain) {
   } catch (e) {
     console.warn("[HOSG] Web Crypto unavailable, using fallback hash", e);
   }
-  // Fallback very simple hash if subtle crypto is unavailable
   let h = 0;
   for (let i = 0; i < plain.length; i++) {
     h = (h * 31 + plain.charCodeAt(i)) >>> 0;
@@ -1079,7 +967,6 @@ async function hosgAuthWithEmailPassword(mode, email, password) {
   const passwordHash = await hosgHashPassword(trimmedPass);
 
   if (mode === "signup") {
-    // Check for existing account with this email
     const { data: existing, error: existingError } = await sb
       .from(HOSG_ACCOUNTS_TABLE)
       .select(HOSG_ACCOUNT_ID_COLUMN)
@@ -1094,7 +981,6 @@ async function hosgAuthWithEmailPassword(mode, email, password) {
       throw new Error("An account with that email already exists.");
     }
 
-    // Derive a simple username from email prefix
     let username = trimmedEmail.split("@")[0] || trimmedEmail;
     username = username.slice(0, 24);
 
@@ -1115,7 +1001,6 @@ async function hosgAuthWithEmailPassword(mode, email, password) {
     }
 
     hosgAccount = data;
-    // Optionally update last_login_at
     try {
       await sb
         .from(HOSG_ACCOUNTS_TABLE)
@@ -1126,7 +1011,6 @@ async function hosgAuthWithEmailPassword(mode, email, password) {
     }
     return hosgAccount;
   } else {
-    // Sign in to an existing account
     const { data, error } = await sb
       .from(HOSG_ACCOUNTS_TABLE)
       .select("*")
@@ -1198,7 +1082,6 @@ async function hosgCreateCharacterFromState(state) {
 
   const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
 
-  // Enforce unique hero names (case-insensitive, not counting soft-deleted heroes)
   const rawName = state && state.name ? String(state.name) : "";
   const trimmedName = rawName.trim();
   if (trimmedName) {
@@ -1217,8 +1100,6 @@ async function hosgCreateCharacterFromState(state) {
       throw new Error("A hero with that name already exists.");
     }
   }
-
-  // Determine the next free slot index from 0..HOSG_MAX_CHARACTERS-1
 
   const usedSlots = (hosgCharacters || [])
     .filter(c => !c.is_deleted)
@@ -1256,7 +1137,6 @@ async function hosgUpdateCharacterFromState(id, state) {
 
   const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
 
-  // Enforce unique hero names on rename (case-insensitive, not counting this hero or soft-deleted heroes)
   const rawName = state && state.name ? String(state.name) : "";
   const trimmedName = rawName.trim();
   if (trimmedName) {
@@ -1331,7 +1211,6 @@ function hosgBuildPlayerStateFromCharacter(row) {
   if (row && row.stats && typeof row.stats === "object") {
     out.stats = Object.assign({}, base.stats, row.stats);
   } else if (row) {
-    // At minimum, map XP and level if present
     const s = Object.assign({}, base.stats);
     if (typeof row.level === "number") s.level = row.level;
     if (row.xp != null) s.xp = Number(row.xp);
@@ -1480,13 +1359,9 @@ function hosgRefreshCharacterListUI() {
   }
 }
 
-
-
-// Runtime stats shared across HUD & multiplayer payloads
 let hp = 100, maxHp = 100;
 let mp = 60, maxMp = 100;
 let xp = 25, level = 1;
-
 
 function getDefaultPlayerState() {
   return {
@@ -1543,7 +1418,6 @@ function savePlayerStateRuntime(heroBody, hp, maxHp, mp, maxMp, xp, level) {
       playerState.rotationY = heroBody.rotation.y;
     }
     window.localStorage.setItem(HOSG_SAVE_KEY, JSON.stringify(playerState));
-    // Also schedule a debounced save to Supabase if online accounts are enabled
     hosgScheduleSupabaseCharacterSave();
   } catch (e) {
     console.warn("Failed to save player state", e);
@@ -1567,7 +1441,6 @@ function applyAppearanceToMaterials(scene, mats) {
   if (mats.pants) mats.pants.diffuseColor = hexToColor3(a.pants);
   if (mats.boots) mats.boots.diffuseColor = hexToColor3(a.boots);
 }
-
 
 function setupCharacterCreationUI() {
   const overlay = document.getElementById("char-create-overlay");
@@ -1594,9 +1467,7 @@ function setupCharacterCreationUI() {
     skinInput.value = ap.skin || "#f3dec0";
   }
 
-  // Pre-fill from state
   applyStateToForm();
-  // Expose so the character slot list can update the form when loading a hero
   window.applyStateToCharacterForm = applyStateToForm;
 
   function randomColor() {
@@ -1647,7 +1518,6 @@ function setupCharacterCreationUI() {
   startBtn.addEventListener("click", async function () {
     applyFromUI();
 
-    // If we have an online account, create or update the hero record before entering the world
     if (hosgHasSupabaseConfig() && hosgAccount && playerState) {
       try {
         const sb = await hosgEnsureSupabase();
@@ -1656,14 +1526,9 @@ function setupCharacterCreationUI() {
         }
 
         const accountIdVal = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
-
-        // Normalize current hero name
         const rawName = (playerState.name || "").trim();
         let existingForAccount = null;
 
-        // If we don't already have a selected character, see if THIS ACCOUNT
-        // already has a hero with this name. If so, we treat this as "load hero"
-        // instead of "create brand-new hero" to avoid the duplicate-name error.
         if (!hosgCurrentCharacterId && rawName) {
           const { data: rows, error: findErr } = await sb
             .from(HOSG_CHARACTERS_TABLE)
@@ -1681,11 +1546,8 @@ function setupCharacterCreationUI() {
         }
 
         if (!hosgCurrentCharacterId && existingForAccount) {
-          // Case 1: Hero with this name already exists on THIS account.
-          // Reuse that hero instead of trying to create a new one.
           hosgCurrentCharacterId = existingForAccount[HOSG_CHARACTER_ID_COLUMN];
 
-          // Keep local list in sync
           if (!hosgCharacters) hosgCharacters = [];
           const idx = hosgCharacters.findIndex(
             (c) => c[HOSG_CHARACTER_ID_COLUMN] === hosgCurrentCharacterId
@@ -1707,10 +1569,8 @@ function setupCharacterCreationUI() {
           }
           hosgRefreshCharacterListUI();
 
-          // Persist the latest appearance/position/stats
           await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
         } else if (!hosgCurrentCharacterId) {
-          // Case 2: No hero selected and name is new for this account: create one.
           const activeCount = (hosgCharacters || []).filter((c) => !c.is_deleted).length;
           if (activeCount >= HOSG_MAX_CHARACTERS) {
             window.alert("You have reached the maximum number of heroes on this account. Delete one before creating a new hero.");
@@ -1725,7 +1585,6 @@ function setupCharacterCreationUI() {
             hosgRefreshCharacterListUI();
           }
         } else {
-          // Case 3: We already have a current character: update it.
           await hosgUpdateCharacterFromState(hosgCurrentCharacterId, playerState);
           if (hosgCharacters) {
             for (let i = 0; i < hosgCharacters.length; i++) {
@@ -1743,11 +1602,10 @@ function setupCharacterCreationUI() {
       } catch (e) {
         console.warn("[HOSG] Failed to sync hero on start", e);
         window.alert(e && e.message ? e.message : "Could not sync hero to server.");
-        return; // Don't enter the world if we couldn't sync the hero
+        return;
       }
     }
 
-    // Attach accountId / characterId to the in-memory player state
     if (hosgAccount && hosgAccount[HOSG_ACCOUNT_ID_COLUMN] != null) {
       playerState.accountId = hosgAccount[HOSG_ACCOUNT_ID_COLUMN];
     }
@@ -1755,28 +1613,23 @@ function setupCharacterCreationUI() {
       playerState.characterId = hosgCurrentCharacterId;
     }
 
-      overlay.style.display = "none";
-  // Initial save so the hero exists even if they immediately close the page
-  savePlayerStateRuntime(
-    null,
-    playerState.stats.hp, playerState.stats.maxHp,
-    playerState.stats.mp, playerState.stats.maxMp,
-    playerState.stats.xp, playerState.stats.level
-  );
+    overlay.style.display = "none";
+    savePlayerStateRuntime(
+      null,
+      playerState.stats.hp, playerState.stats.maxHp,
+      playerState.stats.mp, playerState.stats.maxMp,
+      playerState.stats.xp, playerState.stats.level
+    );
 
-  // Now that the hero is synced and active, connect this tab to the multiplayer server.
-  try {
-    if (window.hosgConnectMultiplayerIfNeeded) {
-      window.hosgConnectMultiplayerIfNeeded();
+    try {
+      if (window.hosgConnectMultiplayerIfNeeded) {
+        window.hosgConnectMultiplayerIfNeeded();
+      }
+    } catch (e) {
+      console.warn("[HOSG] Multiplayer connect failed", e);
     }
-  } catch (e) {
-    console.warn("[HOSG] Multiplayer connect failed", e);
-  }
-});
+  });
 
-
-
-  // If we already have a saved hero, let them just hit Enter quickly
   nameInput.addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") {
       startBtn.click();
@@ -1784,17 +1637,12 @@ function setupCharacterCreationUI() {
   });
 }
 
-
-
-
 function setupAccountAndCharacterFlows() {
   const accountOverlay = document.getElementById("account-overlay");
   const charOverlay = document.getElementById("char-create-overlay");
 
   const hasSupabase = hosgHasSupabaseConfig();
 
-  // If we don't have Supabase configured, just hide the account overlay and
-  // show the character creator like before.
   if (!accountOverlay || !charOverlay || !hasSupabase) {
     if (accountOverlay) {
       accountOverlay.style.display = "none";
@@ -1805,7 +1653,6 @@ function setupAccountAndCharacterFlows() {
     return;
   }
 
-  // Online mode: force login before character selection
   charOverlay.style.display = "none";
   accountOverlay.style.display = "flex";
 
@@ -1837,7 +1684,6 @@ function setupAccountAndCharacterFlows() {
       if (charOverlay) {
         charOverlay.style.display = "flex";
       }
-      // Load characters for this account into the slot UI
       await hosgLoadCharacters();
     } catch (e) {
       console.warn("[HOSG] Account auth error", e);
@@ -1864,27 +1710,24 @@ function setupAccountAndCharacterFlows() {
   }
 }
 
-
-
 loadPlayerState();
-    const isMobile = (typeof navigator !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
-    (function () {
+const isMobile = (typeof navigator !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+(function () {
 
-      const canvas = document.getElementById("renderCanvas");
-      const engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer: true,
-        stencil: true,
-        disableWebGL2Support: false
-      });
+  const canvas = document.getElementById("renderCanvas");
+  const engine = new BABYLON.Engine(canvas, true, {
+    preserveDrawingBuffer: true,
+    stencil: true,
+    disableWebGL2Support: false
+  });
 
-// --- Multiplayer networking (client) ---
 const MP_SERVER_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
         ? "ws://localhost:8080"
         : "wss://hosg-u1hc.onrender.com";
 let mpSocket = null;
 let mpConnected = false;
 let mpLocalId = null;
-const remotePlayers = {}; // id -> { body, head, nameplate, labelTex }
+const remotePlayers = {};
 
 function mpUpdateStatusLabel() {
   const el = document.getElementById("mp-status-text");
@@ -1948,7 +1791,6 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
   shadowGenerator.addShadowCaster(body);
   shadowGenerator.addShadowCaster(head);
 
-  // Floating name label
   const plate = BABYLON.MeshBuilder.CreatePlane(
     "remoteName_" + id,
     { width: 3, height: 0.6 },
@@ -1965,7 +1807,7 @@ function createRemoteHero(scene, shadowGenerator, id, player) {
     false
   );
   tex.hasAlpha = true;
-  const ctxName = (player.name || "Hero") + (player.role ? " — " + player.role : "");
+  const ctxName = (player.name || "Hero") + (player.role ? " – " + player.role : "");
   tex.drawText(
     ctxName,
     null,
@@ -2032,7 +1874,6 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     mpConnected = false;
     mpUpdateStatusLabel();
     mpLog("Disconnected from multiplayer server");
-    // Clean up remote heroes
     Object.keys(remotePlayers).forEach(id => removeRemoteHero(id));
   });
 
@@ -2094,7 +1935,6 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     }
   });
 
-  // Return a function to send our current state periodically
   return function sendLocalState() {
     if (!mpConnected || !mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
     const stats = getRuntimeStats();
@@ -2125,1226 +1965,872 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
     }
   };
 }
-      function appendChat(text) {
-        const log = document.getElementById("chat-log");
-        const line = document.createElement("div");
-        line.textContent = text;
-        log.appendChild(line);
-        log.scrollTop = log.scrollHeight;
-      }
 
-      (function setupChat() {
-        const input = document.getElementById("chat-input");
-        const send = document.getElementById("chat-send");
-
-        function sendMessage() {
-          const value = input.value.trim();
-          if (!value) return;
-
-          // If connected to multiplayer, send chat over the network
-          if (mpConnected && mpSocket && mpSocket.readyState === WebSocket.OPEN) {
-            const msg = {
-              type: "chat",
-              text: value
-            };
-            try {
-              mpSocket.send(JSON.stringify(msg));
-            } catch (e) {
-              console.warn("Failed to send chat", e);
-            }
-          } else {
-            appendChat("You: " + value);
-          }
-
-          input.value = "";
-        }
-
-        send.addEventListener("click", sendMessage);
-        input.addEventListener("keydown", function (ev) {
-          if (ev.key === "Enter") {
-            sendMessage();
-          }
-        });
-
-        appendChat("System: Type to chat. If connected to the multiplayer server, your messages will be sent to other players.");
-      })();
-
-      const createScene = function () {
-        const scene = new BABYLON.Scene(engine);
-        scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
-        scene.collisionsEnabled = true;
-
-        const envTex = new BABYLON.CubeTexture(
-          "https://playground.babylonjs.com/textures/environment.env",
-          scene
-        );
-        scene.environmentTexture = envTex;
-        scene.createDefaultSkybox(envTex, true, 1000);
-
-        const camera = new BABYLON.ArcRotateCamera(
-          "camera",
-          -Math.PI / 2,
-          0.9,
-          40,
-          new BABYLON.Vector3(0, 3, 0),
-          scene
-        );
-        camera.lowerRadiusLimit = 18;
-        camera.upperRadiusLimit = 70;
-        camera.wheelDeltaPercentage = 0.02;
-        camera.panningSensibility = 0;
-        camera.attachControl(canvas, true);
-        camera.checkCollisions = false;
-
-        const hemiLight = new BABYLON.HemisphericLight(
-          "hemi",
-          new BABYLON.Vector3(0, 1, 0),
-          scene
-        );
-        hemiLight.intensity = 0.6;
-
-        const sun = new BABYLON.DirectionalLight(
-          "sun",
-          new BABYLON.Vector3(-0.5, -1, -0.3),
-          scene
-        );
-        sun.position = new BABYLON.Vector3(60, 80, 60);
-        sun.intensity = 1.1;
-
-        const shadowGenerator = new BABYLON.ShadowGenerator(2048, sun);
-        shadowGenerator.useBlurExponentialShadowMap = true;
-        shadowGenerator.blurKernel = 16;
-        scene.shadowGenerator = shadowGenerator;
-
-        // World: ground, water, trees, simple town plaza
-        const ground = BABYLON.MeshBuilder.CreateGround(
-          "ground",
-          { width: 220, height: 220, subdivisions: 80 },
-          scene
-        );
-        ground.checkCollisions = true;
-        const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-        groundMat.diffuseTexture = new BABYLON.Texture(
-          "https://playground.babylonjs.com/textures/grass.jpg",
-          scene
-        );
-        groundMat.diffuseTexture.uScale = 40;
-        groundMat.diffuseTexture.vScale = 40;
-        groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
-        ground.material = groundMat;
-        ground.receiveShadows = true;
-
-        const water = BABYLON.MeshBuilder.CreateGround(
-          "water",
-          { width: 80, height: 80, subdivisions: 2 },
-          scene
-        );
-        water.position = new BABYLON.Vector3(0, 0.02, -60);
-        const waterMat = new BABYLON.StandardMaterial("waterMat", scene);
-        waterMat.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.6);
-        waterMat.alpha = 0.6;
-        waterMat.specularColor = new BABYLON.Color3(0.6, 0.8, 1);
-        waterMat.backFaceCulling = false;
-        water.material = waterMat;
-
-        const stonePathMat = new BABYLON.StandardMaterial("stoneMat", scene);
-        stonePathMat.diffuseTexture = new BABYLON.Texture(
-          "https://playground.babylonjs.com/textures/rock.png",
-          scene
-        );
-        stonePathMat.diffuseTexture.uScale = 4;
-        stonePathMat.diffuseTexture.vScale = 4;
-        stonePathMat.specularColor = new BABYLON.Color3(0.02, 0.02, 0.02);
-
-        for (let i = -30; i <= 30; i += 5) {
-          const stone = BABYLON.MeshBuilder.CreateBox(
-            "pathStone",
-            { width: 2.5, height: 0.4, depth: 2.5 },
-            scene
-          );
-          stone.position = new BABYLON.Vector3(i, 0.2, 0);
-          stone.material = stonePathMat;
-          stone.checkCollisions = true;
-          stone.receiveShadows = true;
-        }
-
-        const treeTrunkMat = new BABYLON.StandardMaterial("trunkMat", scene);
-        treeTrunkMat.diffuseTexture = new BABYLON.Texture(
-          "https://playground.babylonjs.com/textures/wood.jpg",
-          scene
-        );
-        treeTrunkMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-
-        const treeLeafMat = new BABYLON.StandardMaterial("leafMat", scene);
-        treeLeafMat.diffuseColor = new BABYLON.Color3(0.22, 0.45, 0.2);
-        treeLeafMat.emissiveColor = new BABYLON.Color3(0.03, 0.08, 0.03);
-
-        function createTree(x, z, scale) {
-          const trunk = BABYLON.MeshBuilder.CreateCylinder(
-            "trunk",
-            { height: 6 * scale, diameterTop: 0.8 * scale, diameterBottom: 1.2 * scale },
-            scene
-          );
-          trunk.position = new BABYLON.Vector3(x, 3 * scale, z);
-          trunk.material = treeTrunkMat;
-          trunk.checkCollisions = true;
-          trunk.receiveShadows = true;
-
-          const canopy = BABYLON.MeshBuilder.CreateSphere(
-            "canopy",
-            { diameter: 6 * scale, segments: 8 },
-            scene
-          );
-          canopy.position = new BABYLON.Vector3(x, 6.5 * scale, z);
-          canopy.material = treeLeafMat;
-          canopy.checkCollisions = true;
-          canopy.receiveShadows = true;
-
-          shadowGenerator.addShadowCaster(trunk);
-          shadowGenerator.addShadowCaster(canopy);
-        }
-
-        for (let i = 0; i < 80; i++) {
-          const radius = 80 + Math.random() * 30;
-          const angle = Math.random() * Math.PI * 2;
-          const x = Math.cos(angle) * radius;
-          const z = Math.sin(angle) * radius;
-          const scale = 0.6 + Math.random() * 0.8;
-          createTree(x, z, scale);
-        }
-
-        const townMat = new BABYLON.StandardMaterial("townMat", scene);
-        townMat.diffuseTexture = new BABYLON.Texture(
-          "https://playground.babylonjs.com/textures/floor.png",
-          scene
-        );
-        townMat.diffuseTexture.uScale = 4;
-        townMat.diffuseTexture.vScale = 4;
-
-        const plaza = BABYLON.MeshBuilder.CreateBox(
-          "plaza",
-          { width: 40, depth: 40, height: 1 },
-          scene
-        );
-        plaza.position = new BABYLON.Vector3(0, 0.5, 30);
-        plaza.material = townMat;
-        plaza.checkCollisions = true;
-        plaza.receiveShadows = true;
-
-        const wallMat = new BABYLON.StandardMaterial("wallMat", scene);
-        wallMat.diffuseTexture = new BABYLON.Texture(
-          "https://playground.babylonjs.com/textures/floor.png",
-          scene
-        );
-        wallMat.diffuseTexture.uScale = 2;
-        wallMat.diffuseTexture.vScale = 1;
-
-        function createWall(from, to, height, thickness) {
-          const length = BABYLON.Vector3.Distance(from, to);
-          const wall = BABYLON.MeshBuilder.CreateBox(
-            "wall",
-            { width: length, depth: thickness, height: height },
-            scene
-          );
-          wall.position = from.add(to).scale(0.5);
-          wall.position.y = height / 2;
-          const dir = to.subtract(from);
-          wall.rotation.y = Math.atan2(dir.z, dir.x);
-          wall.material = wallMat;
-          wall.checkCollisions = true;
-          wall.receiveShadows = true;
-          shadowGenerator.addShadowCaster(wall);
-        }
-
-        const half = 20;
-        const height = 5;
-        const thickness = 1;
-        createWall(
-          new BABYLON.Vector3(-half, 0, 30 - half),
-          new BABYLON.Vector3(half, 0, 30 - half),
-          height,
-          thickness
-        );
-        createWall(
-          new BABYLON.Vector3(-half, 0, 30 + half),
-          new BABYLON.Vector3(half, 0, 30 + half),
-          height,
-          thickness
-        );
-        createWall(
-          new BABYLON.Vector3(-half, 0, 30 - half),
-          new BABYLON.Vector3(-half, 0, 30 + half),
-          height,
-          thickness
-        );
-        createWall(
-          new BABYLON.Vector3(half, 0, 30 - half),
-          new BABYLON.Vector3(half, 0, 30 + half),
-          height,
-          thickness
-        );
-
-        
-// ----- GRAND STARTING CITY: Shady Grove Landing -----
-const cityBuildingMat = new BABYLON.StandardMaterial("cityBuildingMat", scene);
-cityBuildingMat.diffuseColor = new BABYLON.Color3(0.78, 0.74, 0.65);
-cityBuildingMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-
-const cityRoofMat = new BABYLON.StandardMaterial("cityRoofMat", scene);
-cityRoofMat.diffuseColor = new BABYLON.Color3(0.42, 0.18, 0.12);
-cityRoofMat.specularColor = new BABYLON.Color3(0.06, 0.06, 0.06);
-
-const cityAccentMat = new BABYLON.StandardMaterial("cityAccentMat", scene);
-cityAccentMat.diffuseColor = new BABYLON.Color3(0.86, 0.82, 0.72);
-cityAccentMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-
-const cityBannerMat = new BABYLON.StandardMaterial("cityBannerMat", scene);
-cityBannerMat.diffuseColor = new BABYLON.Color3(0.18, 0.32, 0.68);
-cityBannerMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.15);
-
-function createCityHouse(name, center, width, depth, height, floors) {
-  const base = BABYLON.MeshBuilder.CreateBox(
-    name + "_base",
-    { width, depth, height },
-    scene
-  );
-  base.position = center.clone();
-  base.position.y = height / 2;
-  base.material = cityBuildingMat;
-  base.checkCollisions = true;
-  base.receiveShadows = true;
-  shadowGenerator.addShadowCaster(base);
-
-  const roof = BABYLON.MeshBuilder.CreateBox(
-    name + "_roof",
-    { width: width * 1.02, depth: depth * 1.02, height: height * 0.45 },
-    scene
-  );
-  roof.position = center.clone();
-  roof.position.y = height + (height * 0.25);
-  roof.rotation.z = Math.PI / 18;
-  roof.material = cityRoofMat;
-  roof.checkCollisions = false;
-  roof.receiveShadows = true;
-  shadowGenerator.addShadowCaster(roof);
-
-  if (floors && floors > 1) {
-    for (let f = 1; f < floors; f++) {
-      const upper = BABYLON.MeshBuilder.CreateBox(
-        name + "_floor_" + f,
-        { width: width * 0.9, depth: depth * 0.9, height: height * 0.7 },
-        scene
-      );
-      upper.position = center.clone();
-      upper.position.y = height / 2 + f * (height * 0.9);
-      upper.material = cityBuildingMat;
-      upper.checkCollisions = true;
-      upper.receiveShadows = true;
-      shadowGenerator.addShadowCaster(upper);
-    }
-  }
-
-  const trim = BABYLON.MeshBuilder.CreateBox(
-    name + "_trim",
-    { width: width * 1.02, depth: depth * 1.02, height: 0.4 },
-    scene
-  );
-  trim.position = new BABYLON.Vector3(center.x, 0.2, center.z);
-  trim.material = cityAccentMat;
-  trim.checkCollisions = false;
-  trim.receiveShadows = true;
-  shadowGenerator.addShadowCaster(trim);
-
-  return base;
+function appendChat(text) {
+  const log = document.getElementById("chat-log");
+  const line = document.createElement("div");
+  line.textContent = text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
 }
 
-function createCityTower(name, center, radius, height) {
-  const tower = BABYLON.MeshBuilder.CreateCylinder(
-    name + "_tower",
-    { diameter: radius * 2, height },
-    scene
-  );
-  tower.position = center.clone();
-  tower.position.y = height / 2;
-  tower.material = cityBuildingMat;
-  tower.checkCollisions = true;
-  tower.receiveShadows = true;
-  shadowGenerator.addShadowCaster(tower);
-
-  const cap = BABYLON.MeshBuilder.CreateCylinder(
-    name + "_cap",
-    { diameterTop: 0, diameterBottom: radius * 2.3, height: height * 0.3, tessellation: 6 },
-    scene
-  );
-  cap.position = center.clone();
-  cap.position.y = height + (height * 0.2);
-  cap.material = cityRoofMat;
-  cap.receiveShadows = true;
-  shadowGenerator.addShadowCaster(cap);
-
-  return tower;
-}
-
-function createCityGate(name, center, spanWidth, gateHeight, thickness) {
-  const arch = BABYLON.MeshBuilder.CreateBox(
-    name + "_arch",
-    { width: spanWidth, depth: thickness * 1.2, height: gateHeight * 0.6 },
-    scene
-  );
-  arch.position = center.clone();
-  arch.position.y = gateHeight * 0.3;
-  arch.material = cityBuildingMat;
-  arch.checkCollisions = true;
-  arch.receiveShadows = true;
-  shadowGenerator.addShadowCaster(arch);
-
-  const sideOffset = (spanWidth / 2) - thickness * 1.6;
-  createCityTower(
-    name + "_left",
-    new BABYLON.Vector3(center.x - sideOffset, 0, center.z - thickness * 0.6),
-    thickness * 1.6,
-    gateHeight * 1.4
-  );
-  createCityTower(
-    name + "_right",
-    new BABYLON.Vector3(center.x + sideOffset, 0, center.z - thickness * 0.6),
-    thickness * 1.6,
-    gateHeight * 1.4
-  );
-}
-
-function createMarketStall(name, center, width, depth) {
-  const table = BABYLON.MeshBuilder.CreateBox(
-    name + "_table",
-    { width, depth, height: 0.4 },
-    scene
-  );
-  table.position = center.clone();
-  table.position.y = 1;
-  table.material = cityAccentMat;
-  table.receiveShadows = true;
-  shadowGenerator.addShadowCaster(table);
-
-  const canopy = BABYLON.MeshBuilder.CreateBox(
-    name + "_canopy",
-    { width: width * 1.05, depth: depth * 1.05, height: 0.25 },
-    scene
-  );
-  canopy.position = center.clone();
-  canopy.position.y = 2.2;
-  canopy.material = cityBannerMat;
-  canopy.receiveShadows = true;
-  shadowGenerator.addShadowCaster(canopy);
-}
-
-function hosgSpawnNpc(name, position, def) {
-  if (def) {
-    hosgRegisterNpc(name, def);
-  } else if (!hosgNpcDefinitions[name]) {
-    hosgRegisterNpc(name, {});
-  }
-  const npc = createNpc(name, position);
-  npc.metadata = npc.metadata || {};
-  npc.metadata.npcName = name;
-  return npc;
-}
-
-function buildStartingCity() {
-  // Inside-wall house ring around the central plaza
-  const houseW = 8;
-  const houseD = 6;
-  const houseH = 4.2;
-
-  // North row of houses overlooking the plaza
-  for (let i = -1; i <= 1; i++) {
-    const cx = i * (houseW + 1.5);
-    const cz = 30 + 16; // just inside the north wall at z ~ 46
-    createCityHouse("northHouse_" + i, new BABYLON.Vector3(cx, 0, cz), houseW, houseD, houseH, 2);
-  }
-
-  // South row facing the approach road
-  for (let i = -1; i <= 1; i++) {
-    const cx = i * (houseW + 1.5);
-    const cz = 30 - 16; // inside south wall at z ~ 14
-    createCityHouse("southHouse_" + i, new BABYLON.Vector3(cx, 0, cz), houseW, houseD, houseH * 0.9, 1);
-  }
-
-  // East and west sides of the plaza
-  createCityHouse("eastHouse_1", new BABYLON.Vector3(30 - 5, 0, 30 + 8), houseW, houseD, houseH, 2);
-  createCityHouse("eastHouse_2", new BABYLON.Vector3(30 - 5, 0, 30 - 8), houseW, houseD, houseH, 2);
-  createCityHouse("westHouse_1", new BABYLON.Vector3(-30 + 5, 0, 30 + 8), houseW, houseD, houseH, 2);
-  createCityHouse("westHouse_2", new BABYLON.Vector3(-30 + 5, 0, 30 - 8), houseW, houseD, houseH, 2);
-
-  // A grand hall on the northern interior wall
-  createCityHouse(
-    "grandHall",
-    new BABYLON.Vector3(0, 0, 30 + 18),
-    houseW * 2.4,
-    houseD * 1.6,
-    houseH * 1.6,
-    3
-  );
-
-  // A mage tower watching the river to the west
-  createCityTower("mageTower", new BABYLON.Vector3(-32, 0, 18), 3.2, 18);
-
-  // City gate aligned with the stone path at the south wall
-  createCityGate("southGate", new BABYLON.Vector3(0, 0, 30 - 20), 22, 10, 2.4);
-
-  // Market stalls along the north edge of the plaza
-  createMarketStall("market_weapons", new BABYLON.Vector3(-8, 0, 30 + 10), 3.4, 2.4);
-  createMarketStall("market_armor", new BABYLON.Vector3(0, 0, 30 + 10), 3.4, 2.4);
-  createMarketStall("market_food", new BABYLON.Vector3(8, 0, 30 + 10), 3.4, 2.4);
-
-  // Populate core NPCs for the starting city
-  hosgSpawnNpc(
-    "Captain Roderic",
-    new BABYLON.Vector3(0, 1.5, 12),
-    {
-      role: "Gate Captain",
-      kind: "guard",
-      lines: [
-        "Welcome to Shady Grove Landing. Keep your blade sharp and your wits sharper.",
-        "No monsters past the wall on my watch.",
-        "If you're looking for work, check the notice board in the plaza."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Town Crier Ellyn",
-    new BABYLON.Vector3(-2, 1.5, 30),
-    {
-      role: "Town Crier",
-      kind: "herald",
-      lines: [
-        "Hear ye! Hear ye! New adventurers are arriving from every corner of Shady Grove.",
-        "Quests and bounties will be posted soon. Keep an eye on the plaza!",
-        "Glory and riches await those brave enough to step beyond the walls."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Innkeeper Rhea",
-    new BABYLON.Vector3(10, 1.5, 40),
-    {
-      role: "Innkeeper",
-      kind: "merchant",
-      lines: [
-        "Rooms are full, but I've always got a warm stew for a hungry hero.",
-        "Come back once the coin starts flowing and I'll have a proper tavern menu for you.",
-        "Rest your feet at the Golden Grove when the road gets rough."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Smith Torvald",
-    new BABYLON.Vector3(18, 1.5, 28),
-    {
-      role: "Blacksmith",
-      kind: "merchant",
-      lines: [
-        "Blades, bucklers, and bad ideas. I can help with two of those.",
-        "I'll be reforging gear soon as the forges are hot and the gold is right.",
-        "Steel remembers the hand that swings it. Swing true."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Armorer Brinna",
-    new BABYLON.Vector3(18, 1.5, 32),
-    {
-      role: "Armorer",
-      kind: "merchant",
-      lines: [
-        "Armor's no good if you can't move in it. I build for fighters, not statues.",
-        "I'll fit you for proper plate once you've proven you can survive leather.",
-        "A dented breastplate is just a story with sharp edges."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Magister Selian",
-    new BABYLON.Vector3(-18, 1.5, 32),
-    {
-      role: "Arcane Instructor",
-      kind: "trainer",
-      lines: [
-        "Magic is a pact, not a toy. Break it, and it will break you.",
-        "I'll teach you to bend the elements once you've shown discipline.",
-        "The veil beyond Shady Grove is thin. Best you learn to respect it."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Guild Registrar Mira",
-    new BABYLON.Vector3(0, 1.5, 42),
-    {
-      role: "Guild Registrar",
-      kind: "guild",
-      lines: [
-        "One day, banners from a hundred guilds will hang over this plaza.",
-        "I can see it now: your name etched on the rolls of legend.",
-        "Bring friends, form a company, and I'll see it recognized."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Mennonite Merchant",
-    new BABYLON.Vector3(4, 1.5, 34),
-    {
-      role: "Traveling Merchant",
-      kind: "merchant",
-      lines: [
-        "Fresh bread and shiny swords! Trading coming soon.",
-        "I've got wares from every corner of Shady Grove—once the market opens.",
-        "Coins first, stories later. That's my way of doing business."
-      ]
-    }
-  );
-
-  hosgSpawnNpc(
-    "Village Guard Tomas",
-    new BABYLON.Vector3(-6, 1.5, 26),
-    {
-      role: "City Guard",
-      kind: "guard",
-      lines: [
-        "Stay out of trouble and we won't have a problem.",
-        "The walls are sturdy, but it's the people inside that matter.",
-        "If you see anything strange outside the gates, report to Captain Roderic."
-      ]
-    }
-  );
-}
-
-// ----- HERO: new procedural humanoid with smooth walk -----
-        let heroBody = BABYLON.MeshBuilder.CreateCapsule(
-          "heroBody",
-          {
-            height: 2.8,
-            radius: 0.6,
-            tessellation: 10,
-            subdivisions: 2
-          },
-          scene
-        );
-        // Place hero from saved state
-        heroBody.position = new BABYLON.Vector3(
-          playerState.position.x,
-          playerState.position.y,
-          playerState.position.z
-        );
-        heroBody.rotation.y = playerState.rotationY || 0;
-
-        heroBody.ellipsoid = new BABYLON.Vector3(0.8, 1.4, 0.8);
-        heroBody.ellipsoidOffset = new BABYLON.Vector3(0, 1.4, 0);
-        heroBody.checkCollisions = true;
-        heroBody.applyGravity = true;
-        heroBody.visibility = 0.0; // invisible collider
-        scene.heroBody = heroBody;
-
-        const heroSkinMat = new BABYLON.StandardMaterial("heroSkinMat", scene);
-        const heroClothMat = new BABYLON.StandardMaterial("heroClothMat", scene);
-        const heroPantsMat = new BABYLON.StandardMaterial("heroPantsMat", scene);
-        const heroBootMat = new BABYLON.StandardMaterial("heroBootMat", scene);
-
-        applyAppearanceToMaterials(scene, {
-          skin: heroSkinMat,
-          tunic: heroClothMat,
-          pants: heroPantsMat,
-          boots: heroBootMat
-        });
-
-        heroSkinMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-
-        const heroVisualRoot = new BABYLON.TransformNode("heroVisualRoot", scene);
-        heroVisualRoot.parent = heroBody;
-        heroVisualRoot.position = new BABYLON.Vector3(0, -0.4, 0);
-
-        const heroRig = {
-          root: heroVisualRoot,
-          torso: null,
-          head: null,
-          shoulders: null,
-          hips: null,
-          leftArmJoint: null,
-          rightArmJoint: null,
-          leftLegJoint: null,
-          rightLegJoint: null
-        };
-
-        // Torso
-        const torso = BABYLON.MeshBuilder.CreateBox(
-          "heroTorso",
-          { width: 1.1, height: 2, depth: 0.7 },
-          scene
-        );
-        torso.parent = heroVisualRoot;
-        torso.position = new BABYLON.Vector3(0, 1.6, 0);
-        torso.material = heroClothMat;
-        heroRig.torso = torso;
-
-        // Head
-        const head = BABYLON.MeshBuilder.CreateSphere(
-          "heroHead",
-          { diameter: 0.9, segments: 8 },
-          scene
-        );
-        head.parent = torso;
-        head.position = new BABYLON.Vector3(0, 1.4, 0);
-        head.material = heroSkinMat;
-        heroRig.head = head;
-
-        // Hips
-        const hips = new BABYLON.TransformNode("heroHips", scene);
-        hips.parent = heroVisualRoot;
-        hips.position = new BABYLON.Vector3(0, 0.8, 0);
-        heroRig.hips = hips;
-
-        // Legs
-        function createLeg(name, xSign) {
-          const joint = new BABYLON.TransformNode(name + "Joint", scene);
-          joint.parent = hips;
-          joint.position = new BABYLON.Vector3(0.35 * xSign, 0, 0);
-
-          const upper = BABYLON.MeshBuilder.CreateBox(
-            name + "Upper",
-            { width: 0.4, height: 1.7, depth: 0.4 },
-            scene
-          );
-          upper.parent = joint;
-          upper.position = new BABYLON.Vector3(0, -0.85, 0);
-          upper.material = heroPantsMat;
-
-          const boot = BABYLON.MeshBuilder.CreateBox(
-            name + "Boot",
-            { width: 0.5, height: 0.4, depth: 0.7 },
-            scene
-          );
-          boot.parent = joint;
-          boot.position = new BABYLON.Vector3(0, -1.7, 0.12);
-          boot.material = heroBootMat;
-
-          shadowGenerator.addShadowCaster(upper);
-          shadowGenerator.addShadowCaster(boot);
-
-          return joint;
-        }
-
-        heroRig.leftLegJoint = createLeg("heroLeftLeg", -1);
-        heroRig.rightLegJoint = createLeg("heroRightLeg", 1);
-
-        // Shoulders
-        const shoulders = new BABYLON.TransformNode("heroShoulders", scene);
-        shoulders.parent = torso;
-        shoulders.position = new BABYLON.Vector3(0, 1.1, 0);
-        heroRig.shoulders = shoulders;
-
-        // Arms
-        function createArm(name, xSign) {
-          const joint = new BABYLON.TransformNode(name + "Joint", scene);
-          joint.parent = shoulders;
-          joint.position = new BABYLON.Vector3(0.75 * xSign, 0.1, 0);
-
-          const upper = BABYLON.MeshBuilder.CreateBox(
-            name + "Upper",
-            { width: 0.35, height: 1.4, depth: 0.35 },
-            scene
-          );
-          upper.parent = joint;
-          upper.position = new BABYLON.Vector3(0, -0.7, 0);
-          upper.material = heroClothMat;
-
-          const hand = BABYLON.MeshBuilder.CreateBox(
-            name + "Hand",
-            { width: 0.3, height: 0.4, depth: 0.3 },
-            scene
-          );
-          hand.parent = joint;
-          hand.position = new BABYLON.Vector3(0, -1.25, 0);
-          hand.material = heroSkinMat;
-
-          shadowGenerator.addShadowCaster(upper);
-          shadowGenerator.addShadowCaster(hand);
-
-          return joint;
-        }
-
-        heroRig.leftArmJoint = createArm("heroLeftArm", -1);
-        heroRig.rightArmJoint = createArm("heroRightArm", 1);
-
-        shadowGenerator.addShadowCaster(torso);
-        shadowGenerator.addShadowCaster(head);
-
-        camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
-        const hudHeroName = document.getElementById("hud-hero-name");
-        if (hudHeroName && playerState && playerState.name) {
-          hudHeroName.textContent = playerState.name + " of Shady Grove";
-        }
-
-
-        // Simple NPCs (boxes with nameplates)
-        const npcMat = new BABYLON.StandardMaterial("npcMat", scene);
-        npcMat.diffuseColor = new BABYLON.Color3(0.4, 0.7, 1.0);
-        npcMat.emissiveColor = new BABYLON.Color3(0.03, 0.05, 0.09);
-
-        function createNpc(name, position) {
-          const npc = BABYLON.MeshBuilder.CreateBox(
-            name,
-            { width: 1.6, height: 3, depth: 1.2 },
-            scene
-          );
-          npc.position = position.clone();
-          npc.material = npcMat;
-          npc.checkCollisions = true;
-          npc.isPickable = true;
-          shadowGenerator.addShadowCaster(npc);
-
-          const plane = BABYLON.MeshBuilder.CreatePlane(
-            name + "_nameplate",
-            { width: 3, height: 0.6 },
-            scene
-          );
-          plane.parent = npc;
-          plane.position = new BABYLON.Vector3(0, 2.2, 0);
-          plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-
-          const dynamicTex = new BABYLON.DynamicTexture(
-            name + "_dt",
-            { width: 256, height: 64 },
-            scene,
-            false
-          );
-          dynamicTex.hasAlpha = true;
-          dynamicTex.drawText(
-            name,
-            null,
-            42,
-            "20px Segoe UI",
-            "#ffffff",
-            "transparent",
-            true
-          );
-
-          const planeMat = new BABYLON.StandardMaterial(name + "_nameMat", scene);
-          planeMat.diffuseTexture = dynamicTex;
-          planeMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
-          planeMat.backFaceCulling = false;
-          plane.material = planeMat;
-
-          return npc;
-        }
-
-        // NPCs are now spawned as part of the Shady Grove Landing buildStartingCity() helper.
-        buildStartingCity();
-
-        // -------- Input systems --------
-        const inputMap = {};
-        window.addEventListener("keydown", function (ev) {
-          if (!ev || typeof ev.key !== "string") return;
-          const key = ev.key.toLowerCase();
-          inputMap[key] = true;
-        });
-        window.addEventListener("keyup", function (ev) {
-          if (!ev || typeof ev.key !== "string") return;
-          const key = ev.key.toLowerCase();
-          inputMap[key] = false;
-        });
-        const mobileControls = document.getElementById("mobile-controls");
-        const joystickBase = document.getElementById("joystick-base");
-        const joystickThumb = document.getElementById("joystick-thumb");
-        const btnJump = document.getElementById("btn-jump");
-        const btnRun = document.getElementById("btn-run");
-
-        const joystick = { x: 0, y: 0, active: false };
-        let mobileRunHeld = false;
-        let mobileJumpQueued = false;
-
-        if (isMobile && mobileControls && joystickBase && joystickThumb && btnJump && btnRun) {
-          mobileControls.style.display = "flex";
-
-          let activeTouchId = null;
-          const maxRadius = 60;
-
-          function resetJoystick() {
-            joystick.active = false;
-            joystick.x = 0;
-            joystick.y = 0;
-            activeTouchId = null;
-            joystickThumb.style.transform = "translate(-50%, -50%)";
-          }
-
-          function updateJoystickFromTouch(touch) {
-            const rect = joystickBase.getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            const centerY = rect.top + rect.height / 2;
-            const dx = touch.clientX - centerX;
-            const dy = touch.clientY - centerY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            let clampedDx = dx;
-            let clampedDy = dy;
-
-            if (distance > maxRadius) {
-              const ratio = maxRadius / distance;
-              clampedDx *= ratio;
-              clampedDy *= ratio;
-            }
-
-            joystickThumb.style.transform = "translate(" + clampedDx + "px, " + clampedDy + "px)";
-            joystick.x = clampedDx / maxRadius;
-            joystick.y = clampedDy / maxRadius;
-            joystick.active = true;
-          }
-
-          joystickBase.addEventListener("touchstart", function (e) {
-            e.preventDefault();
-            const t = e.changedTouches[0];
-            activeTouchId = t.identifier;
-            updateJoystickFromTouch(t);
-          }, { passive: false });
-
-          joystickBase.addEventListener("touchmove", function (e) {
-            e.preventDefault();
-            if (activeTouchId === null) return;
-            for (let i = 0; i < e.changedTouches.length; i++) {
-              const t = e.changedTouches[i];
-              if (t.identifier === activeTouchId) {
-                updateJoystickFromTouch(t);
-                break;
-              }
-            }
-          }, { passive: false });
-
-          joystickBase.addEventListener("touchend", function (e) {
-            e.preventDefault();
-            for (let i = 0; i < e.changedTouches.length; i++) {
-              const t = e.changedTouches[i];
-              if (t.identifier === activeTouchId) {
-                resetJoystick();
-                break;
-              }
-            }
-          }, { passive: false });
-
-          joystickBase.addEventListener("touchcancel", function (e) {
-            e.preventDefault();
-            resetJoystick();
-          }, { passive: false });
-
-          btnJump.addEventListener("touchstart", function (e) {
-            e.preventDefault();
-            mobileJumpQueued = true;
-          }, { passive: false });
-
-          btnRun.addEventListener("touchstart", function (e) {
-            e.preventDefault();
-            mobileRunHeld = true;
-          }, { passive: false });
-
-          btnRun.addEventListener("touchend", function (e) {
-            e.preventDefault();
-            mobileRunHeld = false;
-          }, { passive: false });
-
-          btnRun.addEventListener("touchcancel", function (e) {
-            e.preventDefault();
-            mobileRunHeld = false;
-          }, { passive: false });
-        }
-
-        const gamepadState = {
-          hasPad: false,
-          moveX: 0,
-          moveY: 0,
-          lookX: 0,
-          lookY: 0,
-          run: false,
-          jump: false,
-          lastJump: false
-        };
-
-        function updateGamepadState() {
-          const getGamepads = navigator.getGamepads || navigator.webkitGetGamepads || navigator.msGetGamepads;
-          if (!getGamepads) {
-            gamepadState.hasPad = false;
-            return;
-          }
-          const pads = getGamepads.call(navigator);
-          let pad = null;
-          for (let i = 0; i < pads.length; i++) {
-            if (pads[i]) { pad = pads[i]; break; }
-          }
-          if (!pad) {
-            gamepadState.hasPad = false;
-            gamepadState.moveX = gamepadState.moveY = gamepadState.lookX = gamepadState.lookY = 0;
-            gamepadState.run = gamepadState.jump = false;
-            return;
-          }
-          gamepadState.hasPad = true;
-          const axes = pad.axes || [];
-          const buttons = pad.buttons || [];
-          const dead = 0.2;
-          function d(v) { return Math.abs(v) < dead ? 0 : v; }
-          const lx = d(axes[0] || 0);
-          const ly = d(axes[1] || 0);
-          const rx = d(axes[2] || 0);
-          const ry = d(axes[3] || 0);
-          gamepadState.moveX = lx;
-          gamepadState.moveY = ly;
-          gamepadState.lookX = rx;
-          gamepadState.lookY = ry;
-          const jumpNow = buttons[0] && buttons[0].pressed;
-          gamepadState.run = (buttons[1] && buttons[1].pressed) || (buttons[4] && buttons[4].pressed) || (buttons[5] && buttons[5].pressed);
-          gamepadState.jump = !gamepadState.lastJump && !!jumpNow;
-          gamepadState.lastJump = !!jumpNow;
-        }
-
-        function wrapAngle(a) {
-          while (a > Math.PI) a -= Math.PI * 2;
-          while (a < -Math.PI) a += Math.PI * 2;
-          return a;
-        }
-
-        // HUD state
-        let hudTime = 0;
-        const hpFill = document.getElementById("hp-fill");
-        const mpFill = document.getElementById("mp-fill");
-        const hpLabel = document.getElementById("hp-label");
-        const mpLabel = document.getElementById("mp-label");
-        const xpFill = document.getElementById("xp-fill");
-        const xpLabel = document.getElementById("xp-label");
-        const levelLabel = document.getElementById("level-label");
-
-        function updateHud(time) {
-          // Clamp HP/MP into valid ranges; game logic should update hp/mp/xp/level
-          if (hp > maxHp) hp = maxHp;
-          if (hp < 0) hp = 0;
-          if (mp > maxMp) mp = maxMp;
-          if (mp < 0) mp = 0;
-          hpFill.style.width = (hp / maxHp * 100) + "%";
-          mpFill.style.width = (mp / maxMp * 100) + "%";
-          xpFill.style.width = Math.min(100, xp) + "%";
-          hpLabel.textContent = Math.round(hp) + " / " + maxHp;
-          mpLabel.textContent = Math.round(mp) + " / " + maxMp;
-          xpLabel.textContent = Math.round(xp) + "%";
-          levelLabel.textContent = level;
-        }
-
-        // Movement/animation state
-        const baseSpeed = 0.16;
-        const runMultiplier = 1.8;
-        const rotationLerp = 0.18;
-        let verticalVelocity = 0;
-        const jumpStrength = 0.22;
-        let isGrounded = false;
-
-        let walkCycleTime = 0;
-        let autosaveTimer = 0;
-        let netSendTimer = 0;
-
-        scene.onBeforeRenderObservable.add(function () {
-          const deltaTime = scene.getEngine().getDeltaTime();
-          const dt = deltaTime / (1000 / 60);
-          const dtSec = deltaTime / 1000;
-
-          hudTime += dtSec;
-          updateHud(hudTime);
-          updateGamepadState();
-
-          autosaveTimer += dtSec;
-          netSendTimer += dtSec;
-
-          let heroSpeed = baseSpeed;
-          if (inputMap["shift"] || (gamepadState.hasPad && gamepadState.run) || mobileRunHeld) {
-            heroSpeed *= runMultiplier;
-          }
-
-          let moveX = 0;
-          let moveZ = 0;
-
-          if (inputMap["w"]) moveZ += 1;
-          if (inputMap["s"]) moveZ -= 1;
-          if (inputMap["d"]) moveX += 1;
-          if (inputMap["a"]) moveX -= 1;
-
-          if (joystick.active) {
-            moveZ += -joystick.y;
-            moveX += joystick.x;
-          }
-
-          if (gamepadState.hasPad) {
-            moveZ += -gamepadState.moveY;
-            moveX += gamepadState.moveX;
-          }
-
-          const moveMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
-          let isMoving = moveMagnitude > 0.05;
-
-          // Jump
-          const jumpRequested = (inputMap[" "] || mobileJumpQueued || (gamepadState.hasPad && gamepadState.jump));
-          if (jumpRequested && isGrounded) {
-            verticalVelocity = jumpStrength;
-            isGrounded = false;
-          }
-          mobileJumpQueued = false;
-
-          verticalVelocity += scene.gravity.y * dtSec;
-          let nextPos = heroBody.position.clone();
-          nextPos.y += verticalVelocity * dt;
-
-          if (nextPos.y < 1.5) {
-            nextPos.y = 1.5;
-            verticalVelocity = 0;
-            isGrounded = true;
-          }
-
-          let moveVecWorld = new BABYLON.Vector3(0, 0, 0);
-          if (isMoving) {
-            const normX = moveX / moveMagnitude;
-            const normZ = moveZ / moveMagnitude;
-
-            let forwardDir = camera.getDirection(new BABYLON.Vector3(0, 0, 1));
-            forwardDir.y = 0;
-            forwardDir.normalize();
-
-            let rightDir = camera.getDirection(new BABYLON.Vector3(1, 0, 0));
-            rightDir.y = 0;
-            rightDir.normalize();
-
-            moveVecWorld = forwardDir.scale(normZ).add(rightDir.scale(normX));
-            moveVecWorld.normalize();
-
-            const desiredY = Math.atan2(moveVecWorld.x, moveVecWorld.z);
-            const angleDiff = wrapAngle(desiredY - heroBody.rotation.y);
-            heroBody.rotation.y += angleDiff * rotationLerp * dt;
-          }
-
-          if (isMoving) {
-            const displacement = moveVecWorld.scale(heroSpeed * dt);
-            nextPos.addInPlace(displacement);
-          }
-
-          heroBody.moveWithCollisions(nextPos.subtract(heroBody.position));
-
-          // Procedural walk animation for hero rig
-          if (heroRig.root) {
-            if (isMoving) {
-              walkCycleTime += dtSec * (heroSpeed / baseSpeed) * 4.2;
-              const phase = walkCycleTime * Math.PI * 2;
-              const swing = Math.sin(phase);
-              const swingOpp = Math.sin(phase + Math.PI);
-              const legSwing = 0.7;
-              const armSwing = 0.8;
-
-              heroRig.leftLegJoint.rotation.x = swing * legSwing;
-              heroRig.rightLegJoint.rotation.x = swingOpp * legSwing;
-              heroRig.leftArmJoint.rotation.x = swingOpp * armSwing * 0.6;
-              heroRig.rightArmJoint.rotation.x = swing * armSwing * 0.6;
-
-              const bob = Math.abs(Math.sin(phase)) * 0.06;
-              heroRig.torso.position.y = 1.6 + bob;
-            } else {
-              // Relax to idle pose: arms at sides, legs straight, subtle breathing
-              const relaxFactor = 1 - Math.pow(0.0001, dtSec); // smooth damping
-
-              function dampJoint(joint) {
-                joint.rotation.x -= joint.rotation.x * relaxFactor;
-                joint.rotation.z -= joint.rotation.z * relaxFactor;
-              }
-
-              dampJoint(heroRig.leftLegJoint);
-              dampJoint(heroRig.rightLegJoint);
-              dampJoint(heroRig.leftArmJoint);
-              dampJoint(heroRig.rightArmJoint);
-
-              const baseTorsoY = 1.6;
-              heroRig.torso.position.y += (baseTorsoY - heroRig.torso.position.y) * relaxFactor;
-
-              walkCycleTime += dtSec * 0.5;
-              const breath = Math.sin(walkCycleTime * Math.PI * 2) * 0.01;
-              heroRig.torso.position.y = baseTorsoY + breath;
-            }
-          }
-
-          camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
-
-          if (gamepadState.hasPad) {
-            const lookSpeed = 0.04;
-            camera.alpha -= gamepadState.lookX * lookSpeed * dt;
-            camera.beta -= gamepadState.lookY * lookSpeed * dt;
-            const lowerBetaLimit = 0.3;
-            const upperBetaLimit = Math.PI / 2;
-            if (camera.beta < lowerBetaLimit) camera.beta = lowerBetaLimit;
-            if (camera.beta > upperBetaLimit) camera.beta = upperBetaLimit;
-          }
-
-          // Autosave player state roughly twice per second (online-ready structure)
-          if (autosaveTimer >= 0.5) {
-            autosaveTimer = 0;
-            savePlayerStateRuntime(
-              heroBody,
-              hp, maxHp,
-              mp, maxMp,
-              xp, level
-            );
-          }
-
-          // Send multiplayer position/stats updates ~10x per second
-          if (typeof mpSendLocalState === "function" && netSendTimer >= 0.1) {
-            netSendTimer = 0;
-            mpSendLocalState();
-          }
-        });
-
-        scene.onPointerObservable.add(function (pointerInfo) {
-  if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERPICK) {
-    const pick = pointerInfo.pickInfo;
-    if (pick && pick.hit && pick.pickedMesh) {
-      const mesh = pick.pickedMesh;
-      const npcName =
-        (mesh.metadata && mesh.metadata.npcName) ||
-        (mesh.parent && mesh.parent.metadata && mesh.parent.metadata.npcName) ||
-        mesh.name;
-      const def = hosgNpcDefinitions[npcName];
-      if (def) {
-        const lines = (def.lines && def.lines.length)
-          ? def.lines
-          : ["Hello, adventurer."];
-        const line = lines[Math.floor(Math.random() * lines.length)];
-        const label = def.role ? def.name + " (" + def.role + ")" : def.name;
-        appendChat(label + ": " + line);
-      }
-    }
-  }
-});
-
-
-window.addEventListener("keydown", function (evt) {
-  const chatInput = document.getElementById("chat-input");
-  if (chatInput && chatInput === document.activeElement) return;
-  if (evt.key === "e" || evt.key === "E") {
-    hosgInteractWithNearestNpc();
-  }
-});
-return scene;
+(function setupChat() {
+  const input = document.getElementById("chat-input");
+  const send = document.getElementById("chat-send");
+
+  function sendMessage() {
+    const value = input.value.trim();
+    if (!value) return;
+
+    if (mpConnected && mpSocket && mpSocket.readyState === WebSocket.OPEN) {
+      const msg = {
+        type: "chat",
+        text: value
       };
+      try {
+        mpSocket.send(JSON.stringify(msg));
+      } catch (e) {
+        console.warn("Failed to send chat", e);
+      }
+    } else {
+      appendChat("You: " + value);
+    }
 
-      const scene = createScene();
+    input.value = "";
+  }
 
-      setupCharacterCreationUI();
-      setupAccountAndCharacterFlows();
+  send.addEventListener("click", sendMessage);
+  input.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      sendMessage();
+    }
+  });
 
-// Hook multiplayer client (requires external Node.js WebSocket server)
-// NOTE: we now connect only after the player actually enters the world,
-// so that simply opening the page on another device/tab doesn't kick
-// existing sessions offline.
+  appendChat("System: Type to chat. If connected to the multiplayer server, your messages will be sent to other players.");
+})();
+
+const createScene = function () {
+  const scene = new BABYLON.Scene(engine);
+  scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+  scene.collisionsEnabled = true;
+
+  // Initialize game systems
+  GameSystems.init(scene, hosgSupabase);
+
+  const envTex = new BABYLON.CubeTexture(
+    "https://playground.babylonjs.com/textures/environment.env",
+    scene
+  );
+  scene.environmentTexture = envTex;
+  scene.createDefaultSkybox(envTex, true, 1000);
+
+  const camera = new BABYLON.ArcRotateCamera(
+    "camera",
+    -Math.PI / 2,
+    0.9,
+    40,
+    new BABYLON.Vector3(0, 3, 0),
+    scene
+  );
+  camera.lowerRadiusLimit = 18;
+  camera.upperRadiusLimit = 70;
+  camera.wheelDeltaPercentage = 0.02;
+  camera.panningSensibility = 0;
+  camera.attachControl(canvas, true);
+  camera.checkCollisions = false;
+
+  const hemiLight = new BABYLON.HemisphericLight(
+    "hemi",
+    new BABYLON.Vector3(0, 1, 0),
+    scene
+  );
+  hemiLight.intensity = 0.6;
+
+  const sun = new BABYLON.DirectionalLight(
+    "sun",
+    new BABYLON.Vector3(-0.5, -1, -0.3),
+    scene
+  );
+  sun.position = new BABYLON.Vector3(60, 80, 60);
+  sun.intensity = 1.1;
+
+  const shadowGenerator = new BABYLON.ShadowGenerator(2048, sun);
+  shadowGenerator.useBlurExponentialShadowMap = true;
+  shadowGenerator.blurKernel = 16;
+  scene.shadowGenerator = shadowGenerator;
+
+  const ground = BABYLON.MeshBuilder.CreateGround(
+    "ground",
+    { width: 220, height: 220, subdivisions: 80 },
+    scene
+  );
+  ground.checkCollisions = true;
+  const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+  groundMat.diffuseTexture = new BABYLON.Texture(
+    "https://playground.babylonjs.com/textures/grass.jpg",
+    scene
+  );
+  groundMat.diffuseTexture.uScale = 40;
+  groundMat.diffuseTexture.vScale = 40;
+  groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
+  ground.material = groundMat;
+  ground.receiveShadows = true;
+
+  const water = BABYLON.MeshBuilder.CreateGround(
+    "water",
+    { width: 80, height: 80, subdivisions: 2 },
+    scene
+  );
+  water.position = new BABYLON.Vector3(0, 0.02, -60);
+  const waterMat = new BABYLON.StandardMaterial("waterMat", scene);
+  waterMat.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.6);
+  waterMat.alpha = 0.6;
+  waterMat.specularColor = new BABYLON.Color3(0.6, 0.8, 1);
+  waterMat.backFaceCulling = false;
+  water.material = waterMat;
+
+  const stonePathMat = new BABYLON.StandardMaterial("stoneMat", scene);
+  stonePathMat.diffuseTexture = new BABYLON.Texture(
+    "https://playground.babylonjs.com/textures/rock.png",
+    scene
+  );
+  stonePathMat.diffuseTexture.uScale = 4;
+  stonePathMat.diffuseTexture.vScale = 4;
+  stonePathMat.specularColor = new BABYLON.Color3(0.02, 0.02, 0.02);
+
+  for (let i = -30; i <= 30; i += 5) {
+    const stone = BABYLON.MeshBuilder.CreateBox(
+      "pathStone",
+      { width: 2.5, height: 0.4, depth: 2.5 },
+      scene
+    );
+    stone.position = new BABYLON.Vector3(i, 0.2, 0);
+    stone.material = stonePathMat;
+    stone.checkCollisions = true;
+    stone.receiveShadows = true;
+  }
+
+  const treeTrunkMat = new BABYLON.StandardMaterial("trunkMat", scene);
+  treeTrunkMat.diffuseTexture = new BABYLON.Texture(
+    "https://playground.babylonjs.com/textures/wood.jpg",
+    scene
+  );
+  treeTrunkMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+
+  const treeLeafMat = new BABYLON.StandardMaterial("leafMat", scene);
+  treeLeafMat.diffuseColor = new BABYLON.Color3(0.22, 0.45, 0.2);
+  treeLeafMat.emissiveColor = new BABYLON.Color3(0.03, 0.08, 0.03);
+
+  function createTree(x, z, scale) {
+    const trunk = BABYLON.MeshBuilder.CreateCylinder(
+      "trunk",
+      { height: 6 * scale, diameterTop: 0.8 * scale, diameterBottom: 1.2 * scale },
+      scene
+    );
+    trunk.position = new BABYLON.Vector3(x, 3 * scale, z);
+    trunk.material = treeTrunkMat;
+    trunk.checkCollisions = true;
+    trunk.receiveShadows = true;
+
+    const canopy = BABYLON.MeshBuilder.CreateSphere(
+      "canopy",
+      { diameter: 6 * scale, segments: 8 },
+      scene
+    );
+    canopy.position = new BABYLON.Vector3(x, 6.5 * scale, z);
+    canopy.material = treeLeafMat;
+    canopy.checkCollisions = true;
+    canopy.receiveShadows = true;
+
+    shadowGenerator.addShadowCaster(trunk);
+    shadowGenerator.addShadowCaster(canopy);
+  }
+
+  for (let i = 0; i < 80; i++) {
+    const radius = 80 + Math.random() * 30;
+    const angle = Math.random() * Math.PI * 2;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const scale = 0.6 + Math.random() * 0.8;
+    createTree(x, z, scale);
+  }
+
+  const townMat = new BABYLON.StandardMaterial("townMat", scene);
+  townMat.diffuseTexture = new BABYLON.Texture(
+    "https://playground.babylonjs.com/textures/floor.png",
+    scene
+  );
+  townMat.diffuseTexture.uScale = 4;
+  townMat.diffuseTexture.vScale = 4;
+
+  const plaza = BABYLON.MeshBuilder.CreateBox(
+    "plaza",
+    { width: 40, depth: 40, height: 1 },
+    scene
+  );
+  plaza.position = new BABYLON.Vector3(0, 0.5, 30);
+  plaza.material = townMat;
+  plaza.checkCollisions = true;
+  plaza.receiveShadows = true;
+
+  const wallMat = new BABYLON.StandardMaterial("wallMat", scene);
+  wallMat.diffuseTexture = new BABYLON.Texture(
+    "https://playground.babylonjs.com/textures/floor.png",
+    scene
+  );
+  wallMat.diffuseTexture.uScale = 2;
+  wallMat.diffuseTexture.vScale = 1;
+
+  function createWall(from, to, height, thickness) {
+    const length = BABYLON.Vector3.Distance(from, to);
+    const wall = BABYLON.MeshBuilder.CreateBox(
+      "wall",
+      { width: length, depth: thickness, height: height },
+      scene
+    );
+    wall.position = from.add(to).scale(0.5);
+    wall.position.y = height / 2;
+    const dir = to.subtract(from);
+    wall.rotation.y = Math.atan2(dir.z, dir.x);
+    wall.material = wallMat;
+    wall.checkCollisions = true;
+    wall.receiveShadows = true;
+    shadowGenerator.addShadowCaster(wall);
+  }
+
+  const half = 20;
+  const height = 5;
+  const thickness = 1;
+  createWall(
+    new BABYLON.Vector3(-half, 0, 30 - half),
+    new BABYLON.Vector3(half, 0, 30 - half),
+    height,
+    thickness
+  );
+  createWall(
+    new BABYLON.Vector3(-half, 0, 30 + half),
+    new BABYLON.Vector3(half, 0, 30 + half),
+    height,
+    thickness
+  );
+  createWall(
+    new BABYLON.Vector3(-half, 0, 30 - half),
+    new BABYLON.Vector3(-half, 0, 30 + half),
+    height,
+    thickness
+  );
+  createWall(
+    new BABYLON.Vector3(half, 0, 30 - half),
+    new BABYLON.Vector3(half, 0, 30 + half),
+    height,
+    thickness
+  );
+
+  let heroBody = BABYLON.MeshBuilder.CreateCapsule(
+    "heroBody",
+    {
+      height: 2.8,
+      radius: 0.6,
+      tessellation: 10,
+      subdivisions: 2
+    },
+    scene
+  );
+  heroBody.position = new BABYLON.Vector3(
+    playerState.position.x,
+    playerState.position.y,
+    playerState.position.z
+  );
+  heroBody.rotation.y = playerState.rotationY || 0;
+
+  heroBody.ellipsoid = new BABYLON.Vector3(0.8, 1.4, 0.8);
+  heroBody.ellipsoidOffset = new BABYLON.Vector3(0, 1.4, 0);
+  heroBody.checkCollisions = true;
+  heroBody.applyGravity = true;
+  heroBody.visibility = 0.0;
+  scene.heroBody = heroBody;
+
+  const heroSkinMat = new BABYLON.StandardMaterial("heroSkinMat", scene);
+  const heroClothMat = new BABYLON.StandardMaterial("heroClothMat", scene);
+  const heroPantsMat = new BABYLON.StandardMaterial("heroPantsMat", scene);
+  const heroBootMat = new BABYLON.StandardMaterial("heroBootMat", scene);
+
+  applyAppearanceToMaterials(scene, {
+    skin: heroSkinMat,
+    tunic: heroClothMat,
+    pants: heroPantsMat,
+    boots: heroBootMat
+  });
+
+  heroSkinMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+
+  const heroVisualRoot = new BABYLON.TransformNode("heroVisualRoot", scene);
+  heroVisualRoot.parent = heroBody;
+  heroVisualRoot.position = new BABYLON.Vector3(0, -0.4, 0);
+
+  const heroRig = {
+    root: heroVisualRoot,
+    torso: null,
+    head: null,
+    shoulders: null,
+    hips: null,
+    leftArmJoint: null,
+    rightArmJoint: null,
+    leftLegJoint: null,
+    rightLegJoint: null
+  };
+
+  const torso = BABYLON.MeshBuilder.CreateBox(
+    "heroTorso",
+    { width: 1.1, height: 2, depth: 0.7 },
+    scene
+  );
+  torso.parent = heroVisualRoot;
+  torso.position = new BABYLON.Vector3(0, 1.6, 0);
+  torso.material = heroClothMat;
+  heroRig.torso = torso;
+
+  const head = BABYLON.MeshBuilder.CreateSphere(
+    "heroHead",
+    { diameter: 0.9, segments: 8 },
+    scene
+  );
+  head.parent = torso;
+  head.position = new BABYLON.Vector3(0, 1.4, 0);
+  head.material = heroSkinMat;
+  heroRig.head = head;
+
+  const hips = new BABYLON.TransformNode("heroHips", scene);
+  hips.parent = heroVisualRoot;
+  hips.position = new BABYLON.Vector3(0, 0.8, 0);
+  heroRig.hips = hips;
+
+  function createLeg(name, xSign) {
+    const joint = new BABYLON.TransformNode(name + "Joint", scene);
+    joint.parent = hips;
+    joint.position = new BABYLON.Vector3(0.35 * xSign, 0, 0);
+
+    const upper = BABYLON.MeshBuilder.CreateBox(
+      name + "Upper",
+      { width: 0.4, height: 1.7, depth: 0.4 },
+      scene
+    );
+    upper.parent = joint;
+    upper.position = new BABYLON.Vector3(0, -0.85, 0);
+    upper.material = heroPantsMat;
+
+    const boot = BABYLON.MeshBuilder.CreateBox(
+      name + "Boot",
+      { width: 0.5, height: 0.4, depth: 0.7 },
+      scene
+    );
+    boot.parent = joint;
+    boot.position = new BABYLON.Vector3(0, -1.7, 0.12);
+    boot.material = heroBootMat;
+
+    shadowGenerator.addShadowCaster(upper);
+    shadowGenerator.addShadowCaster(boot);
+
+    return joint;
+  }
+
+  heroRig.leftLegJoint = createLeg("heroLeftLeg", -1);
+  heroRig.rightLegJoint = createLeg("heroRightLeg", 1);
+
+  const shoulders = new BABYLON.TransformNode("heroShoulders", scene);
+  shoulders.parent = torso;
+  shoulders.position = new BABYLON.Vector3(0, 1.1, 0);
+  heroRig.shoulders = shoulders;
+
+  function createArm(name, xSign) {
+    const joint = new BABYLON.TransformNode(name + "Joint", scene);
+    joint.parent = shoulders;
+    joint.position = new BABYLON.Vector3(0.75 * xSign, 0.1, 0);
+
+    const upper = BABYLON.MeshBuilder.CreateBox(
+      name + "Upper",
+      { width: 0.35, height: 1.4, depth: 0.35 },
+      scene
+    );
+    upper.parent = joint;
+    upper.position = new BABYLON.Vector3(0, -0.7, 0);
+    upper.material = heroClothMat;
+
+    const hand = BABYLON.MeshBuilder.CreateBox(
+      name + "Hand",
+      { width: 0.3, height: 0.4, depth: 0.3 },
+      scene
+    );
+    hand.parent = joint;
+    hand.position = new BABYLON.Vector3(0, -1.25, 0);
+    hand.material = heroSkinMat;
+
+    shadowGenerator.addShadowCaster(upper);
+    shadowGenerator.addShadowCaster(hand);
+
+    return joint;
+  }
+
+  heroRig.leftArmJoint = createArm("heroLeftArm", -1);
+  heroRig.rightArmJoint = createArm("heroRightArm", 1);
+
+  shadowGenerator.addShadowCaster(torso);
+  shadowGenerator.addShadowCaster(head);
+
+  camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
+  const hudHeroName = document.getElementById("hud-hero-name");
+  if (hudHeroName && playerState && playerState.name) {
+    hudHeroName.textContent = playerState.name + " of Shady Grove";
+  }
+
+  const npcMat = new BABYLON.StandardMaterial("npcMat", scene);
+  npcMat.diffuseColor = new BABYLON.Color3(0.4, 0.7, 1.0);
+  npcMat.emissiveColor = new BABYLON.Color3(0.03, 0.05, 0.09);
+
+  function createNpc(name, position) {
+    const npc = BABYLON.MeshBuilder.CreateBox(
+      name,
+      { width: 1.6, height: 3, depth: 1.2 },
+      scene
+    );
+    npc.position = position.clone();
+    npc.material = npcMat;
+    npc.checkCollisions = true;
+    npc.isPickable = true;
+    shadowGenerator.addShadowCaster(npc);
+
+    const plane = BABYLON.MeshBuilder.CreatePlane(
+      name + "_nameplate",
+      { width: 3, height: 0.6 },
+      scene
+    );
+    plane.parent = npc;
+    plane.position = new BABYLON.Vector3(0, 2.2, 0);
+    plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+
+    const dynamicTex = new BABYLON.DynamicTexture(
+      name + "_dt",
+      { width: 256, height: 64 },
+      scene,
+      false
+    );
+    dynamicTex.hasAlpha = true;
+    dynamicTex.drawText(
+      name,
+      null,
+      42,
+      "20px Segoe UI",
+      "#ffffff",
+      "transparent",
+      true
+    );
+
+    const planeMat = new BABYLON.StandardMaterial(name + "_nameMat", scene);
+    planeMat.diffuseTexture = dynamicTex;
+    planeMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    planeMat.backFaceCulling = false;
+    plane.material = planeMat;
+
+    return npc;
+  }
+
+  createNpc("Mennonite Merchant", new BABYLON.Vector3(4, 1.5, 34));
+  createNpc("Village Guard", new BABYLON.Vector3(-6, 1.5, 26));
+
+  // Spawn test enemies
+  GameSystems.spawnTestEnemies(scene);
+
+  const inputMap = {};
+  window.addEventListener("keydown", function (ev) {
+    if (!ev || typeof ev.key !== "string") return;
+    const key = ev.key.toLowerCase();
+    inputMap[key] = true;
+  });
+  window.addEventListener("keyup", function (ev) {
+    if (!ev || typeof ev.key !== "string") return;
+    const key = ev.key.toLowerCase();
+    inputMap[key] = false;
+  });
+  const mobileControls = document.getElementById("mobile-controls");
+  const joystickBase = document.getElementById("joystick-base");
+  const joystickThumb = document.getElementById("joystick-thumb");
+  const btnJump = document.getElementById("btn-jump");
+  const btnRun = document.getElementById("btn-run");
+
+  const joystick = { x: 0, y: 0, active: false };
+  let mobileRunHeld = false;
+  let mobileJumpQueued = false;
+
+  if (isMobile && mobileControls && joystickBase && joystickThumb && btnJump && btnRun) {
+    mobileControls.style.display = "flex";
+
+    let activeTouchId = null;
+    const maxRadius = 60;
+
+    function resetJoystick() {
+      joystick.active = false;
+      joystick.x = 0;
+      joystick.y = 0;
+      activeTouchId = null;
+      joystickThumb.style.transform = "translate(-50%, -50%)";
+    }
+
+    function updateJoystickFromTouch(touch) {
+      const rect = joystickBase.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const dx = touch.clientX - centerX;
+      const dy = touch.clientY - centerY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      let clampedDx = dx;
+      let clampedDy = dy;
+
+      if (distance > maxRadius) {
+        const ratio = maxRadius / distance;
+        clampedDx *= ratio;
+        clampedDy *= ratio;
+      }
+
+      joystickThumb.style.transform = "translate(" + clampedDx + "px, " + clampedDy + "px)";
+      joystick.x = clampedDx / maxRadius;
+      joystick.y = clampedDy / maxRadius;
+      joystick.active = true;
+    }
+
+    joystickBase.addEventListener("touchstart", function (e) {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      activeTouchId = t.identifier;
+      updateJoystickFromTouch(t);
+    }, { passive: false });
+
+    joystickBase.addEventListener("touchmove", function (e) {
+      e.preventDefault();
+      if (activeTouchId === null) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier === activeTouchId) {
+          updateJoystickFromTouch(t);
+          break;
+        }
+      }
+    }, { passive: false });
+
+    joystickBase.addEventListener("touchend", function (e) {
+      e.preventDefault();
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier === activeTouchId) {
+          resetJoystick();
+          break;
+        }
+      }
+    }, { passive: false });
+
+    joystickBase.addEventListener("touchcancel", function (e) {
+      e.preventDefault();
+      resetJoystick();
+    }, { passive: false });
+
+    btnJump.addEventListener("touchstart", function (e) {
+      e.preventDefault();
+      mobileJumpQueued = true;
+    }, { passive: false });
+
+    btnRun.addEventListener("touchstart", function (e) {
+      e.preventDefault();
+      mobileRunHeld = true;
+    }, { passive: false });
+
+    btnRun.addEventListener("touchend", function (e) {
+      e.preventDefault();
+      mobileRunHeld = false;
+    }, { passive: false });
+
+    btnRun.addEventListener("touchcancel", function (e) {
+      e.preventDefault();
+      mobileRunHeld = false;
+    }, { passive: false });
+  }
+
+  const gamepadState = {
+    hasPad: false,
+    moveX: 0,
+    moveY: 0,
+    lookX: 0,
+    lookY: 0,
+    run: false,
+    jump: false,
+    lastJump: false
+  };
+
+  function updateGamepadState() {
+    const getGamepads = navigator.getGamepads || navigator.webkitGetGamepads || navigator.msGetGamepads;
+    if (!getGamepads) {
+      gamepadState.hasPad = false;
+      return;
+    }
+    const pads = getGamepads.call(navigator);
+    let pad = null;
+    for (let i = 0; i < pads.length; i++) {
+      if (pads[i]) { pad = pads[i]; break; }
+    }
+    if (!pad) {
+      gamepadState.hasPad = false;
+      gamepadState.moveX = gamepadState.moveY = gamepadState.lookX = gamepadState.lookY = 0;
+      gamepadState.run = gamepadState.jump = false;
+      return;
+    }
+    gamepadState.hasPad = true;
+    const axes = pad.axes || [];
+    const buttons = pad.buttons || [];
+    const dead = 0.2;
+    function d(v) { return Math.abs(v) < dead ? 0 : v; }
+    const lx = d(axes[0] || 0);
+    const ly = d(axes[1] || 0);
+    const rx = d(axes[2] || 0);
+    const ry = d(axes[3] || 0);
+    gamepadState.moveX = lx;
+    gamepadState.moveY = ly;
+    gamepadState.lookX = rx;
+    gamepadState.lookY = ry;
+    const jumpNow = buttons[0] && buttons[0].pressed;
+    gamepadState.run = (buttons[1] && buttons[1].pressed) || (buttons[4] && buttons[4].pressed) || (buttons[5] && buttons[5].pressed);
+    gamepadState.jump = !gamepadState.lastJump && !!jumpNow;
+    gamepadState.lastJump = !!jumpNow;
+  }
+
+  function wrapAngle(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  let hudTime = 0;
+  const hpFill = document.getElementById("hp-fill");
+  const mpFill = document.getElementById("mp-fill");
+  const hpLabel = document.getElementById("hp-label");
+  const mpLabel = document.getElementById("mp-label");
+  const xpFill = document.getElementById("xp-fill");
+  const xpLabel = document.getElementById("xp-label");
+  const levelLabel = document.getElementById("level-label");
+
+  function updateHud(time) {
+    if (hp > maxHp) hp = maxHp;
+    if (hp < 0) hp = 0;
+    if (mp > maxMp) mp = maxMp;
+    if (mp < 0) mp = 0;
+    hpFill.style.width = (hp / maxHp * 100) + "%";
+    mpFill.style.width = (mp / maxMp * 100) + "%";
+    xpFill.style.width = Math.min(100, xp) + "%";
+    hpLabel.textContent = Math.round(hp) + " / " + maxHp;
+    mpLabel.textContent = Math.round(mp) + " / " + maxMp;
+    xpLabel.textContent = Math.round(xp) + "%";
+    levelLabel.textContent = level;
+  }
+
+  const baseSpeed = 0.16;
+  const runMultiplier = 1.8;
+  const rotationLerp = 0.18;
+  let verticalVelocity = 0;
+  const jumpStrength = 0.22;
+  let isGrounded = false;
+
+  let walkCycleTime = 0;
+  let autosaveTimer = 0;
+  let netSendTimer = 0;
+
+  scene.onBeforeRenderObservable.add(function () {
+    const deltaTime = scene.getEngine().getDeltaTime();
+    const dt = deltaTime / (1000 / 60);
+    const dtSec = deltaTime / 1000;
+
+    hudTime += dtSec;
+    updateHud(hudTime);
+    updateGamepadState();
+
+    autosaveTimer += dtSec;
+    netSendTimer += dtSec;
+
+    // Update NPC AI
+    const playerData = {
+      id: hosgCurrentCharacterId || 'player_local',
+      name: playerState?.name || "Hero",
+      position: heroBody.position.clone(),
+      stats: { hp, maxHp, mp, maxMp, level, xp, attack: 10, defense: 5 }
+    };
+    GameSystems.npcManager.updateAI(dtSec, [playerData]);
+
+    // Update target frame
+    if (GameSystems.currentTarget && GameSystems.currentTarget.stats.hp > 0) {
+      const target = GameSystems.currentTarget;
+      document.getElementById('target-frame').style.display = 'block';
+      document.getElementById('target-name').textContent = target.name;
+      document.getElementById('target-hp-label').textContent = 
+        Math.floor(target.stats.hp) + ' / ' + target.stats.maxHp;
+      document.getElementById('target-hp-fill').style.width = 
+        (target.stats.hp / target.stats.maxHp * 100) + '%';
+    } else {
+      document.getElementById('target-frame').style.display = 'none';
+      if (GameSystems.currentTarget && GameSystems.currentTarget.stats.hp <= 0) {
+        GameSystems.currentTarget = null;
+      }
+    }
+
+    let heroSpeed = baseSpeed;
+    if (inputMap["shift"] || (gamepadState.hasPad && gamepadState.run) || mobileRunHeld) {
+      heroSpeed *= runMultiplier;
+    }
+
+    let moveX = 0;
+    let moveZ = 0;
+
+    if (inputMap["w"]) moveZ += 1;
+    if (inputMap["s"]) moveZ -= 1;
+    if (inputMap["d"]) moveX += 1;
+    if (inputMap["a"]) moveX -= 1;
+
+    if (joystick.active) {
+      moveZ += -joystick.y;
+      moveX += joystick.x;
+    }
+
+    if (gamepadState.hasPad) {
+      moveZ += -gamepadState.moveY;
+      moveX += gamepadState.moveX;
+    }
+
+    const moveMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+    let isMoving = moveMagnitude > 0.05;
+
+    const jumpRequested = (inputMap[" "] || mobileJumpQueued || (gamepadState.hasPad && gamepadState.jump));
+    if (jumpRequested && isGrounded) {
+      verticalVelocity = jumpStrength;
+      isGrounded = false;
+    }
+    mobileJumpQueued = false;
+
+    verticalVelocity += scene.gravity.y * dtSec;
+    let nextPos = heroBody.position.clone();
+    nextPos.y += verticalVelocity * dt;
+
+    if (nextPos.y < 1.5) {
+      nextPos.y = 1.5;
+      verticalVelocity = 0;
+      isGrounded = true;
+    }
+
+    let moveVecWorld = new BABYLON.Vector3(0, 0, 0);
+    if (isMoving) {
+      const normX = moveX / moveMagnitude;
+      const normZ = moveZ / moveMagnitude;
+
+      let forwardDir = camera.getDirection(new BABYLON.Vector3(0, 0, 1));
+      forwardDir.y = 0;
+      forwardDir.normalize();
+
+      let rightDir = camera.getDirection(new BABYLON.Vector3(1, 0, 0));
+      rightDir.y = 0;
+      rightDir.normalize();
+
+      moveVecWorld = forwardDir.scale(normZ).add(rightDir.scale(normX));
+      moveVecWorld.normalize();
+
+      const desiredY = Math.atan2(moveVecWorld.x, moveVecWorld.z);
+      const angleDiff = wrapAngle(desiredY - heroBody.rotation.y);
+      heroBody.rotation.y += angleDiff * rotationLerp * dt;
+    }
+
+    if (isMoving) {
+      const displacement = moveVecWorld.scale(heroSpeed * dt);
+      nextPos.addInPlace(displacement);
+    }
+
+    heroBody.moveWithCollisions(nextPos.subtract(heroBody.position));
+
+    if (heroRig.root) {
+      if (isMoving) {
+        walkCycleTime += dtSec * (heroSpeed / baseSpeed) * 4.2;
+        const phase = walkCycleTime * Math.PI * 2;
+        const swing = Math.sin(phase);
+        const swingOpp = Math.sin(phase + Math.PI);
+        const legSwing = 0.7;
+        const armSwing = 0.8;
+
+        heroRig.leftLegJoint.rotation.x = swing * legSwing;
+        heroRig.rightLegJoint.rotation.x = swingOpp * legSwing;
+        heroRig.leftArmJoint.rotation.x = swingOpp * armSwing * 0.6;
+        heroRig.rightArmJoint.rotation.x = swing * armSwing * 0.6;
+
+        const bob = Math.abs(Math.sin(phase)) * 0.06;
+        heroRig.torso.position.y = 1.6 + bob;
+      } else {
+        const relaxFactor = 1 - Math.pow(0.0001, dtSec);
+
+        function dampJoint(joint) {
+          joint.rotation.x -= joint.rotation.x * relaxFactor;
+          joint.rotation.z -= joint.rotation.z * relaxFactor;
+        }
+
+        dampJoint(heroRig.leftLegJoint);
+        dampJoint(heroRig.rightLegJoint);
+        dampJoint(heroRig.leftArmJoint);
+        dampJoint(heroRig.rightArmJoint);
+
+        const baseTorsoY = 1.6;
+        heroRig.torso.position.y += (baseTorsoY - heroRig.torso.position.y) * relaxFactor;
+
+        walkCycleTime += dtSec * 0.5;
+        const breath = Math.sin(walkCycleTime * Math.PI * 2) * 0.01;
+        heroRig.torso.position.y = baseTorsoY + breath;
+      }
+    }
+
+    camera.target = heroBody.position.add(new BABYLON.Vector3(0, 2, 0));
+
+    if (gamepadState.hasPad) {
+      const lookSpeed = 0.04;
+      camera.alpha -= gamepadState.lookX * lookSpeed * dt;
+      camera.beta -= gamepadState.lookY * lookSpeed * dt;
+      const lowerBetaLimit = 0.3;
+      const upperBetaLimit = Math.PI / 2;
+      if (camera.beta < lowerBetaLimit) camera.beta = lowerBetaLimit;
+      if (camera.beta > upperBetaLimit) camera.beta = upperBetaLimit;
+    }
+
+    if (autosaveTimer >= 0.5) {
+      autosaveTimer = 0;
+      savePlayerStateRuntime(
+        heroBody,
+        hp, maxHp,
+        mp, maxMp,
+        xp, level
+      );
+    }
+
+    if (typeof mpSendLocalState === "function" && netSendTimer >= 0.1) {
+      netSendTimer = 0;
+      mpSendLocalState();
+    }
+  });
+
+  scene.onPointerObservable.add(function (pointerInfo) {
+    if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERPICK) {
+      const pick = pointerInfo.pickInfo;
+      if (pick.hit && pick.pickedMesh && pick.pickedMesh.name.includes("Mennonite")) {
+        appendChat("Mennonite Merchant: 'Fresh bread and shiny swords! Trading coming soon.'");
+      }
+    }
+  });
+
+  return scene;
+};
+
+const scene = createScene();
+
+setupCharacterCreationUI();
+setupAccountAndCharacterFlows();
+
 let mpSendLocalState = null;
 mpUpdateStatusLabel();
 
@@ -3378,1037 +2864,183 @@ function hosgConnectMultiplayerIfNeeded() {
   );
 }
 
-// Expose helper so the character creation flow can connect when "Start" succeeds
 window.hosgConnectMultiplayerIfNeeded = hosgConnectMultiplayerIfNeeded;
 
-      engine.runRenderLoop(function () {
-        scene.render();
-      });
+// ==================== COMBAT & TARGETING FUNCTIONS ====================
+window.useHotbarSkill = async function(skillId) {
+  if (!GameSystems.currentTarget) {
+    appendChat("No target selected. Press Tab to target nearest enemy.");
+    return;
+  }
+  
+  if (GameSystems.currentTarget.stats.hp <= 0) {
+    appendChat("Target is already dead.");
+    GameSystems.currentTarget = null;
+    clearTargetHighlight();
+    return;
+  }
+  
+  const playerData = {
+    id: hosgCurrentCharacterId || 'player_local',
+    name: playerState?.name || "Hero",
+    position: scene.heroBody.position.clone(),
+    stats: { hp, maxHp, mp, maxMp, level, xp, attack: 10, defense: 5 }
+  };
+  
+  const result = await GameSystems.combat.useSkill(
+    playerData,
+    GameSystems.currentTarget,
+    skillId
+  );
+  
+  if (result.success) {
+    mp = Math.max(0, mp - (GameSystems.combat.skills.get(skillId)?.mpCost || 0));
+    
+    const critText = result.isCritical ? " CRITICAL!" : "";
+    appendChat(`You hit ${GameSystems.currentTarget.name} for ${result.damage} damage${critText}`);
+    
+    if (result.targetDied) {
+      appendChat(`${GameSystems.currentTarget.name} has been defeated!`);
+      const xpGain = GameSystems.currentTarget.stats.level * 10;
+      const xpNeeded = 100 * Math.pow(level, 1.8);
+      xp = Math.min(100, xp + (xpGain / xpNeeded) * 100);
+      
+      // Check level up
+      if (xp >= 100) {
+        level++;
+        xp = 0;
+        maxHp += 10;
+        maxMp += 5;
+        hp = maxHp;
+        mp = maxMp;
+        appendChat(`LEVEL UP! You are now level ${level}!`);
+      }
+      
+      GameSystems.currentTarget = null;
+      clearTargetHighlight();
+    }
+  } else {
+    appendChat(result.reason);
+  }
+};
 
-      window.addEventListener("resize", function () {
-        engine.resize();
-      });
-    })();
+function targetNearestEnemy() {
+  const enemies = GameSystems.npcManager.getEnemiesInRange(scene.heroBody.position, 30);
+  if (enemies.length === 0) {
+    appendChat("No enemies nearby.");
+    return;
+  }
+  
+  let nearest = enemies[0];
+  let nearestDist = BABYLON.Vector3.Distance(scene.heroBody.position, nearest.position);
+  
+  for (const enemy of enemies) {
+    if (enemy.stats.hp <= 0) continue;
+    const dist = BABYLON.Vector3.Distance(scene.heroBody.position, enemy.position);
+    if (dist < nearestDist) {
+      nearest = enemy;
+      nearestDist = dist;
+    }
+  }
+  
+  if (nearest.stats.hp <= 0) {
+    appendChat("No living enemies nearby.");
+    return;
+  }
+  
+  GameSystems.currentTarget = nearest;
+  highlightTarget(nearest);
+  appendChat(`Targeted: ${nearest.name}`);
+}
+
+function highlightTarget(target) {
+  clearTargetHighlight();
+  
+  const targetRing = BABYLON.MeshBuilder.CreateTorus("targetRing", {
+    diameter: 3,
+    thickness: 0.1,
+    tessellation: 32
+  }, scene);
+  
+  targetRing.position = target.mesh.root.position.clone();
+  targetRing.position.y = 0.1;
+  targetRing.rotation.x = Math.PI / 2;
+  
+  const mat = new BABYLON.StandardMaterial("targetMat", scene);
+  mat.emissiveColor = new BABYLON.Color3(1, 0, 0);
+  mat.disableLighting = true;
+  targetRing.material = mat;
+  
+  const obs = scene.onBeforeRenderObservable.add(() => {
+    const time = Date.now() / 1000;
+    targetRing.scaling.setAll(1 + Math.sin(time * 3) * 0.1);
+    if (target.mesh && target.mesh.root) {
+      targetRing.position.x = target.mesh.root.position.x;
+      targetRing.position.z = target.mesh.root.position.z;
+    }
+  });
+  
+  targetRing.metadata = { observer: obs };
+  GameSystems.targetRing = targetRing;
+}
+
+function clearTargetHighlight() {
+  if (GameSystems.targetRing) {
+    if (GameSystems.targetRing.metadata?.observer) {
+      scene.onBeforeRenderObservable.remove(GameSystems.targetRing.metadata.observer);
+    }
+    GameSystems.targetRing.dispose();
+    GameSystems.targetRing = null;
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    targetNearestEnemy();
+  } else if (e.key === 'Escape') {
+    GameSystems.currentTarget = null;
+    clearTargetHighlight();
+    appendChat("Target cleared.");
+  } else if (e.key >= '1' && e.key <= '4') {
+    window.useHotbarSkill(parseInt(e.key));
+  }
+});
+
+scene.onPointerObservable.add(function(pointerInfo) {
+  if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+    if (pointerInfo.event.button === 0) {
+      const pick = pointerInfo.pickInfo;
+      if (pick.hit && pick.pickedMesh) {
+        const meshName = pick.pickedMesh.name;
+        
+        if (meshName.includes('enemy_')) {
+          const parts = meshName.split('_');
+          if (parts.length >= 3) {
+            const enemyId = parts[0] + '_' + parts[1] + '_' + parts[2];
+            const enemy = GameSystems.npcManager.getNPC(enemyId);
+            
+            if (enemy && enemy.stats.hp > 0) {
+              GameSystems.currentTarget = enemy;
+              highlightTarget(enemy);
+              appendChat(`Targeted: ${enemy.name}`);
+            }
+          }
+        }
+      }
+    }
+  }
+});
+
+engine.runRenderLoop(function () {
+  scene.render();
+});
+
+window.addEventListener("resize", function () {
+  engine.resize();
+});
+
+})();
   </script>
 </body>
 </html>
-diff --git a/index.html b/index.html
-index bc9a0f19f344dfcef91ce5cc7227f13e0c0baf36..fef43c5b5c089f797cf57d69ebbdfc3ca8db0309 100644
---- a/index.html
-+++ b/index.html
-@@ -775,51 +775,51 @@
-       padding: 4px 10px;
-       font-size: 11px;
-       color: #cfd8ff;
-       pointer-events: auto;
-     }
- 
-     #mp-status-text.online {
-       color: #6bff7b;
-     }
- 
-     #mp-status-text.offline {
-       color: #ff7070;
-     }
- 
-     #helper-keys {
-         display: none;
-       }
-     }
-   </style>
-   <script src="https://cdn.babylonjs.com/babylon.js"></script>
- 
-   <script src="hosg_config.js"></script>
- <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
- </head>
- <body>
--  <!-- Game: Heroes of Shady Grove | Version: 1.0.31 -->
-+  <!-- Game: Heroes of Shady Grove | Version: 1.0.32 -->
- 
-   <canvas id="renderCanvas"></canvas>
- 
-   <div id="hud">
-     <div id="hud-left">
-       <div class="hud-panel">
-         <div class="hud-title"><span id="hud-hero-name">Felix of Shady Grove</span></div>
-         <div class="bar">
-           <div id="hp-fill" class="bar-fill"></div>
-         </div>
-         <div class="bar-label">
-           <span>HP</span>
-           <span id="hp-label">100 / 100</span>
-         </div>
-         <div class="bar">
-           <div id="mp-fill" class="bar-fill"></div>
-         </div>
-         <div class="bar-label">
-           <span>MP</span>
-           <span id="mp-label">60 / 100</span>
-         </div>
-         <div id="xp-row">
-           <span>Lv. <span id="level-label">1</span></span>
-           <div id="xp-bar"><div id="xp-fill"></div></div>
-           <span id="xp-label">25%</span>
-@@ -909,50 +909,223 @@
-   </div>
- 
-   <div id="mp-status">MP: <span id="mp-status-text">Offline</span></div>
- 
-   <div id="helper-keys">
-     <div><strong>Controls</strong></div>
-     <div>W / A / S / D – Move</div>
-     <div>Right mouse drag – Orbit camera</div>
-     <div>Shift / B – Run</div>
-     <div>Space / A – Jump</div>
-     <div>Scroll – Zoom camera</div>
-   </div>
- 
-   <div id="mobile-controls">
-     <div id="joystick-base">
-       <div id="joystick-thumb"></div>
-     </div>
-     <div id="mobile-buttons">
-       <button id="btn-jump">Jump</button>
-       <button id="btn-run">Run</button>
-     </div>
-   </div>
- 
-   <script>
- 
-+// Lightweight grid-based zone streaming to start moving toward the large-world plan
-+class ZoneStreamingManager {
-+  constructor(scene, shadowGenerator) {
-+    this.scene = scene;
-+    this.shadowGenerator = shadowGenerator;
-+    this.zones = [];
-+    this.activeZoneIds = new Set();
-+    this.lastCheck = 0;
-+    this.checkIntervalMs = 500;
-+  }
-+
-+  registerZone(def) {
-+    this.zones.push({
-+      id: def.id,
-+      center: def.center,
-+      halfSize: def.halfSize || 128,
-+      buildContainer: def.buildContainer,
-+      onEnter: def.onEnter,
-+      onExit: def.onExit,
-+      status: "unloaded",
-+      container: null,
-+      loadingPromise: null
-+    });
-+  }
-+
-+  async loadZone(zone) {
-+    if (zone.status === "loaded") return;
-+    if (zone.loadingPromise) {
-+      await zone.loadingPromise;
-+      return;
-+    }
-+    zone.loadingPromise = (async () => {
-+      if (!zone.container) {
-+        zone.container = await zone.buildContainer(this.scene, this.shadowGenerator);
-+      }
-+      zone.container.addAllToScene();
-+      zone.status = "loaded";
-+      this.activeZoneIds.add(zone.id);
-+      if (typeof zone.onEnter === "function") zone.onEnter();
-+    })();
-+    await zone.loadingPromise;
-+    zone.loadingPromise = null;
-+  }
-+
-+  unloadZone(zone) {
-+    if (zone.status !== "loaded" || !zone.container) return;
-+    zone.container.removeAllFromScene();
-+    zone.status = "unloaded";
-+    this.activeZoneIds.delete(zone.id);
-+    if (typeof zone.onExit === "function") zone.onExit();
-+  }
-+
-+  async tick(playerPosition) {
-+    const now = performance.now();
-+    if (now - this.lastCheck < this.checkIntervalMs) return;
-+    this.lastCheck = now;
-+    if (!playerPosition) return;
-+
-+    const pendingLoads = [];
-+    for (const zone of this.zones) {
-+      const inZone = this.pointInside(playerPosition, zone.center, zone.halfSize);
-+      if (inZone) {
-+        if (zone.status !== "loaded") pendingLoads.push(this.loadZone(zone));
-+      } else {
-+        this.unloadZone(zone);
-+      }
-+    }
-+    if (pendingLoads.length) await Promise.all(pendingLoads);
-+  }
-+
-+  pointInside(point, center, halfSize) {
-+    return (
-+      point.x >= center.x - halfSize &&
-+      point.x <= center.x + halfSize &&
-+      point.z >= center.z - halfSize &&
-+      point.z <= center.z + halfSize
-+    );
-+  }
-+}
-+
-+function createForestZoneContainer(scene, shadowGenerator, id, center, size, seed) {
-+  const container = new BABYLON.AssetContainer(scene);
-+  const rng = mulberry32(seed || 1);
-+  function track(mesh) {
-+    container.meshes.push(mesh);
-+    return mesh;
-+  }
-+
-+  const ground = track(
-+    BABYLON.MeshBuilder.CreateGround(
-+      `ground_${id}`,
-+      { width: size, height: size },
-+      scene
-+    )
-+  );
-+  ground.position = new BABYLON.Vector3(center.x, 0, center.z);
-+  ground.material = new BABYLON.StandardMaterial(`groundMat_${id}`, scene);
-+  ground.material.diffuseColor = new BABYLON.Color3(0.15, 0.32, 0.18);
-+  ground.material.specularColor = new BABYLON.Color3(0.02, 0.02, 0.02);
-+  ground.checkCollisions = true;
-+
-+  const hillCount = 6;
-+  for (let i = 0; i < hillCount; i++) {
-+    const offsetX = (rng() - 0.5) * (size * 0.6);
-+    const offsetZ = (rng() - 0.5) * (size * 0.6);
-+    const radius = 8 + rng() * 12;
-+    const mound = track(
-+      BABYLON.MeshBuilder.CreateCylinder(
-+        `hill_${id}_${i}`,
-+        { height: 6 + rng() * 6, diameterTop: radius * 0.6, diameterBottom: radius },
-+        scene
-+      )
-+    );
-+    mound.position = new BABYLON.Vector3(center.x + offsetX, 2.5, center.z + offsetZ);
-+    mound.material = ground.material;
-+    mound.checkCollisions = true;
-+    mound.receiveShadows = true;
-+  }
-+
-+  const foliageCount = 60;
-+  const leafMat = new BABYLON.StandardMaterial(`leaf_${id}`, scene);
-+  leafMat.diffuseColor = new BABYLON.Color3(0.18, 0.4, 0.2);
-+  const trunkMat = new BABYLON.StandardMaterial(`trunk_${id}`, scene);
-+  trunkMat.diffuseColor = new BABYLON.Color3(0.24, 0.18, 0.12);
-+
-+  for (let i = 0; i < foliageCount; i++) {
-+    const angle = rng() * Math.PI * 2;
-+    const radius = (size * 0.35) + rng() * (size * 0.15);
-+    const posX = center.x + Math.cos(angle) * radius;
-+    const posZ = center.z + Math.sin(angle) * radius;
-+    const scale = 0.6 + rng() * 0.8;
-+
-+    const trunk = track(
-+      BABYLON.MeshBuilder.CreateCylinder(
-+        `tree_trunk_${id}_${i}`,
-+        { height: 6 * scale, diameterTop: 0.7 * scale, diameterBottom: 1.1 * scale },
-+        scene
-+      )
-+    );
-+    trunk.position = new BABYLON.Vector3(posX, 3 * scale, posZ);
-+    trunk.material = trunkMat;
-+    trunk.checkCollisions = true;
-+    trunk.receiveShadows = true;
-+
-+    const canopy = track(
-+      BABYLON.MeshBuilder.CreateSphere(
-+        `tree_canopy_${id}_${i}`,
-+        { diameter: 6 * scale, segments: 6 },
-+        scene
-+      )
-+    );
-+    canopy.position = new BABYLON.Vector3(posX, 6.4 * scale, posZ);
-+    canopy.material = leafMat;
-+    canopy.checkCollisions = true;
-+    canopy.receiveShadows = true;
-+
-+    shadowGenerator.addShadowCaster(trunk);
-+    shadowGenerator.addShadowCaster(canopy);
-+  }
-+
-+  container.removeAllFromScene();
-+  return container;
-+}
-+
-+function mulberry32(a) {
-+  return function () {
-+    a |= 0; a = a + 0x6D2B79F5 | 0;
-+    let t = Math.imul(a ^ a >>> 15, 1 | a);
-+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-+  };
-+}
-+
- // NPC registry for the starting city and future zones
- 
- function hosgInteractWithNearestNpc() {
-   if (!scene || !scene.meshes || !heroBody) return;
-   let best = null;
-   let bestDistSq = Number.POSITIVE_INFINITY;
-   const heroPos = heroBody.position;
-   const maxDistSq = 7 * 7;
-   for (const mesh of scene.meshes) {
-     if (!mesh || !mesh.metadata || !mesh.metadata.npcName) continue;
-     const dx = mesh.position.x - heroPos.x;
-     const dz = mesh.position.z - heroPos.z;
-     const distSq = dx * dx + dz * dz;
-     if (distSq < maxDistSq && distSq < bestDistSq) {
-       bestDistSq = distSq;
-       best = mesh;
-     }
-   }
-   if (!best) return;
-   const npcName = best.metadata.npcName;
-   const def = hosgNpcDefinitions[npcName];
-   if (!def) return;
-   const lines = (def.lines && def.lines.length)
-     ? def.lines
-     : ["Hello, adventurer."];
-@@ -2151,123 +2324,205 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
-               mpSocket.send(JSON.stringify(msg));
-             } catch (e) {
-               console.warn("Failed to send chat", e);
-             }
-           } else {
-             appendChat("You: " + value);
-           }
- 
-           input.value = "";
-         }
- 
-         send.addEventListener("click", sendMessage);
-         input.addEventListener("keydown", function (ev) {
-           if (ev.key === "Enter") {
-             sendMessage();
-           }
-         });
- 
-         appendChat("System: Type to chat. If connected to the multiplayer server, your messages will be sent to other players.");
-       })();
- 
-       const createScene = function () {
-         const scene = new BABYLON.Scene(engine);
-         scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
-         scene.collisionsEnabled = true;
-+        scene.clearColor = new BABYLON.Color3(0.015, 0.02, 0.035);
-+        scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-+        scene.fogDensity = 0.0022;
-+        scene.fogColor = new BABYLON.Color3(0.04, 0.07, 0.12);
- 
-         const envTex = new BABYLON.CubeTexture(
-           "https://playground.babylonjs.com/textures/environment.env",
-           scene
-         );
-         scene.environmentTexture = envTex;
-         scene.createDefaultSkybox(envTex, true, 1000);
- 
-         const camera = new BABYLON.ArcRotateCamera(
-           "camera",
-           -Math.PI / 2,
-           0.9,
-           40,
-           new BABYLON.Vector3(0, 3, 0),
-           scene
-         );
-         camera.lowerRadiusLimit = 18;
-         camera.upperRadiusLimit = 70;
-         camera.wheelDeltaPercentage = 0.02;
-         camera.panningSensibility = 0;
-         camera.attachControl(canvas, true);
-         camera.checkCollisions = false;
- 
-         const hemiLight = new BABYLON.HemisphericLight(
-           "hemi",
-           new BABYLON.Vector3(0, 1, 0),
-           scene
-         );
-         hemiLight.intensity = 0.6;
- 
-+        const pipeline = new BABYLON.DefaultRenderingPipeline(
-+          "hosgFx",
-+          true,
-+          scene,
-+          [camera]
-+        );
-+        pipeline.imageProcessingEnabled = true;
-+        pipeline.imageProcessing.toneMappingEnabled = true;
-+        pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
-+        pipeline.imageProcessing.exposure = 1.05;
-+        pipeline.imageProcessing.contrast = 1.12;
-+        pipeline.bloomEnabled = true;
-+        pipeline.bloomThreshold = 0.62;
-+        pipeline.bloomWeight = 0.34;
-+        pipeline.bloomScale = 0.5;
-+        pipeline.grainEnabled = true;
-+        pipeline.grain.animated = true;
-+        pipeline.grain.intensity = 8.5;
-+
-         const sun = new BABYLON.DirectionalLight(
-           "sun",
-           new BABYLON.Vector3(-0.5, -1, -0.3),
-           scene
-         );
-         sun.position = new BABYLON.Vector3(60, 80, 60);
-         sun.intensity = 1.1;
- 
-         const shadowGenerator = new BABYLON.ShadowGenerator(2048, sun);
-         shadowGenerator.useBlurExponentialShadowMap = true;
-         shadowGenerator.blurKernel = 16;
-         scene.shadowGenerator = shadowGenerator;
- 
-+        function createFireflyField(name, center, radius, height, color) {
-+          const fireflies = new BABYLON.ParticleSystem(name, 800, scene);
-+          fireflies.particleTexture = new BABYLON.Texture(
-+            "https://playground.babylonjs.com/textures/flare.png",
-+            scene
-+          );
-+          fireflies.emitter = center;
-+          fireflies.minEmitBox = new BABYLON.Vector3(-radius, 0, -radius);
-+          fireflies.maxEmitBox = new BABYLON.Vector3(radius, height, radius);
-+          fireflies.color1 = new BABYLON.Color4(color.r, color.g, color.b, 0.9);
-+          fireflies.color2 = new BABYLON.Color4(color.r, color.g, color.b, 0.4);
-+          fireflies.colorDead = new BABYLON.Color4(color.r, color.g, color.b, 0);
-+          fireflies.minSize = 0.1;
-+          fireflies.maxSize = 0.25;
-+          fireflies.minLifeTime = 2.5;
-+          fireflies.maxLifeTime = 4.5;
-+          fireflies.emitRate = 240;
-+          fireflies.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
-+          fireflies.gravity = new BABYLON.Vector3(0, -0.05, 0);
-+          fireflies.direction1 = new BABYLON.Vector3(-0.25, 0.6, -0.25);
-+          fireflies.direction2 = new BABYLON.Vector3(0.25, 0.2, 0.25);
-+          fireflies.minAngularSpeed = -0.5;
-+          fireflies.maxAngularSpeed = 0.5;
-+          fireflies.minEmitPower = 0.2;
-+          fireflies.maxEmitPower = 0.6;
-+          fireflies.updateSpeed = 0.008;
-+          fireflies.start();
-+          return fireflies;
-+        }
-+
-+        function createMistPlume(name, center, radius) {
-+          const mist = new BABYLON.ParticleSystem(name, 600, scene);
-+          mist.particleTexture = new BABYLON.Texture(
-+            "https://playground.babylonjs.com/textures/flare.png",
-+            scene
-+          );
-+          mist.emitter = center;
-+          mist.minEmitBox = new BABYLON.Vector3(-radius, 0, -radius);
-+          mist.maxEmitBox = new BABYLON.Vector3(radius, 0.1, radius);
-+          mist.color1 = new BABYLON.Color4(0.75, 0.86, 1, 0.35);
-+          mist.color2 = new BABYLON.Color4(0.6, 0.78, 1, 0.18);
-+          mist.colorDead = new BABYLON.Color4(0.6, 0.78, 1, 0.02);
-+          mist.minSize = 1.4;
-+          mist.maxSize = 2.6;
-+          mist.minLifeTime = 2.5;
-+          mist.maxLifeTime = 5.0;
-+          mist.emitRate = 220;
-+          mist.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-+          mist.gravity = new BABYLON.Vector3(0, 0.04, 0);
-+          mist.direction1 = new BABYLON.Vector3(-0.05, 0.4, -0.05);
-+          mist.direction2 = new BABYLON.Vector3(0.05, 0.6, 0.05);
-+          mist.minEmitPower = 0.08;
-+          mist.maxEmitPower = 0.18;
-+          mist.updateSpeed = 0.0075;
-+          mist.start();
-+          return mist;
-+        }
-+
-         // World: ground, water, trees, simple town plaza
-         const ground = BABYLON.MeshBuilder.CreateGround(
-           "ground",
-           { width: 220, height: 220, subdivisions: 80 },
-           scene
-         );
-         ground.checkCollisions = true;
-         const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-         groundMat.diffuseTexture = new BABYLON.Texture(
-           "https://playground.babylonjs.com/textures/grass.jpg",
-           scene
-         );
-         groundMat.diffuseTexture.uScale = 40;
-         groundMat.diffuseTexture.vScale = 40;
-         groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
-         ground.material = groundMat;
-         ground.receiveShadows = true;
- 
-         const water = BABYLON.MeshBuilder.CreateGround(
-           "water",
-           { width: 80, height: 80, subdivisions: 2 },
-           scene
-         );
-         water.position = new BABYLON.Vector3(0, 0.02, -60);
-         const waterMat = new BABYLON.StandardMaterial("waterMat", scene);
-         waterMat.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.6);
-         waterMat.alpha = 0.6;
-         waterMat.specularColor = new BABYLON.Color3(0.6, 0.8, 1);
-         waterMat.backFaceCulling = false;
-         water.material = waterMat;
-+        createMistPlume("lakeMist", new BABYLON.Vector3(0, 0.02, -60), 36);
- 
-         const stonePathMat = new BABYLON.StandardMaterial("stoneMat", scene);
-         stonePathMat.diffuseTexture = new BABYLON.Texture(
-           "https://playground.babylonjs.com/textures/rock.png",
-           scene
-         );
-         stonePathMat.diffuseTexture.uScale = 4;
-         stonePathMat.diffuseTexture.vScale = 4;
-         stonePathMat.specularColor = new BABYLON.Color3(0.02, 0.02, 0.02);
- 
-         for (let i = -30; i <= 30; i += 5) {
-           const stone = BABYLON.MeshBuilder.CreateBox(
-             "pathStone",
-             { width: 2.5, height: 0.4, depth: 2.5 },
-             scene
-           );
-           stone.position = new BABYLON.Vector3(i, 0.2, 0);
-           stone.material = stonePathMat;
-           stone.checkCollisions = true;
-           stone.receiveShadows = true;
-         }
- 
-         const treeTrunkMat = new BABYLON.StandardMaterial("trunkMat", scene);
-         treeTrunkMat.diffuseTexture = new BABYLON.Texture(
-           "https://playground.babylonjs.com/textures/wood.jpg",
-@@ -2290,50 +2545,57 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
-           trunk.checkCollisions = true;
-           trunk.receiveShadows = true;
- 
-           const canopy = BABYLON.MeshBuilder.CreateSphere(
-             "canopy",
-             { diameter: 6 * scale, segments: 8 },
-             scene
-           );
-           canopy.position = new BABYLON.Vector3(x, 6.5 * scale, z);
-           canopy.material = treeLeafMat;
-           canopy.checkCollisions = true;
-           canopy.receiveShadows = true;
- 
-           shadowGenerator.addShadowCaster(trunk);
-           shadowGenerator.addShadowCaster(canopy);
-         }
- 
-         for (let i = 0; i < 80; i++) {
-           const radius = 80 + Math.random() * 30;
-           const angle = Math.random() * Math.PI * 2;
-           const x = Math.cos(angle) * radius;
-           const z = Math.sin(angle) * radius;
-           const scale = 0.6 + Math.random() * 0.8;
-           createTree(x, z, scale);
-         }
-+        createFireflyField(
-+          "forestFireflies",
-+          new BABYLON.Vector3(0, 2, 0),
-+          95,
-+          7,
-+          new BABYLON.Color3(0.72, 0.98, 0.68)
-+        );
- 
-         const townMat = new BABYLON.StandardMaterial("townMat", scene);
-         townMat.diffuseTexture = new BABYLON.Texture(
-           "https://playground.babylonjs.com/textures/floor.png",
-           scene
-         );
-         townMat.diffuseTexture.uScale = 4;
-         townMat.diffuseTexture.vScale = 4;
- 
-         const plaza = BABYLON.MeshBuilder.CreateBox(
-           "plaza",
-           { width: 40, depth: 40, height: 1 },
-           scene
-         );
-         plaza.position = new BABYLON.Vector3(0, 0.5, 30);
-         plaza.material = townMat;
-         plaza.checkCollisions = true;
-         plaza.receiveShadows = true;
- 
-         const wallMat = new BABYLON.StandardMaterial("wallMat", scene);
-         wallMat.diffuseTexture = new BABYLON.Texture(
-           "https://playground.babylonjs.com/textures/floor.png",
-           scene
-         );
-         wallMat.diffuseTexture.uScale = 2;
-@@ -2362,68 +2624,84 @@ function setupMultiplayer(scene, heroBody, shadowGenerator, getRuntimeStats) {
-         createWall(
-           new BABYLON.Vector3(-half, 0, 30 - half),
-           new BABYLON.Vector3(half, 0, 30 - half),
-           height,
-           thickness
-         );
-         createWall(
-           new BABYLON.Vector3(-half, 0, 30 + half),
-           new BABYLON.Vector3(half, 0, 30 + half),
-           height,
-           thickness
-         );
-         createWall(
-           new BABYLON.Vector3(-half, 0, 30 - half),
-           new BABYLON.Vector3(-half, 0, 30 + half),
-           height,
-           thickness
-         );
-         createWall(
-           new BABYLON.Vector3(half, 0, 30 - half),
-           new BABYLON.Vector3(half, 0, 30 + half),
-           height,
-           thickness
-         );
- 
--        
-+        createFireflyField(
-+          "plazaLanterns",
-+          new BABYLON.Vector3(0, 2.4, 30),
-+          22,
-+          5,
-+          new BABYLON.Color3(0.98, 0.83, 0.52)
-+        );
-+
-+
- // ----- GRAND STARTING CITY: Shady Grove Landing -----
- const cityBuildingMat = new BABYLON.StandardMaterial("cityBuildingMat", scene);
- cityBuildingMat.diffuseColor = new BABYLON.Color3(0.78, 0.74, 0.65);
- cityBuildingMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
- 
- const cityRoofMat = new BABYLON.StandardMaterial("cityRoofMat", scene);
- cityRoofMat.diffuseColor = new BABYLON.Color3(0.42, 0.18, 0.12);
- cityRoofMat.specularColor = new BABYLON.Color3(0.06, 0.06, 0.06);
- 
- const cityAccentMat = new BABYLON.StandardMaterial("cityAccentMat", scene);
- cityAccentMat.diffuseColor = new BABYLON.Color3(0.86, 0.82, 0.72);
- cityAccentMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
- 
- const cityBannerMat = new BABYLON.StandardMaterial("cityBannerMat", scene);
- cityBannerMat.diffuseColor = new BABYLON.Color3(0.18, 0.32, 0.68);
- cityBannerMat.emissiveColor = new BABYLON.Color3(0.02, 0.05, 0.15);
- 
-+const boulevardMat = new BABYLON.StandardMaterial("boulevardMat", scene);
-+boulevardMat.diffuseColor = new BABYLON.Color3(0.28, 0.29, 0.32);
-+boulevardMat.specularColor = new BABYLON.Color3(0.03, 0.03, 0.03);
-+
-+const plazaInlayMat = new BABYLON.StandardMaterial("plazaInlayMat", scene);
-+plazaInlayMat.diffuseColor = new BABYLON.Color3(0.74, 0.72, 0.66);
-+plazaInlayMat.specularColor = new BABYLON.Color3(0.06, 0.06, 0.06);
-+
- function createCityHouse(name, center, width, depth, height, floors) {
-   const base = BABYLON.MeshBuilder.CreateBox(
-     name + "_base",
-     { width, depth, height },
-     scene
-   );
-   base.position = center.clone();
-   base.position.y = height / 2;
-   base.material = cityBuildingMat;
-   base.checkCollisions = true;
-   base.receiveShadows = true;
-   shadowGenerator.addShadowCaster(base);
- 
-   const roof = BABYLON.MeshBuilder.CreateBox(
-     name + "_roof",
-     { width: width * 1.02, depth: depth * 1.02, height: height * 0.45 },
-     scene
-   );
-   roof.position = center.clone();
-   roof.position.y = height + (height * 0.25);
-   roof.rotation.z = Math.PI / 18;
-   roof.material = cityRoofMat;
-   roof.checkCollisions = false;
-   roof.receiveShadows = true;
-   shadowGenerator.addShadowCaster(roof);
-@@ -2574,50 +2852,245 @@ function buildStartingCity() {
-   createCityHouse("eastHouse_2", new BABYLON.Vector3(30 - 5, 0, 30 - 8), houseW, houseD, houseH, 2);
-   createCityHouse("westHouse_1", new BABYLON.Vector3(-30 + 5, 0, 30 + 8), houseW, houseD, houseH, 2);
-   createCityHouse("westHouse_2", new BABYLON.Vector3(-30 + 5, 0, 30 - 8), houseW, houseD, houseH, 2);
- 
-   // A grand hall on the northern interior wall
-   createCityHouse(
-     "grandHall",
-     new BABYLON.Vector3(0, 0, 30 + 18),
-     houseW * 2.4,
-     houseD * 1.6,
-     houseH * 1.6,
-     3
-   );
- 
-   // A mage tower watching the river to the west
-   createCityTower("mageTower", new BABYLON.Vector3(-32, 0, 18), 3.2, 18);
- 
-   // City gate aligned with the stone path at the south wall
-   createCityGate("southGate", new BABYLON.Vector3(0, 0, 30 - 20), 22, 10, 2.4);
- 
-   // Market stalls along the north edge of the plaza
-   createMarketStall("market_weapons", new BABYLON.Vector3(-8, 0, 30 + 10), 3.4, 2.4);
-   createMarketStall("market_armor", new BABYLON.Vector3(0, 0, 30 + 10), 3.4, 2.4);
-   createMarketStall("market_food", new BABYLON.Vector3(8, 0, 30 + 10), 3.4, 2.4);
- 
-+  function createRoadSegment(name, from, to, width, thickness = 0.35) {
-+    const length = BABYLON.Vector3.Distance(from, to);
-+    const road = BABYLON.MeshBuilder.CreateBox(
-+      name,
-+      { width: length, depth: width, height: thickness },
-+      scene
-+    );
-+    road.position = from.add(to).scale(0.5);
-+    road.position.y = thickness / 2;
-+    const dir = to.subtract(from);
-+    road.rotation.y = Math.atan2(dir.z, dir.x);
-+    road.material = boulevardMat;
-+    road.checkCollisions = true;
-+    road.receiveShadows = true;
-+    shadowGenerator.addShadowCaster(road);
-+    return road;
-+  }
-+
-+  function createStreetLamp(name, position) {
-+    const pole = BABYLON.MeshBuilder.CreateCylinder(
-+      name + "_pole",
-+      { diameter: 0.25, height: 4 },
-+      scene
-+    );
-+    pole.position = position.clone();
-+    pole.position.y = 2;
-+    pole.material = cityAccentMat;
-+    pole.checkCollisions = true;
-+    pole.receiveShadows = true;
-+    shadowGenerator.addShadowCaster(pole);
-+
-+    const glow = BABYLON.MeshBuilder.CreateSphere(
-+      name + "_glow",
-+      { diameter: 0.6, segments: 8 },
-+      scene
-+    );
-+    glow.position = position.clone();
-+    glow.position.y = 4.5;
-+    glow.material = cityBannerMat;
-+    glow.material.emissiveColor = new BABYLON.Color3(0.65, 0.72, 0.88);
-+    shadowGenerator.addShadowCaster(glow);
-+  }
-+
-+  function layHouseRow(prefix, start, count, step, dims, floors = 2) {
-+    for (let i = 0; i < count; i++) {
-+      const offset = new BABYLON.Vector3(step.x * i, 0, step.z * i);
-+      createCityHouse(
-+        `${prefix}_${i}`,
-+        start.add(offset),
-+        dims.width,
-+        dims.depth,
-+        dims.height,
-+        floors
-+      );
-+    }
-+  }
-+
-+  // Grand perimeter walls around the expanded landing city
-+  const outerHalf = 70;
-+  const outerHeight = 12;
-+  const outerThickness = 2.4;
-+  createWall(
-+    new BABYLON.Vector3(-outerHalf, 0, 30 - outerHalf - 10),
-+    new BABYLON.Vector3(outerHalf, 0, 30 - outerHalf - 10),
-+    outerHeight,
-+    outerThickness
-+  );
-+  createWall(
-+    new BABYLON.Vector3(-outerHalf, 0, 30 + outerHalf + 10),
-+    new BABYLON.Vector3(outerHalf, 0, 30 + outerHalf + 10),
-+    outerHeight,
-+    outerThickness
-+  );
-+  createWall(
-+    new BABYLON.Vector3(-outerHalf, 0, 30 - outerHalf - 10),
-+    new BABYLON.Vector3(-outerHalf, 0, 30 + outerHalf + 10),
-+    outerHeight,
-+    outerThickness
-+  );
-+  createWall(
-+    new BABYLON.Vector3(outerHalf, 0, 30 - outerHalf - 10),
-+    new BABYLON.Vector3(outerHalf, 0, 30 + outerHalf + 10),
-+    outerHeight,
-+    outerThickness
-+  );
-+
-+  createCityGate("outerSouthGate", new BABYLON.Vector3(0, 0, -50), 26, 14, 3);
-+  createCityGate("outerNorthGate", new BABYLON.Vector3(0, 0, 100), 26, 14, 3);
-+  createCityGate("outerEastGate", new BABYLON.Vector3(70, 0, 30), 20, 12, 2.6);
-+  createCityGate("outerWestGate", new BABYLON.Vector3(-70, 0, 30), 20, 12, 2.6);
-+
-+  createCityTower("outerCornerNW", new BABYLON.Vector3(-outerHalf, 0, 30 + outerHalf + 10), 4, 20);
-+  createCityTower("outerCornerNE", new BABYLON.Vector3(outerHalf, 0, 30 + outerHalf + 10), 4, 20);
-+  createCityTower("outerCornerSW", new BABYLON.Vector3(-outerHalf, 0, 30 - outerHalf - 10), 4, 20);
-+  createCityTower("outerCornerSE", new BABYLON.Vector3(outerHalf, 0, 30 - outerHalf - 10), 4, 20);
-+
-+  // City boulevards stitching the plaza to each gate
-+  createRoadSegment("main_avenue", new BABYLON.Vector3(-60, 0, 30), new BABYLON.Vector3(60, 0, 30), 8);
-+  createRoadSegment("south_approach", new BABYLON.Vector3(0, 0, -50), new BABYLON.Vector3(0, 0, 12), 9);
-+  createRoadSegment("north_avenue", new BABYLON.Vector3(0, 0, 100), new BABYLON.Vector3(0, 0, 48), 9);
-+  createRoadSegment("east_way", new BABYLON.Vector3(70, 0, 30), new BABYLON.Vector3(24, 0, 30), 7);
-+  createRoadSegment("west_way", new BABYLON.Vector3(-70, 0, 30), new BABYLON.Vector3(-24, 0, 30), 7);
-+
-+  // Lamp posts lining the main square and arteries
-+  const lampSpots = [
-+    new BABYLON.Vector3(12, 0, 30),
-+    new BABYLON.Vector3(-12, 0, 30),
-+    new BABYLON.Vector3(0, 0, 14),
-+    new BABYLON.Vector3(0, 0, 46),
-+    new BABYLON.Vector3(24, 0, 30),
-+    new BABYLON.Vector3(-24, 0, 30),
-+    new BABYLON.Vector3(0, 0, 66),
-+    new BABYLON.Vector3(0, 0, -18)
-+  ];
-+  lampSpots.forEach((pos, idx) => createStreetLamp("cityLamp_" + idx, pos));
-+
-+  // Residential belts along the east and west sides of the plaza boulevard
-+  layHouseRow(
-+    "eastRow_north",
-+    new BABYLON.Vector3(32, 0, 64),
-+    4,
-+    new BABYLON.Vector3(0, 0, -12),
-+    { width: 7.5, depth: 6, height: 4.4 },
-+    3
-+  );
-+  layHouseRow(
-+    "eastRow_south",
-+    new BABYLON.Vector3(32, 0, 10),
-+    4,
-+    new BABYLON.Vector3(0, 0, -12),
-+    { width: 7.5, depth: 6, height: 4.2 },
-+    2
-+  );
-+  layHouseRow(
-+    "westRow_north",
-+    new BABYLON.Vector3(-32, 0, 64),
-+    4,
-+    new BABYLON.Vector3(0, 0, -12),
-+    { width: 7.5, depth: 6, height: 4.4 },
-+    3
-+  );
-+  layHouseRow(
-+    "westRow_south",
-+    new BABYLON.Vector3(-32, 0, 10),
-+    4,
-+    new BABYLON.Vector3(0, 0, -12),
-+    { width: 7.5, depth: 6, height: 4.2 },
-+    2
-+  );
-+
-+  // Northern civic district: guild hall, archives, and lookout tower
-+  createCityHouse("guildHall", new BABYLON.Vector3(-10, 0, 82), 16, 10, 7, 3);
-+  createCityHouse("archives", new BABYLON.Vector3(14, 0, 84), 12, 9, 6.5, 2);
-+  createCityTower("northWatch", new BABYLON.Vector3(0, 0, 92), 3.8, 18);
-+
-+  // Southern crafts district and barracks lining the approach road
-+  createCityHouse("barracks", new BABYLON.Vector3(-14, 0, -18), 18, 9, 5, 2);
-+  createCityHouse("workshopRow", new BABYLON.Vector3(16, 0, -16), 14, 8, 4.4, 2);
-+  layHouseRow(
-+    "crafts_lane",
-+    new BABYLON.Vector3(-26, 0, -8),
-+    3,
-+    new BABYLON.Vector3(12, 0, 0),
-+    { width: 6.5, depth: 5.2, height: 4 },
-+    2
-+  );
-+
-+  // Lakeside warehouses and docks hugging the river inlet
-+  createCityHouse("warehouse_west", new BABYLON.Vector3(-22, 0, -44), 12, 9, 5, 2);
-+  createCityHouse("warehouse_east", new BABYLON.Vector3(22, 0, -44), 12, 9, 5, 2);
-+  createMarketStall("dock_cart_1", new BABYLON.Vector3(-8, 0, -52), 4, 3);
-+  createMarketStall("dock_cart_2", new BABYLON.Vector3(8, 0, -52), 4, 3);
-+
-+  // Interior plaza upgrade: stone inlays and a central obelisk
-+  const plazaInlay = BABYLON.MeshBuilder.CreateBox(
-+    "plazaInlay",
-+    { width: 24, depth: 24, height: 0.25 },
-+    scene
-+  );
-+  plazaInlay.position = new BABYLON.Vector3(0, 0.38, 30);
-+  plazaInlay.material = plazaInlayMat;
-+  plazaInlay.checkCollisions = false;
-+  plazaInlay.receiveShadows = true;
-+  shadowGenerator.addShadowCaster(plazaInlay);
-+
-+  const obelisk = BABYLON.MeshBuilder.CreateCylinder(
-+    "plazaObelisk",
-+    { diameterTop: 0.8, diameterBottom: 1.8, height: 10, tessellation: 6 },
-+    scene
-+  );
-+  obelisk.position = new BABYLON.Vector3(0, 5.5, 30);
-+  obelisk.material = cityAccentMat;
-+  obelisk.receiveShadows = true;
-+  shadowGenerator.addShadowCaster(obelisk);
-+
-   // Populate core NPCs for the starting city
-   hosgSpawnNpc(
-     "Captain Roderic",
-     new BABYLON.Vector3(0, 1.5, 12),
-     {
-       role: "Gate Captain",
-       kind: "guard",
-       lines: [
-         "Welcome to Shady Grove Landing. Keep your blade sharp and your wits sharper.",
-         "No monsters past the wall on my watch.",
-         "If you're looking for work, check the notice board in the plaza."
-       ]
-     }
-   );
- 
-   hosgSpawnNpc(
-     "Town Crier Ellyn",
-     new BABYLON.Vector3(-2, 1.5, 30),
-     {
-       role: "Town Crier",
-       kind: "herald",
-       lines: [
-         "Hear ye! Hear ye! New adventurers are arriving from every corner of Shady Grove.",
-         "Quests and bounties will be posted soon. Keep an eye on the plaza!",
-         "Glory and riches await those brave enough to step beyond the walls."
-@@ -2702,76 +3175,103 @@ function buildStartingCity() {
-       role: "Traveling Merchant",
-       kind: "merchant",
-       lines: [
-         "Fresh bread and shiny swords! Trading coming soon.",
-         "I've got wares from every corner of Shady Grove—once the market opens.",
-         "Coins first, stories later. That's my way of doing business."
-       ]
-     }
-   );
- 
-   hosgSpawnNpc(
-     "Village Guard Tomas",
-     new BABYLON.Vector3(-6, 1.5, 26),
-     {
-       role: "City Guard",
-       kind: "guard",
-       lines: [
-         "Stay out of trouble and we won't have a problem.",
-         "The walls are sturdy, but it's the people inside that matter.",
-         "If you see anything strange outside the gates, report to Captain Roderic."
-       ]
-     }
-   );
- }
- 
-+        // Kick off the first streaming-ready expansion zones around the landing area
-+        const zoneManager = new ZoneStreamingManager(scene, shadowGenerator);
-+        const tileSize = 220;
-+        const ring = [
-+          { id: "north_forest", center: new BABYLON.Vector3(0, 0, tileSize * 1.2), seed: 11 },
-+          { id: "south_forest", center: new BABYLON.Vector3(0, 0, -tileSize * 1.2), seed: 21 },
-+          { id: "east_forest", center: new BABYLON.Vector3(tileSize * 1.2, 0, 0), seed: 33 },
-+          { id: "west_forest", center: new BABYLON.Vector3(-tileSize * 1.2, 0, 0), seed: 44 },
-+        ];
-+
-+        ring.forEach((entry) => {
-+          zoneManager.registerZone({
-+            id: entry.id,
-+            center: entry.center,
-+            halfSize: tileSize * 0.6,
-+            buildContainer: (scene, shadowGenerator) => Promise.resolve(
-+              createForestZoneContainer(scene, shadowGenerator, entry.id, entry.center, tileSize, entry.seed)
-+            )
-+          });
-+        });
-+
-+        scene.zoneManager = zoneManager;
-+
- // ----- HERO: new procedural humanoid with smooth walk -----
-         let heroBody = BABYLON.MeshBuilder.CreateCapsule(
-           "heroBody",
-           {
-             height: 2.8,
-             radius: 0.6,
-             tessellation: 10,
-             subdivisions: 2
-           },
-           scene
-         );
-         // Place hero from saved state
-         heroBody.position = new BABYLON.Vector3(
-           playerState.position.x,
-           playerState.position.y,
-           playerState.position.z
-         );
-         heroBody.rotation.y = playerState.rotationY || 0;
- 
-         heroBody.ellipsoid = new BABYLON.Vector3(0.8, 1.4, 0.8);
-         heroBody.ellipsoidOffset = new BABYLON.Vector3(0, 1.4, 0);
-         heroBody.checkCollisions = true;
-         heroBody.applyGravity = true;
-         heroBody.visibility = 0.0; // invisible collider
-         scene.heroBody = heroBody;
- 
-+        if (scene.zoneManager) {
-+          scene.zoneManager.tick(heroBody.position);
-+        }
-+
-         const heroSkinMat = new BABYLON.StandardMaterial("heroSkinMat", scene);
-         const heroClothMat = new BABYLON.StandardMaterial("heroClothMat", scene);
-         const heroPantsMat = new BABYLON.StandardMaterial("heroPantsMat", scene);
-         const heroBootMat = new BABYLON.StandardMaterial("heroBootMat", scene);
- 
-         applyAppearanceToMaterials(scene, {
-           skin: heroSkinMat,
-           tunic: heroClothMat,
-           pants: heroPantsMat,
-           boots: heroBootMat
-         });
- 
-         heroSkinMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
- 
-         const heroVisualRoot = new BABYLON.TransformNode("heroVisualRoot", scene);
-         heroVisualRoot.parent = heroBody;
-         heroVisualRoot.position = new BABYLON.Vector3(0, -0.4, 0);
- 
-         const heroRig = {
-           root: heroVisualRoot,
-           torso: null,
-           head: null,
-           shoulders: null,
-           hips: null,
-           leftArmJoint: null,
-@@ -3360,35 +3860,38 @@ function hosgConnectMultiplayerIfNeeded() {
-     scene.heroBody,
-     scene.shadowGenerator,
-     function getRuntimeStats() {
-       return {
-         position: {
-           x: scene.heroBody.position.x,
-           y: scene.heroBody.position.y,
-           z: scene.heroBody.position.z
-         },
-         rotationY: scene.heroBody.rotation.y,
-         hp,
-         maxHp,
-         mp,
-         maxMp,
-         xp,
-         level
-       };
-     }
-   );
- }
- 
- // Expose helper so the character creation flow can connect when "Start" succeeds
- window.hosgConnectMultiplayerIfNeeded = hosgConnectMultiplayerIfNeeded;
- 
-       engine.runRenderLoop(function () {
-+        if (scene.zoneManager && scene.heroBody) {
-+          scene.zoneManager.tick(scene.heroBody.position);
-+        }
-         scene.render();
-       });
- 
-       window.addEventListener("resize", function () {
-         engine.resize();
-       });
-     })();
-   </script>
- </body>
- </html>
