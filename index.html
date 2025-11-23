@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.27</title>
+  <title>Heroes of Shady Grove v1.0.30</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <style>
     html, body {
@@ -1709,15 +1709,25 @@ function setupCharacterCreationUI() {
       playerState.characterId = hosgCurrentCharacterId;
     }
 
-    overlay.style.display = "none";
-    // Initial save so the hero exists even if they immediately close the page
-    savePlayerStateRuntime(
-      null,
-      playerState.stats.hp, playerState.stats.maxHp,
-      playerState.stats.mp, playerState.stats.maxMp,
-      playerState.stats.xp, playerState.stats.level
-    );
-  });
+      overlay.style.display = "none";
+  // Initial save so the hero exists even if they immediately close the page
+  savePlayerStateRuntime(
+    null,
+    playerState.stats.hp, playerState.stats.maxHp,
+    playerState.stats.mp, playerState.stats.maxMp,
+    playerState.stats.xp, playerState.stats.level
+  );
+
+  // Now that the hero is synced and active, connect this tab to the multiplayer server.
+  try {
+    if (window.hosgConnectMultiplayerIfNeeded) {
+      window.hosgConnectMultiplayerIfNeeded();
+    }
+  } catch (e) {
+    console.warn("[HOSG] Multiplayer connect failed", e);
+  }
+});
+
 
 
   // If we already have a saved hero, let them just hit Enter quickly
