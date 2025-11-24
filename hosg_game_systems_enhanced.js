@@ -2,7 +2,14 @@
 // HEROES OF SHADY GROVE - ENHANCED GAME SYSTEMS v3.0
 // Includes: Loot, Quests, Inventory, Sound, Skills, Bosses
 // ============================================================
-
+// Initialize GameSystems if it doesn't exist
+if (!window.GameSystems) {
+    window.GameSystems = {
+        npcManager: null,
+        combat: null,
+        init: function() { console.log("GameSystems initialized"); }
+    };
+}
 // ==================== SOUND SYSTEM ====================
 class SoundSystem {
   constructor() {
