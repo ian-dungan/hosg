@@ -143,13 +143,23 @@ class AssetLoader {
   async loadAsset(assetKey, options = {}) {
     // Check if already loaded
     if (this.loadedAssets.has(assetKey)) {
-      return this.createInstance(assetKey, options);
+      const instance = this.createInstance(assetKey, options);
+      if (!instance) {
+        console.warn(`No geometry in cached ${assetKey}, using procedural fallback`);
+        return this.createProceduralFallback(assetKey, options);
+      }
+      return instance;
     }
 
     // Check if currently loading
     if (this.loadingAssets.has(assetKey)) {
       await this.loadingAssets.get(assetKey);
-      return this.createInstance(assetKey, options);
+      const instance = this.createInstance(assetKey, options);
+      if (!instance) {
+        console.warn(`No geometry in ${assetKey}, using procedural fallback`);
+        return this.createProceduralFallback(assetKey, options);
+      }
+      return instance;
     }
 
     // Start loading
@@ -160,7 +170,16 @@ class AssetLoader {
       const result = await loadPromise;
       this.loadedAssets.set(assetKey, result);
       this.loadingAssets.delete(assetKey);
-      return this.createInstance(assetKey, options);
+      
+      const instance = this.createInstance(assetKey, options);
+      
+      // If no geometry found, use fallback
+      if (!instance) {
+        console.warn(`No geometry in ${assetKey}, using procedural fallback`);
+        return this.createProceduralFallback(assetKey, options);
+      }
+      
+      return instance;
     } catch (error) {
       console.error(`Failed to load asset: ${assetKey}`, error);
       this.loadingAssets.delete(assetKey);
@@ -266,10 +285,15 @@ class AssetLoader {
     const instances = [];
     let rootMesh = null;
 
-    // Create instances of all meshes
+    // Create instances of all meshes (only meshes with geometry)
     asset.meshes.forEach((mesh, index) => {
-      if (index === 0) {
-        // First mesh becomes the root
+      // Skip nodes without geometry (containers, transform nodes)
+      if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) {
+        return;
+      }
+      
+      if (!rootMesh) {
+        // First mesh with geometry becomes the root
         rootMesh = mesh.createInstance(instanceName);
         rootMesh.position = position.clone();
         rootMesh.rotation = rotation.clone();
@@ -285,6 +309,12 @@ class AssetLoader {
         instances.push(instance);
       }
     });
+
+    // If no meshes with geometry were found, return null (will trigger fallback)
+    if (!rootMesh) {
+      console.warn(`[Assets] No meshes with geometry found in ${assetKey}`);
+      return null;
+    }
 
     // Clone animations if present
     let animationGroups = [];
