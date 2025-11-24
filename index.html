@@ -884,8 +884,9 @@ let playerState = null;
 
 const HOSG_MAX_CHARACTERS = 10;
 
-const HOSG_SUPABASE_URL = (typeof window !== "undefined" && window.HOSG_SUPABASE_URL) ? window.HOSG_SUPABASE_URL : "";
-const HOSG_SUPABASE_ANON_KEY = (typeof window !== "undefined" && window.HOSG_SUPABASE_ANON_KEY) ? window.HOSG_SUPABASE_ANON_KEY : "";
+// Supabase config is in hosg_config.js (HOSG_CONFIG object)
+const HOSG_SUPABASE_URL = typeof HOSG_CONFIG !== "undefined" ? HOSG_CONFIG.supabase.url : "";
+const HOSG_SUPABASE_ANON_KEY = typeof HOSG_CONFIG !== "undefined" ? HOSG_CONFIG.supabase.anonKey : "";
 
 const HOSG_ACCOUNTS_TABLE = "hosg_accounts";
 const HOSG_ACCOUNT_ID_COLUMN = "id";
@@ -897,7 +898,7 @@ const HOSG_CHARACTERS_TABLE = "hosg_characters";
 const HOSG_CHARACTER_ID_COLUMN = "id";
 const HOSG_CHARACTER_ACCOUNT_ID_COLUMN = "account_id";
 
-let hosgSupabase = null;
+// hosgSupabase is declared in hosg_config.js
 let hosgAccount = null;
 let hosgCharacters = [];
 let hosgCurrentCharacterId = null;
@@ -905,10 +906,10 @@ let hosgSupabaseSaveTimer = null;
 
 function hosgHasSupabaseConfig() {
   try {
-    return typeof window !== "undefined" &&
-      typeof window.supabase !== "undefined" &&
-      !!HOSG_SUPABASE_URL &&
-      !!HOSG_SUPABASE_ANON_KEY;
+    return typeof HOSG_CONFIG !== "undefined" &&
+      HOSG_CONFIG.supabase.url !== 'YOUR_SUPABASE_URL_HERE' &&
+      !!HOSG_CONFIG.supabase.url &&
+      !!HOSG_CONFIG.supabase.anonKey;
   } catch (e) {
     return false;
   }
@@ -917,21 +918,7 @@ function hosgHasSupabaseConfig() {
 async function hosgEnsureSupabase() {
   if (!hosgHasSupabaseConfig()) return null;
   if (hosgSupabase) return hosgSupabase;
-  try {
-    hosgSupabase = window.supabase.createClient(
-      HOSG_SUPABASE_URL,
-      HOSG_SUPABASE_ANON_KEY,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false
-        }
-      }
-    );
-  } catch (e) {
-    console.warn("[HOSG] Supabase init failed", e);
-    hosgSupabase = null;
-  }
+  // hosgSupabase is already initialized in hosg_config.js
   return hosgSupabase;
 }
 
