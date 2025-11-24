@@ -565,26 +565,22 @@ class NPCManager {
   }
 
   async createTestEnemy(id, position, name = "Test Wolf", level = 3, isBoss = false) {
-    const scene = this.scene;
-    const root = new BABYLON.TransformNode(id, scene);
-    
-    let body, head;
-    let animationGroups = [];
-    
-    if (window.assetLoaderInstance) {
-      console.log('[NPC] Attempting to load enemy model for', id);
-      try {
-        const modelKey = isBoss ? 'enemy_skeleton' : 'enemy_wolf';
-        const loadedAsset = await window.assetLoaderInstance.loadAsset(modelKey, {
-          position: new BABYLON.Vector3(0, 0, 0)
-        });
+    try {
+        const scene = this.scene;
+        const enemyId = `enemy_${id}`;
         
-        if (loadedAsset && loadedAsset.rootMesh) {
-          loadedAsset.rootMesh.parent = root;
-          body = loadedAsset.rootMesh;
-          head = loadedAsset.rootMesh;
-          animationGroups = loadedAsset.animationGroups || [];
-          console.log('[NPC] ✓ Loaded real model for', id);
+        // Try to load the model
+        let mesh;
+        try {
+            const model = await window.assetLoaderInstance.loadAsset(name.toLowerCase().replace(/\s+/g, '_'));
+            mesh = model.meshes[0].clone(enemyId);
+            mesh.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
+        } catch (error) {
+            console.warn(`Failed to load model for ${name}, using fallback`, error);
+            mesh = createFallbackMesh(enemyId, scene, {
+                size: isBoss ? 2 : 1,
+                color: isBoss ? '#ff0000' : '#00ff00'
+            });
         }
       } catch (error) {
         console.log('[NPC] Using procedural fallback:', error.message);
@@ -1020,6 +1016,5 @@ if (window.GameSystems.combat && window.GameSystems.combat.handleDeath) {
         }
     };
 }
-
-console.log("[HOSG] Enhanced game systems loaded v3.0");
+;
 console.log("[HOSG] Enhanced game systems loaded v3.0");
