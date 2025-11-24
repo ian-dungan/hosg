@@ -587,7 +587,7 @@ class NPCManager {
       }
     }
     
-    if (!body) {
+    if (body) {
       const scale = isBoss ? 2.5 : 1.0;
       body = BABYLON.MeshBuilder.CreateCapsule(id + "_body", {
         height: 2.4 * scale, radius: 0.5 * scale
