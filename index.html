@@ -3544,6 +3544,44 @@ function checkLootPickup(playerPos) {
   console.log('[UI] Enhanced UI handlers loaded');
 })();
 </script>
+<script>
+    // WebSocket handlers
+    window.onSocketConnected = function(ws) {
+        console.log('WebSocket connected, initializing game...');
+        ws.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                // Handle incoming messages
+                if (data.type === 'playerUpdate') {
+                    // Update other players
+                    if (window.updateRemotePlayer) {
+                        window.updateRemotePlayer(data);
+                    }
+                }
+            } catch (e) {
+                console.error('Error handling message:', e);
+            }
+        };
+    };
+
+    window.onSocketError = function(error) {
+        console.error('WebSocket error:', error);
+        const statusEl = document.getElementById('connection-status');
+        if (statusEl) {
+            statusEl.textContent = 'Connection error - Playing in offline mode';
+        }
+    };
+
+    window.onSocketClosed = function() {
+        console.log('WebSocket connection closed');
+        const statusEl = document.getElementById('connection-status');
+        if (statusEl) {
+            statusEl.textContent = 'Disconnected from server';
+        }
+    };
+</script>
+
+<!-- Load fixes.js after all other game scripts -->
 <script src="fixes.js"></script>
 </body>
 </html>
