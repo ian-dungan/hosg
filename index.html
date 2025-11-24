@@ -229,6 +229,37 @@
       border-radius: 2px;
     }
 
+    #mobile-target-btn {
+      position: fixed;
+      bottom: 80px;
+      right: 20px;
+      width: 60px;
+      height: 60px;
+      background: rgba(255, 50, 50, 0.9);
+      border: 3px solid #ff6666;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      cursor: pointer;
+      z-index: 20;
+      pointer-events: auto;
+      transition: all 0.2s;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    #mobile-target-btn:active {
+      transform: scale(0.9);
+      background: rgba(255, 100, 100, 1);
+    }
+
+    @media (min-width: 769px) {
+      #mobile-target-btn {
+        display: none;
+      }
+    }
+
     
 #char-create-overlay {
   position: fixed;
@@ -845,6 +876,9 @@
       <div class="keybind">4</div>
     </div>
   </div>
+
+  <!-- Mobile Target Button -->
+  <div id="mobile-target-btn" onclick="targetNearestEnemy()">🎯</div>
 
   <div id="chat-panel">
     <div id="chat-log"></div>
@@ -3002,11 +3036,14 @@ document.addEventListener('keydown', function(e) {
 
 scene.onPointerObservable.add(function(pointerInfo) {
   if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
-    if (pointerInfo.event.button === 0) {
-      const pick = pointerInfo.pickInfo;
-      if (pick.hit && pick.pickedMesh) {
-        const meshName = pick.pickedMesh.name;
-        
+    // Mobile fix: don't check button property (touch events don't have it)
+    const pick = pointerInfo.pickInfo;
+    if (pick.hit && pick.pickedMesh) {
+      let meshToCheck = pick.pickedMesh;
+      let meshName = meshToCheck.name;
+      
+      // Check picked mesh and its parent for enemy ID
+      for (let i = 0; i < 5; i++) {
         if (meshName.includes('enemy_')) {
           const parts = meshName.split('_');
           if (parts.length >= 3) {
@@ -3017,8 +3054,17 @@ scene.onPointerObservable.add(function(pointerInfo) {
               GameSystems.currentTarget = enemy;
               highlightTarget(enemy);
               appendChat(`Targeted: ${enemy.name}`);
+              return;
             }
           }
+        }
+        
+        // Check parent
+        if (meshToCheck.parent && meshToCheck.parent.name) {
+          meshToCheck = meshToCheck.parent;
+          meshName = meshToCheck.name;
+        } else {
+          break;
         }
       }
     }
