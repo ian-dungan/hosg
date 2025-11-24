@@ -1,0 +1,2 @@
+Note: favicon.ico is optional. 
+To create one, use a free tool like favicon.io or realfavicongenerator.net

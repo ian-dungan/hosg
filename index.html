@@ -1,13 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script>
-    if (typeof window.showNotification !== 'function') {
-      window.showNotification = function (text) {
-        console.log('[Notification]', text);
-      };
-    }
-  </script>
   <meta charset="UTF-8" />
   <title>Heroes of Shady Grove v2.0.0</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
@@ -2048,11 +2041,16 @@ const createScene = function () {
 
   // Initialize game systems
   GameSystems.init(scene, hosgSupabase);
-// Auto-accept first quest
-if (GameSystems.quests) {
-  GameSystems.quests.acceptQuest('starter_1');
-  showNotification('Quest: Wolf Hunter accepted!');
-}
+  
+  // Auto-accept first quest (delayed to let UI load)
+  setTimeout(function() {
+    if (GameSystems.quests) {
+      GameSystems.quests.acceptQuest('starter_1');
+      if (typeof showNotification === 'function') {
+        showNotification('Quest: Wolf Hunter accepted!');
+      }
+    }
+  }, 1000);
   // Initialize advanced systems
   if (window.AdvancedSystems) {
     AdvancedSystems.init(scene, GameSystems.npcManager, GameSystems.combat);
