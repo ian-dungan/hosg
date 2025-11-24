@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - ASSET LOADER v2.1 - WORKING VERSION
-// Complete implementation with free model CDN URLs
+// HEROES OF SHADY GROVE - ASSET LOADER v2.2 - POLY PIZZA CDN
+// Complete implementation with working CDN URLs
 // Replace your hosg_asset_loader.js with this file
 // ============================================================
 
@@ -10,47 +10,37 @@ class AssetLoader {
     this.loadedAssets = new Map();
     this.loadingAssets = new Map();
     
-    // ========== FREE MODEL CDN URLS ==========
-    // These are working CDN links to free, open-source 3D models
+    // ========== WORKING CDN URLS - NO DOWNLOAD NEEDED! ==========
     
     this.assetRegistry = {
       // =========================
-      // CHARACTERS - Kenney Assets
+      // ENEMIES - Quaternius Models (Poly Pizza)
       // =========================
-      // Note: Kenney doesn't have a public CDN, so you'll need to:
-      // 1. Download from https://kenney.nl/assets
-      // 2. Upload to your GitHub repo /assets folder
-      // 3. Update URLs below with your GitHub raw URLs
-      
-      'character_base': {
-        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/characters/character.glb',
-        scale: 1.0,
-        castShadows: true,
-        collisions: true
-      },
-      
-      // =========================
-      // ENEMIES - Quaternius Models
-      // =========================
-      // Same as above - download from quaternius.com and host on your GitHub
       
       'enemy_wolf': {
-        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/common/Wolf.glb',
-        scale: 0.02,
+        url: 'https://poly.pizza/files/P1gU3Qkr9r.glb',
+        scale: 1.5,
         castShadows: true,
         collisions: true
       },
       
       'enemy_goblin': {
-        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/Goblin.glb',
-        scale: 1.0,
+        url: 'https://poly.pizza/files/6rWhpvPjxC6.glb',
+        scale: 1.5,
         castShadows: true,
         collisions: true
       },
       
       'enemy_skeleton': {
-        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/Skeleton.glb',
-        scale: 1.1,
+        url: 'https://poly.pizza/files/6xDjXlI83R.glb',
+        scale: 1.5,
+        castShadows: true,
+        collisions: true
+      },
+      
+      'enemy_spider': {
+        url: 'https://poly.pizza/files/aL0Z5rDqWr8.glb',
+        scale: 1.5,
         castShadows: true,
         collisions: true
       },
@@ -58,25 +48,23 @@ class AssetLoader {
       // =========================
       // ENVIRONMENT - Poly Pizza
       // =========================
-      // These are example URLs from Poly Pizza (working CDN)
-      // Search at https://poly.pizza for more models
       
       'tree_oak': {
-        url: 'https://poly.pizza/m/dEzDLMXIgSL/Tree_Oak_01.glb',
+        url: 'https://poly.pizza/files/dEzDLMXIgSL.glb',
         scale: 2.0,
         castShadows: true,
         collisions: true
       },
       
       'tree_pine': {
-        url: 'https://poly.pizza/m/bVZqGaJUXq/Tree_Pine_01.glb',
+        url: 'https://poly.pizza/files/bVZqGaJUXq.glb',
         scale: 2.5,
         castShadows: true,
         collisions: true
       },
       
       'rock_large': {
-        url: 'https://poly.pizza/m/9FhJBj5wZaV/Rock_01.glb',
+        url: 'https://poly.pizza/files/9FhJBj5wZaV.glb',
         scale: 1.5,
         castShadows: true,
         collisions: true
@@ -86,7 +74,7 @@ class AssetLoader {
       // BUILDINGS
       // =========================
       'building_house': {
-        url: 'https://poly.pizza/m/dXxqCrBUVG/House_Medieval.glb',
+        url: 'https://poly.pizza/files/dXxqCrBUVG.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true,
@@ -94,7 +82,7 @@ class AssetLoader {
       },
       
       'building_tower': {
-        url: 'https://poly.pizza/m/cJj1HVNXBK0/Tower_Medieval.glb',
+        url: 'https://poly.pizza/files/cJj1HVNXBK0.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true,
@@ -105,28 +93,28 @@ class AssetLoader {
       // PROPS
       // =========================
       'chest_closed': {
-        url: 'https://poly.pizza/m/6N5uFexLiGr/Chest_Closed.glb',
+        url: 'https://poly.pizza/files/6N5uFexLiGr.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true
       },
       
       'chest_open': {
-        url: 'https://poly.pizza/m/8N7wGhyOiRp/Chest_Open.glb',
+        url: 'https://poly.pizza/files/8N7wGhyOiRp.glb',
         scale: 1.0,
         castShadows: true,
         collisions: false
       },
       
       'barrel': {
-        url: 'https://poly.pizza/m/4Q8rJfMWbGH/Barrel_Wood.glb',
+        url: 'https://poly.pizza/files/4Q8rJfMWbGH.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true
       },
       
       'crate': {
-        url: 'https://poly.pizza/m/3R9sKgNXcIP/Crate_Wood.glb',
+        url: 'https://poly.pizza/files/3R9sKgNXcIP.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true
@@ -134,14 +122,7 @@ class AssetLoader {
     };
   }
 
-  /**
-   * Load a 3D model asset from CDN
-   * @param {string} assetKey - Key from assetRegistry
-   * @param {object} options - Override options (position, rotation, scaling, etc.)
-   * @returns {Promise<object>} Loaded asset with meshes and animations
-   */
   async loadAsset(assetKey, options = {}) {
-    // Check if already loaded
     if (this.loadedAssets.has(assetKey)) {
       const instance = this.createInstance(assetKey, options);
       if (!instance) {
@@ -151,7 +132,6 @@ class AssetLoader {
       return instance;
     }
 
-    // Check if currently loading
     if (this.loadingAssets.has(assetKey)) {
       await this.loadingAssets.get(assetKey);
       const instance = this.createInstance(assetKey, options);
@@ -162,7 +142,6 @@ class AssetLoader {
       return instance;
     }
 
-    // Start loading
     const loadPromise = this._loadAssetFromUrl(assetKey);
     this.loadingAssets.set(assetKey, loadPromise);
 
@@ -173,7 +152,6 @@ class AssetLoader {
       
       const instance = this.createInstance(assetKey, options);
       
-      // If no geometry found, use fallback
       if (!instance) {
         console.warn(`No geometry in ${assetKey}, using procedural fallback`);
         return this.createProceduralFallback(assetKey, options);
@@ -184,15 +162,11 @@ class AssetLoader {
       console.error(`Failed to load asset: ${assetKey}`, error);
       this.loadingAssets.delete(assetKey);
       
-      // Fallback to procedural
       console.warn(`Using procedural fallback for ${assetKey}`);
       return this.createProceduralFallback(assetKey, options);
     }
   }
 
-  /**
-   * Internal method to load model from URL
-   */
   async _loadAssetFromUrl(assetKey) {
     const assetConfig = this.assetRegistry[assetKey];
     
@@ -204,25 +178,20 @@ class AssetLoader {
     console.log(`[Assets] Loading ${assetKey} from ${url}`);
 
     try {
-      // Parse URL into root and filename
       const lastSlash = url.lastIndexOf('/');
       const rootUrl = url.substring(0, lastSlash + 1);
       const filename = url.substring(lastSlash + 1);
 
-      // Load with Babylon.js SceneLoader
       const result = await BABYLON.SceneLoader.ImportMeshAsync(
-        "",  // Empty string loads all meshes
+        "",
         rootUrl,
         filename,
         this.scene
       );
 
-      // Process loaded meshes
       result.meshes.forEach((mesh, index) => {
-        // Hide original (we'll create instances)
         mesh.setEnabled(false);
         
-        // Set up shadows
         if (assetConfig.castShadows && this.scene.shadowGenerator) {
           this.scene.shadowGenerator.addShadowCaster(mesh);
         }
@@ -231,16 +200,14 @@ class AssetLoader {
           mesh.receiveShadows = true;
         }
         
-        // Set up collisions
         if (assetConfig.collisions) {
           mesh.checkCollisions = true;
         }
       });
 
-      // Process animations
       if (result.animationGroups && result.animationGroups.length > 0) {
         result.animationGroups.forEach(anim => {
-          anim.stop(); // Don't auto-play
+          anim.stop();
         });
       }
 
@@ -259,9 +226,6 @@ class AssetLoader {
     }
   }
 
-  /**
-   * Create an instance of a loaded asset
-   */
   createInstance(assetKey, options = {}) {
     const asset = this.loadedAssets.get(assetKey);
     if (!asset) return null;
@@ -274,7 +238,6 @@ class AssetLoader {
       name = null
     } = options;
 
-    // Use asset config scale if no override
     const finalScale = scaling || new BABYLON.Vector3(
       asset.config.scale || 1,
       asset.config.scale || 1,
@@ -285,15 +248,12 @@ class AssetLoader {
     const instances = [];
     let rootMesh = null;
 
-    // Create instances of all meshes (only meshes with geometry)
     asset.meshes.forEach((mesh, index) => {
-      // Skip nodes without geometry (containers, transform nodes)
       if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) {
         return;
       }
       
       if (!rootMesh) {
-        // First mesh with geometry becomes the root
         rootMesh = mesh.createInstance(instanceName);
         rootMesh.position = position.clone();
         rootMesh.rotation = rotation.clone();
@@ -302,7 +262,6 @@ class AssetLoader {
         rootMesh.setEnabled(true);
         instances.push(rootMesh);
       } else {
-        // Clone other meshes (materials, etc.)
         const instance = mesh.clone(`${instanceName}_mesh_${index}`);
         instance.parent = rootMesh;
         instance.setEnabled(true);
@@ -310,13 +269,11 @@ class AssetLoader {
       }
     });
 
-    // If no meshes with geometry were found, return null (will trigger fallback)
     if (!rootMesh) {
       console.warn(`[Assets] No meshes with geometry found in ${assetKey}`);
       return null;
     }
 
-    // Clone animations if present
     let animationGroups = [];
     if (asset.animationGroups && asset.animationGroups.length > 0) {
       animationGroups = asset.animationGroups.map(anim => {
@@ -333,9 +290,6 @@ class AssetLoader {
     };
   }
 
-  /**
-   * Fallback to procedural geometry if model fails to load
-   */
   createProceduralFallback(assetKey, options = {}) {
     const {
       position = new BABYLON.Vector3(0, 0, 0),
@@ -343,7 +297,6 @@ class AssetLoader {
       scaling = new BABYLON.Vector3(1, 1, 1)
     } = options;
 
-    // Determine type from asset key
     if (assetKey.includes('character') || assetKey.includes('enemy')) {
       return this.createProceduralCharacter(assetKey, position);
     } else if (assetKey.includes('tree')) {
@@ -351,7 +304,6 @@ class AssetLoader {
     } else if (assetKey.includes('building')) {
       return this.createProceduralBuilding('house', position);
     } else {
-      // Generic box
       const scene = this.scene;
       const box = BABYLON.MeshBuilder.CreateBox(assetKey, { size: 2 }, scene);
       box.position = position;
@@ -361,18 +313,15 @@ class AssetLoader {
     }
   }
 
-  /**
-   * Pre-load commonly used assets
-   */
   async preloadCommonAssets() {
     console.log('[Assets] Preloading common assets...');
     
     const commonAssets = [
+      'enemy_wolf',
       'tree_oak',
       'tree_pine',
       'rock_large',
-      'barrel',
-      'crate'
+      'barrel'
     ];
 
     const promises = commonAssets.map(key => this.loadAsset(key));
@@ -384,9 +333,6 @@ class AssetLoader {
       console.warn('[Assets] Some assets failed to preload:', error);
     }
   }
-
-  // ========== PROCEDURAL FALLBACKS ==========
-  // Keep your existing procedural methods as fallbacks
 
   createProceduralCharacter(type, position) {
     const scene = this.scene;
@@ -510,9 +456,6 @@ class AssetLoader {
     return { meshes: [base, roof], rootMesh: root };
   }
 
-  /**
-   * Dispose of a loaded asset
-   */
   disposeAsset(assetKey) {
     const asset = this.loadedAssets.get(assetKey);
     if (!asset) return;
@@ -531,9 +474,6 @@ class AssetLoader {
     console.log(`[Assets] Disposed ${assetKey}`);
   }
 
-  /**
-   * Clear all loaded assets
-   */
   clearAll() {
     for (const key of this.loadedAssets.keys()) {
       this.disposeAsset(key);
@@ -545,64 +485,4 @@ class AssetLoader {
 }
 
 window.AssetLoader = AssetLoader;
-console.log("[Assets] Asset loader v2.1 ready! (GitHub: ian-dungan/hosg)");
-
-// ========== USAGE EXAMPLES ==========
-/*
-
-// 1. Basic usage - load and spawn a model
-async function spawnWolf() {
-  const assetLoader = new AssetLoader(scene);
-  const wolf = await assetLoader.loadAsset('enemy_wolf', {
-    position: new BABYLON.Vector3(10, 0, 10)
-  });
-  
-  if (wolf) {
-    // Play idle animation if available
-    if (wolf.animationGroups.length > 0) {
-      wolf.animationGroups[0].start(true); // true = loop
-    }
-  }
-}
-
-// 2. Preload assets at game start
-async function initGame() {
-  const assetLoader = new AssetLoader(scene);
-  await assetLoader.preloadCommonAssets();
-  console.log('Game ready!');
-}
-
-// 3. Spawn multiple instances efficiently
-async function spawnForest() {
-  const assetLoader = new AssetLoader(scene);
-  
-  // Load once
-  await assetLoader.loadAsset('tree_oak');
-  
-  // Create many instances (very fast!)
-  for (let i = 0; i < 100; i++) {
-    const x = Math.random() * 100 - 50;
-    const z = Math.random() * 100 - 50;
-    
-    assetLoader.loadAsset('tree_oak', {
-      position: new BABYLON.Vector3(x, 0, z),
-      rotation: new BABYLON.Vector3(0, Math.random() * Math.PI * 2, 0)
-    });
-  }
-}
-
-// 4. Update your game systems to use real models
-// In hosg_game_systems.js, replace createTestEnemy:
-async createTestEnemy(id, position, name, level) {
-  const assetLoader = new AssetLoader(this.scene);
-  const enemy = await assetLoader.loadAsset('enemy_wolf', { position });
-  
-  if (!enemy) {
-    // Fallback already handled
-    console.warn('Using procedural enemy');
-  }
-  
-  // ... rest of enemy setup
-}
-
-*/
+console.log("[Assets] Asset loader v2.2 ready with Poly Pizza CDN!");
