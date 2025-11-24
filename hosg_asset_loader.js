@@ -59,7 +59,7 @@ class AssetLoader {
       // =========================
       'enemy_wolf': {
         url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/common/Wolf.glb',
-        scale: 0.05,
+        scale: 0.02,
         castShadows: true,
         collisions: true
       },
