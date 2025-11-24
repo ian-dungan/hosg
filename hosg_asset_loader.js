@@ -18,8 +18,8 @@ class AssetLoader {
       // =========================
       
       'enemy_wolf': {
-        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/common/Wolf.glb',
-        scale: 0.003,
+        url: 'https://poly.pizza/files/P1gU3Qkr9r.glb',
+        scale: 1.5,
         castShadows: true,
         collisions: true
       },
@@ -189,28 +189,21 @@ class AssetLoader {
         this.scene
       );
 
-      result.meshes.forEach((mesh) => {
-  if (!mesh) return;
-
-  // Is this an actual mesh with geometry?
-  const hasGeometry =
-    typeof mesh.getTotalVertices === "function" &&
-    mesh.getTotalVertices() > 0;
-
-  mesh.setEnabled(false);
-
-  if (assetConfig.castShadows && this.scene.shadowGenerator && hasGeometry) {
-    this.scene.shadowGenerator.addShadowCaster(mesh);
-  }
-
-  if (assetConfig.receiveShadows && hasGeometry) {
-    mesh.receiveShadows = true;
-  }
-
-  if (assetConfig.collisions && hasGeometry) {
-    mesh.checkCollisions = true;
-  }
-});
+      result.meshes.forEach((mesh, index) => {
+        mesh.setEnabled(false);
+        
+        if (assetConfig.castShadows && this.scene.shadowGenerator) {
+          this.scene.shadowGenerator.addShadowCaster(mesh);
+        }
+        
+        if (assetConfig.receiveShadows) {
+          mesh.receiveShadows = true;
+        }
+        
+        if (assetConfig.collisions) {
+          mesh.checkCollisions = true;
+        }
+      });
 
       if (result.animationGroups && result.animationGroups.length > 0) {
         result.animationGroups.forEach(anim => {
