@@ -18,7 +18,7 @@ class AssetLoader {
       // =========================
       
       'enemy_wolf': {
-        url: 'https://poly.pizza/files/P1gU3Qkr9r.glb',
+        url: 'assets/enemies/common/Wolf.glb',
         scale: 1.5,
         castShadows: true,
         collisions: true
