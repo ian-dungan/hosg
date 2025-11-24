@@ -2041,7 +2041,11 @@ const createScene = function () {
 
   // Initialize game systems
   GameSystems.init(scene, hosgSupabase);
-  
+// Auto-accept first quest
+if (GameSystems.quests) {
+  GameSystems.quests.acceptQuest('starter_1');
+  showNotification('Quest: Wolf Hunter accepted!');
+}
   // Initialize advanced systems
   if (window.AdvancedSystems) {
     AdvancedSystems.init(scene, GameSystems.npcManager, GameSystems.combat);
@@ -2052,6 +2056,24 @@ const createScene = function () {
     const originalHandleDeath = GameSystems.combat.handleDeath.bind(GameSystems.combat);
     GameSystems.combat.handleDeath = function(victim, killer) {
       originalHandleDeath(victim, killer);
+      // In GameSystems.combat.handleDeath()
+// After enemy death, add:
+if (victim.type === 'enemy' && victim.position) {
+  const loot = GameSystems.loot.rollLoot(victim.level, victim.isBoss);
+  if (loot.length > 0) {
+    GameSystems.loot.spawnLootBag(victim.position, loot);
+  }
+  
+  // Update quest progress
+  const enemyType = victim.id.split('_')[1]; // wolf, goblin, etc
+  GameSystems.quests.updateProgress(enemyType, 1);
+  
+  // Award skill points on level up
+  if (killer.stats.level > oldLevel) {
+    GameSystems.skillTree.addSkillPoints(2);
+    showNotification(`Level up! +2 Skill Points`);
+  }
+}
       
       // Drop loot
       if (victim.type === 'enemy' && victim.position && GameSystems.loot) {
@@ -2709,7 +2731,16 @@ const createScene = function () {
     const deltaTime = scene.getEngine().getDeltaTime();
     const dt = deltaTime / (1000 / 60);
     const dtSec = deltaTime / 1000;
+  // NEW: Update minimap
+  if (typeof updateMinimap === 'function') {
+    const enemies = Array.from(GameSystems.npcManager.enemies.values());
+    updateMinimap(heroBody.position, enemies);
+  }
 
+  // NEW: Check for loot pickup
+  if (typeof checkLootPickup === 'function') {
+    checkLootPickup(heroBody.position);
+  }
     hudTime += dtSec;
     updateHud(hudTime);
     updateGamepadState();
@@ -3221,7 +3252,36 @@ window.addEventListener("resize", function () {
       }
     }
   }, 1000);
-
+function checkLootPickup(playerPos) {
+  if (!scene || !window.GameSystems?.loot) return;
+  
+  const lootBags = scene.meshes.filter(m => m.metadata?.isLootBag);
+  
+  for (const bag of lootBags) {
+    const dist = BABYLON.Vector3.Distance(playerPos, bag.position);
+    
+    if (dist < 2) {
+      // Pickup loot
+      const loot = bag.metadata.loot;
+      loot.forEach(item => {
+        GameSystems.inventory.addItem(item);
+        if (item.type === 'gold') {
+          showNotification(`+${item.amount} gold`);
+        } else {
+          showNotification(`Looted: ${item.type}`);
+        }
+      });
+      
+      GameSystems.sound.play('loot');
+      
+      // Remove bag
+      if (bag.metadata.observer) {
+        scene.onBeforeRenderObservable.remove(bag.metadata.observer);
+      }
+      bag.dispose();
+    }
+  }
+}
   // Toggle panels
   document.getElementById('btn-inventory')?.addEventListener('click', () => {
     const panel = document.getElementById('inventory-panel');
