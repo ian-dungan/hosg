@@ -929,5 +929,97 @@ window.GameSystems = {
     console.log("[HOSG] ✓ Spawned enemies + boss");
   }
 };
+// ==================== SHADOW SYSTEM ====================
+let shadowGenerator = null;
 
+function setupShadows(scene) {
+    if (!scene) {
+        console.error("No scene provided for shadow setup");
+        return null;
+    }
+
+    try {
+        const light = scene.lights.find(l => l instanceof BABYLON.DirectionalLight);
+        if (!light) {
+            console.warn("No directional light found for shadows");
+            return null;
+        }
+        
+        shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
+        shadowGenerator.useBlurExponentialShadowMap = true;
+        shadowGenerator.blurKernel = 32;
+        shadowGenerator.forceBackFacesOnly = true;
+        
+        return shadowGenerator;
+    } catch (error) {
+        console.error("Failed to setup shadows:", error);
+        return null;
+    }
+}
+
+// Initialize shadows when the scene is ready
+if (window.GameSystems.init) {
+    const originalInit = window.GameSystems.init;
+    window.GameSystems.init = function(scene, supabase) {
+        const result = originalInit.call(this, scene, supabase);
+        setupShadows(scene);
+        return result;
+    };
+}
+
+// ==================== TARGETING SYSTEM ====================
+function targetNearestEnemy() {
+    if (!window.GameState || !window.GameState.enemies) {
+        console.warn("No GameState or enemies found");
+        return null;
+    }
+    
+    const player = window.GameState.player;
+    if (!player || !player.position) {
+        console.warn("Player position not found");
+        return null;
+    }
+    
+    let nearestEnemy = null;
+    let nearestDistance = Infinity;
+    
+    Object.values(window.GameState.enemies || {}).forEach(enemy => {
+        if (!enemy?.mesh || (enemy.stats?.hp !== undefined && enemy.stats.hp <= 0)) return;
+        
+        const distance = BABYLON.Vector3.Distance(player.position, enemy.mesh.position);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestEnemy = enemy;
+        }
+    });
+    
+    if (nearestEnemy) {
+        window.GameState.currentTarget = nearestEnemy;
+        console.log(`Targeting: ${nearestEnemy.name || 'Enemy'}`);
+    } else {
+        console.log("No valid enemies found");
+    }
+    
+    return nearestEnemy;
+}
+
+// Make it globally available
+window.targetNearestEnemy = targetNearestEnemy;
+
+// Update the existing CombatSystem's handleDeath method
+if (window.GameSystems.combat && window.GameSystems.combat.handleDeath) {
+    const originalHandleDeath = window.GameSystems.combat.handleDeath;
+    
+    window.GameSystems.combat.handleDeath = function(defender, attacker) {
+        try {
+            const oldLevel = attacker?.stats?.level || 1;
+            return originalHandleDeath.call(this, defender, attacker);
+        } catch (error) {
+            console.error("Error in handleDeath:", error);
+            return false;
+        }
+    };
+}
+
+console.log("[HOSG] Enhanced game systems loaded v3.0");
 console.log("[HOSG] Enhanced game systems loaded v3.0");
