@@ -1,5 +1,7 @@
 // ==================== GLOBAL DEBUGGING ====================
-window.DEBUG_MODE = true;
+if (typeof window.DEBUG_MODE === 'undefined') {
+    window.DEBUG_MODE = true;
+}
 
 function debugLog(...args) {
     if (window.DEBUG_MODE) {
@@ -107,6 +109,9 @@ function setupMultiplayer() {
 
 // ==================== ERROR HANDLING ====================
 function setupErrorHandling() {
+    // Only set up error handlers once
+    if (window._errorHandlersInitialized) return;
+    
     window.addEventListener('error', (event) => {
         debugLog('Unhandled error:', event.error || event.message, event);
     });
@@ -114,14 +119,27 @@ function setupErrorHandling() {
     window.addEventListener('unhandledrejection', (event) => {
         debugLog('Unhandled promise rejection:', event.reason);
     });
+    
+    window._errorHandlersInitialized = true;
 }
 
 // ==================== INITIALIZATION ====================
 function applyFixes() {
+    // Only apply fixes once
+    if (window._fixesApplied) return;
+    
     setupErrorHandling();
     patchBoundingBox();
-    setupMultiplayer();
+    
+    // Wait for the rest of the page to load before setting up multiplayer
+    if (document.readyState === 'complete') {
+        setupMultiplayer();
+    } else {
+        window.addEventListener('load', setupMultiplayer);
+    }
+    
     debugLog("All fixes applied successfully");
+    window._fixesApplied = true;
 }
 
 // Apply fixes when the DOM is fully loaded
