@@ -196,27 +196,31 @@ class AssetLoader {
       );
 
       result.meshes.forEach((mesh) => {
-  if (!mesh) return;
+        if (!mesh) return;
+        
+        // Skip non-mesh objects (transform nodes, etc)
+        if (!mesh.getTotalVertices || typeof mesh.getTotalVertices !== 'function') {
+          return;
+        }
+        
+        // Skip meshes without geometry
+        const hasGeometry = mesh.getTotalVertices() > 0;
+        if (!hasGeometry) return;
 
-  // Is this an actual mesh with geometry?
-  const hasGeometry =
-    typeof mesh.getTotalVertices === "function" &&
-    mesh.getTotalVertices() > 0;
+        mesh.setEnabled(false);
 
-  mesh.setEnabled(false);
+        if (assetConfig.castShadows && this.scene.shadowGenerator) {
+          this.scene.shadowGenerator.addShadowCaster(mesh);
+        }
 
-  if (assetConfig.castShadows && this.scene.shadowGenerator && hasGeometry) {
-    this.scene.shadowGenerator.addShadowCaster(mesh);
-  }
+        if (assetConfig.receiveShadows) {
+          mesh.receiveShadows = true;
+        }
 
-  if (assetConfig.receiveShadows && hasGeometry) {
-    mesh.receiveShadows = true;
-  }
-
-  if (assetConfig.collisions && hasGeometry) {
-    mesh.checkCollisions = true;
-  }
-});
+        if (assetConfig.collisions) {
+          mesh.checkCollisions = true;
+        }
+      });
 
       if (result.animationGroups && result.animationGroups.length > 0) {
         result.animationGroups.forEach(anim => {
@@ -262,8 +266,19 @@ class AssetLoader {
     let rootMesh = null;
 
     asset.meshes.forEach((mesh, index) => {
-      if (!mesh.getTotalVertices || mesh.getTotalVertices() === 0) {
+      // Skip null/undefined
+      if (!mesh) return;
+      
+      // Skip if not a mesh or doesn't have getTotalVertices function
+      if (!mesh.getTotalVertices || typeof mesh.getTotalVertices !== 'function') {
         return;
+      }
+      
+      // Skip if no geometry
+      try {
+        if (mesh.getTotalVertices() === 0) return;
+      } catch (e) {
+        return; // Skip if getTotalVertices throws error
       }
       
       if (!rootMesh) {
