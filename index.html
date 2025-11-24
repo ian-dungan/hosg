@@ -745,7 +745,9 @@
   <script src="hosg_config.js"></script>
   <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="hosg_asset_loader.js"></script>
-  <script src="hosg_game_systems.js"></script>
+  <script src="hosg_game_systems_enhanced.js"></script>
+  <script src="hosg_advanced_features.js"></script>
+  <script src="integration_helpers.js"></script>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
@@ -2039,6 +2041,42 @@ const createScene = function () {
 
   // Initialize game systems
   GameSystems.init(scene, hosgSupabase);
+  
+  // Initialize advanced systems
+  if (window.AdvancedSystems) {
+    AdvancedSystems.init(scene, GameSystems.npcManager, GameSystems.combat);
+  }
+  
+  // Replace combat death handler with enhanced version
+  if (GameSystems.combat) {
+    const originalHandleDeath = GameSystems.combat.handleDeath.bind(GameSystems.combat);
+    GameSystems.combat.handleDeath = function(victim, killer) {
+      originalHandleDeath(victim, killer);
+      
+      // Drop loot
+      if (victim.type === 'enemy' && victim.position && GameSystems.loot) {
+        const loot = GameSystems.loot.rollLoot(victim.level, victim.isBoss);
+        if (loot.length > 0) {
+          GameSystems.loot.spawnLootBag(victim.position, loot);
+        }
+      }
+      
+      // Update quest progress
+      if (GameSystems.quests) {
+        const enemyType = victim.id.split('_')[1];
+        GameSystems.quests.updateProgress(enemyType, 1);
+        if (typeof updateQuestUI === 'function') updateQuestUI();
+      }
+      
+      // Trigger events
+      if (AdvancedSystems?.events) {
+        AdvancedSystems.events.trigger('enemy_killed', {
+          enemyType: victim.id.split('_')[1],
+          isBoss: victim.isBoss
+        });
+      }
+    };
+  }
 
   const envTex = new BABYLON.CubeTexture(
     "https://playground.babylonjs.com/textures/environment.env",
@@ -2676,6 +2714,27 @@ const createScene = function () {
     updateHud(hudTime);
     updateGamepadState();
 
+    // Update advanced systems
+    if (window.AdvancedSystems) {
+      AdvancedSystems.update(deltaTime);
+    }
+    
+    // Update minimap
+    if (typeof updateMinimap === 'function' && GameSystems.npcManager) {
+      const enemies = Array.from(GameSystems.npcManager.enemies.values());
+      updateMinimap(heroBody.position, enemies);
+    }
+    
+    // Check loot pickup
+    if (typeof checkLootPickup === 'function') {
+      checkLootPickup(heroBody.position);
+    }
+    
+    // Check dungeon portals
+    if (typeof checkDungeonPortal === 'function') {
+      checkDungeonPortal(heroBody.position);
+    }
+
     autosaveTimer += dtSec;
     netSendTimer += dtSec;
 
@@ -3081,5 +3140,344 @@ window.addEventListener("resize", function () {
 
 })();
   </script>
+
+<!-- ============================================================
+     ENHANCED UI COMPONENTS
+     ============================================================ -->
+
+<!-- Inventory Panel -->
+<div id="inventory-panel" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 500px; max-width: 90%; background: rgba(5, 5, 15, 0.95); border-radius: 10px; border: 1px solid rgba(130, 180, 255, 0.6); box-shadow: 0 0 30px rgba(0, 0, 0, 0.9); z-index: 100;">
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(10, 15, 35, 0.95); border-bottom: 1px solid rgba(130, 180, 255, 0.4); font-weight: 600; font-size: 16px; border-radius: 10px 10px 0 0;">
+    <span>Inventory</span>
+    <span id="inventory-gold" style="color: #ffe164;">Gold: 0</span>
+    <button id="inventory-close" style="background: rgba(255, 80, 80, 0.8); border: none; color: white; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 20px; line-height: 24px;">×</button>
+  </div>
+  <div style="padding: 16px; max-height: 500px; overflow-y: auto;">
+    <div id="equipped-slots" style="display: flex; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(130, 180, 255, 0.3);">
+      <div style="flex: 1; text-align: center;">
+        <div style="font-size: 11px; color: #9db8ff; margin-bottom: 4px; text-transform: uppercase;">Weapon</div>
+        <div id="equipped-weapon" style="background: rgba(20, 30, 60, 0.9); border: 2px solid rgba(130, 180, 255, 0.5); border-radius: 8px; padding: 12px 8px; min-height: 50px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #cfd8ff;">Empty</div>
+      </div>
+      <div style="flex: 1; text-align: center;">
+        <div style="font-size: 11px; color: #9db8ff; margin-bottom: 4px; text-transform: uppercase;">Armor</div>
+        <div id="equipped-armor" style="background: rgba(20, 30, 60, 0.9); border: 2px solid rgba(130, 180, 255, 0.5); border-radius: 8px; padding: 12px 8px; min-height: 50px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #cfd8ff;">Empty</div>
+      </div>
+      <div style="flex: 1; text-align: center;">
+        <div style="font-size: 11px; color: #9db8ff; margin-bottom: 4px; text-transform: uppercase;">Accessory</div>
+        <div id="equipped-accessory" style="background: rgba(20, 30, 60, 0.9); border: 2px solid rgba(130, 180, 255, 0.5); border-radius: 8px; padding: 12px 8px; min-height: 50px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #cfd8ff;">Empty</div>
+      </div>
+    </div>
+    <div id="inventory-grid" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;"></div>
+  </div>
+</div>
+
+<!-- Quest Panel -->
+<div id="quest-panel" style="display:none; position: fixed; right: 20px; top: 80px; width: 350px; background: rgba(5, 5, 15, 0.95); border-radius: 10px; border: 1px solid rgba(130, 180, 255, 0.6); box-shadow: 0 0 30px rgba(0, 0, 0, 0.9); z-index: 100;">
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(10, 15, 35, 0.95); border-bottom: 1px solid rgba(130, 180, 255, 0.4); font-weight: 600; font-size: 16px; border-radius: 10px 10px 0 0;">
+    <span>Quests</span>
+    <button id="quest-close" style="background: rgba(255, 80, 80, 0.8); border: none; color: white; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 20px; line-height: 24px;">×</button>
+  </div>
+  <div style="padding: 16px; max-height: 500px; overflow-y: auto;">
+    <div id="active-quests"></div>
+    <div id="available-quests"></div>
+  </div>
+</div>
+
+<!-- Skill Panel -->
+<div id="skill-panel" style="display:none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 600px; max-width: 90%; background: rgba(5, 5, 15, 0.95); border-radius: 10px; border: 1px solid rgba(130, 180, 255, 0.6); box-shadow: 0 0 30px rgba(0, 0, 0, 0.9); z-index: 100;">
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(10, 15, 35, 0.95); border-bottom: 1px solid rgba(130, 180, 255, 0.4); font-weight: 600; font-size: 16px; border-radius: 10px 10px 0 0;">
+    <span>Skills</span>
+    <span id="skill-points" style="color: #ffe164;">Points: 0</span>
+    <button id="skill-close" style="background: rgba(255, 80, 80, 0.8); border: none; color: white; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 20px; line-height: 24px;">×</button>
+  </div>
+  <div style="padding: 16px; max-height: 500px; overflow-y: auto;">
+    <div id="skill-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;"></div>
+  </div>
+</div>
+
+<!-- Quick Access Buttons -->
+<div id="quick-menu" style="position: fixed; top: 50%; right: 12px; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 15;">
+  <button id="btn-inventory" style="width: 50px; height: 50px; background: rgba(10, 15, 35, 0.95); border: 2px solid rgba(130, 180, 255, 0.6); border-radius: 8px; color: white; font-size: 12px; cursor: pointer; transition: all 0.2s;">📦<br>I</button>
+  <button id="btn-quests" style="width: 50px; height: 50px; background: rgba(10, 15, 35, 0.95); border: 2px solid rgba(130, 180, 255, 0.6); border-radius: 8px; color: white; font-size: 12px; cursor: pointer; transition: all 0.2s;">📜<br>Q</button>
+  <button id="btn-skills" style="width: 50px; height: 50px; background: rgba(10, 15, 35, 0.95); border: 2px solid rgba(130, 180, 255, 0.6); border-radius: 8px; color: white; font-size: 12px; cursor: pointer; transition: all 0.2s;">⚡<br>K</button>
+</div>
+
+<!-- Time Display -->
+<div id="time-display" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(10, 15, 35, 0.95); border: 1px solid rgba(130, 180, 255, 0.6); border-radius: 999px; padding: 6px 16px; font-size: 12px; color: #cfd8ff; z-index: 11;">12:00 PM</div>
+
+<script>
+// ============================================================
+// ENHANCED UI HANDLERS & INITIALIZATION
+// ============================================================
+
+(function() {
+  // Wait for everything to load
+  setTimeout(function() {
+    // Auto-accept starter quest
+    if (window.GameSystems?.quests) {
+      GameSystems.quests.acceptQuest('starter_1');
+      if (typeof showNotification === 'function') {
+        showNotification('Quest: Wolf Hunter accepted!');
+      }
+    }
+  }, 1000);
+
+  // Toggle panels
+  document.getElementById('btn-inventory')?.addEventListener('click', () => {
+    const panel = document.getElementById('inventory-panel');
+    if (panel) {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      if (panel.style.display === 'block') updateInventoryUI();
+    }
+  });
+
+  document.getElementById('btn-quests')?.addEventListener('click', () => {
+    const panel = document.getElementById('quest-panel');
+    if (panel) {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      if (panel.style.display === 'block') updateQuestUI();
+    }
+  });
+
+  document.getElementById('btn-skills')?.addEventListener('click', () => {
+    const panel = document.getElementById('skill-panel');
+    if (panel) {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      if (panel.style.display === 'block') updateSkillUI();
+    }
+  });
+
+  // Close buttons
+  document.getElementById('inventory-close')?.addEventListener('click', () => {
+    document.getElementById('inventory-panel').style.display = 'none';
+  });
+  document.getElementById('quest-close')?.addEventListener('click', () => {
+    document.getElementById('quest-panel').style.display = 'none';
+  });
+  document.getElementById('skill-close')?.addEventListener('click', () => {
+    document.getElementById('skill-panel').style.display = 'none';
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'i' || e.key === 'I') {
+      document.getElementById('btn-inventory')?.click();
+    } else if (e.key === 'q' || e.key === 'Q') {
+      document.getElementById('btn-quests')?.click();
+    } else if (e.key === 'k' || e.key === 'K') {
+      document.getElementById('btn-skills')?.click();
+    }
+  });
+
+  // Update inventory UI
+  window.updateInventoryUI = function() {
+    if (!window.GameSystems?.inventory) return;
+    
+    const inv = window.GameSystems.inventory;
+    document.getElementById('inventory-gold').textContent = `Gold: ${inv.gold}`;
+    
+    for (const slot in inv.equipped) {
+      const item = inv.equipped[slot];
+      const el = document.getElementById(`equipped-${slot}`);
+      if (el) {
+        el.textContent = item ? (item.name || item.type) : 'Empty';
+      }
+    }
+    
+    const grid = document.getElementById('inventory-grid');
+    if (grid) {
+      grid.innerHTML = '';
+      for (let i = 0; i < inv.maxSlots; i++) {
+        const slot = document.createElement('div');
+        slot.style.cssText = 'aspect-ratio: 1; background: rgba(20, 30, 60, 0.8); border: 2px solid rgba(130, 180, 255, 0.4); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 10px; padding: 4px; transition: all 0.2s;';
+        const item = inv.items[i];
+        
+        if (item) {
+          slot.textContent = item.name || item.type;
+          slot.onclick = () => {
+            const oldItem = inv.equipItem(i);
+            if (oldItem) inv.addItem(oldItem);
+            updateInventoryUI();
+            GameSystems.sound?.play('loot');
+          };
+        } else {
+          slot.style.opacity = '0.3';
+        }
+        
+        grid.appendChild(slot);
+      }
+    }
+  };
+
+  // Update quest UI
+  window.updateQuestUI = function() {
+    if (!window.GameSystems?.quests) return;
+    
+    const quests = window.GameSystems.quests;
+    const activeEl = document.getElementById('active-quests');
+    const availableEl = document.getElementById('available-quests');
+    
+    if (activeEl) {
+      activeEl.innerHTML = '<h3 style="margin-bottom: 10px; color: #ffe164; font-size: 14px;">Active Quests</h3>';
+      quests.activeQuests.forEach(quest => {
+        const div = document.createElement('div');
+        div.style.cssText = 'background: rgba(20, 30, 60, 0.9); border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 3px solid #ffe164;';
+        div.innerHTML = `
+          <div style="font-weight: 600; color: #ffe164; margin-bottom: 4px; font-size: 13px;">${quest.name}</div>
+          <div style="font-size: 12px; color: #cfd8ff; margin-bottom: 6px;">${quest.description}</div>
+          <div style="font-size: 11px; color: #9db8ff;">Progress: ${quest.progress}/${quest.required}</div>
+          <div style="font-size: 11px; color: #7dff7d; margin-top: 6px;">Reward: ${quest.rewards.gold} gold, ${quest.rewards.xp} XP</div>
+          ${quest.progress >= quest.required ? 
+            `<button onclick="completeQuest('${quest.id}')" style="margin-top: 8px; padding: 6px 12px; background: linear-gradient(135deg, #4a7bff, #7a4aff); border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">Complete</button>` : ''}
+        `;
+        activeEl.appendChild(div);
+      });
+    }
+    
+    if (availableEl) {
+      availableEl.innerHTML = '<h3 style="margin: 10px 0; color: #9db8ff; font-size: 14px;">Available Quests</h3>';
+      quests.questTemplates.forEach(quest => {
+        if (!quests.activeQuests.find(q => q.id === quest.id) && 
+            !quests.completedQuests.find(q => q.id === quest.id)) {
+          const div = document.createElement('div');
+          div.style.cssText = 'background: rgba(20, 30, 60, 0.9); border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 3px solid #9db8ff;';
+          div.innerHTML = `
+            <div style="font-weight: 600; color: #ffe164; margin-bottom: 4px; font-size: 13px;">${quest.name}</div>
+            <div style="font-size: 12px; color: #cfd8ff; margin-bottom: 6px;">${quest.description}</div>
+            <div style="font-size: 11px; color: #7dff7d; margin-top: 6px;">Reward: ${quest.rewards.gold} gold, ${quest.rewards.xp} XP</div>
+            <button onclick="acceptQuest('${quest.id}')" style="margin-top: 8px; padding: 6px 12px; background: linear-gradient(135deg, #4a7bff, #7a4aff); border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 11px;">Accept</button>
+          `;
+          availableEl.appendChild(div);
+        }
+      });
+    }
+  };
+
+  // Update skill UI
+  window.updateSkillUI = function() {
+    if (!window.GameSystems?.skillTree) return;
+    
+    const tree = window.GameSystems.skillTree;
+    document.getElementById('skill-points').textContent = `Points: ${tree.skillPoints}`;
+    
+    const grid = document.getElementById('skill-grid');
+    if (grid) {
+      grid.innerHTML = '';
+      const icons = { 1: '⚔️', 2: '🔥', 3: '❄️', 4: '⚡', 5: '☄️', 6: '💚', 7: '🛡️' };
+      
+      tree.skills.forEach((skill, id) => {
+        const node = document.createElement('div');
+        const isUnlocked = tree.unlockedSkills.has(id);
+        const canUnlock = tree.canUnlock(id);
+        
+        node.style.cssText = `
+          background: rgba(20, 30, 60, 0.9);
+          border: 2px solid ${isUnlocked ? '#7dff7d' : 'rgba(130, 180, 255, 0.4)'};
+          border-radius: 8px;
+          padding: 12px;
+          text-align: center;
+          cursor: ${canUnlock ? 'pointer' : (isUnlocked ? 'default' : 'not-allowed')};
+          opacity: ${isUnlocked || canUnlock ? '1' : '0.5'};
+          transition: all 0.2s;
+        `;
+        
+        node.innerHTML = `
+          <div style="font-size: 32px; margin-bottom: 6px;">${icons[id] || '✨'}</div>
+          <div style="font-weight: 600; font-size: 13px; color: #e2e8ff; margin-bottom: 4px;">${skill.name}</div>
+          <div style="font-size: 11px; color: #ffe164;">Cost: ${skill.cost || 1} SP</div>
+        `;
+        
+        if (!isUnlocked && canUnlock) {
+          node.onclick = () => {
+            if (tree.unlockSkill(id)) {
+              updateSkillUI();
+              GameSystems.sound?.play('levelup');
+              showNotification('Skill unlocked!');
+            }
+          };
+          node.onmouseenter = () => node.style.transform = 'scale(1.05)';
+          node.onmouseleave = () => node.style.transform = 'scale(1)';
+        }
+        
+        grid.appendChild(node);
+      });
+    }
+  };
+
+  // Helper functions
+  window.acceptQuest = function(questId) {
+    if (!window.GameSystems?.quests) return;
+    GameSystems.quests.acceptQuest(questId);
+    updateQuestUI();
+    GameSystems.sound?.play('quest');
+    showNotification('Quest accepted!');
+  };
+
+  window.completeQuest = function(questId) {
+    if (!window.GameSystems?.quests || !window.GameSystems?.inventory) return;
+    const rewards = window.GameSystems.quests.completeQuest(questId);
+    if (rewards) {
+      GameSystems.inventory.gold += rewards.gold;
+      updateQuestUI();
+      GameSystems.sound?.play('quest');
+      showNotification(`Quest complete! +${rewards.gold} gold, +${rewards.xp} XP`);
+    }
+  };
+
+  window.showNotification = function(text) {
+    let notif = document.getElementById('loot-notification');
+    if (!notif) {
+      notif = document.createElement('div');
+      notif.id = 'loot-notification';
+      notif.style.cssText = 'position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: rgba(10, 15, 35, 0.95); border: 2px solid #ffe164; border-radius: 8px; padding: 12px 20px; font-size: 14px; color: #ffe164; z-index: 200; pointer-events: none;';
+      document.body.appendChild(notif);
+    }
+    notif.textContent = text;
+    notif.style.display = 'block';
+    setTimeout(() => {
+      notif.style.display = 'none';
+    }, 3000);
+  };
+
+  // Update minimap
+  window.updateMinimap = function(playerPos, enemies) {
+    const canvas = document.getElementById('minimap-canvas');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const size = 180;
+    const scale = 2;
+    
+    ctx.fillStyle = 'rgba(10, 20, 30, 0.9)';
+    ctx.fillRect(0, 0, size, size);
+    
+    enemies.forEach(enemy => {
+      const relX = (enemy.position.x - playerPos.x) * scale + size / 2;
+      const relZ = (enemy.position.z - playerPos.z) * scale + size / 2;
+      
+      if (relX >= 0 && relX <= size && relZ >= 0 && relZ <= size) {
+        ctx.fillStyle = enemy.isBoss ? '#ff00ff' : '#ff4444';
+        ctx.beginPath();
+        ctx.arc(relX, relZ, enemy.isBoss ? 6 : 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    
+    ctx.fillStyle = '#ffe164';
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+    
+    const enemyCount = document.getElementById('enemy-count');
+    if (enemyCount) {
+      const alive = enemies.filter(e => e.stats.hp > 0).length;
+      enemyCount.textContent = `Enemies: ${alive}`;
+    }
+  };
+
+  console.log('[UI] Enhanced UI handlers loaded');
+})();
+</script>
+
 </body>
 </html>
