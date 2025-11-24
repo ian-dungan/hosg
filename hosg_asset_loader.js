@@ -23,7 +23,7 @@ class AssetLoader {
       // 3. Update URLs below with your GitHub raw URLs
       
       'character_base': {
-        url: 'https://raw.githubusercontent.com/YOUR-USERNAME/YOUR-REPO/main/assets/characters/character.glb',
+        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/characters/character.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true
@@ -35,21 +35,21 @@ class AssetLoader {
       // Same as above - download from quaternius.com and host on your GitHub
       
       'enemy_wolf': {
-        url: 'https://raw.githubusercontent.com/YOUR-USERNAME/YOUR-REPO/main/assets/enemies/Wolf.glb',
+        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/common/Wolf.glb',
         scale: 1.2,
         castShadows: true,
         collisions: true
       },
       
       'enemy_goblin': {
-        url: 'https://raw.githubusercontent.com/YOUR-USERNAME/YOUR-REPO/main/assets/enemies/Goblin.glb',
+        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/Goblin.glb',
         scale: 1.0,
         castShadows: true,
         collisions: true
       },
       
       'enemy_skeleton': {
-        url: 'https://raw.githubusercontent.com/YOUR-USERNAME/YOUR-REPO/main/assets/enemies/Skeleton.glb',
+        url: 'https://raw.githubusercontent.com/ian-dungan/hosg/main/assets/enemies/Skeleton.glb',
         scale: 1.1,
         castShadows: true,
         collisions: true
@@ -515,7 +515,7 @@ class AssetLoader {
 }
 
 window.AssetLoader = AssetLoader;
-console.log("[Assets] Asset loader v2.1 ready!");
+console.log("[Assets] Asset loader v2.1 ready! (GitHub: ian-dungan/hosg)");
 
 // ========== USAGE EXAMPLES ==========
 /*
