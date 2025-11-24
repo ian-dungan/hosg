@@ -740,14 +740,20 @@
       }
     }
   </style>
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-  <script src="hosg_config.js"></script>
-  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="hosg_asset_loader.js"></script>
-  <script src="hosg_game_systems_enhanced.js"></script>
-  <script src="hosg_advanced_features.js"></script>
-  <script src="integration_helpers.js"></script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+
+<!-- Load your game files -->
+<script src="hosg_config.js"></script>
+<script src="hosg_asset_loader.js"></script>
+<script src="hosg_game_systems.js"></script>
+<script src="hosg_game_systems_enhanced.js"></script>
+<script src="hosg_advanced_features.js"></script>
+<script src="integration_helpers.js"></script>
+
+<!-- Load UI and fixes last -->
+<script src="enhanced_ui.html"></script>
+<script src="fixes.js"></script>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
@@ -3583,5 +3589,53 @@ function checkLootPickup(playerPos) {
 
 <!-- Load fixes.js after all other game scripts -->
 <script src="fixes.js"></script>
+  <script>
+// Error handling
+window.addEventListener('error', (e) => {
+    console.error('Error:', e.message, e.filename, e.lineno);
+    return false;
+});
+
+// Initialize game when everything is loaded
+window.addEventListener('DOMContentLoaded', function() {
+    try {
+        // Check if createScene exists
+        if (typeof createScene !== 'function') {
+            console.error('createScene function not found');
+            return;
+        }
+        
+        // Create engine
+        const canvas = document.getElementById("renderCanvas");
+        if (!canvas) {
+            console.error('Canvas element not found');
+            return;
+        }
+        
+        const engine = new BABYLON.Engine(canvas, true);
+        
+        // Create scene
+        const scene = createScene();
+        
+        // Run render loop
+        engine.runRenderLoop(function() {
+            try {
+                scene.render();
+            } catch (e) {
+                console.error('Render error:', e);
+            }
+        });
+        
+        // Handle resize
+        window.addEventListener('resize', function() {
+            engine.resize();
+        });
+        
+    } catch (e) {
+        console.error('Fatal error:', e);
+        alert('Failed to start game. Check console for details.');
+    }
+});
+</script>
 </body>
 </html>
