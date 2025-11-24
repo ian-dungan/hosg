@@ -1,188 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>HOSG Enhanced UI</title>
-    <style>
-        /* Base Styles */
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            color: #fff;
-            background-color: transparent;
-            overflow: hidden;
-        }
-
-        /* Panel Styles */
-        #inventory-panel, #quest-panel {
-            position: fixed;
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid #444;
-            border-radius: 5px;
-            padding: 10px;
-            z-index: 1000;
-            color: #fff;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            width: 400px;
-            max-width: 90%;
-        }
-
-        #inventory-panel {
-            top: 20px;
-            left: 20px;
-        }
-
-        #quest-panel {
-            top: 20px;
-            right: 20px;
-        }
-
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            padding-bottom: 5px;
-            border-bottom: 1px solid #444;
-        }
-
-        .panel-header span {
-            font-weight: bold;
-        }
-
-        .panel-header button {
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 1.2em;
-            cursor: pointer;
-            padding: 0 5px;
-        }
-
-        .panel-header button:hover {
-            color: #ff6b6b;
-        }
-
-        /* Inventory Grid */
-        #inventory-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 5px;
-            margin-top: 10px;
-        }
-
-        .inventory-slot {
-            aspect-ratio: 1;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid #444;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            position: relative;
-        }
-
-        .inventory-slot:hover {
-            background: rgba(255, 255, 255, 0.2);
-            border-color: #666;
-        }
-
-        .slot-label {
-            position: absolute;
-            bottom: 2px;
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.7);
-        }
-
-        /* Equipped Items */
-        #equipped-slots {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #444;
-        }
-
-        .equip-slot {
-            text-align: center;
-            width: 30%;
-        }
-
-        .equip-slot .slot-item {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid #444;
-            padding: 10px;
-            min-height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-top: 5px;
-            cursor: pointer;
-        }
-
-        /* Quest Panel */
-        .quest-list {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        .quest-item {
-            padding: 8px;
-            margin: 5px 0;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-        }
-
-        .quest-item.active {
-            border-left: 3px solid #4CAF50;
-        }
-
-        .quest-title {
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .quest-progress {
-            height: 5px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-            margin-top: 5px;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background: #4CAF50;
-            width: 0%;
-            transition: width 0.3s;
-        }
-
-        /* Tooltip */
-        .tooltip {
-            position: absolute;
-            background: rgba(0, 0, 0, 0.9);
-            border: 1px solid #444;
-            padding: 8px;
-            border-radius: 4px;
-            pointer-events: none;
-            z-index: 9999;
-            min-width: 150px;
-            display: none;
-        }
-
-        .tooltip-title {
-            color: #4CAF50;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .tooltip-stats {
-            font-size: 0.9em;
-            color: #ddd;
-        }
-    </style>
-</head>
-<body>
+<div id="enhanced-ui">
     <!-- Inventory Panel -->
     <div id="inventory-panel" style="display:none;">
         <div class="panel-header">
@@ -215,13 +31,26 @@
             <span>Quests</span>
             <button id="quest-close">×</button>
         </div>
-        <div class="quest-list" id="quest-list">
-            <!-- Quests will be populated by JavaScript -->
-            <div class="quest-item active">
-                <div class="quest-title">First Steps</div>
-                <div>Talk to the village elder</div>
-                <div class="quest-progress"><div class="progress-bar" style="width: 30%"></div></div>
+        <div class="panel-content">
+            <div id="active-quests" class="quest-category">
+                <h3>Active Quests</h3>
+                <div class="quest-list" id="active-quests-list"></div>
             </div>
+            <div id="available-quests" class="quest-category">
+                <h3>Available Quests</h3>
+                <div class="quest-list" id="available-quests-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skill Tree Panel -->
+    <div id="skill-tree-panel" style="display:none;">
+        <div class="panel-header">
+            <span>Skills</span>
+            <button id="skill-tree-close">×</button>
+        </div>
+        <div class="panel-content" id="skill-tree-content">
+            <!-- Skill tree will be generated here -->
         </div>
     </div>
 
@@ -233,153 +62,502 @@
             <div>Value: 100g</div>
         </div>
     </div>
+</div>
 
-    <script>
-    // Wait for the DOM to be fully loaded
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('Enhanced UI initialized');
+<style>
+/* Base Styles */
+#enhanced-ui {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    font-family: Arial, sans-serif;
+    z-index: 1000;
+}
 
-        // Initialize UI elements
-        const inventoryPanel = document.getElementById('inventory-panel');
-        const questPanel = document.getElementById('quest-panel');
-        const inventoryGrid = document.getElementById('inventory-grid');
-        const tooltip = document.getElementById('tooltip');
+/* Panel Styles */
+#enhanced-ui .panel {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid #444;
+    border-radius: 5px;
+    color: #fff;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+}
 
-        // Initialize inventory slots
-        function initInventory() {
-            inventoryGrid.innerHTML = '';
-            for (let i = 0; i < 20; i++) {
-                const slot = document.createElement('div');
-                slot.className = 'inventory-slot';
-                slot.dataset.slot = i;
-                slot.innerHTML = `<span class="slot-label">${i + 1}</span>`;
-                slot.addEventListener('mouseenter', showTooltip);
-                slot.addEventListener('mouseleave', hideTooltip);
-                slot.addEventListener('click', handleSlotClick);
-                inventoryGrid.appendChild(slot);
-            }
+#inventory-panel {
+    top: 20px;
+    left: 20px;
+    width: 400px;
+    max-width: 90%;
+}
+
+#quest-panel {
+    top: 20px;
+    right: 20px;
+    width: 400px;
+    max-width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+#skill-tree-panel {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
+    max-width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    border-bottom: 1px solid #444;
+}
+
+.panel-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.panel-content {
+    padding: 10px;
+}
+
+/* Inventory Grid */
+#inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 5px;
+    margin-top: 10px;
+}
+
+.inventory-slot {
+    aspect-ratio: 1;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid #444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+}
+
+.inventory-slot:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: #666;
+}
+
+.slot-label {
+    position: absolute;
+    bottom: 2px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Equipped Items */
+#equipped-slots {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #444;
+}
+
+.equip-slot {
+    text-align: center;
+    width: 30%;
+}
+
+.equip-slot .slot-item {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid #444;
+    padding: 10px;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 5px;
+    cursor: pointer;
+}
+
+/* Quest Styles */
+.quest-category {
+    margin-bottom: 20px;
+}
+
+.quest-category h3 {
+    margin-top: 0;
+    color: #4CAF50;
+    border-bottom: 1px solid #444;
+    padding-bottom: 5px;
+}
+
+.quest-item {
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid #4CAF50;
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 0 3px 3px 0;
+}
+
+.quest-item h4 {
+    margin: 0 0 5px 0;
+    color: #fff;
+}
+
+.quest-item p {
+    margin: 5px 0;
+    font-size: 0.9em;
+    color: #ccc;
+}
+
+.quest-progress {
+    height: 5px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: #4CAF50;
+    width: 0%;
+    transition: width 0.3s;
+}
+
+/* Tooltip */
+.tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid #444;
+    padding: 10px;
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 9999;
+    min-width: 200px;
+    max-width: 300px;
+    display: none;
+}
+
+.tooltip-title {
+    color: #4CAF50;
+    font-weight: bold;
+    margin-bottom: 5px;
+    font-size: 1.1em;
+}
+
+.tooltip-stats {
+    font-size: 0.9em;
+    color: #ddd;
+    line-height: 1.4;
+}
+
+/* Buttons */
+button {
+    background: none;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 3px;
+}
+
+button:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    #inventory-panel, #quest-panel, #skill-tree-panel {
+        width: 90%;
+        max-width: none;
+    }
+    
+    .panel-content {
+        padding: 8px;
+    }
+    
+    #inventory-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+</style>
+
+<script>
+// Initialize the enhanced UI
+function initEnhancedUI() {
+    console.log('Initializing Enhanced UI...');
+    
+    // Initialize UI elements
+    const inventoryPanel = document.getElementById('inventory-panel');
+    const questPanel = document.getElementById('quest-panel');
+    const skillTreePanel = document.getElementById('skill-tree-panel');
+    const inventoryGrid = document.getElementById('inventory-grid');
+    const tooltip = document.getElementById('tooltip');
+    
+    // Initialize inventory slots
+    function initInventory() {
+        if (!inventoryGrid) return;
+        
+        inventoryGrid.innerHTML = '';
+        for (let i = 0; i < 20; i++) {
+            const slot = document.createElement('div');
+            slot.className = 'inventory-slot';
+            slot.dataset.slot = i;
+            slot.innerHTML = `<span class="slot-label">${i + 1}</span>`;
+            slot.addEventListener('mouseenter', showTooltip);
+            slot.addEventListener('mouseleave', hideTooltip);
+            slot.addEventListener('click', handleSlotClick);
+            inventoryGrid.appendChild(slot);
         }
-
-        // Show tooltip
-        function showTooltip(event) {
-            const item = event.target.closest('.inventory-slot, .slot-item');
-            if (!item) return;
-
-            // Position tooltip
-            tooltip.style.display = 'block';
-            tooltip.style.left = (event.pageX + 10) + 'px';
-            tooltip.style.top = (event.pageY + 10) + 'px';
-
-            // Update tooltip content (example)
-            const tooltipTitle = tooltip.querySelector('.tooltip-title');
-            const tooltipStats = tooltip.querySelector('.tooltip-stats');
-            
-            if (item.classList.contains('inventory-slot')) {
-                tooltipTitle.textContent = 'Empty Slot';
-                tooltipStats.innerHTML = 'Right-click to use<br>Drag to move';
-            } else {
-                tooltipTitle.textContent = 'Iron Sword';
-                tooltipStats.innerHTML = 'Type: Weapon<br>Damage: 10-15<br>Durability: 100/100';
-            }
+    }
+    
+    // Show tooltip
+    function showTooltip(event) {
+        if (!tooltip) return;
+        
+        const item = event.target.closest('.inventory-slot, .slot-item, .quest-item');
+        if (!item) return;
+        
+        // Position tooltip
+        tooltip.style.display = 'block';
+        tooltip.style.left = (event.pageX + 10) + 'px';
+        tooltip.style.top = (event.pageY + 10) + 'px';
+        
+        // Update tooltip content based on the item
+        const tooltipTitle = tooltip.querySelector('.tooltip-title');
+        const tooltipStats = tooltip.querySelector('.tooltip-stats');
+        
+        if (!tooltipTitle || !tooltipStats) return;
+        
+        if (item.classList.contains('inventory-slot')) {
+            tooltipTitle.textContent = 'Empty Slot';
+            tooltipStats.innerHTML = 'Right-click to use<br>Drag to move';
+        } else if (item.classList.contains('quest-item')) {
+            tooltipTitle.textContent = item.querySelector('h4')?.textContent || 'Quest';
+            tooltipStats.innerHTML = item.querySelector('p')?.textContent || 'No description available';
+        } else {
+            tooltipTitle.textContent = 'Iron Sword';
+            tooltipStats.innerHTML = 'Type: Weapon<br>Damage: 10-15<br>Durability: 100/100';
         }
-
-        // Hide tooltip
-        function hideTooltip() {
+    }
+    
+    // Hide tooltip
+    function hideTooltip() {
+        if (tooltip) {
             tooltip.style.display = 'none';
         }
-
-        // Handle slot click
-        function handleSlotClick(event) {
-            const slot = event.currentTarget;
-            console.log('Slot clicked:', slot.dataset.slot);
-            // Add your inventory interaction logic here
+    }
+    
+    // Handle slot click
+    function handleSlotClick(event) {
+        const slot = event.currentTarget;
+        console.log('Slot clicked:', slot.dataset.slot);
+        // Add your inventory interaction logic here
+    }
+    
+    // Toggle panels
+    window.toggleInventory = function() {
+        if (!inventoryPanel) return;
+        inventoryPanel.style.display = inventoryPanel.style.display === 'none' ? 'block' : 'none';
+        if (inventoryPanel.style.display === 'block') {
+            if (questPanel) questPanel.style.display = 'none';
+            if (skillTreePanel) skillTreePanel.style.display = 'none';
         }
-
-        // Toggle panels
-        window.toggleInventory = function() {
-            inventoryPanel.style.display = inventoryPanel.style.display === 'none' ? 'block' : 'none';
-            if (inventoryPanel.style.display === 'block') {
-                questPanel.style.display = 'none';
-            }
-        };
-
-        window.toggleQuests = function() {
-            questPanel.style.display = questPanel.style.display === 'none' ? 'block' : 'none';
-            if (questPanel.style.display === 'block') {
-                inventoryPanel.style.display = 'none';
-            }
-        };
-
-        // Close buttons
-        document.getElementById('inventory-close').addEventListener('click', () => {
-            inventoryPanel.style.display = 'none';
-        });
-
-        document.getElementById('quest-close').addEventListener('click', () => {
-            questPanel.style.display = 'none';
-        });
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(event) {
-            // Toggle inventory with 'I' key
-            if (event.key.toLowerCase() === 'i') {
-                toggleInventory();
-                event.preventDefault();
-            }
-            
-            // Toggle quests with 'L' key
-            if (event.key.toLowerCase() === 'l') {
-                toggleQuests();
-                event.preventDefault();
-            }
-            
-            // Close with Escape key
-            if (event.key === 'Escape') {
-                inventoryPanel.style.display = 'none';
-                questPanel.style.display = 'none';
-            }
-        });
-
-        // Initialize UI
-        initInventory();
-
-        // Make functions available globally
-        window.UI = {
-            updateGold: function(amount) {
-                const goldElement = document.getElementById('inventory-gold');
-                if (goldElement) goldElement.textContent = `Gold: ${amount}`;
-            },
-            
-            updateEquipment: function(slot, item) {
-                const element = document.getElementById(`equipped-${slot}`);
-                if (element) {
-                    element.textContent = item ? item.name : 'Empty';
-                    element.dataset.itemId = item ? item.id : '';
-                }
-            },
-            
-            addQuest: function(quest) {
-                const questList = document.getElementById('quest-list');
-                if (!questList) return;
-                
-                const questItem = document.createElement('div');
-                questItem.className = 'quest-item' + (quest.active ? ' active' : '');
-                questItem.innerHTML = `
-                    <div class="quest-title">${quest.title}</div>
-                    <div>${quest.description}</div>
-                    ${quest.progress !== undefined ? `
-                        <div class="quest-progress">
-                            <div class="progress-bar" style="width: ${quest.progress}%"></div>
-                        </div>
-                    ` : ''}
-                `;
-                
-                questList.appendChild(questItem);
-            }
-        };
-
-        console.log('Enhanced UI ready');
+    };
+    
+    window.toggleQuests = function() {
+        if (!questPanel) return;
+        questPanel.style.display = questPanel.style.display === 'none' ? 'block' : 'none';
+        if (questPanel.style.display === 'block') {
+            if (inventoryPanel) inventoryPanel.style.display = 'none';
+            if (skillTreePanel) skillTreePanel.style.display = 'none';
+        }
+    };
+    
+    window.toggleSkillTree = function() {
+        if (!skillTreePanel) return;
+        skillTreePanel.style.display = skillTreePanel.style.display === 'none' ? 'block' : 'none';
+        if (skillTreePanel.style.display === 'block') {
+            if (inventoryPanel) inventoryPanel.style.display = 'none';
+            if (questPanel) questPanel.style.display = 'none';
+        }
+    };
+    
+    // Close buttons
+    const closeButtons = {
+        'inventory-close': () => toggleInventory(),
+        'quest-close': () => toggleQuests(),
+        'skill-tree-close': () => toggleSkillTree()
+    };
+    
+    Object.entries(closeButtons).forEach(([id, handler]) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.addEventListener('click', handler);
+        }
     });
-    </script>
-</body>
-</html>
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(event) {
+        // Toggle inventory with 'I' key
+        if (event.key.toLowerCase() === 'i') {
+            toggleInventory();
+            event.preventDefault();
+        }
+        
+        // Toggle quests with 'L' key
+        if (event.key.toLowerCase() === 'l') {
+            toggleQuests();
+            event.preventDefault();
+        }
+        
+        // Toggle skill tree with 'K' key
+        if (event.key.toLowerCase() === 'k') {
+            toggleSkillTree();
+            event.preventDefault();
+        }
+        
+        // Close with Escape key
+        if (event.key === 'Escape') {
+            if (inventoryPanel) inventoryPanel.style.display = 'none';
+            if (questPanel) questPanel.style.display = 'none';
+            if (skillTreePanel) skillTreePanel.style.display = 'none';
+        }
+    });
+    
+    // Initialize UI components
+    initInventory();
+    
+    // Add sample quests (replace with your actual quest data)
+    const sampleQuests = [
+        {
+            id: 'quest1',
+            title: 'The First Step',
+            description: 'Talk to the village elder',
+            progress: 0,
+            isActive: true
+        },
+        {
+            id: 'quest2',
+            title: 'Goblin Menace',
+            description: 'Defeat 5 goblins (0/5)',
+            progress: 0,
+            isActive: true
+        },
+        {
+            id: 'quest3',
+            title: 'Lost Artifact',
+            description: 'Find the ancient artifact in the forest',
+            progress: 0,
+            isActive: false
+        }
+    ];
+    
+    // Add quests to the UI
+    function addQuestsToUI() {
+        const activeQuestsList = document.getElementById('active-quests-list');
+        const availableQuestsList = document.getElementById('available-quests-list');
+        
+        if (!activeQuestsList || !availableQuestsList) return;
+        
+        activeQuestsList.innerHTML = '';
+        availableQuestsList.innerHTML = '';
+        
+        sampleQuests.forEach(quest => {
+            const questElement = document.createElement('div');
+            questElement.className = 'quest-item';
+            questElement.innerHTML = `
+                <h4>${quest.title}</h4>
+                <p>${quest.description}</p>
+                ${quest.progress !== undefined ? `
+                    <div class="quest-progress">
+                        <div class="progress-bar" style="width: ${quest.progress}%"></div>
+                    </div>
+                ` : ''}
+            `;
+            
+            if (quest.isActive) {
+                activeQuestsList.appendChild(questElement);
+            } else {
+                availableQuestsList.appendChild(questElement);
+            }
+        });
+    }
+    
+    // Initialize quests
+    addQuestsToUI();
+    
+    // Make UI functions available globally
+    window.UI = {
+        updateGold: function(amount) {
+            const goldElement = document.getElementById('inventory-gold');
+            if (goldElement) goldElement.textContent = `Gold: ${amount}`;
+        },
+        
+        updateEquipment: function(slot, item) {
+            const element = document.getElementById(`equipped-${slot}`);
+            if (element) {
+                element.textContent = item ? item.name : 'Empty';
+                element.dataset.itemId = item ? item.id : '';
+            }
+        },
+        
+        addQuest: function(quest) {
+            // Add quest to the appropriate list
+            const questList = quest.isActive ? 
+                document.getElementById('active-quests-list') : 
+                document.getElementById('available-quests-list');
+                
+            if (!questList) return;
+            
+            const questElement = document.createElement('div');
+            questElement.className = 'quest-item';
+            questElement.innerHTML = `
+                <h4>${quest.title}</h4>
+                <p>${quest.description}</p>
+                ${quest.progress !== undefined ? `
+                    <div class="quest-progress">
+                        <div class="progress-bar" style="width: ${quest.progress}%"></div>
+                    </div>
+                ` : ''}
+            `;
+            
+            questList.appendChild(questElement);
+        },
+        
+        updateQuestProgress: function(questId, progress) {
+            // Find and update the quest's progress
+            const questItems = document.querySelectorAll('.quest-item');
+            questItems.forEach(item => {
+                const title = item.querySelector('h4');
+                if (title && title.textContent.toLowerCase().includes(questId.toLowerCase())) {
+                    const progressBar = item.querySelector('.progress-bar');
+                    if (progressBar) {
+                        progressBar.style.width = `${progress}%`;
+                    }
+                }
+            });
+        }
+    };
+    
+    console.log('Enhanced UI initialized');
+}
+
+// Initialize the UI when the script loads
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initEnhancedUI);
+} else {
+    initEnhancedUI();
+}
+</script>
