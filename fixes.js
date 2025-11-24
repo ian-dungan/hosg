@@ -7,6 +7,15 @@ function debugLog(...args) {
     }
 }
 
+// Initialize GameSystems if it doesn't exist
+if (!window.GameSystems) {
+    window.GameSystems = {
+        npcManager: null,
+        combat: null,
+        init: function() { debugLog("GameSystems initialized"); }
+    };
+}
+
 // ==================== TARGETING SYSTEM ====================
 function targetNearestEnemy() {
     if (!window.GameState || !window.GameState.enemies) {
