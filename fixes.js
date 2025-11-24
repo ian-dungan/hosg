@@ -195,3 +195,9 @@ if (document.readyState === 'loading') {
 } else {
     applyFixes();
 }
+// Update the patchCombatSystem function in fixes.js
+function patchCombatSystem() {
+    if (!window.GameSystems || !window.GameSystems.combat) {
+        debugLog("Combat system not found for patching - this is normal if you're not using combat yet");
+        return;
+    }
