@@ -2035,7 +2035,8 @@ function appendChat(text) {
 })();
 
 const createScene = function () {
-  const scene = new BABYLON.Scene(engine);
+  window.scene = new BABYLON.Scene(engine);
+  const scene = window.scene;
   scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
   scene.collisionsEnabled = true;
 

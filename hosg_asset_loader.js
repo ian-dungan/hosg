@@ -32,7 +32,7 @@ class AssetLoader {
       },
       
       'enemy_skeleton': {
-        url: 'https://poly.pizza/files/6xDjXlI83R.glb',
+        url: 'PROCEDURAL', // Poly Pizza URL was 404, using procedural
         scale: 1.5,
         castShadows: true,
         collisions: true
@@ -175,6 +175,12 @@ class AssetLoader {
     }
 
     const url = assetConfig.url;
+    
+    // Skip loading if marked as procedural
+    if (url === 'PROCEDURAL') {
+      throw new Error(`Using procedural fallback for ${assetKey}`);
+    }
+    
     console.log(`[Assets] Loading ${assetKey} from ${url}`);
 
     try {
