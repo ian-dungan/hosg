@@ -347,27 +347,25 @@
     </div>
   </div>
 
-  <!-- Babylon.js and other libraries -->
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-  <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
-  <!-- Game scripts -->
-  <script src="hosg_config.js"></script>
-  <script src="hosg_asset_loader.js"></script>
-  <script src="hosg_game_systems.js"></script>
-  <script src="hosg_game_systems_enhanced.js"></script>
-  <script src="hosg_advanced_features.js"></script>
-  <script src="integration_helpers.js"></script>
-  <script src="js/config.js"></script>
-  <script src="js/assetLoader.js"></script>
-  <script src="js/player.js"></script>
-  <script src="js/world.js"></script>
-  <script src="js/combat.js"></script>
-  <script src="js/quests.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/network.js"></script>
-  <script src="js/main.js"></script>
+<!-- Load Babylon.js and its dependencies first -->
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+<script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+
+<!-- Load Supabase before any code that uses it -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- Load game configuration -->
+<script src="workspace/hosg_config.js"></script>
+
+<!-- Load core game systems -->
+<script src="workspace/hosg_asset_loader.js"></script>
+<script src="workspace/hosg_game_systems.js"></script>
+<script src="workspace/hosg_game_systems_enhanced.js"></script>
+<script src="workspace/hosg_advanced_features.js"></script>
+<script src="workspace/integration_helpers.js"></script>
+
+<!-- Load UI and game initialization scripts last -->
+<script src="fixes.js"></script>
 </body>
 </html>
