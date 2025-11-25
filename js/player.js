@@ -65,7 +65,10 @@ class Player {
         // Set camera to follow player
         this.camera.parent = this.mesh;
         this.camera.position = new BABYLON.Vector3(0, 2, -5);
-        this.camera.lookAt(BABYLON.Vector3.Zero());
+        // FreeCamera / TargetCamera uses setTarget instead of lookAt
+        if (typeof this.camera.setTarget === 'function') {
+            this.camera.setTarget(BABYLON.Vector3.Zero());
+        }
     }
     
     setupPhysics() {

@@ -41,13 +41,23 @@ const CONFIG = {
     }
 };
 
-// Initialize Supabase
+// Initialize Supabase (optional, game runs offline if blocked)
 let supabase = null;
-if (typeof supabase !== 'undefined') {
-    supabase = window.supabase.createClient(
-        'https://vaxfoafjjybwcxwhicla.supabase.co',
-        'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-    );
+
+try {
+    if (typeof window !== 'undefined' &&
+        window.supabase &&
+        typeof window.supabase.createClient === 'function') {
+        supabase = window.supabase.createClient(
+            'https://vaxfoafjjybwcxwhicla.supabase.co',
+            'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
+        );
+        console.log('[Config] Supabase client created');
+    } else {
+        console.warn('[Config] Supabase library not available – running without backend.');
+    }
+} catch (err) {
+    console.warn('[Config] Failed to create Supabase client, running offline:', err);
 }
 
 // Game state

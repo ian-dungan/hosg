@@ -54,7 +54,10 @@ class World {
         // Add shadow support
         if (this.shadowGenerator) {
             this.shadowGenerator.getShadowMap().renderList = [];
-            this.shadowGenerator.addShadowCaster(this.sunLight);
+            // Shadow casters (player, enemies, objects) are added elsewhere.
+            // Just configure sun light shadow bounds here if needed.
+            this.sunLight.shadowMinZ = 1;
+            this.sunLight.shadowMaxZ = 250;
         }
         
         // Ambient light
