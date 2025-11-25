@@ -3,11 +3,14 @@
 // Save this as: hosg_game_systems.js
 // Add to index.html: <script src="hosg_game_systems.js"></script>
 // ============================================================
-function initGameSystems(scene) {
-    // Initialize your game systems here
-    console.log("Initializing game systems with scene");
+// In hosg_game_systems.js
+function initGame(scene) {
+    console.log('Initializing game systems with scene');
     
-    // If you have code that needs to run after the scene is created
+    // Your existing game systems initialization code
+    // Make sure to use the scene parameter instead of a global scene variable
+    
+    // If you need to initialize advanced features, you can call:
     if (typeof initAdvancedFeatures === 'function') {
         initAdvancedFeatures(scene);
     }
