@@ -2,7 +2,24 @@
 // ============================================================
 // HEROES OF SHADY GROVE - ENHANCED FEATURES v4.0
 // ============================================================
+// At the top of hosg_advanced_features.js
+if (window.gameState && window.gameState.scene) {
+    const scene = window.gameState.scene;
+    
+    // Your existing code that uses the scene
+    // For example:
+    const camera = new BABYLON.ArcRotateCamera(...);
+    camera.attachControl(canvas, true);
+    // ... rest of your code
+} else {
+    console.error("Scene not initialized when loading hosg_advanced_features.js");
+}
 
+// If you need to expose any functions to be called after scene initialization
+function initAdvancedFeatures(scene) {
+    // Initialize features that require the scene
+    // This will be called from the main initialization
+}
 // Initialize if not exists
 if (!window.GameSystems) {
     window.GameSystems = {
