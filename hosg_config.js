@@ -1,55 +1,77 @@
-// HEROES OF SHADY GROVE - CONFIGURATION
+// hosg_config.js - Game Configuration
+console.log('[Config] Loading HOSG configuration...');
+
 const HOSG_CONFIG = {
-  supabase: {
-    url: 'YOUR_SUPABASE_URL_HERE',
-    anonKey: 'YOUR_SUPABASE_ANON_KEY_HERE'
-  },
-  
-  multiplayer: {
-    serverUrl: 'wss://your-server.onrender.com',
-    enabled: true,
-    reconnectDelay: 3000
-  },
-  
-  game: {
     version: '2.0.0',
-    startingZone: 'zone_5_5',
-    maxLevel: 100,
-    saveInterval: 30000,
-    networkSyncInterval: 100
-  }
-};
-
-let hosgSupabase = null;
-
-const initSupabase = () => {
-  if (typeof supabase !== 'undefined' && 
-      HOSG_CONFIG.supabase.url && 
-      HOSG_CONFIG.supabase.url !== 'YOUR_SUPABASE_URL_HERE') {
-    try {
-      hosgSupabase = supabase.createClient(
-        HOSG_CONFIG.supabase.url,
-        HOSG_CONFIG.supabase.anonKey
-      );
-      console.log('[Config] Supabase client initialized');
-      return true;
-    } catch (error) {
-      console.error('[Config] Failed to initialize Supabase:', error);
-      return false;
+    
+    // Supabase configuration
+    supabase: {
+        url: 'YOUR_SUPABASE_URL_HERE', // Replace with your Supabase URL
+        anonKey: 'YOUR_SUPABASE_ANON_KEY_HERE' // Replace with your anon key
+    },
+    
+    // Multiplayer configuration
+    multiplayer: {
+        serverUrl: window.location.hostname === 'localhost' 
+            ? 'ws://localhost:8080' 
+            : 'wss://your-production-server.com',
+        enabled: true,
+        reconnectDelay: 3000,
+        maxReconnectAttempts: 5
+    },
+    
+    // Game settings
+    game: {
+        debug: false,
+        gravity: -9.81,
+        renderScale: 1.0,
+        maxFPS: 60,
+        minFPS: 30
+    },
+    
+    // Graphics settings
+    graphics: {
+        shadows: true,
+        postProcess: true,
+        antiAliasing: true,
+        hdEnabled: true
     }
-  } else {
-    console.warn('[Config] Supabase not configured - running in demo mode');
-    return false;
-  }
 };
 
-// Initialize Supabase when the page loads
-window.addEventListener('DOMContentLoaded', () => {
-  if (typeof supabase === 'undefined') {
-    console.warn('[Config] Supabase library not loaded - multiplayer features will be disabled');
-  } else {
-    initSupabase();
-  }
+// Initialize Supabase
+function initSupabase() {
+    if (!HOSG_CONFIG.supabase.url || HOSG_CONFIG.supabase.url.includes('YOUR_')) {
+        console.warn('[Config] Supabase not configured - running in demo mode');
+        return null;
+    }
+
+    try {
+        const { createClient } = supabase;
+        const client = createClient(
+            HOSG_CONFIG.supabase.url,
+            HOSG_CONFIG.supabase.anonKey
+        );
+        console.log('[Config] Supabase client initialized');
+        return client;
+    } catch (error) {
+        console.error('[Config] Error initializing Supabase:', error);
+        return null;
+    }
+}
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Supabase if available
+    if (typeof supabase !== 'undefined') {
+        window.supabase = initSupabase();
+    } else {
+        console.warn('[Config] Supabase JS client not loaded');
+    }
+    
+    console.log(`[Config] HOSG Configuration loaded v${HOSG_CONFIG.version}`);
 });
 
-console.log('[Config] HOSG Configuration loaded v' + HOSG_CONFIG.game.version);
+// Export configuration
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { HOSG_CONFIG, initSupabase };
+}
