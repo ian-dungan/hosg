@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HOSG - House of Starcraft: Genesis</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Game Canvas -->
+    <canvas id="renderCanvas"></canvas>
+    
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="loading-container">
+            <h1>Loading...</h1>
+            <div class="loading-bar">
+                <div id="loading-bar-fill"></div>
+            </div>
+            <p id="loading-text">Initializing game...</p>
+        </div>
+    </div>
+
+    <!-- UI Elements -->
+    <div id="ui-container">
+        <!-- HUD -->
+        <div id="hud">
+            <div class="player-stats">
+                <div class="health-bar">
+                    <div class="health-fill" id="health-fill"></div>
+                </div>
+                <div class="mana-bar">
+                    <div class="mana-fill" id="mana-fill"></div>
+                </div>
+                <div class="level-display">Lvl <span id="player-level">1</span></div>
+            </div>
+            <div class="quick-slots" id="quick-slots">
+                <!-- Filled by JavaScript -->
+            </div>
+            <div class="minimap" id="minimap">
+                <div class="minimap-viewport" id="minimap-viewport"></div>
+            </div>
+        </div>
+
+        <!-- Chat -->
+        <div id="chat-container">
+            <div id="chat-messages"></div>
+            <div class="chat-input-container">
+                <input type="text" id="chat-input" placeholder="Type a message...">
+                <button id="send-chat">Send</button>
+            </div>
+        </div>
+
+        <!-- Other UI elements will be added here -->
+    </div>
+
+    <!-- External Libraries -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/supabase@2.0.0-rc.3/dist/umd/supabase.min.js"></script>
+    
+    <!-- Game Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/world.js"></script>
+    <script src="js/network.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>
