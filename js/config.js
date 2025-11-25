@@ -45,8 +45,8 @@ const CONFIG = {
 let supabase = null;
 if (typeof supabase !== 'undefined') {
     supabase = window.supabase.createClient(
-        'YOUR_SUPABASE_URL',
-        'YOUR_SUPABASE_ANON_KEY'
+        'https://vaxfoafjjybwcxwhicla.supabase.co',
+        'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
     );
 }
 
