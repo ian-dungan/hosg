@@ -355,15 +355,53 @@
 <!-- Load Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-<!-- Load game configuration and systems from root -->
+<!-- Load game configuration -->
 <script src="hosg_config.js"></script>
 <script src="hosg_asset_loader.js"></script>
 <script src="hosg_game_systems.js"></script>
+
+<!-- Initialize the game -->
+<script>
+// Create a global game object if it doesn't exist
+window.game = window.game || {};
+
+// Initialize the game when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Create the canvas
+    const canvas = document.createElement('canvas');
+    canvas.id = 'renderCanvas';
+    document.body.appendChild(canvas);
+    
+    // Initialize the engine
+    const engine = new BABYLON.Engine(canvas, true);
+    window.game.engine = engine;
+    
+    // Create the scene
+    const scene = new BABYLON.Scene(engine);
+    window.game.scene = scene;
+    
+    // Initialize game systems that need the scene
+    if (typeof initGame === 'function') {
+        initGame(scene);
+    }
+    
+    // Start the render loop
+    engine.runRenderLoop(function() {
+        scene.render();
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', function() {
+        engine.resize();
+    });
+});
+</script>
+
+<!-- Load other game systems -->
 <script src="hosg_game_systems_enhanced.js"></script>
 <script src="hosg_advanced_features.js"></script>
 <script src="integration_helpers.js"></script>
-
-<!-- Load UI and fixes last -->
 <script src="fixes.js"></script>
+
 </body>
 </html>
