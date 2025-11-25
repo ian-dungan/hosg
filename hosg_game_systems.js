@@ -3,7 +3,15 @@
 // Save this as: hosg_game_systems.js
 // Add to index.html: <script src="hosg_game_systems.js"></script>
 // ============================================================
-
+function initGameSystems(scene) {
+    // Initialize your game systems here
+    console.log("Initializing game systems with scene");
+    
+    // If you have code that needs to run after the scene is created
+    if (typeof initAdvancedFeatures === 'function') {
+        initAdvancedFeatures(scene);
+    }
+}
 // ==================== COMBAT SYSTEM ====================
 class CombatSystem {
   constructor(scene, supabase) {
