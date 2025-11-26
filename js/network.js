@@ -1,56 +1,49 @@
-// network.js - Network communication
-export class Network {
+// network.js
+class Network {
     constructor() {
         this.socket = null;
-        this.connected = false;
         this.messageQueue = [];
+        this.isConnected = false;
+        this.reconnectAttempts = 0;
+        this.connect();
     }
 
     async connect() {
-        return new Promise((resolve, reject) => {
-            try {
-                this.socket = new WebSocket(CONFIG.NETWORK.SERVER_URL);
-                
-                this.socket.onopen = () => {
-                    this.connected = true;
-                    console.log('Connected to server');
-                    this.processMessageQueue();
-                    resolve();
-                };
-                
-                this.socket.onmessage = (event) => {
-                    this.handleMessage(JSON.parse(event.data));
-                };
-                
-                this.socket.onclose = () => {
-                    this.connected = false;
-                    console.log('Disconnected from server');
-                    this.handleReconnect();
-                };
-                
-                this.socket.onerror = (error) => {
-                    console.error('Network error:', error);
-                    reject(error);
-                };
-            } catch (error) {
-                console.error('Failed to connect:', error);
-                reject(error);
-            }
-        });
+        try {
+            this.socket = new WebSocket(CONFIG.NETWORK.SERVER_URL);
+            
+            this.socket.onopen = () => {
+                console.log('Connected to server');
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                this.processMessageQueue();
+            };
+
+            this.socket.onmessage = (event) => {
+                this.handleMessage(JSON.parse(event.data));
+            };
+
+            this.socket.onclose = () => {
+                this.isConnected = false;
+                console.log('Disconnected from server');
+                this.handleReconnect();
+            };
+
+            this.socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                this.socket.close();
+            };
+        } catch (error) {
+            console.error('Failed to connect:', error);
+            this.handleReconnect();
+        }
     }
 
     send(message) {
-        if (!this.connected) {
-            this.messageQueue.push(message);
-            return false;
-        }
-        
-        try {
+        if (this.isConnected) {
             this.socket.send(JSON.stringify(message));
-            return true;
-        } catch (error) {
-            console.error('Failed to send message:', error);
-            return false;
+        } else {
+            this.messageQueue.push(message);
         }
     }
 
@@ -63,26 +56,25 @@ export class Network {
 
     handleMessage(message) {
         // Handle incoming messages from server
-        // Example: if (message.type === 'playerUpdate') { ... }
+        console.log('Received message:', message);
+        // Add your message handling logic here
     }
 
     handleReconnect() {
-        if (this.reconnectAttempts >= CONFIG.NETWORK.MAX_RECONNECT_ATTEMPTS) {
+        if (this.reconnectAttempts < CONFIG.NETWORK.MAX_RECONNECT_ATTEMPTS) {
+            this.reconnectAttempts++;
+            console.log(`Attempting to reconnect (${this.reconnectAttempts}/${CONFIG.NETWORK.MAX_RECONNECT_ATTEMPTS})...`);
+            setTimeout(() => this.connect(), CONFIG.NETWORK.RECONNECT_DELAY);
+        } else {
             console.error('Max reconnection attempts reached');
-            return;
         }
-        
-        setTimeout(() => {
-            console.log('Attempting to reconnect...');
-            this.connect();
-        }, CONFIG.NETWORK.RECONNECT_DELAY);
     }
 
     disconnect() {
         if (this.socket) {
             this.socket.close();
             this.socket = null;
-            this.connected = false;
+            this.isConnected = false;
         }
     }
 }
