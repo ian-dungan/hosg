@@ -5,10 +5,10 @@ class Player {
         this.camera = null;
         this.velocity = new BABYLON.Vector3();
         this.isOnGround = false;
-        this.moveSpeed = 0.2;
-        this.jumpForce = 0.5;
-        this.health = 100;
-        this.maxHealth = 100;
+        this.moveSpeed = CONFIG.PLAYER.MOVE_SPEED;
+        this.jumpForce = CONFIG.PLAYER.JUMP_FORCE;
+        this.health = CONFIG.PLAYER.HEALTH;
+        this.maxHealth = CONFIG.PLAYER.HEALTH;
         this.inventory = null;
         this.currentWeapon = null;
         this.weapons = [];
@@ -40,9 +40,6 @@ class Player {
             
             // Setup input
             this.setupInput();
-            
-            // Initialize inventory
-            this.inventory = new Inventory(this.scene, this);
             
             console.log('Player initialized');
         } catch (error) {
@@ -644,3 +641,6 @@ class Player {
         window.removeEventListener('keyup', this.onKeyUp);
     }
 }
+
+// Make Player class globally available
+window.Player = Player;
