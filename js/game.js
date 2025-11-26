@@ -1,9 +1,6 @@
 // game.js - Main game class
-import { Engine, Scene, Vector3, HemisphericLight, ArcRotateCamera } from '@babylonjs/core';
-import { Player } from './player.js';
-import { World } from './world.js';
-import { Network } from './network.js';
-import { UI } from './ui.js';
+// Using global BABYLON object from CDN
+const { Engine, Scene, Vector3, HemisphericLight, ArcRotateCamera } = BABYLON;
 
 class Game {
     constructor(canvas) {
@@ -28,20 +25,15 @@ class Game {
         // Load assets
         await this.loadAssets();
         
-        // Connect to server
-        await this.network.connect();
-        
-        // Start game loop
-        this.engine.runRenderLoop(() => {
-            this.update();
-            this.scene.render();
-        });
+        // Start the game loop
+        this.engine.runRenderLoop(() => this.update());
         
         // Handle window resize
         window.addEventListener('resize', () => this.engine.resize());
     }
 
     setupCamera() {
+        // Create and position a camera
         this.camera = new ArcRotateCamera(
             'camera',
             -Math.PI / 2,
@@ -56,6 +48,7 @@ class Game {
     }
 
     setupLighting() {
+        // Create a light
         const light = new HemisphericLight(
             'light',
             new Vector3(0, 1, 0),
@@ -65,20 +58,34 @@ class Game {
     }
 
     async loadAssets() {
-        // Load game assets here
-        // Example: await this.assetManager.loadTexture('player', 'assets/textures/player.png');
+        // Load your game assets here
+        // Example:
+        // await BABYLON.SceneLoader.AppendAsync('models/', 'character.glb', this.scene);
     }
 
     update() {
-        const deltaTime = this.engine.getDeltaTime() / 1000;
+        const deltaTime = this.engine.getDeltaTime() / 1000; // Convert to seconds
+        
+        // Update game objects
         this.player.update(deltaTime);
         this.world.update(deltaTime);
         this.ui.update();
+        
+        // Update camera to follow player
+        if (this.player.mesh) {
+            this.camera.target = this.player.mesh.position;
+        }
+        
+        // Render the scene
+        this.scene.render();
     }
 
     dispose() {
+        // Clean up resources
         this.engine.dispose();
-        this.network.disconnect();
+        this.player.dispose();
+        this.world.dispose();
+        this.ui.dispose();
     }
 }
 
