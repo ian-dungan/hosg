@@ -1,11 +1,18 @@
-// game.js - Main game class
-// Using global BABYLON object
+// game.js - Main game class with enhanced graphics
 
 class Game {
     constructor(canvas) {
         this.canvas = canvas;
-        this.engine = new BABYLON.Engine(canvas, true);
+        this.engine = new BABYLON.Engine(canvas, true, {
+            preserveDrawingBuffer: true,
+            stencil: true
+        });
         this.scene = new BABYLON.Scene(this.engine);
+        this.scene.clearColor = new BABYLON.Color4(0.1, 0.1, 0.2, 1);
+        
+        // Enable physics
+        this.scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
+        
         this.network = new Network();
         this.player = new Player(this.scene);
         this.world = new World(this.scene);
@@ -16,17 +23,17 @@ class Game {
 
     async init() {
         try {
-            // Setup camera
+            // Setup camera with better defaults
             this.setupCamera();
             
-            // Setup lighting
+            // Setup enhanced lighting
             this.setupLighting();
             
-            // Create skybox
-            this.world.createSkybox();
+            // Create environment
+            await this.setupEnvironment();
             
-            // Load any additional assets
-            await this.loadAssets();
+            // Load player model
+            await this.player.loadModel();
             
             // Start the game loop
             this.engine.runRenderLoop(() => this.update());
@@ -34,7 +41,7 @@ class Game {
             // Handle window resize
             window.addEventListener('resize', () => this.engine.resize());
             
-            console.log('Game initialized successfully');
+            console.log('Game initialized with enhanced graphics');
         } catch (error) {
             console.error('Error initializing game:', error);
         }
@@ -43,16 +50,18 @@ class Game {
     setupCamera() {
         // Create and position a camera
         this.camera = new BABYLON.ArcRotateCamera(
-            'camera',
-            -Math.PI / 2,
-            Math.PI / 3,
-            10,
-            BABYLON.Vector3.Zero(),
+            "camera", 
+            -Math.PI / 2, 
+            Math.PI / 2, 
+            10, 
+            BABYLON.Vector3.Zero(), 
             this.scene
         );
         this.camera.attachControl(this.canvas, true);
-        this.camera.lowerRadiusLimit = 2;
-        this.camera.upperRadiusLimit = 20;
+        this.camera.lowerRadiusLimit = 5;
+        this.camera.upperRadiusLimit = 100;
+        this.camera.wheelDeltaPercentage = 0.01;
+        this.camera.upperBetaLimit = Math.PI / 2;
     }
 
     setupLighting() {
@@ -62,51 +71,117 @@ class Game {
             new BABYLON.Vector3(0, 1, 0),
             this.scene
         );
-        hemiLight.intensity = CONFIG.GRAPHICS.LIGHTING.AMBIENT_INTENSITY || 0.8;
-        hemiLight.specular = new BABYLON.Color3(0, 0, 0);
+        hemiLight.intensity = 0.6;
+        hemiLight.groundColor = new BABYLON.Color3(0.3, 0.3, 0.2);
+        hemiLight.diffuse = new BABYLON.Color3(0.8, 0.8, 0.9);
         
         // Directional light to simulate sun
         this.sunLight = new BABYLON.DirectionalLight(
             'sunLight',
-            new BABYLON.Vector3(
-                CONFIG.GRAPHICS.LIGHTING.SUN_DIRECTION?.x || 1,
-                CONFIG.GRAPHICS.LIGHTING.SUN_DIRECTION?.y || -1,
-                CONFIG.GRAPHICS.LIGHTING.SUN_DIRECTION?.z || 1
-            ),
+            new BABYLON.Vector3(-1, -2, -1),
             this.scene
         );
-        this.sunLight.intensity = CONFIG.GRAPHICS.LIGHTING.SUN_INTENSITY || 0.9;
-        this.sunLight.position = new BABYLON.Vector3(0, 50, 0);
+        this.sunLight.intensity = 0.9;
+        this.sunLight.position = new BABYLON.Vector3(20, 40, 20);
         
-        // Enable shadows if configured
-        if (CONFIG.GRAPHICS.SHADOWS?.ENABLED) {
-            this.sunLight.shadowEnabled = true;
-            const shadowGenerator = new BABYLON.ShadowGenerator(
-                CONFIG.GRAPHICS.SHADOWS.SIZE || 1024, 
-                this.sunLight
-            );
-            shadowGenerator.useBlurExponentialShadowMap = true;
-            shadowGenerator.blurKernel = CONFIG.GRAPHICS.SHADOWS.BLUR_KERNEL || 32;
-        }
+        // Shadows
+        this.sunLight.shadowEnabled = true;
+        const shadowGenerator = new BABYLON.ShadowGenerator(2048, this.sunLight);
+        shadowGenerator.useBlurExponentialShadowMap = true;
+        shadowGenerator.blurKernel = 32;
+        shadowGenerator.normalBias = 0.05;
+        
+        // Store shadow generator for later use
+        this.shadowGenerator = shadowGenerator;
+    }
+
+    async setupEnvironment() {
+        // Create skybox
+        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
+        const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
+        skyboxMaterial.backFaceCulling = false;
+        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(
+            "https://assets.babylonjs.com/textures/skybox/skybox", 
+            this.scene
+        );
+        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+        skyboxMaterial.disableLighting = true;
+        skybox.material = skyboxMaterial;
+        
+        // Add some fog
+        this.scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
+        this.scene.fogColor = new BABYLON.Color3(0.9, 0.9, 1);
+        this.scene.fogStart = 20;
+        this.scene.fogEnd = 100;
+        
+        // Add some post-processing
+        this.setupPostProcessing();
+    }
+
+    setupPostProcessing() {
+        // Create pipeline
+        const pipeline = new BABYLON.DefaultRenderingPipeline(
+            "defaultPipeline",
+            true,
+            this.scene,
+            [this.camera]
+        );
+        
+        // Configure effects
+        pipeline.imageProcessingEnabled = true;
+        pipeline.imageProcessing.contrast = 1.4;
+        pipeline.imageProcessing.exposure = 0.6;
+        pipeline.imageProcessing.toneMappingEnabled = true;
+        pipeline.samples = 4;
+        
+        // Add bloom effect
+        pipeline.bloomEnabled = true;
+        pipeline.bloomThreshold = 0.8;
+        pipeline.bloomWeight = 0.5;
+        pipeline.bloomKernel = 64;
+        pipeline.bloomScale = 0.5;
+        
+        // Add depth of field
+        pipeline.depthOfFieldEnabled = true;
+        pipeline.depthOfField.fStop = 1.4;
+        pipeline.depthOfField.focalLength = 100;
+        pipeline.depthOfField.focusDistance = 50;
     }
 
     async loadAssets() {
-        // Load your game assets here
-        // Example:
-        // await BABYLON.SceneLoader.AppendAsync('models/', 'character.glb', this.scene);
+        // Load any additional game assets here
+        const assetsManager = new BABYLON.AssetsManager(this.scene);
+        
+        // Example: Load a character model
+        // const characterTask = assetsManager.addMeshTask("character", "", "models/", "character.glb");
+        // characterTask.onSuccess = (task) => {
+        //     task.loadedMeshes[0].scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
+        //     this.player.mesh = task.loadedMeshes[0];
+        //     this.shadowGenerator.addShadowCaster(this.player.mesh);
+        // };
+        
+        await assetsManager.loadAsync();
     }
 
     update() {
-        const deltaTime = this.engine.getDeltaTime() / 1000; // Convert to seconds
+        const deltaTime = this.engine.getDeltaTime() / 1000;
         
         // Update game objects
-        this.player.update(deltaTime);
-        this.world.update(deltaTime);
-        this.ui.update();
+        if (this.player) {
+            this.player.update(deltaTime);
+            
+            // Update camera to follow player
+            if (this.player.mesh) {
+                this.camera.target = this.player.mesh.position;
+            }
+        }
         
-        // Update camera to follow player
-        if (this.player.mesh) {
-            this.camera.target = this.player.mesh.position;
+        if (this.world) {
+            this.world.update(deltaTime);
+        }
+        
+        if (this.ui) {
+            this.ui.update();
         }
         
         // Render the scene
@@ -116,9 +191,9 @@ class Game {
     dispose() {
         // Clean up resources
         this.engine.dispose();
-        this.player.dispose();
-        this.world.dispose();
-        this.ui.dispose();
+        if (this.player) this.player.dispose();
+        if (this.world) this.world.dispose();
+        if (this.ui) this.ui.dispose();
     }
 }
 
