@@ -3,17 +3,52 @@ class Player {
         this.scene = scene;
         this.mesh = null;
         this.camera = null;
+        this.inventory = new Inventory(CONFIG.PLAYER.INVENTORY_SIZE);
         this.velocity = new BABYLON.Vector3();
         this.isOnGround = false;
-        this.moveSpeed = CONFIG.PLAYER.MOVE_SPEED;
-        this.jumpForce = CONFIG.PLAYER.JUMP_FORCE;
         this.health = CONFIG.PLAYER.HEALTH;
         this.maxHealth = CONFIG.PLAYER.HEALTH;
-        this.inventory = null;
-        this.currentWeapon = null;
-        this.weapons = [];
-        this.animations = {};
-        this.currentAnimation = null;
+        this.moveSpeed = CONFIG.PLAYER.MOVE_SPEED;
+        this.jumpForce = CONFIG.PLAYER.JUMP_FORCE;
+        this.init();
+    }
+
+    init() {
+        this.createPlayerMesh();
+        this.setupCamera();
+        this.setupInput();
+    }
+
+    createPlayerMesh() {
+        this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
+            height: 1.8,
+            radius: 0.3
+        }, this.scene);
+        
+        this.mesh.position.y = 2;
+        this.mesh.checkCollisions = true;
+        
+        // Setup physics
+        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.mesh,
+            BABYLON.PhysicsImpostor.CapsuleImpostor,
+            { mass: 1, friction: 0.2, restitution: 0.1 },
+            this.scene
+        );
+    }
+
+    setupCamera() {
+        this.camera = new BABYLON.FollowCamera('playerCam', 
+            new BABYLON.Vector3(0, 1.6, -5), 
+            this.scene, 
+            this.mesh
+        );
+        this.camera.radius = 5;
+        this.camera.heightOffset = 1.6;
+        this.scene.activeCamera = this.camera;
+    }
+
+    setupInput() {
         this.input = {
             forward: false,
             backward: false,
@@ -22,214 +57,133 @@ class Player {
             jump: false,
             run: false
         };
-        
-        // Physics initialization flag
-        this.physicsReady = false;
-        
-        // Initialize player
-        this.init();
-    }
 
-    async init() {
-        try {
-            // Create player mesh
-            this.createPlayerMesh();
-            
-            // Setup camera
-            this.setupCamera();
-            
-            // Setup animations
-            this.setupAnimations();
-            
-            // Setup input
-            this.setupInput();
-            
-            // Mark physics as ready after a short delay to ensure everything is initialized
-            setTimeout(() => {
-                this.physicsReady = true;
-            }, 100);
-            
-            console.log('Player initialized');
-        } catch (error) {
-            console.error('Error initializing player:', error);
-        }
-    }
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w' || key === 'arrowup') this.input.forward = true;
+            if (key === 's' || key === 'arrowdown') this.input.backward = true;
+            if (key === 'a' || key === 'arrowleft') this.input.left = true;
+            if (key === 'd' || key === 'arrowright') this.input.right = true;
+            if (key === ' ') this.input.jump = true;
+            if (key === 'shift') this.input.run = true;
+        });
 
-    // ... [Previous methods remain the same until updateMovement] ...
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w' || key === 'arrowup') this.input.forward = false;
+            if (key === 's' || key === 'arrowdown') this.input.backward = false;
+            if (key === 'a' || key === 'arrowleft') this.input.left = false;
+            if (key === 'd' || key === 'arrowright') this.input.right = false;
+            if (key === ' ') this.input.jump = false;
+            if (key === 'shift') this.input.run = false;
+        });
+    }
 
     update(deltaTime) {
-        if (!this.mesh || !this.camera || !this.physicsReady) {
-            return; // Skip update if required components aren't ready
-        }
-        
-        // Update movement
-        this.updateMovement(deltaTime);
-        
-        // Update animations
-        this.updateAnimations();
-        
-        // Update camera position to follow player
-        this.updateCamera();
-    }
+        if (!this.mesh || !this.mesh.physicsImpostor) return;
 
-    updateMovement(deltaTime) {
-        // Check if we have a valid physics impostor
-        if (!this.capsule || !this.capsule.physicsImpostor) {
-            return; // Skip physics updates if not ready
+        // Get movement direction from camera
+        const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();
+        const right = this.camera.getDirection(BABYLON.Vector3.Right());
+        forward.y = 0;
+        right.y = 0;
+        forward.normalize();
+        right.normalize();
+
+        // Calculate movement vector
+        const moveDirection = new BABYLON.Vector3();
+        if (this.input.forward) moveDirection.addInPlace(forward);
+        if (this.input.backward) moveDirection.subtractInPlace(forward);
+        if (this.input.left) moveDirection.subtractInPlace(right);
+        if (this.input.right) moveDirection.addInPlace(right);
+
+        // Apply movement
+        if (moveDirection.lengthSquared() > 0) {
+            moveDirection.normalize();
+            const speed = this.input.run ? 
+                this.moveSpeed * CONFIG.PLAYER.RUN_MULTIPLIER : 
+                this.moveSpeed;
+            
+            const velocity = moveDirection.scale(speed * deltaTime * 60);
+            const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+            this.mesh.physicsImpostor.setLinearVelocity(
+                new BABYLON.Vector3(
+                    velocity.x,
+                    currentVelocity.y,
+                    velocity.z
+                )
+            );
         }
 
-        try {
-            // Get camera forward and right vectors
-            const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
-            const right = this.camera.getDirection(BABYLON.Vector3.Right());
-            
-            // Project onto XZ plane
-            forward.y = 0;
-            right.y = 0;
-            forward.normalize();
-            right.normalize();
-            
-            // Calculate movement direction
-            const moveDirection = new BABYLON.Vector3(0, 0, 0);
-            
-            if (this.input.forward) moveDirection.addInPlace(forward);
-            if (this.input.backward) moveDirection.subtractInPlace(forward);
-            if (this.input.left) moveDirection.subtractInPlace(right);
-            if (this.input.right) moveDirection.addInPlace(right);
-            
-            // Get current velocity safely
-            let currentVelocity;
-            try {
-                currentVelocity = this.capsule.physicsImpostor.getLinearVelocity();
-                if (!currentVelocity) {
-                    currentVelocity = BABYLON.Vector3.Zero();
-                }
-            } catch (e) {
-                currentVelocity = BABYLON.Vector3.Zero();
-            }
-            
-            // If we have movement input
-            if (moveDirection.lengthSquared() > 0) {
-                moveDirection.normalize();
-                
-                // Apply movement speed
-                const speed = this.input.run ? this.moveSpeed * 1.8 : this.moveSpeed;
-                moveDirection.scaleInPlace(speed * deltaTime * 60);
-                
-                // Calculate target velocity
-                const targetVelocity = new BABYLON.Vector3(
-                    moveDirection.x * 10,
-                    currentVelocity ? currentVelocity.y : 0,
-                    moveDirection.z * 10
-                );
-                
-                // Apply damping for better control
-                const damping = 0.9;
-                const newVelocity = new BABYLON.Vector3(
-                    targetVelocity.x * (1 - damping) + (currentVelocity ? currentVelocity.x * damping : 0),
-                    targetVelocity.y,
-                    targetVelocity.z * (1 - damping) + (currentVelocity ? currentVelocity.z * damping : 0)
-                );
-                
-                // Safely set velocity
-                if (this.capsule && this.capsule.physicsImpostor) {
-                    this.capsule.physicsImpostor.setLinearVelocity(newVelocity);
-                }
-                
-                // Update animation based on movement
-                this.playAnimation(this.input.run ? 'run' : 'walk');
-            } else {
-                // Apply damping when not moving
-                if (currentVelocity && this.capsule && this.capsule.physicsImpostor) {
-                    const damping = 0.8;
-                    const newVelocity = new BABYLON.Vector3(
-                        currentVelocity.x * damping,
-                        currentVelocity.y,
-                        currentVelocity.z * damping
-                    );
-                    this.capsule.physicsImpostor.setLinearVelocity(newVelocity);
-                }
-                
-                // Play idle animation when not moving
-                if (this.currentAnimation !== this.animations.idle) {
-                    this.playAnimation('idle');
-                }
-            }
-            
-            // Handle jumping
-            if (this.input.jump && this.isOnGround) {
-                this.jump();
-            }
-            
-            // Update ground check
-            this.updateGroundCheck();
-            
-        } catch (error) {
-            console.error('Error in updateMovement:', error);
+        // Handle jumping
+        if (this.input.jump && this.isOnGround) {
+            this.jump();
         }
     }
 
     jump() {
-        if (this.isOnGround && this.capsule && this.capsule.physicsImpostor) {
-            try {
-                const currentVelocity = this.capsule.physicsImpostor.getLinearVelocity() || BABYLON.Vector3.Zero();
-                this.capsule.physicsImpostor.setLinearVelocity(
-                    new BABYLON.Vector3(
-                        currentVelocity.x,
-                        this.jumpForce * 10,
-                        currentVelocity.z
-                    )
-                );
-                this.isOnGround = false;
-                this.playAnimation('jump');
-            } catch (e) {
-                console.error('Error in jump:', e);
-            }
+        if (this.isOnGround && this.mesh?.physicsImpostor) {
+            const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+            this.mesh.physicsImpostor.setLinearVelocity(
+                new BABYLON.Vector3(velocity.x, this.jumpForce * 10, velocity.z)
+            );
+            this.isOnGround = false;
         }
     }
 
-    // ... [Rest of the methods remain the same] ...
+    takeDamage(amount) {
+        this.health = Math.max(0, this.health - amount);
+        if (this.health <= 0) {
+            this.die();
+        }
+    }
+
+    die() {
+        console.log('Player died');
+        // Handle player death
+    }
 
     dispose() {
-        // Clean up resources
-        this.physicsReady = false;
-        
-        if (this.mesh) {
-            this.mesh.dispose();
-            this.mesh = null;
-        }
-        
-        if (this.camera) {
-            this.camera.dispose();
-            this.camera = null;
-        }
-        
-        if (this.inventory) {
-            this.inventory.dispose();
-            this.inventory = null;
-        }
-        
-        // Dispose animations
-        if (this.animations) {
-            Object.values(this.animations).forEach(anim => {
-                if (anim && typeof anim.dispose === 'function') {
-                    anim.dispose();
-                }
-            });
-            this.animations = {};
-        }
-        
-        // Remove event listeners
-        const canvas = this.scene ? this.scene.getEngine().getRenderingCanvas() : null;
-        if (canvas) {
-            canvas.removeEventListener('mousedown', this.onMouseDown);
-            canvas.removeEventListener('mousemove', this.onMouseMove);
-        }
-        
-        window.removeEventListener('keydown', this.onKeyDown);
-        window.removeEventListener('keyup', this.onKeyUp);
+        this.mesh?.dispose();
+        this.camera?.dispose();
     }
 }
 
-// Make Player class globally available
-window.Player = Player;
+class Inventory {
+    constructor(size) {
+        this.size = size;
+        this.items = [];
+        this.equippedItem = null;
+    }
+
+    addItem(item) {
+        if (this.items.length < this.size) {
+            this.items.push(item);
+            return true;
+        }
+        return false;
+    }
+
+    removeItem(index) {
+        if (index >= 0 && index < this.items.length) {
+            return this.items.splice(index, 1)[0];
+        }
+        return null;
+    }
+
+    equipItem(index) {
+        if (index >= 0 && index < this.items.length) {
+            this.equippedItem = this.items[index];
+            return true;
+        }
+        return false;
+    }
+
+    useEquippedItem() {
+        if (this.equippedItem) {
+            // Use the equipped item
+            return true;
+        }
+        return false;
+    }
+}
