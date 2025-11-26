@@ -46,9 +46,6 @@ class Game {
             // Create UI
             this.ui = new UI(this.scene, this.player);
             
-            // Create minimap
-            this.miniMap = new MiniMap(this.scene, this.player, this.world);
-            
             // Initialize network
             this.network = new Network();
             
@@ -121,14 +118,6 @@ class Game {
         );
         dirLight.position = new BABYLON.Vector3(20, 40, 20);
         dirLight.intensity = 0.8;
-        
-        // Enable shadows
-        if (BABYLON.ShadowGenerator) {
-            const shadowGenerator = new BABYLON.ShadowGenerator(1024, dirLight);
-            shadowGenerator.useBlurExponentialShadowMap = true;
-            shadowGenerator.blurKernel = 32;
-            this.shadowGenerator = shadowGenerator;
-        }
         
         // Set ambient color
         this.scene.ambientColor = new BABYLON.Color3(0.3, 0.3, 0.3);
