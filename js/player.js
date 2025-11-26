@@ -134,7 +134,9 @@ class Player {
         
         // Get camera forward and right vectors
         const forward = this.camera.getForwardRay().direction;
-        const right = this.camera.getRightRay().direction;
+        const right = new THREE.Vector3();
+this.camera.getWorldDirection(right);
+right.cross(new THREE.Vector3(0, 1, 0)).normalize();
         
         // Flatten vectors to horizontal plane
         forward.y = 0;
