@@ -139,8 +139,15 @@ class Game {
     }
 
     setupPhysics() {
-        this.scene.enablePhysics(null, new BABYLON.CannonJSPlugin());
+    // Use the same gravity as the scene config
+    const gravityVector = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
+
+    if (typeof CANNON !== "undefined") {
+        this.scene.enablePhysics(gravityVector, new BABYLON.CannonJSPlugin());
+    } else {
+        console.warn("CANNON.js not found – skipping physics setup.");
     }
+}
 
     setupCamera() {
         this.camera = new BABYLON.ArcRotateCamera('camera', 0, 0, 10, BABYLON.Vector3.Zero(), this.scene);
