@@ -1,16 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8" />
-    <title>Game</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Physics engine -->
+    <title>Simple 3D Game</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-    <!-- Babylon.js -->
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
     <style>
         html, body {
             width: 100%;
@@ -18,28 +13,83 @@
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background: #000;
         }
-
         #renderCanvas {
             width: 100%;
             height: 100%;
             touch-action: none;
             display: block;
         }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            text-align: center;
+            background: rgba(0,0,0,0.7);
+            padding: 20px 40px;
+            border-radius: 10px;
+            z-index: 1000;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-family: Arial, sans-serif;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
+    <div id="loading">Loading game...</div>
+    <div id="controls">
+        <div>WASD: Move</div>
+        <div>SPACE: Jump</div>
+        <div>SHIFT: Run</div>
+        <div>Click to lock mouse</div>
+    </div>
     <canvas id="renderCanvas"></canvas>
-
+    
     <!-- Load game scripts in order -->
     <script src="js/core.js"></script>
     <script src="js/player.js"></script>
     <script src="js/environment.js"></script>
     <script src="js/ui-network.js"></script>
-
+    
     <script>
-        // Game initialization is handled in core.js (DOMContentLoaded listener)
+        // Show loading message
+        const loadingDiv = document.getElementById('loading');
+        
+        // Initialize game
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                loadingDiv.textContent = 'Initializing...';
+                window.game = new Game('renderCanvas');
+                await window.game.init();
+                
+                // Hide loading screen
+                loadingDiv.style.display = 'none';
+                
+                // Start game loop
+                window.game.run();
+                
+                // Show welcome message
+                if (window.game.ui) {
+                    window.game.ui.showMessage('Welcome to the game!', 3000);
+                }
+            } catch (error) {
+                console.error('Failed to start game:', error);
+                loadingDiv.textContent = `Error: ${error.message}`;
+                loadingDiv.style.color = 'red';
+            }
+        });
     </script>
 </body>
 </html>
