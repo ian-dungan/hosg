@@ -1,6 +1,5 @@
-// player.js
-// Using global BABYLON object from CDN
-const { Vector3, MeshBuilder } = BABYLON;
+// player.js - Player controller
+// Using BABYLON namespace directly
 
 class Player {
     constructor(scene) {
@@ -8,8 +7,8 @@ class Player {
         this.mesh = null;
         this.health = CONFIG.PLAYER.START_HEALTH;
         this.mana = CONFIG.PLAYER.START_MANA;
-        this.position = new Vector3(0, 2, 0); // Start slightly above ground
-        this.velocity = new Vector3(0, 0, 0);
+        this.position = new BABYLON.Vector3(0, 2, 0); // Start slightly above ground
+        this.velocity = new BABYLON.Vector3(0, 0, 0);
         this.isJumping = false;
         this.isRunning = false;
         this.init();
@@ -17,7 +16,7 @@ class Player {
 
     init() {
         // Create player mesh
-        this.mesh = MeshBuilder.CreateBox('player', { 
+        this.mesh = BABYLON.MeshBuilder.CreateBox('player', { 
             width: 1, 
             height: 2, 
             depth: 1 
