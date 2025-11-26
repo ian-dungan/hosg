@@ -35,16 +35,17 @@ const CONFIG = {
 
     // Graphics settings
     GRAPHICS: {
-        SHADOWS: {
-            ENABLED: true,
-            SIZE: 2048
-        },
-        POST_PROCESSING: {
-            BLOOM: true,
-            SSAO: true,
-            FXAA: true
-        }
+    SHADOWS: {
+        ENABLED: true,
+        SIZE: 2048,
+        BLUR_KERNEL: 32
+    },
+    LIGHTING: {
+        SUN_INTENSITY: 0.9,
+        AMBIENT_INTENSITY: 0.8,
+        SUN_DIRECTION: { x: 1, y: -1, z: 1 }
     }
+}
 };
 
 // Make CONFIG globally available
