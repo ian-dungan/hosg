@@ -4,8 +4,7 @@ const CONFIG = {
     DEBUG: true,
     GAME: { FPS: 60, GRAVITY: 9.81, PHYSICS_ENGINE: 'cannon' },
     PLAYER: { MOVE_SPEED: 0.1, RUN_MULTIPLIER: 1.8, JUMP_FORCE: 0.2, HEALTH: 100, STAMINA: 100, INVENTORY_SIZE: 20 },
-    WORLD: { SIZE: 1000, CHUNK_SIZE: 32, TERRAIN_SIZE: 1024, WATER_LEVEL: 0 },
-    NETWORK: { MAX_PLAYERS: 100, TICK_RATE: 20, TIMEOUT: 30000 }
+    WORLD: { SIZE: 1000, CHUNK_SIZE: 32, TERRAIN_SIZE: 1024, WATER_LEVEL: 0 }
 };
 
 // ====================== ASSETMANAGER.JS ======================
@@ -13,60 +12,20 @@ class AssetManager {
     constructor(scene) {
         this.scene = scene;
         this.assets = new Map();
-        this.queue = [];
-        this.loading = false;
-    }
-
-    addToQueue(name, url, type = 'texture', options = {}) {
-        this.queue.push({ name, url, type, options });
     }
 
     async loadAll() {
-        if (this.loading) return;
-        this.loading = true;
-        
-        for (const {name, url, type, options} of this.queue) {
-            try {
-                await this.loadAsset(name, url, type, options);
-            } catch (error) {
-                console.error(`Failed to load ${name}:`, error);
-            }
-        }
-        this.loading = false;
+        console.log('Skipping asset loading');
+        return Promise.resolve();
     }
 
-    loadAsset(name, url, type) {
-        return new Promise((resolve, reject) => {
-            try {
-                let asset;
-                switch (type.toLowerCase()) {
-                    case 'texture':
-                        asset = new BABYLON.Texture(url, this.scene);
-                        break;
-                    case 'mesh':
-                        BABYLON.SceneLoader.ImportMesh('', '', url, this.scene, 
-                            (meshes) => resolve(this.assets.set(name, meshes)),
-                            null, 
-                            (_, msg) => reject(new Error(`Mesh load failed: ${msg}`))
-                        );
-                        return;
-                    default:
-                        return reject(new Error(`Unsupported type: ${type}`));
-                }
-                asset.onLoadObservable.add(() => {
-                    this.assets.set(name, asset);
-                    resolve(asset);
-                });
-            } catch (error) {
-                reject(error);
-            }
-        });
+    get(name) { 
+        console.log('Asset requested but not loaded:', name);
+        return null; 
     }
 
-    get(name) { return this.assets.get(name); }
-    dispose() { 
-        this.assets.forEach(asset => asset.dispose?.()); 
-        this.assets.clear(); 
+    dispose() {
+        this.assets.clear();
     }
 }
 
@@ -76,48 +35,49 @@ class World {
         this.scene = scene;
         this.ground = null;
         this.skybox = null;
-        this.water = null;
     }
 
     init() {
         this.createGround();
         this.createSkybox();
-        this.createWater();
+        console.log('World initialized');
     }
 
     createGround() {
         this.ground = BABYLON.MeshBuilder.CreateGround('ground', {
-            width: CONFIG.WORLD.SIZE,
-            height: CONFIG.WORLD.SIZE,
-            subdivisions: 100
+            width: 100,
+            height: 100,
+            subdivisions: 20
         }, this.scene);
         
-        const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
-        mat.diffuseTexture = new BABYLON.Texture('assets/textures/ground.jpg', this.scene);
-        this.ground.material = mat;
+        const groundMaterial = new BABYLON.StandardMaterial('groundMat', this.scene);
+        groundMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.8, 0.3);
+        groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        this.ground.material = groundMaterial;
         this.ground.checkCollisions = true;
     }
 
     createSkybox() {
-        this.skybox = BABYLON.MeshBuilder.CreateBox('skybox', {size: 10000}, this.scene);
-        const mat = new BABYLON.StandardMaterial('skyboxMat', this.scene);
-        mat.backFaceCulling = false;
-        mat.reflectionTexture = new BABYLON.CubeTexture('assets/textures/skybox/skybox', this.scene);
-        mat.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        mat.disableLighting = true;
-        this.skybox.material = mat;
+        this.skybox = BABYLON.MeshBuilder.CreateBox('skybox', {size: 1000}, this.scene);
+        const skyboxMaterial = new BABYLON.StandardMaterial('skyboxMat', this.scene);
+        skyboxMaterial.backFaceCulling = false;
+        skyboxMaterial.disableLighting = true;
+        
+        // Create gradient from dark blue to light blue
+        skyboxMaterial.diffuseColor = new BABYLON.Color3(0.8, 0.8, 1.0);
+        skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+        
+        this.skybox.material = skyboxMaterial;
+        this.skybox.infiniteDistance = true;
     }
 
-    createWater() {
-        this.water = BABYLON.MeshBuilder.CreateGround('water', {
-            width: CONFIG.WORLD.SIZE,
-            height: CONFIG.WORLD.SIZE
-        }, this.scene);
-        this.water.position.y = CONFIG.WORLD.WATER_LEVEL;
+    update() {
+        // Update world systems
     }
 
     dispose() {
-        [this.ground, this.skybox, this.water].forEach(mesh => mesh?.dispose());
+        if (this.ground) this.ground.dispose();
+        if (this.skybox) this.skybox.dispose();
     }
 }
 
@@ -129,60 +89,83 @@ class Game {
         this.scene = new BABYLON.Scene(this.engine);
         this.assets = new AssetManager(this.scene);
         this.keys = {};
+        this.isPaused = false;
         this.setupScene();
     }
 
     setupScene() {
         this.scene.clearColor = new BABYLON.Color4(0.1, 0.1, 0.2, 1);
-        this.scene.gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
-        this.scene.collisionsEnabled = true;
+        this.setupPhysics();
+        this.setupCamera();
+        this.setupLighting();
     }
 
     setupPhysics() {
-    // Use the same gravity as the scene config
-    const gravityVector = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
-
-    if (typeof CANNON !== "undefined") {
-        this.scene.enablePhysics(gravityVector, new BABYLON.CannonJSPlugin());
-    } else {
-        console.warn("CANNON.js not found – skipping physics setup.");
+        try {
+            if (typeof CANNON !== 'undefined') {
+                const physicsPlugin = new BABYLON.CannonJSPlugin();
+                this.scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), physicsPlugin);
+                console.log('Physics engine initialized');
+            } else {
+                console.warn('Cannon.js not found, running without physics');
+                this.scene.gravity = new BABYLON.Vector3(0, -9.81, 0);
+            }
+        } catch (e) {
+            console.error('Error initializing physics:', e);
+            this.scene.gravity = new BABYLON.Vector3(0, -9.81, 0);
+        }
     }
-}
 
     setupCamera() {
-        this.camera = new BABYLON.ArcRotateCamera('camera', 0, 0, 10, BABYLON.Vector3.Zero(), this.scene);
-        this.camera.setPosition(new BABYLON.Vector3(0, 5, -10));
+        this.camera = new BABYLON.ArcRotateCamera(
+            'camera', 
+            -Math.PI / 2, 
+            Math.PI / 3, 
+            10, 
+            BABYLON.Vector3.Zero(), 
+            this.scene
+        );
         this.camera.attachControl(this.canvas, true);
+        this.camera.lowerRadiusLimit = 2;
+        this.camera.upperRadiusLimit = 50;
     }
 
     setupLighting() {
         const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), this.scene);
         light.intensity = 0.7;
+        
+        const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-1, -2, -1), this.scene);
+        sun.intensity = 0.8;
+        sun.position = new BABYLON.Vector3(20, 40, 20);
     }
 
     async loadAssets() {
-        // Example asset loading
-        this.assets.addToQueue('playerModel', 'assets/models/player.glb', 'mesh');
+        console.log('Loading assets...');
         await this.assets.loadAll();
     }
 
     async init() {
-        this.setupPhysics();
-        this.setupCamera();
-        this.setupLighting();
-        await this.loadAssets();
-        
-        this.world = new World(this.scene);
-        this.world.init();
-        
-        // Player will be initialized by player.js
-        console.log('Game initialized');
+        try {
+            await this.loadAssets();
+            
+            this.world = new World(this.scene);
+            this.world.init();
+            
+            this.player = new Player(this.scene);
+            
+            console.log('Game initialized');
+            return true;
+        } catch (error) {
+            console.error('Error initializing game:', error);
+            throw error;
+        }
     }
 
     run() {
         this.engine.runRenderLoop(() => {
             if (!this.isPaused) {
                 const deltaTime = this.engine.getDeltaTime() / 1000;
+                this.update(deltaTime);
                 this.scene.render();
             }
         });
@@ -190,15 +173,35 @@ class Game {
         window.addEventListener('resize', () => this.engine.resize());
     }
 
+    update(deltaTime) {
+        if (this.player) {
+            this.player.update(deltaTime);
+        }
+        if (this.world) {
+            this.world.update(deltaTime);
+        }
+    }
+
     dispose() {
         this.engine.dispose();
         this.world?.dispose();
+        this.player?.dispose();
         this.assets.dispose();
     }
 }
 
 // Initialize game when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    window.game = new Game('renderCanvas');
-    window.game.init().then(() => window.game.run());
+document.addEventListener('DOMContentLoaded', async () => {
+    const loadingDiv = document.getElementById('loading');
+    try {
+        loadingDiv.textContent = 'Initializing...';
+        window.game = new Game('renderCanvas');
+        await window.game.init();
+        loadingDiv.style.display = 'none';
+        window.game.run();
+    } catch (error) {
+        console.error('Failed to start game:', error);
+        loadingDiv.textContent = `Error: ${error.message}`;
+        loadingDiv.style.color = 'red';
+    }
 });
