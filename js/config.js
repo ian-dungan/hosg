@@ -30,8 +30,8 @@ const CONFIG = {
             HEIGHT: 200,
             SUBDIVISIONS: 100
         },
-        TIME_OF_DAY: 0.5, // 0-1, where 0 is midnight, 0.5 is noon
-        TIME_SPEED: 0.0001 // Speed of day/night cycle
+        TIME_OF_DAY: 0.5,
+        TIME_SPEED: 0.0001
     },
     
     // Graphics settings
