@@ -32,9 +32,6 @@ class World {
             // Setup day/night cycle
             this.setupDayNightCycle();
             
-            // Initialize weather system
-            this.weatherSystem = new WeatherSystem(this.scene);
-            
             console.log('World initialized');
         } catch (error) {
             console.error('Error initializing world:', error);
@@ -54,8 +51,8 @@ class World {
         this.ground.checkCollisions = true;
         this.ground.receiveShadows = true;
         
-        // Create terrain material
-        const groundMaterial = new BABYLON.StandardMaterial('groundMaterial', this.scene);
+        // Create material
+        const material = new BABYLON.StandardMaterial('groundMaterial', this.scene);
         
         // Create procedural texture for ground
         const groundTexture = new BABYLON.NoiseProceduralTexture('groundNoise', 256, this.scene);
@@ -66,21 +63,21 @@ class World {
         
         // Create grass texture
         const grassTexture = this.createProceduralGrassTexture(512);
-        groundMaterial.diffuseTexture = grassTexture;
-        groundMaterial.diffuseTexture.uScale = groundMaterial.diffuseTexture.vScale = 20;
+        material.diffuseTexture = grassTexture;
+        material.diffuseTexture.uScale = material.diffuseTexture.vScale = 20;
         
-        // Add bump map for depth
-        groundMaterial.bumpTexture = groundTexture;
-        groundMaterial.bumpTexture.level = 0.2;
+        // Add bump map
+        material.bumpTexture = groundTexture;
+        material.bumpTexture.level = 0.2;
         
         // Set material properties
-        groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-        groundMaterial.specularPower = 10;
+        material.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        material.specularPower = 10;
         
         // Apply material
-        this.ground.material = groundMaterial;
+        this.ground.material = material;
         
-        // Add physics impostor
+        // Add physics
         this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.ground,
             BABYLON.PhysicsImpostor.BoxImpostor,
@@ -328,11 +325,6 @@ class World {
         waterMaterial.bumpTexture = noiseTexture;
         waterMaterial.bumpTexture.level = 0.5;
         
-        // Add reflection/refraction
-        waterMaterial.reflectionTexture = new BABYLON.MirrorTexture('waterReflection', 512, this.scene, true);
-        waterMaterial.reflectionTexture.mirrorPlane = new BABYLON.Plane(0, -1, 0, 0);
-        waterMaterial.reflectionTexture.level = 0.5;
-        
         // Apply material
         this.water.material = waterMaterial;
     }
@@ -405,12 +397,6 @@ class World {
         trunk.material = trunkMaterial;
         leaves.material = leavesMaterial;
         
-        // Enable shadows
-        if (this.scene.shadowGenerator) {
-            this.scene.shadowGenerator.getShadowMap().renderList.push(trunk);
-            this.scene.shadowGenerator.getShadowMap().renderList.push(leaves);
-        }
-        
         // Group trunk and leaves
         const tree = new BABYLON.TransformNode('tree');
         trunk.parent = tree;
@@ -479,14 +465,6 @@ class World {
         
         // Apply material
         rock.material = rockMaterial;
-        
-        // Enable physics
-        rock.checkCollisions = true;
-        
-        // Enable shadows
-        if (this.scene.shadowGenerator) {
-            this.scene.shadowGenerator.getShadowMap().renderList.push(rock);
-        }
         
         return rock;
     }
@@ -646,3 +624,6 @@ class World {
         this.rocks = [];
     }
 }
+
+// Make World class globally available
+window.World = World;
