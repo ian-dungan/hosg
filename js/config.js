@@ -49,5 +49,5 @@ const CONFIG = {
     }
 };
 
-// Export for Node.js or browser
-try { module.exports = CONFIG; } catch (e) { window.CONFIG = CONFIG; }
+// Make CONFIG globally available
+window.CONFIG = CONFIG;
