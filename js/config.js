@@ -8,13 +8,11 @@ const CONFIG = {
     
     // Network settings
     NETWORK: {
-        // Use Render's environment variables with fallback for local development
-        SERVER_URL: window.location.protocol === 'https:' 
-            ? `wss://${window.location.hostname}`
-            : `ws://${window.location.hostname}:3000`,
+        ENABLED: true,  // Make sure networking is enabled
+        SERVER_URL: 'wss://hosg.onrender.com',  // Your Render WebSocket server
         RECONNECT_DELAY: 3000,
         MAX_RECONNECT_ATTEMPTS: 5,
-        PORT: 3000,
+        PORT: 10000,  // Default WebSocket port for Render
         HOST: '0.0.0.0'
     },
 
