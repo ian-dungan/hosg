@@ -1,16 +1,21 @@
 // config.js - Core game configuration
 const CONFIG = {
     // Core settings
-    DEBUG: false,
+    DEBUG: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1',
     VERSION: '1.0.0',
     TICK_RATE: 60,
     MAX_PLAYERS: 100,
     
     // Network settings
     NETWORK: {
-        SERVER_URL: 'ws://localhost:3000',
+        // Use Render's environment variables with fallback for local development
+        SERVER_URL: window.location.protocol === 'https:' 
+            ? `wss://${window.location.hostname}`
+            : `ws://${window.location.hostname}:3000`,
         RECONNECT_DELAY: 3000,
-        MAX_RECONNECT_ATTEMPTS: 5
+        MAX_RECONNECT_ATTEMPTS: 5,
+        PORT: 3000,
+        HOST: '0.0.0.0'
     },
 
     // Player settings
@@ -44,5 +49,5 @@ const CONFIG = {
     }
 };
 
-// Export for both browser and Node.js
+// Export for Node.js or browser
 try { module.exports = CONFIG; } catch (e) { window.CONFIG = CONFIG; }
