@@ -1,627 +1,616 @@
-// world.js - Enhanced world with beautiful terrain
-
-// weather.js - Procedural weather system
-class WeatherSystem {
+class World {
     constructor(scene) {
         this.scene = scene;
-        this.weatherParticles = null;
-        this.weatherType = 'clear';
-        this.targetWeather = 'clear';
-        this.weatherTransition = 0;
-        this.time = 0;
-        this.dayNightCycle = 0;
-        this.rainSound = null;
-        this.windSound = null;
-        this.thunderSound = null;
-        this.audioContext = null;
+        this.ground = null;
+        this.skybox = null;
+        this.water = null;
+        this.trees = [];
+        this.rocks = [];
+        this.weatherSystem = null;
+        this.sun = null;
+        this.moon = null;
+        this.stars = null;
+        
+        // Initialize world
         this.init();
     }
 
-    init() {
-        // Setup audio context
-        this.setupAudio();
-        
-        // Create weather particle system
-        this.createWeatherParticles();
-        
-        // Start weather cycle
-        this.startWeatherCycle();
-    }
-
-    setupAudio() {
-        try {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            
-            // Create wind sound (procedural noise)
-            this.windSound = this.createWindSound();
-            
-            // Create rain sound (procedural noise)
-            this.rainSound = this.createRainSound();
-            
-            // Create thunder sound (procedural)
-            this.thunderSound = this.createThunderSound();
-            
-        } catch (e) {
-            console.warn('Web Audio API not supported', e);
-        }
-    }
-
-    createWindSound() {
-        // Create wind noise using audio API
-        const bufferSize = 4096;
-        const noiseBuffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        
-        // Fill the buffer with noise
-        for (let i = 0; i < bufferSize; i++) {
-            output[i] = Math.random() * 2 - 1;
-        }
-        
-        // Create a buffer source node
-        const noise = this.audioContext.createBufferSource();
-        noise.buffer = noiseBuffer;
-        noise.loop = true;
-        
-        // Create filter for wind effect
-        const filter = this.audioContext.createBiquadFilter();
-        filter.type = 'highpass';
-        filter.frequency.value = 500;
-        
-        // Create gain node for volume control
-        const gainNode = this.audioContext.createGain();
-        gainNode.gain.value = 0;
-        
-        // Connect nodes
-        noise.connect(filter);
-        filter.connect(gainNode);
-        gainNode.connect(this.audioContext.destination);
-        
-        // Start the noise
-        noise.start();
-        
-        return { gainNode, filter };
-    }
-
-    createRainSound() {
-        // Similar to wind but with different filter settings
-        const bufferSize = 4096;
-        const noiseBuffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        
-        for (let i = 0; i < bufferSize; i++) {
-            output[i] = Math.random() * 2 - 1;
-        }
-        
-        const noise = this.audioContext.createBufferSource();
-        noise.buffer = noiseBuffer;
-        noise.loop = true;
-        
-        const filter = this.audioContext.createBiquadFilter();
-        filter.type = 'bandpass';
-        filter.frequency.value = 1000;
-        filter.Q.value = 0.5;
-        
-        const gainNode = this.audioContext.createGain();
-        gainNode.gain.value = 0;
-        
-        noise.connect(filter);
-        filter.connect(gainNode);
-        gainNode.connect(this.audioContext.destination);
-        
-        noise.start();
-        
-        return { gainNode, filter };
-    }
-
-    createThunderSound() {
-        // Create an impulse for thunder
-        const sampleRate = this.audioContext.sampleRate;
-        const duration = 3; // seconds
-        const buffer = this.audioContext.createBuffer(1, sampleRate * duration, sampleRate);
-        const channelData = buffer.getChannelData(0);
-        
-        // Create thunder-like sound
-        for (let i = 0; i < channelData.length; i++) {
-            const t = i / sampleRate;
-            // Random impulses with exponential decay
-            const impulse = Math.random() > 0.99 ? Math.random() * 0.5 : 0;
-            const decay = Math.exp(-t * 2);
-            channelData[i] = impulse * decay * (0.5 + 0.5 * Math.sin(t * 50));
-        }
-        
-        return buffer;
-    }
-
-    playThunder() {
-        if (!this.audioContext) return;
-        
-        const source = this.audioContext.createBufferSource();
-        source.buffer = this.thunderSound;
-        
-        const gainNode = this.audioContext.createGain();
-        gainNode.gain.value = 0.5;
-        
-        source.connect(gainNode);
-        gainNode.connect(this.audioContext.destination);
-        
-        source.start();
-        
-        // Random rumble after thunder
-        if (Math.random() > 0.7) {
-            setTimeout(() => this.playThunder(), 1000 + Math.random() * 2000);
-        }
-    }
-
-    createWeatherParticles() {
-        // Create a particle system for rain/snow
-        this.weatherParticles = new BABYLON.ParticleSystem("weatherParticles", 5000, this.scene);
-        
-        // Default to rain settings
-        this.weatherParticles.particleTexture = new BABYLON.Texture("data:image/png;base64,...", this.scene);
-        this.weatherParticles.emitter = new BABYLON.Vector3(0, 50, 0);
-        this.weatherParticles.minEmitBox = new BABYLON.Vector3(-100, 0, -100);
-        this.weatherParticles.maxEmitBox = new BABYLON.Vector3(100, 0, 100);
-        
-        // Common settings
-        this.weatherParticles.color1 = new BABYLON.Color4(1, 1, 1, 1);
-        this.weatherParticles.color2 = new BABYLON.Color4(1, 1, 1, 0.8);
-        this.weatherParticles.colorDead = new BABYLON.Color4(1, 1, 1, 0);
-        this.weatherParticles.minSize = 0.1;
-        this.weatherParticles.maxSize = 0.5;
-        this.weatherParticles.minLifeTime = 2.0;
-        this.weatherParticles.maxLifeTime = 5.0;
-        this.weatherParticles.emitRate = 0; // Start with no particles
-        this.weatherParticles.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
-        this.weatherParticles.gravity = new BABYLON.Vector3(0, -9.81, 0);
-        this.weatherParticles.direction1 = new BABYLON.Vector3(-1, -1, -1);
-        this.weatherParticles.direction2 = new BABYLON.Vector3(1, -1, 1);
-        this.weatherParticles.minAngularSpeed = 0;
-        this.weatherParticles.maxAngularSpeed = Math.PI;
-        this.weatherParticles.minEmitPower = 10;
-        this.weatherParticles.maxEmitPower = 20;
-        this.weatherParticles.updateSpeed = 0.01;
-        
-        this.weatherParticles.start();
-    }
-
-    updateWeatherParticles(weatherType) {
-        if (!this.weatherParticles) return;
-        
-        switch(weatherType) {
-            case 'rain':
-                this.weatherParticles.particleTexture = this.createRainTexture();
-                this.weatherParticles.minEmitBox = new BABYLON.Vector3(-100, 30, -100);
-                this.weatherParticles.maxEmitBox = new BABYLON.Vector3(100, 50, 100);
-                this.weatherParticles.minSize = 0.1;
-                this.weatherParticles.maxSize = 0.3;
-                this.weatherParticles.minLifeTime = 1.0;
-                this.weatherParticles.maxLifeTime = 2.0;
-                this.weatherParticles.direction1 = new BABYLON.Vector3(-0.5, -1, -0.5);
-                this.weatherParticles.direction2 = new BABYLON.Vector3(0.5, -1.5, 0.5);
-                this.weatherParticles.minEmitPower = 15;
-                this.weatherParticles.maxEmitPower = 25;
-                this.weatherParticles.emitRate = CONFIG.WORLD.MAX_RAIN_PARTICLES * this.weatherTransition;
-                break;
-                
-            case 'snow':
-                this.weatherParticles.particleTexture = this.createSnowTexture();
-                this.weatherParticles.minEmitBox = new BABYLON.Vector3(-100, 30, -100);
-                this.weatherParticles.maxEmitBox = new BABYLON.Vector3(100, 50, 100);
-                this.weatherParticles.minSize = 0.2;
-                this.weatherParticles.maxSize = 0.5;
-                this.weatherParticles.minLifeTime = 3.0;
-                this.weatherParticles.maxLifeTime = 6.0;
-                this.weatherParticles.direction1 = new BABYLON.Vector3(-0.25, -0.5, -0.25);
-                this.weatherParticles.direction2 = new BABYLON.Vector3(0.25, -0.7, 0.25);
-                this.weatherParticles.minEmitPower = 2;
-                this.weatherParticles.maxEmitPower = 5;
-                this.weatherParticles.emitRate = CONFIG.WORLD.MAX_SNOW_PARTICLES * this.weatherTransition;
-                break;
-                
-            default: // clear
-                this.weatherParticles.emitRate = 0;
-                break;
-        }
-    }
-
-    createRainTexture() {
-        // Create a simple rain drop texture procedurally
-        const size = 64;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        
-        // Transparent background
-        ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-        ctx.fillRect(0, 0, size, size);
-        
-        // Draw a simple raindrop shape
-        ctx.fillStyle = 'rgba(200, 220, 255, 0.8)';
-        ctx.beginPath();
-        ctx.ellipse(size/2, size/2, size/4, size/2, 0, 0, Math.PI * 2);
-        ctx.fill();
-        
-        return new BABYLON.Texture(canvas.toDataURL(), this.scene);
-    }
-
-    createSnowTexture() {
-        // Create a simple snowflake texture procedurally
-        const size = 64;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        
-        // Transparent background
-        ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-        ctx.fillRect(0, 0, size, size);
-        
-        // Draw a simple snowflake
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.lineWidth = 2;
-        
-        const center = size / 2;
-        const radius = size / 3;
-        
-        // Draw snowflake arms
-        for (let i = 0; i < 6; i++) {
-            const angle = (i / 6) * Math.PI * 2;
-            const x = center + Math.cos(angle) * radius;
-            const y = center + Math.sin(angle) * radius;
-            
-            ctx.beginPath();
-            ctx.moveTo(center, center);
-            ctx.lineTo(x, y);
-            ctx.stroke();
-            
-            // Add some branches
-            const midX = center + Math.cos(angle) * radius * 0.5;
-            const midY = center + Math.sin(angle) * radius * 0.5;
-            
-            const perpAngle = angle + Math.PI / 2;
-            const branchLength = radius * 0.3;
-            
-            ctx.beginPath();
-            ctx.moveTo(midX, midY);
-            ctx.lineTo(
-                midX + Math.cos(perpAngle) * branchLength,
-                midY + Math.sin(perpAngle) * branchLength
-            );
-            ctx.stroke();
-            
-            ctx.beginPath();
-            ctx.moveTo(midX, midY);
-            ctx.lineTo(
-                midX - Math.cos(perpAngle) * branchLength,
-                midY - Math.sin(perpAngle) * branchLength
-            );
-            ctx.stroke();
-        }
-        
-        return new BABYLON.Texture(canvas.toDataURL(), this.scene);
-    }
-
-    startWeatherCycle() {
-        // Start with clear weather
-        this.setWeather('clear');
-        
-        // Change weather periodically
-        setInterval(() => {
-            const weatherTypes = Object.keys(CONFIG.WEATHER.WEATHER_TYPES);
-            const currentIndex = weatherTypes.indexOf(this.weatherType);
-            const nextIndex = (currentIndex + 1) % weatherTypes.length;
-            this.setWeather(weatherTypes[nextIndex]);
-        }, CONFIG.WEATHER.CYCLE_DURATION * 1000);
-    }
-
-    setWeather(weatherType) {
-        if (this.weatherType === weatherType) return;
-        
-        this.targetWeather = weatherType;
-        this.weatherTransition = 0;
-        
-        // Play weather-specific sounds
-        if (weatherType === 'rain' && this.rainSound) {
-            this.rainSound.gainNode.gain.linearRampToValueAtTime(
-                CONFIG.SOUND.EFFECTS_VOLUME * 0.5,
-                this.audioContext.currentTime + 2
-            );
-            
-            // Random thunder during rain
-            if (Math.random() > 0.7) {
-                setTimeout(() => this.playThunder(), 2000 + Math.random() * 5000);
-            }
-        } else if (this.rainSound) {
-            this.rainSound.gainNode.gain.linearRampToValueAtTime(
-                0,
-                this.audioContext.currentTime + 2
-            );
-        }
-        
-        console.log(`Weather changing to: ${weatherType}`);
-    }
-
-    update(deltaTime) {
-        // Update weather transition
-        if (this.weatherType !== this.targetWeather) {
-            this.weatherTransition += CONFIG.WEATHER.TRANSITION_SPEED * deltaTime;
-            
-            if (this.weatherTransition >= 1) {
-                this.weatherTransition = 1;
-                this.weatherType = this.targetWeather;
-            }
-            
-            this.updateWeatherParticles(this.targetWeather);
-        }
-        
-        // Update day/night cycle
-        CONFIG.WORLD.TIME_OF_DAY = (CONFIG.WORLD.TIME_OF_DAY + CONFIG.WORLD.TIME_SPEED * deltaTime) % 1;
-        this.updateDayNightCycle();
-    }
-
-    updateDayNightCycle() {
-        // Update lighting based on time of day
-        const time = CONFIG.WORLD.TIME_OF_DAY;
-        const sunIntensity = Math.sin(time * Math.PI) * 0.8 + 0.2; // 0.2 to 1.0
-        
-        // Update sun direction (rotates around Y axis)
-        const sunAngle = time * Math.PI * 2;
-        CONFIG.GRAPHICS.LIGHTING.SUN_DIRECTION = new BABYLON.Vector3(
-            Math.sin(sunAngle),
-            Math.cos(sunAngle * 2) * 0.5, // Higher sun at noon
-            Math.cos(sunAngle)
-        ).normalize();
-        
-        // Update ambient light
-        CONFIG.GRAPHICS.LIGHTING.AMBIENT_INTENSITY = 0.2 + sunIntensity * 0.4;
-        
-        // Update fog color based on time of day
-        const isDay = time > 0.2 && time < 0.8;
-        const fogColor = isDay ? 
-            new BABYLON.Color3(0.9, 0.9, 1.0) : // Daytime fog (light blue)
-            new BABYLON.Color3(0.1, 0.1, 0.2);   // Nighttime fog (dark blue)
-        
-        if (this.scene.fogColor) {
-            BABYLON.Color3.LerpToRef(
-                this.scene.fogColor,
-                fogColor,
-                0.01,
-                this.scene.fogColor
-            );
-        }
-    }
-
-    dispose() {
-        if (this.weatherParticles) {
-            this.weatherParticles.dispose();
-        }
-        // Clean up audio
-        if (this.audioContext) {
-            this.audioContext.close();
-        }
-    }
-}
-
-// Make WeatherSystem globally available
-window.WeatherSystem = WeatherSystem;
-
     async init() {
-        await this.createTerrain();
-        this.createSkybox();
-        this.createEnvironment();
+        try {
+            // Create terrain
+            await this.createTerrain();
+            
+            // Create skybox
+            this.createSkybox();
+            
+            // Create water
+            this.createWater();
+            
+            // Add environment objects
+            this.populateEnvironment();
+            
+            // Setup day/night cycle
+            this.setupDayNightCycle();
+            
+            // Initialize weather system
+            this.weatherSystem = new WeatherSystem(this.scene);
+            
+            console.log('World initialized');
+        } catch (error) {
+            console.error('Error initializing world:', error);
+        }
     }
 
     async createTerrain() {
-        // Create a large ground
+        // Create ground
         this.ground = BABYLON.MeshBuilder.CreateGround('ground', {
-            width: 200,
-            height: 200,
-            subdivisions: 100
+            width: CONFIG.WORLD.TERRAIN.WIDTH,
+            height: CONFIG.WORLD.TERRAIN.HEIGHT,
+            subdivisions: CONFIG.WORLD.TERRAIN.SUBDIVISIONS,
+            updatable: true
         }, this.scene);
         
-        // Create a material with procedural textures
-        const groundMaterial = new BABYLON.StandardMaterial("groundMaterial", this.scene);
-        
-        // Create a grass-like texture procedurally
-        const grassTexture = new BABYLON.NoiseProceduralTexture("grassNoise", 512, this.scene);
-        grassTexture.octaves = 3;
-        grassTexture.persistence = 0.8;
-        grassTexture.animationSpeedFactor = 0;
-        
-        // Create a green color for grass
-        const grassColor = new BABYLON.Color3(0.2, 0.5, 0.2);
-        
-        groundMaterial.diffuseTexture = grassTexture;
-        groundMaterial.diffuseColor = grassColor;
-        
-        // Add some bump mapping
-        const bumpTexture = new BABYLON.NoiseProceduralTexture("bumpNoise", 512, this.scene);
-        bumpTexture.octaves = 4;
-        bumpTexture.persistence = 0.2;
-        groundMaterial.bumpTexture = bumpTexture;
-        groundMaterial.bumpTexture.level = 0.1;
-        
-        this.ground.material = groundMaterial;
+        // Enable physics
+        this.ground.checkCollisions = true;
         this.ground.receiveShadows = true;
         
-        // Add some height variation
+        // Create terrain material
+        const groundMaterial = new BABYLON.StandardMaterial('groundMaterial', this.scene);
+        
+        // Create procedural texture for ground
+        const groundTexture = new BABYLON.NoiseProceduralTexture('groundNoise', 256, this.scene);
+        groundTexture.animationSpeedFactor = 0;
+        groundTexture.persistence = 0.2;
+        groundTexture.brightness = 0.7;
+        groundTexture.octaves = 4;
+        
+        // Create grass texture
+        const grassTexture = this.createProceduralGrassTexture(512);
+        groundMaterial.diffuseTexture = grassTexture;
+        groundMaterial.diffuseTexture.uScale = groundMaterial.diffuseTexture.vScale = 20;
+        
+        // Add bump map for depth
+        groundMaterial.bumpTexture = groundTexture;
+        groundMaterial.bumpTexture.level = 0.2;
+        
+        // Set material properties
+        groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        groundMaterial.specularPower = 10;
+        
+        // Apply material
+        this.ground.material = groundMaterial;
+        
+        // Add physics impostor
+        this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.ground,
+            BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 0, restitution: 0.2, friction: 0.8 },
+            this.scene
+        );
+        
+        // Generate height map
+        this.generateHeightMap();
+    }
+
+    createProceduralGrassTexture(size) {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        
+        // Create gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, size);
+        gradient.addColorStop(0, '#2c5e1a');
+        gradient.addColorStop(0.4, '#3a7d24');
+        gradient.addColorStop(0.6, '#4c9a2a');
+        gradient.addColorStop(1, '#5cb85c');
+        
+        // Fill with gradient
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        
+        // Add noise for variation
+        const imageData = ctx.getImageData(0, 0, size, size);
+        const data = imageData.data;
+        
+        for (let i = 0; i < data.length; i += 4) {
+            // Add subtle noise
+            const noise = Math.random() * 30 - 15;
+            data[i] = Math.min(255, Math.max(0, data[i] + noise));     // R
+            data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise)); // G
+            data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise)); // B
+        }
+        
+        ctx.putImageData(imageData, 0, 0);
+        
+        // Create texture from canvas
+        return new BABYLON.Texture(canvas.toDataURL(), this.scene);
+    }
+
+    generateHeightMap() {
+        // Generate height data
         const positions = this.ground.getVerticesData(BABYLON.VertexBuffer.PositionKind);
         for (let i = 0; i < positions.length; i += 3) {
             const x = positions[i];
             const z = positions[i + 2];
             
-            // Generate some hills and valleys
+            // Generate height using multiple noise functions
             let height = 0;
-            height += Math.sin(x * 0.02) * 2;
-            height += Math.cos(z * 0.02) * 2;
-            height += Math.sin(x * 0.05) * Math.cos(z * 0.05) * 3;
             
-            // Add some random noise
-            height += (Math.random() - 0.5) * 0.5;
+            // Large scale terrain features
+            height += this.simplexNoise(x * 0.01, z * 0.01) * 10;
             
+            // Medium scale details
+            height += this.simplexNoise(x * 0.05, z * 0.05) * 3;
+            
+            // Small details
+            height += this.simplexNoise(x * 0.2, z * 0.2) * 0.5;
+            
+            // Apply height
             positions[i + 1] = height;
         }
         
+        // Update ground mesh
         this.ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
-        this.ground.convertToFlatShadedMesh();
         
-        // Add physics
-        this.ground.checkCollisions = true;
-        this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.ground,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
-            { mass: 0, restitution: 0.3 },
-            this.scene
-        );
+        // Update normals for lighting
+        this.ground.updateVerticesData(BABYLON.VertexBuffer.NormalKind, null);
+    }
+
+    simplexNoise(x, y) {
+        // Simple 2D simplex noise implementation
+        const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+        const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+        
+        const s = (x + y) * F2;
+        const i = Math.floor(x + s);
+        const j = Math.floor(y + s);
+        
+        const t = (i + j) * G2;
+        const X0 = i - t;
+        const Y0 = j - t;
+        const x0 = x - X0;
+        const y0 = y - Y0;
+        
+        let i1, j1;
+        if (x0 > y0) {
+            i1 = 1;
+            j1 = 0;
+        } else {
+            i1 = 0;
+            j1 = 1;
+        }
+        
+        const x1 = x0 - i1 + G2;
+        const y1 = y0 - j1 + G2;
+        const x2 = x0 - 1.0 + 2.0 * G2;
+        const y2 = y0 - 1.0 + 2.0 * G2;
+        
+        // Random gradient at each corner
+        const n0 = this.grad(i, j, x0, y0);
+        const n1 = this.grad(i + i1, j + j1, x1, y1);
+        const n2 = this.grad(i + 1, j + 1, x2, y2);
+        
+        // Combine contributions
+        let value = 0.5 * (n0 + n1 + n2);
+        return Math.max(-1, Math.min(1, value));
+    }
+
+    grad(hash, x, y) {
+        const h = hash & 15;
+        const grad = 1 + (h & 7);
+        const u = h < 8 ? x : y;
+        const v = h < 4 ? y : (h === 12 || h === 14 ? x : 0);
+        return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
     }
 
     createSkybox() {
-        // Use a simple color skybox instead of texture
-        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
-        const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
-        skyboxMaterial.backFaceCulling = false;
+        // Create procedural skybox
+        const skybox = BABYLON.MeshBuilder.CreateBox('skyBox', { size: 1000 }, this.scene);
+        const skyboxMaterial = new BABYLON.StandardMaterial('skyBox', this.scene);
         
-        // Create a gradient sky
-        skyboxMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.8); // Blue sky
+        // Create gradient texture for sky
+        const skyTexture = this.createSkyGradientTexture(512, 256);
+        skyboxMaterial.reflectionTexture = skyTexture;
+        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+        skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
         skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
         skyboxMaterial.disableLighting = true;
         
-        // Add some simple clouds with noise
-        const noiseTexture = new BABYLON.NoiseProceduralTexture("clouds", 512, this.scene);
-        noiseTexture.animationSpeedFactor = 0.01;
-        noiseTexture.persistence = 0.2;
-        noiseTexture.brightness = 0.7;
-        noiseTexture.octaves = 4;
-        
-        skyboxMaterial.reflectionTexture = noiseTexture;
-        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        
+        // Apply material
         skybox.material = skyboxMaterial;
-        return skybox;
+        skybox.infiniteDistance = true;
+        
+        this.skybox = skybox;
     }
 
-    createEnvironment() {
-        // Add some trees
-        this.addTrees();
+    createSkyGradientTexture(width, height) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
         
-        // Add some rocks
-        this.addRocks();
+        // Create gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, '#1a1a2e');
+        gradient.addColorStop(0.4, '#16213e');
+        gradient.addColorStop(0.6, '#0f3460');
+        gradient.addColorStop(0.8, '#533483');
+        gradient.addColorStop(1, '#e94560');
         
-        // Add a water plane
-        this.addWater();
+        // Fill with gradient
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+        
+        // Add stars
+        this.addStarsToSky(ctx, width, height, 200);
+        
+        // Add sun/moon
+        this.addCelestialBodies(ctx, width, height);
+        
+        // Create texture from canvas
+        return new BABYLON.Texture(canvas.toDataURL(), this.scene);
     }
 
-    addTrees() {
-        // Create a tree prototype
-        const createTree = (x, z) => {
-            // Trunk
-            const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk", {
-                height: 2,
-                diameterBottom: 0.5,
-                diameterTop: 0.3
-            }, this.scene);
-            trunk.position = new BABYLON.Vector3(x, 1, z);
-            
-            const trunkMaterial = new BABYLON.StandardMaterial("trunkMaterial", this.scene);
-            trunkMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.2, 0.1);
-            trunk.material = trunkMaterial;
-            
-            // Leaves
-            const leaves = BABYLON.MeshBuilder.CreateSphere("leaves", {
-                diameter: 3,
-                segments: 8
-            }, this.scene);
-            leaves.position = new BABYLON.Vector3(x, 3.5, z);
-            
-            const leavesMaterial = new BABYLON.StandardMaterial("leavesMaterial", this.scene);
-            leavesMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.1);
-            leavesMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-            leaves.material = leavesMaterial;
-            
-            return [trunk, leaves];
-        };
+    addStarsToSky(ctx, width, height, count) {
+        ctx.fillStyle = '#ffffff';
         
-        // Add some random trees
-        for (let i = 0; i < 50; i++) {
-            const x = Math.random() * 180 - 90;
-            const z = Math.random() * 180 - 90;
-            createTree(x, 0, z);
+        for (let i = 0; i < count; i++) {
+            const x = Math.random() * width;
+            const y = Math.random() * (height * 0.8); // Only in upper part
+            const size = Math.random() * 1.5;
+            
+            // Make some stars brighter
+            const opacity = Math.random() * 0.8 + 0.2;
+            ctx.globalAlpha = opacity;
+            
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fill();
         }
-    }
-
-    addRocks() {
-        // Create a rock prototype
-        const createRock = (x, z) => {
-            const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", {
-                radius: 0.5 + Math.random(),
-                subdivisions: 2
-            }, this.scene);
-            
-            rock.position = new BABYLON.Vector3(
-                x + (Math.random() - 0.5) * 5,
-                0.5,
-                z + (Math.random() - 0.5) * 5
-            );
-            
-            rock.rotation = new BABYLON.Vector3(
-                Math.random() * Math.PI,
-                Math.random() * Math.PI,
-                Math.random() * Math.PI
-            );
-            
-            const rockMaterial = new BABYLON.StandardMaterial("rockMaterial", this.scene);
-            rockMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.3);
-            rockMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-            rock.material = rockMaterial;
-            
-            return rock;
-        };
         
-        // Add some random rocks
-        for (let i = 0; i < 100; i++) {
-            const x = Math.random() * 180 - 90;
-            const z = Math.random() * 180 - 90;
-            createRock(x, z);
-        }
+        ctx.globalAlpha = 1.0;
     }
 
-    addWater() {
-        // Create a water material
-        const waterMesh = BABYLON.MeshBuilder.CreateGround("water", {
-            width: 200,
-            height: 200,
-            subdivisions: 50
+    addCelestialBodies(ctx, width, height) {
+        // Draw sun
+        const sunX = width * 0.7;
+        const sunY = height * 0.3;
+        const sunRadius = 30;
+        
+        const sunGradient = ctx.createRadialGradient(
+            sunX, sunY, 0,
+            sunX, sunY, sunRadius * 2
+        );
+        sunGradient.addColorStop(0, 'rgba(255, 255, 200, 0.8)');
+        sunGradient.addColorStop(0.6, 'rgba(255, 200, 100, 0.6)');
+        sunGradient.addColorStop(1, 'rgba(255, 150, 50, 0)');
+        
+        ctx.fillStyle = sunGradient;
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, sunRadius * 2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw moon
+        const moonX = width * 0.3;
+        const moonY = height * 0.2;
+        const moonRadius = 15;
+        
+        ctx.fillStyle = '#f0f0f0';
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, moonRadius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    createWater() {
+        // Create water mesh
+        this.water = BABYLON.MeshBuilder.CreateGround('water', {
+            width: CONFIG.WORLD.TERRAIN.WIDTH * 1.5,
+            height: CONFIG.WORLD.TERRAIN.HEIGHT * 1.5,
+            subdivisions: 1
         }, this.scene);
         
-        waterMesh.position.y = -0.5; // Slightly below the ground
+        // Position water slightly below ground level
+        this.water.position.y = -1;
         
-        // Create a simple water material
-        const waterMaterial = new BABYLON.StandardMaterial("waterMaterial", this.scene);
-        waterMaterial.alpha = 0.7;
-        waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.5);
-        waterMaterial.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-        waterMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.1, 0.3);
-        waterMaterial.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
+        // Create water material
+        const waterMaterial = new BABYLON.StandardMaterial('waterMaterial', this.scene);
+        waterMaterial.alpha = 0.8;
+        waterMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.8);
+        waterMaterial.specularColor = new BABYLON.Color3(0.8, 0.9, 1.0);
+        waterMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.2, 0.3);
+        waterMaterial.alpha = 0.8;
         
-        // Add some wave effect
-        waterMaterial.bumpTexture = new BABYLON.NoiseProceduralTexture("waterBump", 256, this.scene);
-        waterMaterial.bumpTexture.level = 0.1;
-        waterMaterial.bumpTexture.animationSpeedFactor = 0.1;
+        // Add bump texture for waves
+        const noiseTexture = new BABYLON.NoiseProceduralTexture('waterNoise', 256, this.scene);
+        noiseTexture.animationSpeedFactor = 0.1;
+        noiseTexture.persistence = 0.2;
+        waterMaterial.bumpTexture = noiseTexture;
+        waterMaterial.bumpTexture.level = 0.5;
         
-        waterMesh.material = waterMaterial;
+        // Add reflection/refraction
+        waterMaterial.reflectionTexture = new BABYLON.MirrorTexture('waterReflection', 512, this.scene, true);
+        waterMaterial.reflectionTexture.mirrorPlane = new BABYLON.Plane(0, -1, 0, 0);
+        waterMaterial.reflectionTexture.level = 0.5;
         
-        // Animate the water
-        let time = 0;
-        this.scene.registerBeforeRender(() => {
-            time += 0.01;
-            waterMesh.rotation.z = Math.sin(time * 0.1) * 0.1;
-            waterMesh.rotation.x = Math.cos(time * 0.05) * 0.1;
+        // Apply material
+        this.water.material = waterMaterial;
+    }
+
+    populateEnvironment() {
+        // Add trees
+        this.addTrees(50);
+        
+        // Add rocks
+        this.addRocks(30);
+    }
+
+    addTrees(count) {
+        for (let i = 0; i < count; i++) {
+            const x = (Math.random() - 0.5) * CONFIG.WORLD.TERRAIN.WIDTH * 0.9;
+            const z = (Math.random() - 0.5) * CONFIG.WORLD.TERRAIN.HEIGHT * 0.9;
+            
+            // Get height at position
+            const ray = new BABYLON.Ray(
+                new BABYLON.Vector3(x, 100, z),
+                new BABYLON.Vector3(0, -1, 0),
+                200
+            );
+            
+            const hit = this.scene.pickWithRay(ray);
+            if (hit.pickedPoint) {
+                const height = hit.pickedPoint.y;
+                
+                // Only place trees above water level
+                if (height > 0) {
+                    const tree = this.createTree(x, height, z);
+                    this.trees.push(tree);
+                }
+            }
+        }
+    }
+
+    createTree(x, y, z) {
+        // Create trunk
+        const trunk = BABYLON.MeshBuilder.CreateCylinder('trunk', {
+            height: 2 + Math.random() * 2,
+            diameterBottom: 0.5,
+            diameterTop: 0.3
+        }, this.scene);
+        
+        // Position trunk
+        trunk.position.set(x, y + 1, z);
+        
+        // Create leaves
+        const leaves = BABYLON.MeshBuilder.CreateSphere('leaves', {
+            diameter: 3 + Math.random() * 2,
+            segments: 8
+        }, this.scene);
+        
+        // Position leaves above trunk
+        leaves.position.set(x, y + 3 + Math.random(), z);
+        
+        // Create materials
+        const trunkMaterial = new BABYLON.StandardMaterial('trunkMaterial', this.scene);
+        trunkMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.2, 0.1);
+        
+        const leavesMaterial = new BABYLON.StandardMaterial('leavesMaterial', this.scene);
+        leavesMaterial.diffuseColor = new BABYLON.Color3(
+            0.1 + Math.random() * 0.2,
+            0.4 + Math.random() * 0.3,
+            0.1 + Math.random() * 0.2
+        );
+        
+        // Apply materials
+        trunk.material = trunkMaterial;
+        leaves.material = leavesMaterial;
+        
+        // Enable shadows
+        if (this.scene.shadowGenerator) {
+            this.scene.shadowGenerator.getShadowMap().renderList.push(trunk);
+            this.scene.shadowGenerator.getShadowMap().renderList.push(leaves);
+        }
+        
+        // Group trunk and leaves
+        const tree = new BABYLON.TransformNode('tree');
+        trunk.parent = tree;
+        leaves.parent = tree;
+        
+        return tree;
+    }
+
+    addRocks(count) {
+        for (let i = 0; i < count; i++) {
+            const x = (Math.random() - 0.5) * CONFIG.WORLD.TERRAIN.WIDTH * 0.9;
+            const z = (Math.random() - 0.5) * CONFIG.WORLD.TERRAIN.HEIGHT * 0.9;
+            
+            // Get height at position
+            const ray = new BABYLON.Ray(
+                new BABYLON.Vector3(x, 100, z),
+                new BABYLON.Vector3(0, -1, 0),
+                200
+            );
+            
+            const hit = this.scene.pickWithRay(ray);
+            if (hit.pickedPoint) {
+                const height = hit.pickedPoint.y;
+                
+                // Only place rocks above water level
+                if (height > 0) {
+                    const rock = this.createRock(x, height, z);
+                    this.rocks.push(rock);
+                }
+            }
+        }
+    }
+
+    createRock(x, y, z) {
+        // Create rock
+        const rock = BABYLON.MeshBuilder.CreateIcoSphere('rock', {
+            radius: 0.5 + Math.random(),
+            subdivisions: 2
+        }, this.scene);
+        
+        // Position and rotate randomly
+        rock.position.set(x, y, z);
+        rock.rotation.x = Math.random() * Math.PI * 2;
+        rock.rotation.y = Math.random() * Math.PI * 2;
+        rock.rotation.z = Math.random() * Math.PI * 2;
+        
+        // Scale non-uniformly for more natural look
+        rock.scaling.y = 0.5 + Math.random() * 0.5;
+        rock.scaling.x = 0.7 + Math.random() * 0.6;
+        rock.scaling.z = 0.7 + Math.random() * 0.6;
+        
+        // Create material
+        const rockMaterial = new BABYLON.StandardMaterial('rockMaterial', this.scene);
+        rockMaterial.diffuseColor = new BABYLON.Color3(
+            0.3 + Math.random() * 0.3,
+            0.3 + Math.random() * 0.3,
+            0.3 + Math.random() * 0.3
+        );
+        rockMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        
+        // Add bump map
+        const noiseTexture = new BABYLON.NoiseProceduralTexture('rockNoise', 64, this.scene);
+        noiseTexture.animationSpeedFactor = 0;
+        rockMaterial.bumpTexture = noiseTexture;
+        rockMaterial.bumpTexture.level = 0.5;
+        
+        // Apply material
+        rock.material = rockMaterial;
+        
+        // Enable physics
+        rock.checkCollisions = true;
+        
+        // Enable shadows
+        if (this.scene.shadowGenerator) {
+            this.scene.shadowGenerator.getShadowMap().renderList.push(rock);
+        }
+        
+        return rock;
+    }
+
+    setupDayNightCycle() {
+        // Create sun
+        this.sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-1, -1, 1), this.scene);
+        this.sun.position = new BABYLON.Vector3(0, 100, 0);
+        this.sun.intensity = 1.0;
+        this.sun.diffuse = new BABYLON.Color3(1, 1, 0.9);
+        this.sun.specular = new BABYLON.Color3(1, 1, 0.8);
+        
+        // Create moon
+        this.moon = new BABYLON.DirectionalLight('moon', new BABYLON.Vector3(1, -1, -1), this.scene);
+        this.moon.position = new BABYLON.Vector3(0, 100, 0);
+        this.moon.intensity = 0;
+        this.moon.diffuse = new BABYLON.Color3(0.8, 0.8, 1.0);
+        this.moon.specular = new BABYLON.Color3(0.1, 0.1, 0.2);
+        
+        // Create stars
+        this.createStars();
+    }
+
+    createStars() {
+        // Create starfield
+        const starCount = 1000;
+        const stars = new BABYLON.PointsCloudSystem('stars', 1, this.scene);
+        
+        // Add stars
+        for (let i = 0; i < starCount; i++) {
+            // Random position on a sphere
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            
+            const x = Math.sin(phi) * Math.cos(theta) * 500;
+            const y = Math.sin(phi) * Math.sin(theta) * 500;
+            const z = Math.cos(phi) * 500;
+            
+            // Random size and brightness
+            const size = 0.1 + Math.random() * 0.5;
+            const brightness = 0.5 + Math.random() * 0.5;
+            
+            stars.addPoints(1, {
+                position: new BABYLON.Vector3(x, y, z),
+                color: new BABYLON.Color4(brightness, brightness, brightness, 1),
+                size: size
+            });
+        }
+        
+        // Build the starfield
+        stars.buildMeshAsync().then(() => {
+            this.stars = stars.mesh;
         });
     }
 
     update(deltaTime) {
-        // Update any world animations here
+        // Update day/night cycle
+        this.updateDayNightCycle(deltaTime);
+        
+        // Update water animation
+        if (this.water && this.water.material && this.water.material.bumpTexture) {
+            this.water.material.bumpTexture.time += deltaTime * 0.01;
+        }
+    }
+
+    updateDayNightCycle(deltaTime) {
+        // Update time of day
+        CONFIG.WORLD.TIME_OF_DAY = (CONFIG.WORLD.TIME_OF_DAY + deltaTime * CONFIG.WORLD.TIME_SPEED) % 1;
+        
+        // Calculate sun and moon positions
+        const time = CONFIG.WORLD.TIME_OF_DAY;
+        const angle = time * Math.PI * 2;
+        
+        // Update sun position
+        this.sun.direction = new BABYLON.Vector3(
+            Math.cos(angle),
+            Math.sin(angle),
+            Math.cos(angle) * 0.5
+        ).normalize();
+        
+        // Update moon position (opposite of sun)
+        this.moon.direction = this.sun.direction.negate();
+        
+        // Update lighting based on time of day
+        const isDay = time > 0.2 && time < 0.8;
+        const dayFactor = isDay ? 
+            Math.sin((time - 0.25) * Math.PI * 2) * 0.5 + 0.5 : 
+            0;
+        
+        const nightFactor = !isDay ? 
+            Math.sin((time - 0.75) * Math.PI * 2) * 0.5 + 0.5 : 
+            0;
+        
+        // Update light intensities
+        this.sun.intensity = dayFactor * CONFIG.GRAPHICS.LIGHTING.SUN_INTENSITY;
+        this.moon.intensity = nightFactor * 0.5;
+        
+        // Update ambient light
+        const ambientIntensity = 0.3 + 0.7 * dayFactor + 0.1 * nightFactor;
+        this.scene.ambientColor = new BABYLON.Color3(
+            ambientIntensity * 0.6,
+            ambientIntensity * 0.7,
+            ambientIntensity
+        );
+        
+        // Update fog
+        const fogDensity = 0.001 + (1 - dayFactor) * 0.004;
+        this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
+        this.scene.fogDensity = fogDensity;
+        this.scene.fogColor = new BABYLON.Color3(
+            0.8 * (1 - nightFactor * 0.5),
+            0.8 * (1 - nightFactor * 0.3),
+            0.9 * (1 - nightFactor * 0.1)
+        );
+        
+        // Update skybox visibility
+        if (this.skybox) {
+            this.skybox.visibility = 0.2 + dayFactor * 0.8;
+        }
+        
+        // Update stars visibility
+        if (this.stars) {
+            this.stars.visibility = 1 - dayFactor;
+        }
     }
 
     dispose() {
@@ -629,13 +618,31 @@ window.WeatherSystem = WeatherSystem;
         if (this.ground) {
             this.ground.dispose();
         }
-        if (this.environment) {
-            this.environment.dispose();
+        if (this.skybox) {
+            this.skybox.dispose();
         }
-        this.chunks.forEach(chunk => chunk.dispose());
-        this.chunks.clear();
+        if (this.water) {
+            this.water.dispose();
+        }
+        if (this.sun) {
+            this.sun.dispose();
+        }
+        if (this.moon) {
+            this.moon.dispose();
+        }
+        if (this.stars) {
+            this.stars.dispose();
+        }
+        if (this.weatherSystem) {
+            this.weatherSystem.dispose();
+        }
+        
+        // Dispose trees
+        this.trees.forEach(tree => tree.dispose());
+        this.trees = [];
+        
+        // Dispose rocks
+        this.rocks.forEach(rock => rock.dispose());
+        this.rocks = [];
     }
 }
-
-// Make World globally available
-window.World = World;
