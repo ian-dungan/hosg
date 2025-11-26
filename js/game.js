@@ -170,7 +170,7 @@ class Game {
             // Initialize network
             this.updateLoadingProgress(80, 'Connecting to server...');
             this.network = new NetworkManager(this);
-            await this.network.connect();
+            try { await this.network.connect(); } catch(e) { console.log("[Game] Multiplayer unavailable"); }
             
             // Initialize other systems
             this.updateLoadingProgress(90, 'Finalizing...');
