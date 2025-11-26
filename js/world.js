@@ -1,6 +1,5 @@
-// world.js
-// Using global BABYLON object from CDN
-const { Vector3, MeshBuilder, StandardMaterial, Color3 } = BABYLON;
+// world.js - World management
+// Using BABYLON namespace directly
 
 class World {
     constructor(scene) {
@@ -17,13 +16,13 @@ class World {
 
     createGround() {
         // Create a simple ground
-        this.ground = MeshBuilder.CreateGround('ground', {
+        this.ground = BABYLON.MeshBuilder.CreateGround('ground', {
             width: 100,
             height: 100
         }, this.scene);
         
-        const groundMaterial = new StandardMaterial('groundMaterial', this.scene);
-        groundMaterial.diffuseColor = new Color3(0.2, 0.6, 0.3);
+        const groundMaterial = new BABYLON.StandardMaterial('groundMaterial', this.scene);
+        groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.3);
         this.ground.material = groundMaterial;
         this.ground.checkCollisions = true;
     }
@@ -44,20 +43,20 @@ class World {
         if (this.chunks.has(chunkId)) return;
 
         // Create a simple chunk
-        const chunk = MeshBuilder.CreateBox(`chunk_${chunkId}`, {
+        const chunk = BABYLON.MeshBuilder.CreateBox(`chunk_${chunkId}`, {
             width: CONFIG.WORLD.CHUNK_SIZE - 1,
             height: 1,
             depth: CONFIG.WORLD.CHUNK_SIZE - 1
         }, this.scene);
         
-        chunk.position = new Vector3(
+        chunk.position = new BABYLON.Vector3(
             x * CONFIG.WORLD.CHUNK_SIZE,
             y * CONFIG.WORLD.CHUNK_SIZE,
             z * CONFIG.WORLD.CHUNK_SIZE
         );
         
-        const material = new StandardMaterial(`chunkMat_${chunkId}`, this.scene);
-        material.diffuseColor = new Color3(0.8, 0.8, 0.8);
+        const material = new BABYLON.StandardMaterial(`chunkMat_${chunkId}`, this.scene);
+        material.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
         chunk.material = material;
         chunk.checkCollisions = true;
         
