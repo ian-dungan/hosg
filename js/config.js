@@ -1,74 +1,48 @@
-// Game Configuration
+// config.js - Core game configuration
 const CONFIG = {
-    // Debug mode
+    // Core settings
     DEBUG: false,
-    
-    // Game settings
     VERSION: '1.0.0',
     TICK_RATE: 60,
     MAX_PLAYERS: 100,
     
+    // Network settings
+    NETWORK: {
+        SERVER_URL: 'ws://localhost:3000',
+        RECONNECT_DELAY: 3000,
+        MAX_RECONNECT_ATTEMPTS: 5
+    },
+
     // Player settings
     PLAYER: {
         START_HEALTH: 100,
         START_MANA: 50,
-        START_LEVEL: 1,
-        MOVEMENT_SPEED: 0.2,
-        ROTATION_SPEED: 0.01,
-        JUMP_FORCE: 0.5
+        MOVEMENT_SPEED: 5.0,
+        RUN_MULTIPLIER: 1.5,
+        JUMP_FORCE: 5.0,
+        GRAVITY: -9.81
     },
-    
+
     // World settings
     WORLD: {
         GRAVITY: { x: 0, y: -9.81, z: 0 },
         CHUNK_SIZE: 32,
         VIEW_DISTANCE: 3
     },
-    
-    // Network settings
-    NETWORK: {
-        RECONNECT_DELAY: 3000,
-        MAX_RECONNECT_ATTEMPTS: 5,
-        SYNC_RATE: 100 // ms
-    },
-    
-    // Asset paths
-    ASSETS: {
-        MODELS: 'assets/models/',
-        TEXTURES: 'assets/textures/',
-        AUDIO: 'assets/audio/',
-        UI: 'assets/ui/'
+
+    // Graphics settings
+    GRAPHICS: {
+        SHADOWS: {
+            ENABLED: true,
+            SIZE: 2048
+        },
+        POST_PROCESSING: {
+            BLOOM: true,
+            SSAO: true,
+            FXAA: true
+        }
     }
 };
 
-// Initialize Supabase (optional, game runs offline if blocked)
-let supabase = null;
-
-try {
-    if (typeof window !== 'undefined' &&
-        window.supabase &&
-        typeof window.supabase.createClient === 'function') {
-        supabase = window.supabase.createClient(
-            'https://vaxfoafjjybwcxwhicla.supabase.co',
-            'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-        );
-        console.log('[Config] Supabase client created');
-    } else {
-        console.warn('[Config] Supabase library not available – running without backend.');
-    }
-} catch (err) {
-    console.warn('[Config] Failed to create Supabase client, running offline:', err);
-}
-
-// Game state
-const GameState = {
-    MENU: 'menu',
-    PLAYING: 'playing',
-    PAUSED: 'paused',
-    GAME_OVER: 'game_over'
-};
-
-// Export for use in other modules
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { CONFIG, GameState, supabase };
-}
+// Export for both browser and Node.js
+try { module.exports = CONFIG; } catch (e) { window.CONFIG = CONFIG; }
