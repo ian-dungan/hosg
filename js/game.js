@@ -1,27 +1,16 @@
-// game.js - Main game class
-// No need to destructure BABYLON here since we'll use BABYLON namespace directly
-
-class Game {
-    constructor(canvas) {
-        this.canvas = canvas;
-        this.engine = new BABYLON.Engine(canvas, true);
-        this.scene = new BABYLON.Scene(this.engine);
-        this.network = new Network();
-        this.player = new Player(this.scene);
-        this.world = new World(this.scene);
-        this.ui = new UI(this.scene, this.player);
-        
-        this.init();
-    }
-
-    async init() {
+// In your Game class, update the init method:
+async init() {
+    try {
         // Setup camera
         this.setupCamera();
         
         // Setup lighting
         this.setupLighting();
         
-        // Load assets
+        // Create skybox
+        this.world.createSkybox();
+        
+        // Load any additional assets
         await this.loadAssets();
         
         // Start the game loop
@@ -29,61 +18,36 @@ class Game {
         
         // Handle window resize
         window.addEventListener('resize', () => this.engine.resize());
-    }
-
-    setupCamera() {
-        // Create and position a camera
-        this.camera = new BABYLON.ArcRotateCamera(
-            'camera',
-            -Math.PI / 2,
-            Math.PI / 3,
-            10,
-            BABYLON.Vector3.Zero(),
-            this.scene
-        );
-        this.camera.attachControl(this.canvas, true);
-        this.camera.lowerRadiusLimit = 2;
-        this.camera.upperRadiusLimit = 20;
-    }
-
-    setupLighting() {
-        // Create a light
-        const light = new BABYLON.HemisphericLight(
-            'light',
-            new BABYLON.Vector3(0, 1, 0),
-            this.scene
-        );
-        light.intensity = 0.7;
-    }
-
-    async loadAssets() {
-        // Load your game assets here
-        // Example:
-        // await BABYLON.SceneLoader.AppendAsync('models/', 'character.glb', this.scene);
-    }
-
-    update() {
-        const deltaTime = this.engine.getDeltaTime() / 1000; // Convert to seconds
         
-        // Update game objects
-        this.player.update(deltaTime);
-        this.world.update(deltaTime);
-        this.ui.update();
-        
-        // Update camera to follow player
-        if (this.player.mesh) {
-            this.camera.target = this.player.mesh.position;
-        }
-        
-        // Render the scene
-        this.scene.render();
+        console.log('Game initialized successfully');
+    } catch (error) {
+        console.error('Error initializing game:', error);
     }
+}
 
-    dispose() {
-        // Clean up resources
-        this.engine.dispose();
-        this.player.dispose();
-        this.world.dispose();
-        this.ui.dispose();
-    }
+// Update the setupLighting method to better suit the outdoor scene
+setupLighting() {
+    // Hemispheric light to simulate sky light
+    const hemiLight = new BABYLON.HemisphericLight(
+        'hemiLight',
+        new BABYLON.Vector3(0, 1, 0),
+        this.scene
+    );
+    hemiLight.intensity = 0.8;
+    hemiLight.specular = new BABYLON.Color3(0, 0, 0); // No specular from hemi light
+    
+    // Directional light to simulate sun
+    this.sunLight = new BABYLON.DirectionalLight(
+        'sunLight',
+        new BABYLON.Vector3(1, -1, 1),
+        this.scene
+    );
+    this.sunLight.intensity = 0.9;
+    this.sunLight.position = new BABYLON.Vector3(0, 50, 0);
+    
+    // Enable shadows
+    this.sunLight.shadowEnabled = true;
+    const shadowGenerator = new BABYLON.ShadowGenerator(1024, this.sunLight);
+    shadowGenerator.useBlurExponentialShadowMap = true;
+    shadowGenerator.blurKernel = 32;
 }
