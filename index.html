@@ -34,18 +34,18 @@
 <body>
     <canvas id="renderCanvas"></canvas>
     
-    <!-- Load Babylon.js from CDN -->
-    <script src="https://cdn.babylonjs.com/babylon.js"></script>
-    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-    
-    <!-- Load game files in order -->
-    <script src="js/config.js"></script>
-    <script src="js/network.js"></script>
-    <script src="js/player.js"></script>
-    <script src="js/world.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/game.js"></script>
+    <!-- Load Babylon.js first -->
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+<script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+
+<!-- Then load your game files -->
+<script src="js/config.js"></script>
+<script src="js/network.js"></script>
+<script src="js/player.js"></script>
+<script src="js/world.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
 
     <script>
         // Global error handling
