@@ -9,6 +9,11 @@ class Network {
     }
 
     async connect() {
+        if (!CONFIG.NETWORK.ENABLED) {
+            console.log('Network is disabled in config');
+            return;
+        }
+
         try {
             this.socket = new WebSocket(CONFIG.NETWORK.SERVER_URL);
             
@@ -78,3 +83,6 @@ class Network {
         }
     }
 }
+
+// Make Network globally available
+window.Network = Network;
