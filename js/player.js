@@ -45,7 +45,7 @@ class Player {
     async init() {
         await this.createMesh();
         this.setupPhysics();
-        this.setupAnimations();
+        // this.setupAnimations(); // TODO: Fix animations later
     }
     
     async createMesh() {
@@ -93,7 +93,7 @@ class Player {
         
         // Start with idle animation
         this.currentAnimation = this.animations.idle;
-        this.currentAnimation.play(true);
+        // this.currentAnimation.play(true); // TODO: Fix
     }
     
     createAnimation(name, from, to, loop) {
