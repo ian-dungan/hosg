@@ -75,10 +75,10 @@ class World {
         skyboxMaterial.disableLighting = true;
         
         // Set skybox texture based on time of day
-        this.updateSkybox();
         
         this.skybox.material = skyboxMaterial;
         this.skybox.infiniteDistance = true;
+        this.updateSkybox();
     }
     
     updateSkybox() {

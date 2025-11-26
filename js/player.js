@@ -45,7 +45,7 @@ class Player {
     async init() {
         await this.createMesh();
         this.setupPhysics();
-        // this.setupAnimations(); // Disabled - causes errors
+        this.setupAnimations();
     }
     
     async createMesh() {
@@ -75,7 +75,7 @@ class Player {
         // Set up physics body
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
-            BABYLON.PhysicsImpostor.CapsuleImpostor,
+            BABYLON.PhysicsImpostor.BoxImpostor,
             { mass: 1, friction: 0.2, restitution: 0.3 },
             this.scene
         );
@@ -93,7 +93,7 @@ class Player {
         
         // Start with idle animation
         this.currentAnimation = this.animations.idle;
-        // this.currentAnimation.play(true); // Disabled - BABYLON.Animation has no play method
+        this.currentAnimation.play(true);
     }
     
     createAnimation(name, from, to, loop) {
