@@ -323,7 +323,9 @@ class Player {
     }
 
     update(deltaTime) {
-        if (!this.mesh || !this.camera) return;
+        if (!this.mesh || !this.camera || !this.capsule || !this.capsule.physicsImpostor) {
+            return; // Skip update if required components aren't ready
+        }
         
         // Update movement
         this.updateMovement(deltaTime);
@@ -336,8 +338,13 @@ class Player {
     }
 
     updateMovement(deltaTime) {
+        // Check if we have a valid physics impostor
+        if (!this.capsule || !this.capsule.physicsImpostor) {
+            return; // Skip physics updates if not ready
+        }
+
         // Get camera forward and right vectors
-        const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();
+        const forward = this.camera.getDirection(BABYLON.Vector3.Forward());
         const right = this.camera.getDirection(BABYLON.Vector3.Right());
         
         // Project onto XZ plane
@@ -362,6 +369,17 @@ class Player {
             moveDirection.addInPlace(right);
         }
         
+        // Get current velocity safely
+        let currentVelocity;
+        try {
+            currentVelocity = this.capsule.physicsImpostor.getLinearVelocity();
+            if (!currentVelocity) {
+                currentVelocity = BABYLON.Vector3.Zero();
+            }
+        } catch (e) {
+            currentVelocity = BABYLON.Vector3.Zero();
+        }
+        
         // Normalize and apply speed
         if (moveDirection.lengthSquared() > 0) {
             moveDirection.normalize();
@@ -371,36 +389,42 @@ class Player {
             moveDirection.scaleInPlace(speed * deltaTime * 60);
             
             // Apply movement to physics body
-            if (this.capsule.physicsImpostor) {
-                const currentVelocity = this.capsule.physicsImpostor.getLinearVelocity();
-                const targetVelocity = new BABYLON.Vector3(
-                    moveDirection.x * 10,
-                    currentVelocity.y,
-                    moveDirection.z * 10
-                );
-                
-                // Apply damping for better control
-                const damping = 0.9;
-                this.capsule.physicsImpostor.setLinearVelocity(
-                    new BABYLON.Vector3(
-                        targetVelocity.x * (1 - damping) + currentVelocity.x * damping,
-                        targetVelocity.y,
-                        targetVelocity.z * (1 - damping) + currentVelocity.z * damping
-                    )
-                );
+            const targetVelocity = new BABYLON.Vector3(
+                moveDirection.x * 10,
+                currentVelocity.y,
+                moveDirection.z * 10
+            );
+            
+            // Apply damping for better control
+            const damping = 0.9;
+            this.capsule.physicsImpostor.setLinearVelocity(
+                new BABYLON.Vector3(
+                    targetVelocity.x * (1 - damping) + currentVelocity.x * damping,
+                    targetVelocity.y,
+                    targetVelocity.z * (1 - damping) + currentVelocity.z * damping
+                )
+            );
+            
+            // Update animation based on movement
+            if (this.input.run) {
+                this.playAnimation('run');
+            } else {
+                this.playAnimation('walk');
             }
         } else {
             // Apply damping when not moving
-            if (this.capsule.physicsImpostor) {
-                const currentVelocity = this.capsule.physicsImpostor.getLinearVelocity();
-                const damping = 0.8;
-                this.capsule.physicsImpostor.setLinearVelocity(
-                    new BABYLON.Vector3(
-                        currentVelocity.x * damping,
-                        currentVelocity.y,
-                        currentVelocity.z * damping
-                    )
-                );
+            const damping = 0.8;
+            this.capsule.physicsImpostor.setLinearVelocity(
+                new BABYLON.Vector3(
+                    currentVelocity.x * damping,
+                    currentVelocity.y,
+                    currentVelocity.z * damping
+                )
+            );
+            
+            // Play idle animation when not moving
+            if (this.currentAnimation !== this.animations.idle) {
+                this.playAnimation('idle');
             }
         }
         
@@ -426,44 +450,50 @@ class Player {
     }
 
     updateAnimations() {
-        // Update animations based on movement
-        if (!this.isOnGround) {
-            this.playAnimation('jump');
-        } else if (this.input.run && (this.input.forward || this.input.backward || this.input.left || this.input.right)) {
-            this.playAnimation('run');
-        } else if (this.input.forward || this.input.backward || this.input.left || this.input.right) {
-            this.playAnimation('walk');
+        // Update animation based on movement state
+        if (this.isOnGround) {
+            const velocity = this.velocity.length();
+            if (velocity > 0.1) {
+                if (this.input.run) {
+                    this.playAnimation('run');
+                } else {
+                    this.playAnimation('walk');
+                }
+            } else {
+                this.playAnimation('idle');
+            }
         } else {
-            this.playAnimation('idle');
+            this.playAnimation('jump');
         }
     }
 
     updateCamera() {
+        if (!this.mesh || !this.camera) return;
+        
         // Update camera target to follow player
-        if (this.camera && this.mesh) {
-            // Smooth camera follow
-            const targetPosition = this.mesh.position.clone();
-            targetPosition.y += 1.6; // Eye level
+        this.camera.target = this.mesh.position.clone();
+        
+        // Apply camera shake if active
+        if (this.cameraShake) {
+            const time = Date.now() * 0.001;
+            const shakeIntensity = this.shakeIntensity || 0.1;
+            this.camera.position.addInPlace(new BABYLON.Vector3(
+                Math.sin(time * 20) * shakeIntensity,
+                Math.sin(time * 17) * shakeIntensity,
+                0
+            ));
             
-            // Apply camera shake if needed
-            if (this.cameraShake) {
-                const time = Date.now() * 0.001;
-                targetPosition.x += Math.sin(time * 20) * 0.05;
-                targetPosition.y += Math.sin(time * 17) * 0.05;
+            // Decrease shake over time
+            this.shakeTime -= this.scene.getEngine().getDeltaTime() / 1000;
+            if (this.shakeTime <= 0) {
+                this.cameraShake = false;
             }
-            
-            // Smoothly interpolate camera position
-            this.camera.position = BABYLON.Vector3.Lerp(
-                this.camera.position,
-                targetPosition,
-                0.1
-            );
         }
     }
 
     jump() {
-        if (this.isOnGround && this.capsule.physicsImpostor) {
-            const currentVelocity = this.capsule.physicsImpostor.getLinearVelocity();
+        if (this.isOnGround && this.capsule && this.capsule.physicsImpostor) {
+            const currentVelocity = this.capsule.physicsImpostor.getLinearVelocity() || BABYLON.Vector3.Zero();
             this.capsule.physicsImpostor.setLinearVelocity(
                 new BABYLON.Vector3(
                     currentVelocity.x,
@@ -472,18 +502,25 @@ class Player {
                 )
             );
             this.isOnGround = false;
+            this.playAnimation('jump');
         }
     }
 
     attack() {
-        // Play attack animation
-        this.playAnimation('attack');
-        
-        // Check for hits
-        this.checkMeleeHit();
+        if (this.currentWeapon) {
+            this.currentWeapon.attack();
+        } else {
+            // Play punch animation if no weapon equipped
+            this.playAnimation('attack');
+            
+            // Check for melee hit
+            this.checkMeleeHit();
+        }
     }
 
     checkMeleeHit() {
+        if (!this.camera) return;
+        
         // Create a ray from the camera in the look direction
         const ray = new BABYLON.Ray(
             this.camera.position,
@@ -508,6 +545,8 @@ class Player {
     }
 
     interact() {
+        if (!this.camera) return;
+        
         // Cast a ray to check for interactable objects
         const ray = new BABYLON.Ray(
             this.camera.position,
@@ -533,12 +572,12 @@ class Player {
             this.scene.ui.updateHealth(this.health, this.maxHealth);
         }
         
+        // Apply camera shake
+        this.applyCameraShake(0.3);
+        
         // Check for death
         if (this.health <= 0) {
             this.die();
-        } else {
-            // Apply camera shake
-            this.applyCameraShake(0.3);
         }
     }
 
@@ -583,6 +622,8 @@ class Player {
     }
 
     addWeapon(weapon) {
+        if (!weapon) return;
+        
         this.weapons.push(weapon);
         
         // Equip the weapon if it's the first one
@@ -609,10 +650,10 @@ class Player {
         }
     }
 
-    applyCameraShake(intensity) {
+    applyCameraShake(intensity = 0.1, duration = 0.5) {
         this.cameraShake = true;
-        this.shakeIntensity = intensity || 0.1;
-        this.shakeTime = 0;
+        this.shakeIntensity = intensity;
+        this.shakeTime = duration;
     }
 
     dispose() {
