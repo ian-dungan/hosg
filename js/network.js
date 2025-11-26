@@ -18,7 +18,7 @@ class NetworkManager {
                 // In a real game, this would connect to your game server
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const host = window.location.host;
-                this.socket = new WebSocket(`${protocol}//${host}/game`);
+                this.socket = new WebSocket("wss://hosg.onrender.com");
                 
                 this.socket.onopen = () => {
                     console.log('Connected to game server');
