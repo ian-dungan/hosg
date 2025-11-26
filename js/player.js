@@ -338,7 +338,7 @@ class Player {
     updateMovement(deltaTime) {
         // Get camera forward and right vectors
         const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();
-        const right = this.camera.getRightPosition(1).subtract(this.camera.position).normalize();
+        const right = this.camera.getDirection(BABYLON.Vector3.Right());
         
         // Project onto XZ plane
         forward.y = 0;
