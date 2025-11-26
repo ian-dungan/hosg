@@ -21,10 +21,10 @@ class Player {
     async loadModel() {
         // Create a simple player model
         const playerMaterial = new BABYLON.StandardMaterial("playerMaterial", this.scene);
-        playerMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.8);
-        playerMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+        playerMaterial.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2); // Red color
+        playerMaterial.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
         
-        // Create a capsule for the player
+        // Create a capsule shape for the player
         const sphere = BABYLON.MeshBuilder.CreateSphere("playerBody", {
             diameter: 1
         }, this.scene);
@@ -35,11 +35,11 @@ class Player {
         }, this.scene);
         cylinder.position.y = 0.5;
         
+        // Merge meshes
         this.mesh = BABYLON.Mesh.MergeMeshes([sphere, cylinder], true);
         this.mesh.material = playerMaterial;
         this.mesh.position = this.position;
         this.mesh.checkCollisions = true;
-        this.mesh.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
         
         // Add physics
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
@@ -48,6 +48,21 @@ class Player {
             { mass: 1, friction: 0.5, restitution: 0.1 },
             this.scene
         );
+        
+        // Add to shadow caster
+        if (this.scene.shadowGenerator) {
+            this.scene.shadowGenerator.addShadowCaster(this.mesh);
+        }
+        
+        // Add a simple animation
+        this.scene.registerBeforeRender(() => {
+            if (this.mesh && this.moveDirection.length() > 0) {
+                this.mesh.rotation.y = Math.atan2(
+                    this.moveDirection.x,
+                    this.moveDirection.z
+                );
+            }
+        });
     }
 
     setupInput() {
@@ -82,8 +97,9 @@ class Player {
         this.moveDirection.set(0, 0, 0);
         
         // Get camera forward and right vectors
-        const forward = this.scene.activeCamera.getForwardRay().direction;
-        const right = this.scene.activeCamera.getRightRay().direction;
+        const camera = this.scene.activeCamera;
+        const forward = camera.getForwardRay().direction;
+        const right = camera.getDirection(BABYLON.Vector3.Right());
         
         // Flatten vectors
         forward.y = 0;
@@ -155,3 +171,6 @@ class Player {
         }
     }
 }
+
+// Make Player globally available
+window.Player = Player;
