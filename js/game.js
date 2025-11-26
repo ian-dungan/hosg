@@ -1,12 +1,11 @@
 // game.js - Main game class
-// Using global BABYLON object from CDN
-const { Engine, Scene, Vector3, HemisphericLight, ArcRotateCamera } = BABYLON;
+// No need to destructure BABYLON here since we'll use BABYLON namespace directly
 
 class Game {
     constructor(canvas) {
         this.canvas = canvas;
-        this.engine = new Engine(canvas, true);
-        this.scene = new Scene(this.engine);
+        this.engine = new BABYLON.Engine(canvas, true);
+        this.scene = new BABYLON.Scene(this.engine);
         this.network = new Network();
         this.player = new Player(this.scene);
         this.world = new World(this.scene);
@@ -34,12 +33,12 @@ class Game {
 
     setupCamera() {
         // Create and position a camera
-        this.camera = new ArcRotateCamera(
+        this.camera = new BABYLON.ArcRotateCamera(
             'camera',
             -Math.PI / 2,
             Math.PI / 3,
             10,
-            Vector3.Zero(),
+            BABYLON.Vector3.Zero(),
             this.scene
         );
         this.camera.attachControl(this.canvas, true);
@@ -49,9 +48,9 @@ class Game {
 
     setupLighting() {
         // Create a light
-        const light = new HemisphericLight(
+        const light = new BABYLON.HemisphericLight(
             'light',
-            new Vector3(0, 1, 0),
+            new BABYLON.Vector3(0, 1, 0),
             this.scene
         );
         light.intensity = 0.7;
@@ -88,9 +87,3 @@ class Game {
         this.ui.dispose();
     }
 }
-
-// Start the game when the page loads
-window.addEventListener('DOMContentLoaded', () => {
-    const canvas = document.getElementById('renderCanvas');
-    const game = new Game(canvas);
-});
