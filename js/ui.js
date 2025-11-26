@@ -89,3 +89,6 @@ class UI {
         }
     }
 }
+
+// Make UI globally available
+window.UI = UI;
