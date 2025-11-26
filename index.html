@@ -1,109 +1,142 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Heroes of Shady Grove</title>
+    <title>Beautiful 3D World</title>
     <style>
         body { 
             margin: 0; 
+            padding: 0; 
             overflow: hidden; 
             font-family: Arial, sans-serif;
+            background-color: #000;
         }
         #renderCanvas { 
-            width: 100%; 
-            height: 100%; 
-            display: block; 
+            width: 100vw; 
+            height: 100vh; 
+            display: block;
             touch-action: none;
         }
-        .message {
+        #loadingScreen {
             position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 10px 20px;
-            border-radius: 5px;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             color: white;
-            background-color: rgba(0, 0, 0, 0.7);
             z-index: 1000;
-            display: none;
         }
-        .message.info { background-color: rgba(0, 120, 255, 0.8); }
-        .message.error { background-color: rgba(255, 50, 50, 0.8); }
-        .message.success { background-color: rgba(50, 200, 50, 0.8); }
+        #loadingBar {
+            width: 50%;
+            height: 20px;
+            margin-top: 20px;
+            border: 2px solid #444;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #loadingBarFill {
+            height: 100%;
+            width: 0%;
+            background-color: #4CAF50;
+            transition: width 0.3s;
+        }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
+    <div id="loadingScreen">
+        <h1>Loading Beautiful World...</h1>
+        <div id="loadingBar">
+            <div id="loadingBarFill"></div>
+        </div>
+        <p id="loadingText">Initializing...</p>
+    </div>
     <canvas id="renderCanvas"></canvas>
+    <div class="controls">
+        <div>WASD: Move</div>
+        <div>Space: Jump</div>
+        <div>Shift: Run</div>
+        <div>Mouse: Look around</div>
+    </div>
+
+    <!-- Load Babylon.js and plugins -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    <script src="https://cdn.babylonjs.com/postProcesses/babylonjs.postProcess.min.js"></script>
+    <script src="https://cdn.babylonjs.com/proceduralTextures/babylonjs.proceduralTextures.min.js"></script>
+    <script src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
+    <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
     
-    <!-- Load Babylon.js first -->
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
-<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-<script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
-<!-- Then load your game files -->
-<script src="js/config.js"></script>
-<script src="js/network.js"></script>
-<script src="js/player.js"></script>
-<script src="js/world.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/game.js"></script>
-
+    <!-- Load physics engine -->
+    <script src="https://cdn.babylonjs.com/cannon.js"></script>
+    <script src="https://cdn.babylonjs.com/Oimo.js"></script>
+    <script src="https://cdn.babylonjs.com/ammo.js"></script>
+    
+    <!-- Load game files -->
+    <script src="js/config.js"></script>
+    <script src="js/network.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/world.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
+    
     <script>
-        // Global error handling
-        window.addEventListener('error', function(event) {
-            console.error('Global error:', event.error);
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'message error';
-            errorDiv.textContent = 'An error occurred: ' + (event.message || 'Unknown error');
-            document.body.appendChild(errorDiv);
-        });
-
-        // Check if WebGL is supported
-        function isWebGLAvailable() {
-            try {
-                const canvas = document.createElement('canvas');
-                return !!(window.WebGLRenderingContext && 
-                    (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
-            } catch (e) {
-                return false;
-            }
+        // Update loading screen
+        function updateLoading(progress, message) {
+            document.getElementById('loadingBarFill').style.width = `${progress}%`;
+            document.getElementById('loadingText').textContent = message;
         }
 
         // Initialize the game
-        function initGame() {
-            if (!isWebGLAvailable()) {
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'message error';
-                errorDiv.textContent = 'WebGL is not supported in your browser. Please try a different browser.';
-                document.body.appendChild(errorDiv);
-                return;
-            }
-
+        async function initGame() {
             try {
+                updateLoading(10, 'Loading graphics engine...');
+                
+                // Wait for everything to load
+                await Promise.all([
+                    // Add any preload promises here if needed
+                ]);
+                
+                updateLoading(50, 'Creating world...');
+                
+                // Create game instance
                 const canvas = document.getElementById('renderCanvas');
-                if (canvas) {
-                    // Start the game
-                    const game = new Game(canvas);
-                    window.game = game; // Make game globally available for debugging
-                } else {
-                    throw new Error('Canvas element not found');
-                }
+                window.game = new Game(canvas);
+                
+                // Hide loading screen when everything is ready
+                setTimeout(() => {
+                    updateLoading(100, 'Ready!');
+                    document.getElementById('loadingScreen').style.opacity = '0';
+                    setTimeout(() => {
+                        document.getElementById('loadingScreen').style.display = 'none';
+                    }, 500);
+                }, 1000);
+                
             } catch (error) {
                 console.error('Failed to initialize game:', error);
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'message error';
-                errorDiv.textContent = 'Failed to initialize game: ' + error.message;
-                document.body.appendChild(errorDiv);
+                document.getElementById('loadingText').textContent = `Error: ${error.message}`;
+                document.getElementById('loadingText').style.color = '#ff6b6b';
             }
         }
 
         // Start the game when the page loads
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-            // Document is already ready, run immediately
-            setTimeout(initGame, 1);
-        } else {
-            // Wait for the document to be ready
-            document.addEventListener('DOMContentLoaded', initGame);
-        }
+        window.addEventListener('DOMContentLoaded', initGame);
     </script>
 </body>
 </html>
