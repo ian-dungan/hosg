@@ -43,15 +43,27 @@
     <div id="settings-panel" class="panel"></div>
     <div id="pause-menu"></div>
 
-    <script src="https://cdn.babylonjs.com/babylon.js"></script>
-    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-    <script src="https://cdn.babylonjs.com/cannon.js"></script>
-    <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-    <script src="js/config.js"></script>
-    <script src="js/world.js"></script>
-    <script src="js/player.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/network.js"></script>
-    <script src="js/game.js"></script>
+    <!-- Babylon core + loaders + cannon -->
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/loaders/babylon.glTF2FileLoader.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+<!-- Optional: Supabase (if you actually want backend) -->
+<script src="https://cdn.jsdelivr.net/npm/supabase@2.0.0-rc.3/dist/umd/supabase.min.js"></script>
+
+<!-- Your new modular game files (note: no /js/ folder since they’re at root) -->
+<script src="config.js"></script>
+<script src="world.js"></script>
+<script src="player.js"></script>
+<script src="ui.js"></script>
+<script src="network.js"></script>
+<script src="game.js"></script>
+
+<script>
+  window.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.getElementById('renderCanvas');
+    new Game(canvas);
+  });
+</script>
 </body>
 </html>
