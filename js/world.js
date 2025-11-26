@@ -1,36 +1,87 @@
-// world.js - World management
+// world.js - Enhanced world with beautiful terrain
+
 class World {
     constructor(scene) {
         this.scene = scene;
         this.ground = null;
+        this.environment = null;
         this.chunks = new Map();
         this.init();
     }
 
-    init() {
-        this.createGround();
-        this.loadInitialChunks();
+    async init() {
+        await this.createTerrain();
+        this.createSkybox();
+        this.createEnvironment();
     }
 
-    createGround() {
-        // Create a simple green ground
+    async createTerrain() {
+        // Create a large ground
         this.ground = BABYLON.MeshBuilder.CreateGround('ground', {
-            width: 100,
-            height: 100,
-            subdivisions: 20  // More subdivisions for better lighting
+            width: 200,
+            height: 200,
+            subdivisions: 100
         }, this.scene);
         
-        const groundMaterial = new BABYLON.StandardMaterial('groundMaterial', this.scene);
-        groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.3); // Green color
-        groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // Reduce shininess
+        // Create a material with multiple textures
+        const groundMaterial = new BABYLON.StandardMaterial("groundMaterial", this.scene);
         
-        // Add some basic bumpiness
-        groundMaterial.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/grassn.png", this.scene);
-        groundMaterial.bumpTexture.level = 0.2;
+        // Base texture
+        const groundTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/grass.jpg", this.scene);
+        groundTexture.uScale = 20;
+        groundTexture.vScale = 20;
+        groundMaterial.diffuseTexture = groundTexture;
+        
+        // Normal map for detail
+        const groundNormal = new BABYLON.Texture("https://assets.babylonjs.com/environments/grassn.png", this.scene);
+        groundNormal.uScale = 20;
+        groundNormal.vScale = 20;
+        groundMaterial.bumpTexture = groundNormal;
+        groundMaterial.invertNormalMapX = true;
+        groundMaterial.invertNormalMapY = true;
+        
+        // Add some specular
+        groundMaterial.specularPower = 1;
+        groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
         
         this.ground.material = groundMaterial;
         this.ground.receiveShadows = true;
+        
+        // Add physics
         this.ground.checkCollisions = true;
+        this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.ground,
+            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            { mass: 0, restitution: 0.9 },
+            this.scene
+        );
+        
+        // Add some height variation
+        const noiseTexture = new BABYLON.NoiseProceduralTexture("perlin", 256, this.scene);
+        noiseTexture.animationSpeedFactor = 0;
+        noiseTexture.octaves = 4;
+        noiseTexture.persistence = 0.2;
+        
+        // Create heightmap
+        const positions = this.ground.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+        for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i];
+            const z = positions[i + 2];
+            
+            // Generate some hills and valleys
+            let height = 0;
+            height += Math.sin(x * 0.05) * 2;
+            height += Math.cos(z * 0.05) * 2;
+            height += Math.sin(x * 0.1) * Math.cos(z * 0.1) * 3;
+            
+            // Add some random noise
+            height += (Math.random() - 0.5) * 0.5;
+            
+            positions[i + 1] = height;
+        }
+        
+        this.ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
+        this.ground.convertToFlatShadedMesh();
     }
 
     createSkybox() {
@@ -38,65 +89,135 @@ class World {
         const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
         skyboxMaterial.backFaceCulling = false;
         
-        // Create a simple gradient sky
-        skyboxMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.7, 1.0); // Light blue
-        skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-        skyboxMaterial.disableLighting = true; // Sky should not be affected by lights
-        
-        // Add some simple clouds
-        const cloudTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/cloud.png", this.scene);
-        cloudTexture.level = 0.2; // Slight cloud effect
-        skyboxMaterial.reflectionTexture = cloudTexture;
+        // Use a high-quality skybox texture
+        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(
+            "https://assets.babylonjs.com/textures/skybox/TropicalSunnyDay", 
+            this.scene
+        );
         skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        
+        skyboxMaterial.disableLighting = true;
         skybox.material = skyboxMaterial;
-        return skybox;
     }
 
-    loadInitialChunks() {
-        // Load initial chunks around the player
-        const viewDistance = CONFIG.WORLD.VIEW_DISTANCE;
+    createEnvironment() {
+        // Add some trees
+        this.addTrees();
         
-        for (let x = -viewDistance; x <= viewDistance; x++) {
-            for (let z = -viewDistance; z <= viewDistance; z++) {
-                this.loadChunk(x, 0, z);
-            }
+        // Add some rocks
+        this.addRocks();
+        
+        // Add a water plane
+        this.addWater();
+    }
+
+    addTrees() {
+        // Create a tree prototype
+        const createTree = (x, z) => {
+            // Trunk
+            const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk", {
+                height: 2,
+                diameterBottom: 0.5,
+                diameterTop: 0.3
+            }, this.scene);
+            trunk.position = new BABYLON.Vector3(x, 1, z);
+            
+            const trunkMaterial = new BABYLON.StandardMaterial("trunkMaterial", this.scene);
+            trunkMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.2, 0.1);
+            trunk.material = trunkMaterial;
+            
+            // Leaves
+            const leaves = BABYLON.MeshBuilder.CreateSphere("leaves", {
+                diameter: 3,
+                segments: 8
+            }, this.scene);
+            leaves.position = new BABYLON.Vector3(x, 3.5, z);
+            
+            const leavesMaterial = new BABYLON.StandardMaterial("leavesMaterial", this.scene);
+            leavesMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.1);
+            leavesMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+            leaves.material = leavesMaterial;
+            
+            return [trunk, leaves];
+        };
+        
+        // Add some random trees
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * 180 - 90;
+            const z = Math.random() * 180 - 90;
+            createTree(x, 0, z);
         }
     }
 
-    loadChunk(x, y, z) {
-        const chunkId = `${x},${y},${z}`;
-        if (this.chunks.has(chunkId)) return;
+    addRocks() {
+        // Create a rock prototype
+        const createRock = (x, z) => {
+            const rock = BABYLON.MeshBuilder.CreateIcoSphere("rock", {
+                radius: 0.5 + Math.random(),
+                subdivisions: 2
+            }, this.scene);
+            
+            rock.position = new BABYLON.Vector3(
+                x + (Math.random() - 0.5) * 5,
+                0.5,
+                z + (Math.random() - 0.5) * 5
+            );
+            
+            rock.rotation = new BABYLON.Vector3(
+                Math.random() * Math.PI,
+                Math.random() * Math.PI,
+                Math.random() * Math.PI
+            );
+            
+            const rockMaterial = new BABYLON.StandardMaterial("rockMaterial", this.scene);
+            rockMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+            rockMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+            rock.material = rockMaterial;
+            
+            return rock;
+        };
+        
+        // Add some random rocks
+        for (let i = 0; i < 100; i++) {
+            const x = Math.random() * 180 - 90;
+            const z = Math.random() * 180 - 90;
+            createRock(x, z);
+        }
+    }
 
-        // Create a simple chunk
-        const chunk = BABYLON.MeshBuilder.CreateBox(`chunk_${chunkId}`, {
-            width: CONFIG.WORLD.CHUNK_SIZE - 1,
-            height: 1,
-            depth: CONFIG.WORLD.CHUNK_SIZE - 1
+    addWater() {
+        // Create a water material
+        const waterMesh = BABYLON.MeshBuilder.CreateGround("water", {
+            width: 200,
+            height: 200,
+            subdivisions: 100
         }, this.scene);
         
-        chunk.position = new BABYLON.Vector3(
-            x * CONFIG.WORLD.CHUNK_SIZE,
-            y * CONFIG.WORLD.CHUNK_SIZE,
-            z * CONFIG.WORLD.CHUNK_SIZE
-        );
+        waterMesh.position.y = -1; // Slightly below the ground
         
-        const material = new BABYLON.StandardMaterial(`chunkMat_${chunkId}`, this.scene);
-        material.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
-        chunk.material = material;
-        chunk.checkCollisions = true;
+        const waterMaterial = new BABYLON.WaterMaterial("waterMaterial", this.scene);
+        waterMaterial.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/waterbump.png", this.scene);
+        waterMaterial.windForce = -5;
+        waterMaterial.waveHeight = 0.5;
+        waterMaterial.bumpHeight = 0.1;
+        waterMaterial.waveLength = 0.1;
+        waterMaterial.waveSpeed = 50;
+        waterMaterial.colorBlendFactor = 0;
+        waterMaterial.addToRenderList(this.ground);
         
-        this.chunks.set(chunkId, chunk);
+        waterMesh.material = waterMaterial;
     }
 
     update(deltaTime) {
-        // Update world logic here
+        // Update any world animations here
     }
 
     dispose() {
         // Clean up resources
         if (this.ground) {
             this.ground.dispose();
+        }
+        if (this.environment) {
+            this.environment.dispose();
         }
         this.chunks.forEach(chunk => chunk.dispose());
         this.chunks.clear();
