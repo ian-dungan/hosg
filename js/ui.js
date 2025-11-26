@@ -1,94 +1,91 @@
-// ui.js - User interface
-export class UI {
+// ui.js
+class UI {
     constructor(scene, player) {
         this.scene = scene;
         this.player = player;
-        this.elements = {};
-        
+        this.healthBar = null;
+        this.healthText = null;
+        this.messageElement = null;
         this.init();
     }
 
     init() {
-        // Create health bar
         this.createHealthBar();
-        
-        // Create minimap
-        this.createMinimap();
+        this.createMessageElement();
     }
 
     createHealthBar() {
-        // Create health bar elements
-        const healthBar = document.createElement('div');
-        healthBar.id = 'health-bar';
-        healthBar.style.position = 'absolute';
-        healthBar.style.bottom = '20px';
-        healthBar.style.left = '20px';
-        healthBar.style.width = '200px';
-        healthBar.style.height = '20px';
-        healthBar.style.backgroundColor = '#333';
-        healthBar.style.border = '2px solid #000';
-        
-        const healthFill = document.createElement('div');
-        healthFill.id = 'health-fill';
-        healthFill.style.width = '100%';
-        healthFill.style.height = '100%';
-        healthFill.style.backgroundColor = '#f00';
-        healthFill.style.transition = 'width 0.3s';
-        
-        healthBar.appendChild(healthFill);
-        document.body.appendChild(healthBar);
-        
-        this.elements.healthBar = healthBar;
-        this.elements.healthFill = healthFill;
+        // Create health bar container
+        const container = document.createElement('div');
+        container.style.position = 'absolute';
+        container.style.top = '20px';
+        container.style.left = '20px';
+        container.style.width = '200px';
+        container.style.height = '30px';
+        container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        container.style.borderRadius = '5px';
+        container.style.overflow = 'hidden';
+        document.body.appendChild(container);
+
+        // Create health bar
+        this.healthBar = document.createElement('div');
+        this.healthBar.style.height = '100%';
+        this.healthBar.style.width = '100%';
+        this.healthBar.style.backgroundColor = '#4CAF50';
+        this.healthBar.style.transition = 'width 0.3s';
+        container.appendChild(this.healthBar);
+
+        // Create health text
+        this.healthText = document.createElement('div');
+        this.healthText.style.position = 'absolute';
+        this.healthText.style.top = '0';
+        this.healthText.style.left = '0';
+        this.healthText.style.width = '100%';
+        this.healthText.style.height = '100%';
+        this.healthText.style.display = 'flex';
+        this.healthText.style.alignItems = 'center';
+        this.healthText.style.justifyContent = 'center';
+        this.healthText.style.color = 'white';
+        this.healthText.style.fontWeight = 'bold';
+        container.appendChild(this.healthText);
     }
 
-    createMinimap() {
-        // Create minimap container
-        const minimap = document.createElement('div');
-        minimap.id = 'minimap';
-        minimap.style.position = 'absolute';
-        minimap.style.top = '20px';
-        minimap.style.right = '20px';
-        minimap.style.width = '150px';
-        minimap.style.height = '150px';
-        minimap.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-        minimap.style.border = '2px solid #fff';
+    createMessageElement() {
+        this.messageElement = document.createElement('div');
+        this.messageElement.className = 'message';
+        document.body.appendChild(this.messageElement);
+    }
+
+    showMessage(text, type = 'info') {
+        this.messageElement.textContent = text;
+        this.messageElement.className = `message ${type}`;
+        this.messageElement.style.display = 'block';
         
-        document.body.appendChild(minimap);
-        this.elements.minimap = minimap;
+        // Hide message after 3 seconds
+        setTimeout(() => {
+            this.messageElement.style.display = 'none';
+        }, 3000);
     }
 
     update() {
         // Update health bar
-        if (this.elements.healthFill) {
+        if (this.player && this.healthBar && this.healthText) {
             const healthPercent = (this.player.health / CONFIG.PLAYER.START_HEALTH) * 100;
-            this.elements.healthFill.style.width = `${healthPercent}%`;
+            this.healthBar.style.width = `${healthPercent}%`;
+            this.healthBar.style.backgroundColor = 
+                healthPercent > 50 ? '#4CAF50' : 
+                healthPercent > 20 ? '#FFC107' : '#F44336';
+            this.healthText.textContent = `HP: ${Math.ceil(this.player.health)}/${CONFIG.PLAYER.START_HEALTH}`;
         }
-        
-        // Update minimap
-        // This would update player position on the minimap
-    }
-
-    showMessage(message, type = 'info') {
-        const messageElement = document.createElement('div');
-        messageElement.className = `message ${type}`;
-        messageElement.textContent = message;
-        
-        document.body.appendChild(messageElement);
-        
-        // Remove message after delay
-        setTimeout(() => {
-            messageElement.remove();
-        }, 5000);
     }
 
     dispose() {
         // Clean up UI elements
-        for (const element of Object.values(this.elements)) {
-            if (element.parentNode) {
-                element.parentNode.removeChild(element);
-            }
+        if (this.healthBar && this.healthBar.parentNode) {
+            this.healthBar.parentNode.remove();
         }
-        this.elements = {};
+        if (this.messageElement && this.messageElement.parentNode) {
+            this.messageElement.parentNode.removeChild(this.messageElement);
+        }
     }
 }
