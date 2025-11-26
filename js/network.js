@@ -1,4 +1,4 @@
-// network.js
+// network.js - Network communication
 class Network {
     constructor() {
         this.socket = null;
