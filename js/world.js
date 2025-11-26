@@ -23,46 +23,32 @@ class World {
             subdivisions: 100
         }, this.scene);
         
-        // Create a material with multiple textures
+        // Create a material with procedural textures
         const groundMaterial = new BABYLON.StandardMaterial("groundMaterial", this.scene);
         
-        // Base texture
-        const groundTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/grass.jpg", this.scene);
-        groundTexture.uScale = 20;
-        groundTexture.vScale = 20;
-        groundMaterial.diffuseTexture = groundTexture;
+        // Create a grass-like texture procedurally
+        const grassTexture = new BABYLON.NoiseProceduralTexture("grassNoise", 512, this.scene);
+        grassTexture.octaves = 3;
+        grassTexture.persistence = 0.8;
+        grassTexture.animationSpeedFactor = 0;
         
-        // Normal map for detail
-        const groundNormal = new BABYLON.Texture("https://assets.babylonjs.com/environments/grassn.png", this.scene);
-        groundNormal.uScale = 20;
-        groundNormal.vScale = 20;
-        groundMaterial.bumpTexture = groundNormal;
-        groundMaterial.invertNormalMapX = true;
-        groundMaterial.invertNormalMapY = true;
+        // Create a green color for grass
+        const grassColor = new BABYLON.Color3(0.2, 0.5, 0.2);
         
-        // Add some specular
-        groundMaterial.specularPower = 1;
-        groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+        groundMaterial.diffuseTexture = grassTexture;
+        groundMaterial.diffuseColor = grassColor;
+        
+        // Add some bump mapping
+        const bumpTexture = new BABYLON.NoiseProceduralTexture("bumpNoise", 512, this.scene);
+        bumpTexture.octaves = 4;
+        bumpTexture.persistence = 0.2;
+        groundMaterial.bumpTexture = bumpTexture;
+        groundMaterial.bumpTexture.level = 0.1;
         
         this.ground.material = groundMaterial;
         this.ground.receiveShadows = true;
         
-        // Add physics
-        this.ground.checkCollisions = true;
-        this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.ground,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
-            { mass: 0, restitution: 0.9 },
-            this.scene
-        );
-        
         // Add some height variation
-        const noiseTexture = new BABYLON.NoiseProceduralTexture("perlin", 256, this.scene);
-        noiseTexture.animationSpeedFactor = 0;
-        noiseTexture.octaves = 4;
-        noiseTexture.persistence = 0.2;
-        
-        // Create heightmap
         const positions = this.ground.getVerticesData(BABYLON.VertexBuffer.PositionKind);
         for (let i = 0; i < positions.length; i += 3) {
             const x = positions[i];
@@ -70,9 +56,9 @@ class World {
             
             // Generate some hills and valleys
             let height = 0;
-            height += Math.sin(x * 0.05) * 2;
-            height += Math.cos(z * 0.05) * 2;
-            height += Math.sin(x * 0.1) * Math.cos(z * 0.1) * 3;
+            height += Math.sin(x * 0.02) * 2;
+            height += Math.cos(z * 0.02) * 2;
+            height += Math.sin(x * 0.05) * Math.cos(z * 0.05) * 3;
             
             // Add some random noise
             height += (Math.random() - 0.5) * 0.5;
@@ -82,21 +68,40 @@ class World {
         
         this.ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
         this.ground.convertToFlatShadedMesh();
+        
+        // Add physics
+        this.ground.checkCollisions = true;
+        this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.ground,
+            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            { mass: 0, restitution: 0.3 },
+            this.scene
+        );
     }
 
     createSkybox() {
+        // Use a simple color skybox instead of texture
         const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
         const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
         skyboxMaterial.backFaceCulling = false;
         
-        // Use a high-quality skybox texture
-        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(
-            "https://assets.babylonjs.com/textures/skybox/TropicalSunnyDay", 
-            this.scene
-        );
-        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+        // Create a gradient sky
+        skyboxMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.8); // Blue sky
+        skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
         skyboxMaterial.disableLighting = true;
+        
+        // Add some simple clouds with noise
+        const noiseTexture = new BABYLON.NoiseProceduralTexture("clouds", 512, this.scene);
+        noiseTexture.animationSpeedFactor = 0.01;
+        noiseTexture.persistence = 0.2;
+        noiseTexture.brightness = 0.7;
+        noiseTexture.octaves = 4;
+        
+        skyboxMaterial.reflectionTexture = noiseTexture;
+        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+        
         skybox.material = skyboxMaterial;
+        return skybox;
     }
 
     createEnvironment() {
@@ -189,22 +194,33 @@ class World {
         const waterMesh = BABYLON.MeshBuilder.CreateGround("water", {
             width: 200,
             height: 200,
-            subdivisions: 100
+            subdivisions: 50
         }, this.scene);
         
-        waterMesh.position.y = -1; // Slightly below the ground
+        waterMesh.position.y = -0.5; // Slightly below the ground
         
-        const waterMaterial = new BABYLON.WaterMaterial("waterMaterial", this.scene);
-        waterMaterial.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/waterbump.png", this.scene);
-        waterMaterial.windForce = -5;
-        waterMaterial.waveHeight = 0.5;
-        waterMaterial.bumpHeight = 0.1;
-        waterMaterial.waveLength = 0.1;
-        waterMaterial.waveSpeed = 50;
-        waterMaterial.colorBlendFactor = 0;
-        waterMaterial.addToRenderList(this.ground);
+        // Create a simple water material
+        const waterMaterial = new BABYLON.StandardMaterial("waterMaterial", this.scene);
+        waterMaterial.alpha = 0.7;
+        waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.5);
+        waterMaterial.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+        waterMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.1, 0.3);
+        waterMaterial.alphaMode = BABYLON.Engine.ALPHA_COMBINE;
+        
+        // Add some wave effect
+        waterMaterial.bumpTexture = new BABYLON.NoiseProceduralTexture("waterBump", 256, this.scene);
+        waterMaterial.bumpTexture.level = 0.1;
+        waterMaterial.bumpTexture.animationSpeedFactor = 0.1;
         
         waterMesh.material = waterMaterial;
+        
+        // Animate the water
+        let time = 0;
+        this.scene.registerBeforeRender(() => {
+            time += 0.01;
+            waterMesh.rotation.z = Math.sin(time * 0.1) * 0.1;
+            waterMesh.rotation.x = Math.cos(time * 0.05) * 0.1;
+        });
     }
 
     update(deltaTime) {
@@ -223,3 +239,6 @@ class World {
         this.chunks.clear();
     }
 }
+
+// Make World globally available
+window.World = World;
