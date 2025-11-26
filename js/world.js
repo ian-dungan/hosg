@@ -1,37 +1,35 @@
-// world.js - Game world management
-import { Vector3, MeshBuilder, StandardMaterial, Color3 } from '@babylonjs/core';
+// world.js
+// Using global BABYLON object from CDN
+const { Vector3, MeshBuilder, StandardMaterial, Color3 } = BABYLON;
 
-export class World {
+class World {
     constructor(scene) {
         this.scene = scene;
+        this.ground = null;
         this.chunks = new Map();
-        this.entities = [];
-        
         this.init();
     }
 
     init() {
-        // Create ground
         this.createGround();
-        
-        // Load initial chunks
         this.loadInitialChunks();
     }
 
     createGround() {
-        const ground = MeshBuilder.CreateGround('ground', {
+        // Create a simple ground
+        this.ground = MeshBuilder.CreateGround('ground', {
             width: 100,
             height: 100
         }, this.scene);
         
-        const material = new StandardMaterial('groundMaterial', this.scene);
-        material.diffuseColor = new Color3(0.2, 0.6, 0.3);
-        ground.material = material;
+        const groundMaterial = new StandardMaterial('groundMaterial', this.scene);
+        groundMaterial.diffuseColor = new Color3(0.2, 0.6, 0.3);
+        this.ground.material = groundMaterial;
+        this.ground.checkCollisions = true;
     }
 
     loadInitialChunks() {
-        // Load chunks around the player
-        const chunkSize = CONFIG.WORLD.CHUNK_SIZE;
+        // Load initial chunks around the player
         const viewDistance = CONFIG.WORLD.VIEW_DISTANCE;
         
         for (let x = -viewDistance; x <= viewDistance; x++) {
@@ -43,37 +41,39 @@ export class World {
 
     loadChunk(x, y, z) {
         const chunkId = `${x},${y},${z}`;
-        
-        // Skip if chunk already loaded
         if (this.chunks.has(chunkId)) return;
+
+        // Create a simple chunk
+        const chunk = MeshBuilder.CreateBox(`chunk_${chunkId}`, {
+            width: CONFIG.WORLD.CHUNK_SIZE - 1,
+            height: 1,
+            depth: CONFIG.WORLD.CHUNK_SIZE - 1
+        }, this.scene);
         
-        // Create chunk
-        const chunk = {
-            x, y, z,
-            meshes: []
-        };
+        chunk.position = new Vector3(
+            x * CONFIG.WORLD.CHUNK_SIZE,
+            y * CONFIG.WORLD.CHUNK_SIZE,
+            z * CONFIG.WORLD.CHUNK_SIZE
+        );
         
-        // Add chunk to map
+        const material = new StandardMaterial(`chunkMat_${chunkId}`, this.scene);
+        material.diffuseColor = new Color3(0.8, 0.8, 0.8);
+        chunk.material = material;
+        chunk.checkCollisions = true;
+        
         this.chunks.set(chunkId, chunk);
-        
-        // Load chunk data and create meshes
-        // This is where you'd load terrain data from your game server
     }
 
     update(deltaTime) {
-        // Update entities
-        for (const entity of this.entities) {
-            if (entity.update) entity.update(deltaTime);
-        }
+        // Update world logic here
     }
 
     dispose() {
-        // Clean up all chunks
-        for (const chunk of this.chunks.values()) {
-            for (const mesh of chunk.meshes) {
-                mesh.dispose();
-            }
+        // Clean up resources
+        if (this.ground) {
+            this.ground.dispose();
         }
+        this.chunks.forEach(chunk => chunk.dispose());
         this.chunks.clear();
     }
 }
