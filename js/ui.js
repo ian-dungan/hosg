@@ -1,4 +1,4 @@
-// ui.js
+// ui.js - User Interface
 class UI {
     constructor(scene, player) {
         this.scene = scene;
