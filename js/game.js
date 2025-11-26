@@ -52,16 +52,30 @@ class Game {
         this.camera = new BABYLON.ArcRotateCamera(
             "camera", 
             -Math.PI / 2, 
-            Math.PI / 2, 
-            10, 
+            Math.PI / 3, 
+            15, 
             BABYLON.Vector3.Zero(), 
             this.scene
         );
+        
+        // Position the camera
+        this.camera.setPosition(new BABYLON.Vector3(0, 10, -20));
         this.camera.attachControl(this.canvas, true);
+        
+        // Camera settings
         this.camera.lowerRadiusLimit = 5;
         this.camera.upperRadiusLimit = 100;
-        this.camera.wheelDeltaPercentage = 0.01;
+        this.camera.wheelPrecision = 50;
+        this.camera.panningSensibility = 50;
         this.camera.upperBetaLimit = Math.PI / 2;
+        
+        // Enable collision
+        this.camera.checkCollisions = true;
+        this.camera.applyGravity = true;
+        this.camera.ellipsoid = new BABYLON.Vector3(1, 1, 1);
+        
+        // Lock camera to player
+        this.scene.activeCamera = this.camera;
     }
 
     setupLighting() {
@@ -86,27 +100,22 @@ class Game {
         
         // Shadows
         this.sunLight.shadowEnabled = true;
-        const shadowGenerator = new BABYLON.ShadowGenerator(2048, this.sunLight);
-        shadowGenerator.useBlurExponentialShadowMap = true;
-        shadowGenerator.blurKernel = 32;
-        shadowGenerator.normalBias = 0.05;
+        this.shadowGenerator = new BABYLON.ShadowGenerator(1024, this.sunLight);
+        this.shadowGenerator.useBlurExponentialShadowMap = true;
+        this.shadowGenerator.blurKernel = 32;
         
-        // Store shadow generator for later use
-        this.shadowGenerator = shadowGenerator;
+        // Ambient light for better lighting
+        const ambientLight = new BABYLON.HemisphericLight(
+            "ambient",
+            new BABYLON.Vector3(0, 1, 0),
+            this.scene
+        );
+        ambientLight.intensity = 0.3;
     }
 
     async setupEnvironment() {
-        // Create skybox
-        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
-        const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
-        skyboxMaterial.backFaceCulling = false;
-        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(
-            "https://assets.babylonjs.com/textures/skybox/skybox", 
-            this.scene
-        );
-        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        skyboxMaterial.disableLighting = true;
-        skybox.material = skyboxMaterial;
+        // Setup environment
+        await this.world.init();
         
         // Add some fog
         this.scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
@@ -114,7 +123,7 @@ class Game {
         this.scene.fogStart = 20;
         this.scene.fogEnd = 100;
         
-        // Add some post-processing
+        // Add post-processing
         this.setupPostProcessing();
     }
 
@@ -140,27 +149,6 @@ class Game {
         pipeline.bloomWeight = 0.5;
         pipeline.bloomKernel = 64;
         pipeline.bloomScale = 0.5;
-        
-        // Add depth of field
-        pipeline.depthOfFieldEnabled = true;
-        pipeline.depthOfField.fStop = 1.4;
-        pipeline.depthOfField.focalLength = 100;
-        pipeline.depthOfField.focusDistance = 50;
-    }
-
-    async loadAssets() {
-        // Load any additional game assets here
-        const assetsManager = new BABYLON.AssetsManager(this.scene);
-        
-        // Example: Load a character model
-        // const characterTask = assetsManager.addMeshTask("character", "", "models/", "character.glb");
-        // characterTask.onSuccess = (task) => {
-        //     task.loadedMeshes[0].scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
-        //     this.player.mesh = task.loadedMeshes[0];
-        //     this.shadowGenerator.addShadowCaster(this.player.mesh);
-        // };
-        
-        await assetsManager.loadAsync();
     }
 
     update() {
