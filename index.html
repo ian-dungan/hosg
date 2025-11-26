@@ -1,10 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8" />
     <title>Game</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Babylon.js -->
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+
     <style>
         html, body {
             width: 100%;
@@ -12,25 +17,28 @@
             margin: 0;
             padding: 0;
             overflow: hidden;
+            background: #000;
         }
+
         #renderCanvas {
             width: 100%;
             height: 100%;
             touch-action: none;
+            display: block;
         }
     </style>
 </head>
 <body>
     <canvas id="renderCanvas"></canvas>
-    
+
     <!-- Load game scripts in order -->
     <script src="js/core.js"></script>
     <script src="js/player.js"></script>
     <script src="js/environment.js"></script>
     <script src="js/ui-network.js"></script>
-    
+
     <script>
-        // Game initialization is handled in core.js
+        // Game initialization is handled in core.js (DOMContentLoaded listener)
     </script>
 </body>
 </html>
