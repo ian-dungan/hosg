@@ -1,8 +1,8 @@
-// config.js - Enhanced configuration
+// config.js - Core game configuration
 const CONFIG = {
     // Core settings
     DEBUG: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1',
-    VERSION: '1.1.0',
+    VERSION: '1.1.1',
     TICK_RATE: 60,
     MAX_PLAYERS: 100,
     
@@ -20,7 +20,7 @@ const CONFIG = {
     PLAYER: {
         START_HEALTH: 100,
         START_MANA: 50,
-        MOVEMENT_SPEED: 5.0,
+        MOVEMENT_SPEED: 10.0,
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 5.0,
         GRAVITY: -9.81
@@ -42,7 +42,7 @@ const CONFIG = {
     GRAPHICS: {
         SHADOWS: {
             ENABLED: true,
-            SIZE: 2048,
+            SIZE: 1024,
             BLUR_KERNEL: 32
         },
         LIGHTING: {
@@ -51,7 +51,7 @@ const CONFIG = {
             SUN_DIRECTION: { x: -1, y: -2, z: -1 }
         },
         POST_PROCESSING: {
-            ENAABLED: true,
+            ENABLED: true,
             BLOOM: true,
             SSAO: true,
             FXAA: true
