@@ -26,38 +26,51 @@ class Player {
     }
 
     createPlayerMesh() {
-        // Create capsule for player
-        this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
-            height: 1.8,
-            radius: 0.3
-        }, this.scene);
-        
+        // Create root transform for the player
+        this.mesh = new BABYLON.TransformNode('player', this.scene);
         this.mesh.position.y = 5; // Start above ground
-        this.mesh.checkCollisions = true;
         
-        // Setup ellipsoid for collisions
-        this.mesh.ellipsoid = new BABYLON.Vector3(0.3, 0.9, 0.3);
+        // Create human-like body parts
+        this.createHumanBody();
+        
+        // Setup ellipsoid for collisions on the root node
+        this.mesh.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
         this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
 
-        // Setup physics impostor
+        // Create invisible collision capsule for physics
+        this.collisionMesh = BABYLON.MeshBuilder.CreateCapsule('playerCollision', {
+            height: 1.8,
+            radius: 0.4
+        }, this.scene);
+        this.collisionMesh.position = this.mesh.position.clone();
+        this.collisionMesh.visibility = 0; // Invisible
+        this.collisionMesh.checkCollisions = true;
+
+        // Setup physics impostor on collision mesh
         const physicsEngine = this.scene.getPhysicsEngine();
         if (physicsEngine && typeof CANNON !== 'undefined') {
             try {
-                this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                    this.mesh,
+                this.collisionMesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    this.collisionMesh,
                     BABYLON.PhysicsImpostor.CylinderImpostor,
                     { 
-                        mass: 1, 
-                        friction: 0.5, 
-                        restitution: 0.1 
+                        mass: 80, // More realistic weight
+                        friction: 0.9, // Higher friction to prevent sliding
+                        restitution: 0.0 // No bouncing
                     },
                     this.scene
                 );
                 
-                // Lock rotation to prevent player from tipping over
-                if (this.mesh.physicsImpostor.physicsBody) {
-                    this.mesh.physicsImpostor.physicsBody.fixedRotation = true;
-                    this.mesh.physicsImpostor.physicsBody.updateMassProperties();
+                // Lock rotation and configure physics body
+                if (this.collisionMesh.physicsImpostor.physicsBody) {
+                    this.collisionMesh.physicsImpostor.physicsBody.fixedRotation = true;
+                    this.collisionMesh.physicsImpostor.physicsBody.updateMassProperties();
+                    
+                    // Lock X and Z rotation to prevent tipping
+                    this.collisionMesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+                    
+                    // Add linear damping to prevent infinite sliding
+                    this.collisionMesh.physicsImpostor.physicsBody.linearDamping = 0.5;
                 }
                 
                 logDebug('[Player] Physics impostor created successfully');
@@ -67,9 +80,68 @@ class Player {
         } else {
             console.warn('[Player] Physics engine not available, using basic collisions');
         }
+    }
+
+    createHumanBody() {
+        // Body (torso)
+        const torso = BABYLON.MeshBuilder.CreateBox('torso', {
+            width: 0.5,
+            height: 0.7,
+            depth: 0.3
+        }, this.scene);
+        torso.position.y = 1.2;
+        torso.parent = this.mesh;
         
-        // Make player invisible (third-person view)
-        this.mesh.visibility = 0.3;
+        const torsoMat = new BABYLON.StandardMaterial('torsoMat', this.scene);
+        torsoMat.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.6); // Blue shirt
+        torso.material = torsoMat;
+        
+        // Head
+        const head = BABYLON.MeshBuilder.CreateSphere('head', {
+            diameter: 0.35,
+            segments: 16
+        }, this.scene);
+        head.position.y = 1.75;
+        head.parent = this.mesh;
+        
+        const headMat = new BABYLON.StandardMaterial('headMat', this.scene);
+        headMat.diffuseColor = new BABYLON.Color3(0.9, 0.7, 0.6); // Skin tone
+        head.material = headMat;
+        
+        // Arms
+        for (let side of [-1, 1]) {
+            const arm = BABYLON.MeshBuilder.CreateCylinder(`arm${side}`, {
+                height: 0.6,
+                diameter: 0.12
+            }, this.scene);
+            arm.position = new BABYLON.Vector3(side * 0.35, 1.15, 0);
+            arm.parent = this.mesh;
+            arm.material = headMat;
+        }
+        
+        // Legs
+        for (let side of [-1, 1]) {
+            const leg = BABYLON.MeshBuilder.CreateCylinder(`leg${side}`, {
+                height: 0.8,
+                diameter: 0.15
+            }, this.scene);
+            leg.position = new BABYLON.Vector3(side * 0.15, 0.4, 0);
+            leg.parent = this.mesh;
+            
+            const legMat = new BABYLON.StandardMaterial(`legMat${side}`, this.scene);
+            legMat.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.3); // Dark pants
+            leg.material = legMat;
+        }
+        
+        // Store body parts for animation
+        this.bodyParts = {
+            torso,
+            head,
+            leftArm: this.mesh.getChildMeshes().find(m => m.name === 'arm-1'),
+            rightArm: this.mesh.getChildMeshes().find(m => m.name === 'arm1'),
+            leftLeg: this.mesh.getChildMeshes().find(m => m.name === 'leg-1'),
+            rightLeg: this.mesh.getChildMeshes().find(m => m.name === 'leg1')
+        };
     }
 
     setupCamera() {
@@ -128,32 +200,46 @@ class Player {
     }
 
     checkGrounded() {
-        if (!this.mesh) return false;
+        if (!this.collisionMesh) return false;
         
         const now = Date.now();
         if (now - this.lastGroundCheck < 100) return this.grounded;
         
         this.lastGroundCheck = now;
         
-        // Raycast downward to check if on ground
+        // Raycast downward from collision mesh to check if on ground
         const ray = new BABYLON.Ray(
-            this.mesh.position,
+            this.collisionMesh.position,
             new BABYLON.Vector3(0, -1, 0),
-            1.2
+            1.0  // Check 1 unit below
         );
         
         const hit = this.scene.pickWithRay(ray, (mesh) => {
-            return mesh !== this.mesh && mesh.checkCollisions;
+            // Check against terrain and objects with collision, but not player
+            return mesh !== this.mesh && 
+                   mesh !== this.collisionMesh && 
+                   mesh.checkCollisions;
         });
         
-        this.grounded = hit && hit.hit && hit.distance < 1.2;
+        // Also verify with physics velocity
+        let isStable = false;
+        if (this.collisionMesh.physicsImpostor) {
+            const velocity = this.collisionMesh.physicsImpostor.getLinearVelocity();
+            isStable = Math.abs(velocity.y) < 1.0; // Not falling fast
+        }
+        
+        this.grounded = (hit && hit.hit && hit.distance < 1.0) || isStable;
         return this.grounded;
     }
 
     update(deltaTime) {
-        if (!this.mesh) return;
+        if (!this.mesh || !this.collisionMesh) return;
 
-        // Check if grounded
+        // Sync visual mesh with collision mesh
+        this.mesh.position.copyFrom(this.collisionMesh.position);
+        this.mesh.rotation.y = this.collisionMesh.rotation.y;
+
+        // Improved ground check
         this.isOnGround = this.checkGrounded();
 
         // Get camera direction for movement
@@ -177,22 +263,34 @@ class Player {
                 this.moveSpeed * CONFIG.PLAYER.RUN_MULTIPLIER : 
                 this.moveSpeed;
             
-            const velocity = moveDirection.scale(speed * deltaTime * 60);
-            
-            if (this.mesh.physicsImpostor) {
-                // Use physics
-                const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                this.mesh.physicsImpostor.setLinearVelocity(
+            if (this.collisionMesh.physicsImpostor) {
+                // Use physics - apply force for more natural movement
+                const currentVelocity = this.collisionMesh.physicsImpostor.getLinearVelocity();
+                
+                // Only update horizontal velocity, keep vertical (gravity) intact
+                const targetVelocity = moveDirection.scale(speed);
+                
+                this.collisionMesh.physicsImpostor.setLinearVelocity(
                     new BABYLON.Vector3(
-                        velocity.x,
-                        currentVelocity.y,
-                        velocity.z
+                        targetVelocity.x,
+                        currentVelocity.y, // Preserve gravity/jumping
+                        targetVelocity.z
                     )
                 );
+                
+                // Orient player to movement direction
+                if (moveDirection.length() > 0.1) {
+                    const targetAngle = Math.atan2(moveDirection.x, moveDirection.z);
+                    this.collisionMesh.rotation.y = targetAngle;
+                }
             } else {
                 // Fallback to direct movement
-                this.mesh.moveWithCollisions(velocity);
+                const velocity = moveDirection.scale(speed * deltaTime * 60);
+                this.collisionMesh.moveWithCollisions(velocity);
             }
+            
+            // Add walking animation
+            this.animateWalking(deltaTime);
         }
 
         // Handle jumping
@@ -200,8 +298,17 @@ class Player {
             this.jump();
         }
         
+        // Safety check - if player falls below -10, respawn
+        if (this.collisionMesh.position.y < -10) {
+            console.log('[Player] Fell through world, respawning');
+            this.collisionMesh.position.y = 10;
+            if (this.collisionMesh.physicsImpostor) {
+                this.collisionMesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            }
+        }
+        
         // Update camera target to follow player
-        this.camera.setTarget(this.mesh.position);
+        this.camera.setTarget(this.mesh.position.add(new BABYLON.Vector3(0, 1, 0)));
         
         // Regenerate stamina when not running
         if (!this.input.run && this.stamina < this.maxStamina) {
@@ -214,12 +321,34 @@ class Player {
         }
     }
 
-    jump() {
-        if (!this.isOnGround) return;
+    animateWalking(deltaTime) {
+        if (!this.bodyParts) return;
         
-        if (this.mesh.physicsImpostor) {
-            const velocity = this.mesh.physicsImpostor.getLinearVelocity();
-            this.mesh.physicsImpostor.setLinearVelocity(
+        // Simple walk cycle
+        this.walkCycle = (this.walkCycle || 0) + deltaTime * 5;
+        const swing = Math.sin(this.walkCycle);
+        
+        // Swing arms opposite to legs
+        if (this.bodyParts.leftArm) {
+            this.bodyParts.leftArm.rotation.x = swing * 0.5;
+        }
+        if (this.bodyParts.rightArm) {
+            this.bodyParts.rightArm.rotation.x = -swing * 0.5;
+        }
+        if (this.bodyParts.leftLeg) {
+            this.bodyParts.leftLeg.rotation.x = -swing * 0.3;
+        }
+        if (this.bodyParts.rightLeg) {
+            this.bodyParts.rightLeg.rotation.x = swing * 0.3;
+        }
+    }
+
+    jump() {
+        if (!this.isOnGround || !this.collisionMesh) return;
+        
+        if (this.collisionMesh.physicsImpostor) {
+            const velocity = this.collisionMesh.physicsImpostor.getLinearVelocity();
+            this.collisionMesh.physicsImpostor.setLinearVelocity(
                 new BABYLON.Vector3(velocity.x, this.jumpForce * 10, velocity.z)
             );
         } else {
