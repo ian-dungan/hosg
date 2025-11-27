@@ -11,7 +11,7 @@ const CONFIG = {
   },
 
   PLAYER: {
-    MOVE_SPEED: 0.1,
+    MOVE_SPEED: 0.15,
     RUN_MULTIPLIER: 1.8,
     JUMP_FORCE: 0.2,
     HEALTH: 100,

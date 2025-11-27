@@ -54,8 +54,8 @@ class Player {
                     this.collisionMesh,
                     BABYLON.PhysicsImpostor.CylinderImpostor,
                     { 
-                        mass: 80, // More realistic weight
-                        friction: 0.9, // Higher friction to prevent sliding
+                        mass: 10, // Lighter for easier movement
+                        friction: 0.1, // Very low friction for easy movement
                         restitution: 0.0 // No bouncing
                     },
                     this.scene
@@ -67,10 +67,10 @@ class Player {
                     this.collisionMesh.physicsImpostor.physicsBody.updateMassProperties();
                     
                     // Lock X and Z rotation to prevent tipping
-                    this.collisionMesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+                    this.collisionMesh.physicsImpostor.physicsBody.angularDamping = 0.99;
                     
-                    // Add linear damping to prevent infinite sliding
-                    this.collisionMesh.physicsImpostor.physicsBody.linearDamping = 0.5;
+                    // Minimal linear damping for smooth movement
+                    this.collisionMesh.physicsImpostor.physicsBody.linearDamping = 0.1;
                 }
                 
                 logDebug('[Player] Physics impostor created successfully');
@@ -264,19 +264,32 @@ class Player {
                 this.moveSpeed;
             
             if (this.collisionMesh.physicsImpostor) {
-                // Use physics - apply force for more natural movement
+                // Use impulse for more responsive movement
                 const currentVelocity = this.collisionMesh.physicsImpostor.getLinearVelocity();
                 
-                // Only update horizontal velocity, keep vertical (gravity) intact
-                const targetVelocity = moveDirection.scale(speed);
+                // Apply impulse in movement direction
+                const impulseStrength = speed * 100; // Stronger impulse
+                const impulse = moveDirection.scale(impulseStrength);
                 
-                this.collisionMesh.physicsImpostor.setLinearVelocity(
-                    new BABYLON.Vector3(
-                        targetVelocity.x,
-                        currentVelocity.y, // Preserve gravity/jumping
-                        targetVelocity.z
-                    )
+                // Apply impulse at center of mass
+                this.collisionMesh.physicsImpostor.applyImpulse(
+                    impulse,
+                    this.collisionMesh.getAbsolutePosition()
                 );
+                
+                // Limit maximum velocity to prevent runaway speed
+                const maxSpeed = speed * 80;
+                const currentSpeed = Math.sqrt(currentVelocity.x * currentVelocity.x + currentVelocity.z * currentVelocity.z);
+                if (currentSpeed > maxSpeed) {
+                    const scale = maxSpeed / currentSpeed;
+                    this.collisionMesh.physicsImpostor.setLinearVelocity(
+                        new BABYLON.Vector3(
+                            currentVelocity.x * scale,
+                            currentVelocity.y,
+                            currentVelocity.z * scale
+                        )
+                    );
+                }
                 
                 // Orient player to movement direction
                 if (moveDirection.length() > 0.1) {
