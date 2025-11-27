@@ -220,8 +220,10 @@ class World {
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
         // Add waves
-        this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
-        this.waterMaterial.bumpTexture.level = 0.5;
+        // No external bump texture to keep setup asset-free.
+        // this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
+        // this.waterMaterial.bumpTexture.level = 0.5;
+
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;

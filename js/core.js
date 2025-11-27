@@ -1,13 +1,13 @@
-// core.js - global configuration and helpers
+// Core configuration and shared helpers
 
 const CONFIG = {
-  VERSION: '1.0.0',
+  VERSION: "1.0.0",
   DEBUG: true,
 
   GAME: {
     FPS: 60,
     GRAVITY: 9.81,
-    PHYSICS_ENGINE: 'cannon'
+    PHYSICS_ENGINE: "cannon"
   },
 
   PLAYER: {
@@ -27,7 +27,7 @@ const CONFIG = {
   },
 
   NETWORK: {
-    WS_URL: 'wss://hosg.onrender.com/',
+    WS_URL: "wss://hosg.onrender.com/",
     MAX_PLAYERS: 100,
     TICK_RATE: 20,
     TIMEOUT: 30000,
@@ -35,17 +35,16 @@ const CONFIG = {
   },
 
   SUPABASE: {
-    URL: 'https://vaxfoafjjybwcxwhicla.supabase.co',
-    KEY: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
+    URL: "https://vaxfoafjjybwcxwhicla.supabase.co",
+    KEY: "sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD"
   }
 };
 
-window.CONFIG = CONFIG;
-
 function logDebug(...args) {
   if (CONFIG.DEBUG) {
-    console.log('[DEBUG]', ...args);
+    console.log("[DEBUG]", ...args);
   }
 }
 
+window.CONFIG = CONFIG;
 window.logDebug = logDebug;

@@ -1,66 +1,111 @@
-// Main Game Class
+// Main Game orchestration
+
 class Game {
-    constructor(canvasId) {
-        // Get the canvas element
-        this.canvas = document.getElementById(canvasId);
-        if (!this.canvas) {
-            console.error('Canvas element not found!');
-            return;
-        }
-
-        // Initialize the Babylon.js engine
-        this.engine = new BABYLON.Engine(this.canvas, true, {
-            preserveDrawingBuffer: true,
-            stencil: true
-        });
-
-        // Create the scene
-        this.scene = new BABYLON.Scene(this.engine);
-        this.scene.clearColor = new BABYLON.Color4(0.1, 0.1, 0.2, 1);
-
-        // Store references
-        this.player = null;
-        this.world = null;
-        this.ui = null;
-
-        // Initialize the game
-        this.init();
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    if (!this.canvas) {
+      console.error("[Game] Canvas element not found:", canvasId);
+      return;
     }
 
-    async init() {
-        try {
-            // Setup scene
-            this.setupScene();
+    this.engine = new BABYLON.Engine(this.canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true
+    });
 
-            // Create world
-            this.world = new World(this.scene);
+    this.scene = new BABYLON.Scene(this.engine);
+    this.scene.collisionsEnabled = true;
 
-            // Create player
-            this.player = new Player(this.scene);
-            
-            // Create UI
-            this.ui = new UIManager(this);
-            
-            // Create crosshair
-            createCrosshair(this.scene);
-
-            // Hide loading screen if any
-            const loadingScreen = document.getElementById('loadingScreen');
-            if (loadingScreen) {
-                loadingScreen.style.display = 'none';
-            }
-
-            // Start render loop
-            this.run();
-
-        } catch (error) {
-            console.error('Error initializing game:', error);
-        }
+    // Physics
+    if (typeof CANNON !== "undefined") {
+      const gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
+      this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
+    } else {
+      console.warn("[Game] CANNON.js not found – physics disabled");
     }
 
-    setupScene() {
-        // Enable physics
-        this.scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
+    this.world = null;
+    this.player = null;
+    this.ui = null;
+    this.network = null;
 
-        // Optimize scene
-        this.scene.optimize
+    this._lastFrameTime = performance.now();
+
+    window.addEventListener("resize", () => {
+      this.engine.resize();
+    });
+  }
+
+  async init() {
+    // Basic ambient light
+    const hemi = new BABYLON.HemisphericLight(
+      "ambientLight",
+      new BABYLON.Vector3(0, 1, 0),
+      this.scene
+    );
+    hemi.intensity = 0.6;
+
+    // World
+    this.world = new World(this.scene, {
+      size: CONFIG.WORLD.SIZE,
+      waterLevel: CONFIG.WORLD.WATER_LEVEL
+    });
+
+    // Player
+    this.player = new Player(this.scene);
+
+    // UI
+    this.ui = new UIManager(this);
+
+    // Network
+    if (window.NetworkManager) {
+      this.network = new NetworkManager(CONFIG.NETWORK.WS_URL);
+      try {
+        await this.network.connect();
+      } catch (err) {
+        console.error("[Game] Failed to connect to WebSocket server", err);
+      }
+    }
+
+    // Example server event hook; adjust to your protocol
+    if (this.network) {
+      this.network.on("welcome", (data) => {
+        console.log("[Game] welcome from server:", data);
+      });
+    }
+
+    console.log("[Game] Initialization complete");
+  }
+
+  start() {
+    this._lastFrameTime = performance.now();
+
+    this.engine.runRenderLoop(() => {
+      const now = performance.now();
+      const deltaTime = (now - this._lastFrameTime) / 1000;
+      this._lastFrameTime = now;
+
+      if (this.player && typeof this.player.update === "function") {
+        this.player.update(deltaTime);
+      }
+
+      if (this.ui && typeof this.ui.update === "function") {
+        this.ui.update(deltaTime);
+      }
+
+      this.scene.render();
+    });
+  }
+
+  dispose() {
+    if (this.network) {
+      this.network.dispose();
+      this.network = null;
+    }
+    if (this.engine) {
+      this.engine.dispose();
+    }
+  }
+}
+
+window.Game = Game;
