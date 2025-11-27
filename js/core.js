@@ -27,7 +27,7 @@ const CONFIG = {
   },
 
   NETWORK: {
-    WS_URL: "wss://hosg.onrender.com/",
+    WS_URL: "wss://hosg.onrender.com",
     MAX_PLAYERS: 100,
     TICK_RATE: 20,
     TIMEOUT: 30000,
@@ -36,7 +36,7 @@ const CONFIG = {
 
   SUPABASE: {
     URL: "https://vaxfoafjjybwcxwhicla.supabase.co",
-    KEY: "sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD"
+    KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZheGZvYWZqanlid2N4d2hpY2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQ1NzEwODgsImV4cCI6MjA1MDE0NzA4OH0.zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD"
   }
 };
 

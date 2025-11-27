@@ -23,9 +23,9 @@ class SupabaseService {
 
     try {
       this.client = createClient(this.config.URL, this.config.KEY);
-      console.log("[Supabase] client initialized");
+      console.log("[Supabase] Client initialized successfully");
     } catch (err) {
-      console.error("[Supabase] failed to initialize client", err);
+      console.error("[Supabase] Failed to initialize client", err);
     }
   }
 
@@ -33,9 +33,38 @@ class SupabaseService {
     return !!this.client;
   }
 
-  // Add your table helpers here later, e.g.:
-  // async getProfileById(id) { ... }
-  // async upsertProfile(row) { ... }
+  // Example table helpers - add more as needed
+  async getProfileById(id) {
+    if (!this.isReady()) return null;
+    try {
+      const { data, error } = await this.client
+        .from('profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.error('[Supabase] getProfileById error:', err);
+      return null;
+    }
+  }
+
+  async upsertProfile(profile) {
+    if (!this.isReady()) return false;
+    try {
+      const { error } = await this.client
+        .from('profiles')
+        .upsert(profile);
+      
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error('[Supabase] upsertProfile error:', err);
+      return false;
+    }
+  }
 }
 
 const supabaseService = new SupabaseService(CONFIG.SUPABASE);
@@ -48,12 +77,14 @@ class NetworkManager {
     this.shouldReconnect = true;
     this.reconnectDelay = CONFIG.NETWORK.RECONNECT_DELAY_MS || 5000;
     this.listeners = {}; // eventName -> Set<handler>
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 10;
   }
 
   async connect() {
     if (typeof window === "undefined" || !("WebSocket" in window)) {
       console.error("[Network] WebSocket not supported in this environment");
-      return;
+      return Promise.reject(new Error("WebSocket not supported"));
     }
 
     if (
@@ -61,41 +92,65 @@ class NetworkManager {
       (this.socket.readyState === WebSocket.OPEN ||
         this.socket.readyState === WebSocket.CONNECTING)
     ) {
-      return;
+      return Promise.resolve();
     }
 
     return new Promise((resolve, reject) => {
       console.log("[Network] Connecting to", this.url);
-      const socket = new WebSocket(this.url);
-      this.socket = socket;
+      
+      try {
+        const socket = new WebSocket(this.url);
+        this.socket = socket;
 
-      socket.onopen = () => {
-        console.log("[Network] Connected");
-        this.connected = true;
-        this._emit("open");
-        resolve();
-      };
+        const timeout = setTimeout(() => {
+          if (socket.readyState !== WebSocket.OPEN) {
+            socket.close();
+            reject(new Error("Connection timeout"));
+          }
+        }, CONFIG.NETWORK.TIMEOUT);
 
-      socket.onmessage = (event) => {
-        this._handleMessage(event);
-      };
+        socket.onopen = () => {
+          clearTimeout(timeout);
+          console.log("[Network] Connected successfully");
+          this.connected = true;
+          this.reconnectAttempts = 0;
+          this._emit("open");
+          resolve();
+        };
 
-      socket.onerror = (error) => {
-        console.error("[Network] Error", error);
-        this._emit("error", error);
-      };
+        socket.onmessage = (event) => {
+          this._handleMessage(event);
+        };
 
-      socket.onclose = (event) => {
-        console.warn("[Network] Disconnected", event.code, event.reason);
-        this.connected = false;
-        this._emit("close", event);
+        socket.onerror = (error) => {
+          clearTimeout(timeout);
+          console.error("[Network] WebSocket error", error);
+          this._emit("error", error);
+        };
 
-        if (this.shouldReconnect) {
-          setTimeout(() => {
-            this.connect().catch(() => {});
-          }, this.reconnectDelay);
-        }
-      };
+        socket.onclose = (event) => {
+          clearTimeout(timeout);
+          console.warn("[Network] Disconnected", event.code, event.reason);
+          this.connected = false;
+          this._emit("close", event);
+
+          if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, 5);
+            console.log(`[Network] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+            
+            setTimeout(() => {
+              this.connect().catch(() => {});
+            }, delay);
+          } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error("[Network] Max reconnection attempts reached");
+            this._emit("maxReconnectReached");
+          }
+        };
+      } catch (err) {
+        console.error("[Network] Failed to create WebSocket:", err);
+        reject(err);
+      }
     });
   }
 
@@ -105,7 +160,7 @@ class NetworkManager {
     try {
       payload = JSON.parse(event.data);
     } catch {
-      // Not JSON – leave as raw string
+      // Not JSON - leave as raw string
     }
 
     const eventName =
@@ -140,7 +195,7 @@ class NetworkManager {
       try {
         handler(data);
       } catch (err) {
-        console.error("[Network] listener error for", eventName, err);
+        console.error("[Network] Listener error for", eventName, err);
       }
     }
   }
@@ -148,11 +203,17 @@ class NetworkManager {
   send(eventName, data) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       console.warn("[Network] Cannot send, socket not open");
-      return;
+      return false;
     }
 
-    const payload = JSON.stringify({ event: eventName, data });
-    this.socket.send(payload);
+    try {
+      const payload = JSON.stringify({ event: eventName, data });
+      this.socket.send(payload);
+      return true;
+    } catch (err) {
+      console.error("[Network] Send error:", err);
+      return false;
+    }
   }
 
   disconnect() {
@@ -166,6 +227,7 @@ class NetworkManager {
 
   dispose() {
     this.disconnect();
+    this.listeners = {};
   }
 }
 

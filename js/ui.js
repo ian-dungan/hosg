@@ -11,12 +11,16 @@ class UIManager {
         this.healthBar = null;
         this.manaBar = null;
         this.staminaBar = null;
+        this.debugText = null;
 
         this._init();
     }
 
     _init() {
         this.createHUD();
+        if (CONFIG.DEBUG) {
+            this.createDebugInfo();
+        }
     }
 
     createHUD() {
@@ -66,9 +70,6 @@ class UIManager {
         this.hud.addControl(this.staminaBar.container);
     }
 
-    /**
-     * Create a generic labeled status bar.
-     */
     createStatusBar(id, label, color, width, height, left, top) {
         const container = new BABYLON.GUI.Rectangle(id + "Container");
         container.width = width + "px";
@@ -93,7 +94,8 @@ class UIManager {
         const background = new BABYLON.GUI.Rectangle(id + "Background");
         background.width = "100%";
         background.height = height + "px";
-        background.thickness = 0;
+        background.thickness = 1;
+        background.color = "white";
         background.background = "#000a";
         background.cornerRadius = 4;
         background.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
@@ -138,28 +140,86 @@ class UIManager {
         };
     }
 
-    /**
-     * Called each frame from Game.update if available.
-     */
+    createDebugInfo() {
+        this.debugText = new BABYLON.GUI.TextBlock("debugInfo");
+        this.debugText.text = "FPS: 60";
+        this.debugText.color = "lime";
+        this.debugText.fontSize = 12;
+        this.debugText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        this.debugText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.debugText.paddingTop = "10px";
+        this.debugText.paddingRight = "10px";
+        this.gui.addControl(this.debugText);
+    }
+
     update(deltaTime) {
         if (!this.player) {
             this.player = this.game.player;
         }
+        
         const p = this.player;
         if (!p) return;
 
+        // Update health bar
         if (this.healthBar) {
             this.healthBar.setValue(p.health, p.maxHealth || CONFIG.PLAYER.HEALTH);
         }
+        
+        // Update mana bar
         if (this.manaBar) {
             const mana = typeof p.mana === "number" ? p.mana : 0;
             const maxMana = typeof p.maxMana === "number" ? p.maxMana : 100;
             this.manaBar.setValue(mana, maxMana);
         }
+        
+        // Update stamina bar
         if (this.staminaBar) {
             const stamina = typeof p.stamina === "number" ? p.stamina : 0;
             const maxStamina = typeof p.maxStamina === "number" ? p.maxStamina : CONFIG.PLAYER.STAMINA;
             this.staminaBar.setValue(stamina, maxStamina);
+        }
+
+        // Update debug info
+        if (this.debugText && this.game.engine) {
+            const fps = this.game.engine.getFps().toFixed(0);
+            const pos = p.mesh ? p.mesh.position : new BABYLON.Vector3(0, 0, 0);
+            this.debugText.text = `FPS: ${fps}\nPos: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}\nGrounded: ${p.isOnGround ? 'Yes' : 'No'}`;
+        }
+    }
+
+    showMessage(message, duration = 3000) {
+        const msgText = new BABYLON.GUI.TextBlock("message");
+        msgText.text = message;
+        msgText.color = "white";
+        msgText.fontSize = 18;
+        msgText.fontWeight = "bold";
+        msgText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        msgText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        msgText.paddingTop = "-100px";
+        
+        const bg = new BABYLON.GUI.Rectangle("messageBg");
+        bg.width = "400px";
+        bg.height = "60px";
+        bg.thickness = 2;
+        bg.color = "white";
+        bg.background = "rgba(0, 0, 0, 0.8)";
+        bg.cornerRadius = 10;
+        bg.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        bg.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        bg.paddingTop = "-100px";
+        
+        bg.addControl(msgText);
+        this.gui.addControl(bg);
+
+        setTimeout(() => {
+            this.gui.removeControl(bg);
+        }, duration);
+    }
+
+    dispose() {
+        if (this.gui) {
+            this.gui.dispose();
+            this.gui = null;
         }
     }
 }
