@@ -584,7 +584,7 @@ createTerrain() {
     }
 
     updateWater() {
-        if (!this.waterMaterial) return;
+        if (!this.waterMaterial || !this.waterMaterial.bumpTexture) return;
         
         // Animate water
         const time = Date.now() * 0.001;
