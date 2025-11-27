@@ -1,76 +1,36 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Physics engine (Cannon.js) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-
-  <!-- Babylon.js core + loaders + GUI -->
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
-  <!-- Supabase JS client (global `supabase`) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <style>
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: #000;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-
-    #renderCanvas {
-      width: 100%;
-      height: 100%;
-      touch-action: none;
-      display: block;
-    }
-
-    #loading {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: white;
-      font-size: 18px;
-      z-index: 1000;
-    }
-  </style>
+    <title>Game</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
 </head>
 <body>
-  <canvas id="renderCanvas"></canvas>
-  <div id="loading">Loading Heroes of Shady Grove...</div>
-
-  <!-- Game scripts (order matters) -->
-  <script src="js/core.js"></script>
-  <script src="js/world.js"></script>
-  <script src="js/player.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/network.js"></script>
-  <script src="js/game.js"></script>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', async () => {
-      const game = new Game('renderCanvas');
-      window.game = game;
-
-      try {
-        await game.init();
-        document.getElementById('loading').style.display = 'none';
-        game.start();
-      } catch (err) {
-        console.error('Failed to start game', err);
-        document.getElementById('loading').textContent = 'Error loading game: ' + err.message;
-      }
-    });
-  </script>
+    <canvas id="renderCanvas"></canvas>
+    
+    <!-- Load game scripts in order -->
+    <script src="js/core.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/environment.js"></script>
+    <script src="js/ui-network.js"></script>
+    
+    <script>
+        // Game initialization is handled in core.js
+    </script>
 </body>
 </html>
