@@ -77,28 +77,36 @@ class World {
     }
 
     createSkybox() {
-        // Create a simple skybox
+        // Create a simple procedural skybox using a DynamicTexture gradient
         this.skybox = BABYLON.MeshBuilder.CreateBox('skybox', { size: 10000 }, this.scene);
         const skyboxMaterial = new BABYLON.StandardMaterial('skyboxMaterial', this.scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
-        
-        // Create a gradient texture for the sky
-        const skyTexture = new BABYLON.Texture.CreateGradientRampTexture('skyGradient', 512, this.scene, (gradient) => {
-            // Sky gradient from top to bottom
-            gradient.addColorStop(0, '#87CEEB'); // Sky blue at top
-            gradient.addColorStop(0.5, '#1E90FF'); // Dodger blue in middle
-            gradient.addColorStop(1, '#E0F7FF'); // Light cyan at bottom
-        });
-        
+
+        const size = 512;
+        const skyTexture = new BABYLON.DynamicTexture('skyGradient', { width: size, height: size }, this.scene, false);
+        const ctx = skyTexture.getContext();
+        const gradient = ctx.createLinearGradient(0, 0, 0, size);
+
+        // Sky gradient from top to bottom
+        gradient.addColorStop(0, '#87CEEB');  // Sky blue at top
+        gradient.addColorStop(0.5, '#1E90FF'); // Dodger blue in middle
+        gradient.addColorStop(1, '#E0F7FF');  // Light cyan at bottom
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        skyTexture.update();
+
         skyboxMaterial.reflectionTexture = skyTexture;
         skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
         skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
         skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+        skyboxMaterial.emissiveTexture = skyTexture;
+
         this.skybox.material = skyboxMaterial;
     }
 
-    createTerrain() {
+createTerrain() {
         // Create a large ground
         this.terrain = BABYLON.MeshBuilder.CreateGround('terrain', {
             width: this.options.size,
@@ -115,17 +123,26 @@ class World {
         this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         
         // Create a blend material for different terrain types
-        const groundTexture = new BABYLON.Texture.CreateGradientRampTexture('groundGradient', 512, this.scene, (gradient) => {
-            // Terrain color gradient
-            gradient.addColorStop(0, '#3A5F0B'); // Dark green
-            gradient.addColorStop(0.3, '#6B8C21'); // Medium green
-            gradient.addColorStop(0.6, '#8FBC8F'); // Light green
-            gradient.addColorStop(0.8, '#D2B48C'); // Sand
-            gradient.addColorStop(1, '#FFFFFF'); // Snow
-        });
-        
+        const size = 512;
+        const groundTexture = new BABYLON.DynamicTexture('groundGradient', { width: size, height: size }, this.scene, false);
+        const ctx = groundTexture.getContext();
+        const gradient = ctx.createLinearGradient(0, 0, 0, size);
+
+        // Terrain color gradient
+        gradient.addColorStop(0, '#3A5F0B');  // Dark green
+        gradient.addColorStop(0.3, '#6B8C21'); // Medium green
+        gradient.addColorStop(0.6, '#8FBC8F'); // Light green
+        gradient.addColorStop(0.8, '#D2B48C'); // Sand
+        gradient.addColorStop(1, '#FFFFFF');   // Snow
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, size, size);
+        groundTexture.update();
+
         this.terrainMaterial.diffuseTexture = groundTexture;
         this.terrain.material = this.terrainMaterial;
+
+
         
         // Enable collisions
         this.terrain.checkCollisions = true;
@@ -219,10 +236,9 @@ class World {
         this.waterMaterial.refractionTexture.depth = 0.1;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
-        // Add waves
-        // No external bump texture to keep setup asset-free.
-        // this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
-        // this.waterMaterial.bumpTexture.level = 0.5;
+        // Add waves (bump texture removed to keep setup asset-free)
+// this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
+// this.waterMaterial.bumpTexture.level = 0.5;
 
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
@@ -907,6 +923,30 @@ class World {
         
         // Clear weather
         this.clearWeather();
+    }
+}
+
+
+// Base Entity Class
+class Entity {
+    constructor(scene, position = BABYLON.Vector3.Zero()) {
+        this.scene = scene;
+        this.position = position && position.clone ? position.clone() : (position || BABYLON.Vector3.Zero());
+        this.mesh = null;
+    }
+
+    setPosition(position) {
+        this.position = position && position.clone ? position.clone() : position;
+        if (this.mesh && this.position) {
+            this.mesh.position.copyFrom(this.position);
+        }
+    }
+
+    dispose() {
+        if (this.mesh) {
+            this.mesh.dispose();
+            this.mesh = null;
+        }
     }
 }
 

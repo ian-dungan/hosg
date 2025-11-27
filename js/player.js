@@ -8,6 +8,10 @@ class Player {
         this.isOnGround = false;
         this.health = CONFIG.PLAYER.HEALTH;
         this.maxHealth = CONFIG.PLAYER.HEALTH;
+        this.mana = 100;
+        this.maxMana = 100;
+        this.stamina = CONFIG.PLAYER.STAMINA;
+        this.maxStamina = CONFIG.PLAYER.STAMINA;
         this.moveSpeed = CONFIG.PLAYER.MOVE_SPEED;
         this.jumpForce = CONFIG.PLAYER.JUMP_FORCE;
         this.init();
