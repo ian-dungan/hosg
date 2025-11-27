@@ -326,7 +326,7 @@ class Player {
         forward.y = 0;
         forward.normalize();
         
-        const right = BABYLON.Vector3.Cross(forward, BABYLON.Vector3.Up());
+        const right = BABYLON.Vector3.Cross(BABYLON.Vector3.Up(), forward);
 
         // Calculate movement direction
         const moveDirection = new BABYLON.Vector3();
