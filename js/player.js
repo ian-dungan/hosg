@@ -24,22 +24,27 @@ class Player {
     }
 
     createPlayerMesh() {
-        this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
-            height: 1.8,
-            radius: 0.3
-        }, this.scene);
-        
-        this.mesh.position.y = 2;
-        this.mesh.checkCollisions = true;
-        
-        // Setup physics
+    this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
+        height: 1.8,
+        radius: 0.3
+    }, this.scene);
+    
+    this.mesh.position.y = 2;
+    this.mesh.checkCollisions = true;
+
+    // Setup physics (use CylinderImpostor – supported by Cannon)
+    const physicsEngine = this.scene.getPhysicsEngine();
+    if (physicsEngine) {
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
-            BABYLON.PhysicsImpostor.CapsuleImpostor,
+            BABYLON.PhysicsImpostor.CylinderImpostor,
             { mass: 1, friction: 0.2, restitution: 0.1 },
             this.scene
         );
+    } else {
+        console.warn('[Player] Physics engine not enabled – skipping player impostor.');
     }
+}
 
     setupCamera() {
         this.camera = new BABYLON.FollowCamera('playerCam', 
