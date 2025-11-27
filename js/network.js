@@ -1,115 +1,236 @@
-class UIManager {
-    constructor(scene, player) {
-        this.scene = scene;
-        this.player = player;
-        this.ui = null;
-        this.healthBar = null;
-        this.init();
+// Networking: Supabase + WebSocket client
+
+class SupabaseService {
+  constructor(config) {
+    this.config = config || {};
+    this.client = null;
+    this._init();
+  }
+
+  _init() {
+    if (typeof window === "undefined") return;
+
+    if (!window.supabase) {
+      console.warn("[Supabase] supabase-js CDN script not loaded; client not initialized.");
+      return;
     }
 
-    init() {
-        // Create advanced texture for UI
-        this.ui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
-        
-        // Create health bar
-        this.createHealthBar();
-        
-        console.log('UI initialized');
+    const { createClient } = window.supabase || {};
+    if (!createClient) {
+      console.warn("[Supabase] createClient not available on global supabase.");
+      return;
     }
 
-    createHealthBar() {
-        const panel = new BABYLON.GUI.Rectangle();
-        panel.width = '200px';
-        panel.height = '30px';
-        panel.cornerRadius = 10;
-        panel.color = 'white';
-        panel.thickness = 2;
-        panel.background = 'rgba(0, 0, 0, 0.5)';
-        panel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        panel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        panel.top = '20px';
-        panel.left = '20px';
-        this.ui.addControl(panel);
-
-        const healthText = new BABYLON.GUI.TextBlock();
-        healthText.text = 'HEALTH';
-        healthText.color = 'white';
-        healthText.fontSize = 16;
-        healthText.top = '-10px';
-        healthText.left = '10px';
-        healthText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        healthText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        panel.addControl(healthText);
-
-        this.healthBar = new BABYLON.GUI.Rectangle();
-        this.healthBar.width = '90%';
-        this.healthBar.height = '60%';
-        this.healthBar.cornerRadius = 5;
-        this.healthBar.background = '#ff3300';
-        this.healthBar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        this.healthBar.left = '5%';
-        this.healthBar.top = '20px';
-        panel.addControl(this.healthBar);
+    try {
+      this.client = createClient(this.config.URL, this.config.KEY);
+      console.log("[Supabase] Client initialized successfully");
+    } catch (err) {
+      console.error("[Supabase] Failed to initialize client", err);
     }
+  }
 
-    update() {
-        if (this.healthBar && this.player) {
-            const healthPercent = this.player.health / this.player.maxHealth;
-            this.healthBar.width = `${healthPercent * 90}%`;
-            this.healthBar.background = healthPercent > 0.5 ? '#33cc33' : 
-                                       healthPercent > 0.2 ? '#ff9900' : '#ff3300';
-        }
-    }
+  isReady() {
+    return !!this.client;
+  }
 
-    showMessage(text, duration = 3000) {
-        const message = new BABYLON.GUI.TextBlock();
-        message.text = text;
-        message.color = 'white';
-        message.fontSize = 24;
-        message.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        message.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        message.top = '50px';
-        this.ui.addControl(message);
-        
-        setTimeout(() => {
-            this.ui.removeControl(message);
-        }, duration);
+  // Example table helpers - add more as needed
+  async getProfileById(id) {
+    if (!this.isReady()) return null;
+    try {
+      const { data, error } = await this.client
+        .from('profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.error('[Supabase] getProfileById error:', err);
+      return null;
     }
+  }
 
-    dispose() {
-        if (this.ui) {
-            this.ui.dispose();
-            this.ui = null;
-        }
+  async upsertProfile(profile) {
+    if (!this.isReady()) return false;
+    try {
+      const { error } = await this.client
+        .from('profiles')
+        .upsert(profile);
+      
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error('[Supabase] upsertProfile error:', err);
+      return false;
     }
+  }
 }
+
+const supabaseService = new SupabaseService(CONFIG.SUPABASE);
 
 class NetworkManager {
-    constructor() {
-        this.connected = false;
-        this.socket = null;
+  constructor(url) {
+    this.url = url || CONFIG.NETWORK.WS_URL;
+    this.socket = null;
+    this.connected = false;
+    this.shouldReconnect = true;
+    this.reconnectDelay = CONFIG.NETWORK.RECONNECT_DELAY_MS || 5000;
+    this.listeners = {}; // eventName -> Set<handler>
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 10;
+  }
+
+  async connect() {
+    if (typeof window === "undefined" || !("WebSocket" in window)) {
+      console.error("[Network] WebSocket not supported in this environment");
+      return Promise.reject(new Error("WebSocket not supported"));
     }
 
-    connect() {
-        console.log('Network manager initialized (no actual connection)');
-        this.connected = true;
-        return Promise.resolve();
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return Promise.resolve();
     }
 
-    send(event, data) {
-        console.log(`[NETWORK] ${event}`, data);
+    return new Promise((resolve, reject) => {
+      console.log("[Network] Connecting to", this.url);
+      
+      try {
+        const socket = new WebSocket(this.url);
+        this.socket = socket;
+
+        const timeout = setTimeout(() => {
+          if (socket.readyState !== WebSocket.OPEN) {
+            socket.close();
+            reject(new Error("Connection timeout"));
+          }
+        }, CONFIG.NETWORK.TIMEOUT);
+
+        socket.onopen = () => {
+          clearTimeout(timeout);
+          console.log("[Network] Connected successfully");
+          this.connected = true;
+          this.reconnectAttempts = 0;
+          this._emit("open");
+          resolve();
+        };
+
+        socket.onmessage = (event) => {
+          this._handleMessage(event);
+        };
+
+        socket.onerror = (error) => {
+          clearTimeout(timeout);
+          console.error("[Network] WebSocket error", error);
+          this._emit("error", error);
+        };
+
+        socket.onclose = (event) => {
+          clearTimeout(timeout);
+          console.warn("[Network] Disconnected", event.code, event.reason);
+          this.connected = false;
+          this._emit("close", event);
+
+          if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, 5);
+            console.log(`[Network] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+            
+            setTimeout(() => {
+              this.connect().catch(() => {});
+            }, delay);
+          } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error("[Network] Max reconnection attempts reached");
+            this._emit("maxReconnectReached");
+          }
+        };
+      } catch (err) {
+        console.error("[Network] Failed to create WebSocket:", err);
+        reject(err);
+      }
+    });
+  }
+
+  _handleMessage(event) {
+    let payload = event.data;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      // Not JSON - leave as raw string
     }
 
-    disconnect() {
-        this.connected = false;
-        console.log('Disconnected from server');
+    const eventName =
+      (payload && (payload.event || payload.type || payload.action)) ||
+      "message";
+
+    this._emit(eventName, payload);
+    this._emit("message", payload);
+  }
+
+  on(eventName, handler) {
+    if (!this.listeners[eventName]) {
+      this.listeners[eventName] = new Set();
+    }
+    this.listeners[eventName].add(handler);
+  }
+
+  off(eventName, handler) {
+    const set = this.listeners[eventName];
+    if (!set) return;
+    set.delete(handler);
+    if (set.size === 0) {
+      delete this.listeners[eventName];
+    }
+  }
+
+  _emit(eventName, data) {
+    const set = this.listeners[eventName];
+    if (!set) return;
+
+    for (const handler of set) {
+      try {
+        handler(data);
+      } catch (err) {
+        console.error("[Network] Listener error for", eventName, err);
+      }
+    }
+  }
+
+  send(eventName, data) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      console.warn("[Network] Cannot send, socket not open");
+      return false;
     }
 
-    dispose() {
-        this.disconnect();
+    try {
+      const payload = JSON.stringify({ event: eventName, data });
+      this.socket.send(payload);
+      return true;
+    } catch (err) {
+      console.error("[Network] Send error:", err);
+      return false;
     }
+  }
+
+  disconnect() {
+    this.shouldReconnect = false;
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+    this.connected = false;
+  }
+
+  dispose() {
+    this.disconnect();
+    this.listeners = {};
+  }
 }
 
-// Export classes to global scope
-window.UIManager = UIManager;
 window.NetworkManager = NetworkManager;
+window.SupabaseService = SupabaseService;
+window.supabaseService = supabaseService;
