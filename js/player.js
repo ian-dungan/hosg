@@ -28,7 +28,7 @@ class Player {
     createPlayerMesh() {
         // Create root transform for the player
         this.mesh = new BABYLON.TransformNode('player', this.scene);
-        this.mesh.position.y = 5; // Start above ground
+        this.mesh.position.y = 20; // Start well above ground to ensure proper spawn
         
         // Create human-like body parts
         this.createHumanBody();
@@ -42,7 +42,7 @@ class Player {
             height: 1.8,
             radius: 0.4
         }, this.scene);
-        this.collisionMesh.position = this.mesh.position.clone();
+        this.collisionMesh.position = new BABYLON.Vector3(0, 20, 0); // Explicit high spawn
         this.collisionMesh.visibility = 0; // Invisible
         this.collisionMesh.checkCollisions = true;
 
@@ -54,8 +54,8 @@ class Player {
                     this.collisionMesh,
                     BABYLON.PhysicsImpostor.CylinderImpostor,
                     { 
-                        mass: 10, // Lighter for easier movement
-                        friction: 0.1, // Very low friction for easy movement
+                        mass: 15, // Balanced mass for good control
+                        friction: 0.2, // Balanced friction - prevents sliding but allows movement
                         restitution: 0.0 // No bouncing
                     },
                     this.scene
@@ -69,8 +69,13 @@ class Player {
                     // Lock X and Z rotation to prevent tipping
                     this.collisionMesh.physicsImpostor.physicsBody.angularDamping = 0.99;
                     
-                    // Minimal linear damping for smooth movement
-                    this.collisionMesh.physicsImpostor.physicsBody.linearDamping = 0.1;
+                    // Balanced linear damping for smooth movement with proper stopping
+                    this.collisionMesh.physicsImpostor.physicsBody.linearDamping = 0.3;
+                    
+                    // Increase contact stiffness to prevent sinking
+                    if (this.collisionMesh.physicsImpostor.physicsBody.material) {
+                        this.collisionMesh.physicsImpostor.physicsBody.material.friction = 0.2;
+                    }
                 }
                 
                 logDebug('[Player] Physics impostor created successfully');
@@ -178,6 +183,14 @@ class Player {
             run: false
         };
 
+        // Gamepad state
+        this.gamepad = {
+            connected: false,
+            index: -1,
+            deadzone: 0.15
+        };
+
+        // Keyboard controls
         window.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
             if (key === 'w' || key === 'arrowup') this.input.forward = true;
@@ -197,6 +210,69 @@ class Player {
             if (key === ' ') this.input.jump = false;
             if (key === 'shift') this.input.run = false;
         });
+
+        // Gamepad connection
+        window.addEventListener('gamepadconnected', (e) => {
+            console.log('[Player] Gamepad connected:', e.gamepad.id);
+            this.gamepad.connected = true;
+            this.gamepad.index = e.gamepad.index;
+        });
+
+        window.addEventListener('gamepaddisconnected', (e) => {
+            console.log('[Player] Gamepad disconnected');
+            this.gamepad.connected = false;
+            this.gamepad.index = -1;
+        });
+    }
+
+    updateGamepadInput() {
+        if (!this.gamepad.connected) return;
+
+        const gamepads = navigator.getGamepads();
+        if (!gamepads || !gamepads[this.gamepad.index]) return;
+
+        const gp = gamepads[this.gamepad.index];
+        const deadzone = this.gamepad.deadzone;
+
+        // Left stick (movement)
+        const lx = Math.abs(gp.axes[0]) > deadzone ? gp.axes[0] : 0;
+        const ly = Math.abs(gp.axes[1]) > deadzone ? gp.axes[1] : 0;
+
+        // Apply stick input (override keyboard if present)
+        if (Math.abs(lx) > 0 || Math.abs(ly) > 0) {
+            this.input.forward = ly < -0.1;
+            this.input.backward = ly > 0.1;
+            this.input.left = lx < -0.1;
+            this.input.right = lx > 0.1;
+        }
+
+        // Buttons (Xbox layout)
+        // A button (0) - Jump
+        if (gp.buttons[0] && gp.buttons[0].pressed) {
+            if (!this.gamepadJumpPressed) {
+                this.input.jump = true;
+                this.gamepadJumpPressed = true;
+            }
+        } else {
+            this.gamepadJumpPressed = false;
+            this.input.jump = false;
+        }
+
+        // LB (4) or RB (5) or RT (7) - Run
+        const runPressed = (gp.buttons[4] && gp.buttons[4].pressed) ||
+                          (gp.buttons[5] && gp.buttons[5].pressed) ||
+                          (gp.axes[7] > 0.5);
+        this.input.run = runPressed;
+
+        // Right stick for camera control (handled by camera separately)
+        const rx = Math.abs(gp.axes[2]) > deadzone ? gp.axes[2] : 0;
+        const ry = Math.abs(gp.axes[3]) > deadzone ? gp.axes[3] : 0;
+        
+        if (this.camera && (Math.abs(rx) > 0 || Math.abs(ry) > 0)) {
+            this.camera.alpha -= rx * 0.05;
+            this.camera.beta = Math.max(0.1, Math.min(Math.PI / 2.2, 
+                this.camera.beta + ry * 0.03));
+        }
     }
 
     checkGrounded() {
@@ -235,6 +311,9 @@ class Player {
     update(deltaTime) {
         if (!this.mesh || !this.collisionMesh) return;
 
+        // Update gamepad input
+        this.updateGamepadInput();
+
         // Sync visual mesh with collision mesh
         this.mesh.position.copyFrom(this.collisionMesh.position);
         this.mesh.rotation.y = this.collisionMesh.rotation.y;
@@ -264,11 +343,11 @@ class Player {
                 this.moveSpeed;
             
             if (this.collisionMesh.physicsImpostor) {
-                // Use impulse for more responsive movement
+                // Use impulse for responsive movement with refined physics
                 const currentVelocity = this.collisionMesh.physicsImpostor.getLinearVelocity();
                 
-                // Apply impulse in movement direction
-                const impulseStrength = speed * 100; // Stronger impulse
+                // Apply impulse in movement direction (adjusted for new mass/friction)
+                const impulseStrength = speed * 150; // Increased for higher friction
                 const impulse = moveDirection.scale(impulseStrength);
                 
                 // Apply impulse at center of mass
@@ -278,7 +357,7 @@ class Player {
                 );
                 
                 // Limit maximum velocity to prevent runaway speed
-                const maxSpeed = speed * 80;
+                const maxSpeed = speed * 100; // Increased cap for better responsiveness
                 const currentSpeed = Math.sqrt(currentVelocity.x * currentVelocity.x + currentVelocity.z * currentVelocity.z);
                 if (currentSpeed > maxSpeed) {
                     const scale = maxSpeed / currentSpeed;
@@ -291,10 +370,19 @@ class Player {
                     );
                 }
                 
-                // Orient player to movement direction
+                // Smooth rotation to movement direction
                 if (moveDirection.length() > 0.1) {
                     const targetAngle = Math.atan2(moveDirection.x, moveDirection.z);
-                    this.collisionMesh.rotation.y = targetAngle;
+                    const currentAngle = this.collisionMesh.rotation.y;
+                    const angleDiff = targetAngle - currentAngle;
+                    
+                    // Normalize angle difference to -PI to PI
+                    let normalizedDiff = angleDiff;
+                    while (normalizedDiff > Math.PI) normalizedDiff -= Math.PI * 2;
+                    while (normalizedDiff < -Math.PI) normalizedDiff += Math.PI * 2;
+                    
+                    // Smooth rotation
+                    this.collisionMesh.rotation.y += normalizedDiff * 0.2;
                 }
             } else {
                 // Fallback to direct movement
