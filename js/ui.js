@@ -1,175 +1,161 @@
-// UI System
+// UI Manager
 class UIManager {
     constructor(game) {
         this.game = game;
         this.scene = game.scene;
         this.player = game.player;
-        this.elements = {};
         
+        // UI elements
+        this.canvas = null;
+        this.gui = null;
+        this.healthBar = null;
+        this.manaBar = null;
+        this.staminaBar = null;
+        this.minimap = null;
+        this.inventoryUI = null;
+        this.questLogUI = null;
+        this.dialogueUI = null;
+        this.hud = null;
+        
+        // State
+        this.isInventoryOpen = false;
+        this.isPaused = false;
+        this.isInDialogue = false;
+        this.currentDialogue = null;
+        
+        // Initialize
         this.init();
     }
 
     init() {
+        // Get the canvas
+        this.canvas = this.scene.getEngine().getRenderingCanvas();
+        
+        // Create GUI
+        this.gui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
+        
+        // Create HUD
         this.createHUD();
+        
+        // Create inventory UI (initially hidden)
         this.createInventoryUI();
+        
+        // Create quest log UI (initially hidden)
         this.createQuestLogUI();
+        
+        // Create dialogue UI (initially hidden)
+        this.createDialogueUI();
+        
+        // Create pause menu (initially hidden)
+        this.createPauseMenu();
+        
+        // Event listeners
         this.setupEventListeners();
     }
 
     createHUD() {
-        // Create a fullscreen UI
-        const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+        // Create a container for the HUD
+        this.hud = new BABYLON.GUI.Rectangle('hud');
+        this.hud.width = '100%';
+        this.hud.height = '100%';
+        this.hud.thickness = 0;
+        this.hud.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        this.hud.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.gui.addControl(this.hud);
         
         // Health bar
-        const healthBar = new BABYLON.GUI.Rectangle();
-        healthBar.width = "200px";
-        healthBar.height = "20px";
-        healthBar.color = "white";
-        healthBar.thickness = 2;
-        healthBar.background = "red";
-        healthBar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        healthBar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        healthBar.left = "20px";
-        healthBar.top = "-20px";
+        this.healthBar = this.createStatusBar(
+            'healthBar',
+            'HP',
+            new BABYLON.Color4(1, 0.2, 0.2, 1),
+            200,
+            20,
+            10,
+            10
+        );
+        this.hud.addControl(this.healthBar.container);
         
-        // Health text
-        const healthText = new BABYLON.GUI.TextBlock();
-        healthText.text = "Health: 100/100";
-        healthText.color = "white";
-        healthText.fontSize = 14;
-        healthText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        healthText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        healthBar.addControl(healthText);
+        // Mana bar
+        this.manaBar = this.createStatusBar(
+            'manaBar',
+            'MP',
+            new BABYLON.Color4(0.2, 0.5, 1, 1),
+            200,
+            20,
+            10,
+            40
+        );
+        this.hud.addControl(this.manaBar.container);
         
-        // Add to UI
-        advancedTexture.addControl(healthBar);
+        // Stamina bar
+        this.staminaBar = this.createStatusBar(
+            'staminaBar',
+            'SP',
+            new BABYLON.Color4(0.2, 1, 0.2, 1),
+            200,
+            20,
+            10,
+            70
+        );
+        this.hud.addControl(this.staminaBar.container);
         
-        // Store references
-        this.elements.healthBar = healthBar;
-        this.elements.healthText = healthText;
-        
-        // Add other HUD elements (mana, stamina, etc.) in a similar way
+        // Mini-map
+        this.createMinimap(150, 150, 10, 10);
     }
 
-    createInventoryUI() {
-        // Create inventory panel (initially hidden)
-        const inventoryPanel = new BABYLON.GUI.Rectangle();
-        inventoryPanel.width = "400px";
-        inventoryPanel.height = "300px";
-        inventoryPanel.color = "white";
-        inventoryPanel.thickness = 2;
-        inventoryPanel.background = "rgba(0, 0, 0, 0.7)";
-        inventoryPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        inventoryPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        inventoryPanel.isVisible = false;
+    createStatusBar(id, label, color, width, height, left, top) {
+        const container = new BABYLON.GUI.Rectangle(`${id}Container`);
+        container.width = `${width}px`;
+        container.height = `${height + 20}px`;
+        container.color = 'white';
+        container.thickness = 1;
+        container.background = '#222222';
+        container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        container.left = `${left}px`;
+        container.top = `${top}px`;
         
-        // Add title
-        const title = new BABYLON.GUI.TextBlock();
-        title.text = "INVENTORY";
-        title.color = "white";
-        title.fontSize = 24;
-        title.top = "-130px";
-        inventoryPanel.addControl(title);
+        // Label
+        const labelText = new BABYLON.GUI.TextBlock(`${id}Label`, label);
+        labelText.color = 'white';
+        labelText.fontSize = 14;
+        labelText.left = '5px';
+        labelText.top = '0px';
+        labelText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        labelText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        container.addControl(labelText);
         
-        // Add close button
-        const closeButton = BABYLON.GUI.Button.CreateSimpleButton("closeButton", "X");
-        closeButton.width = "30px";
-        closeButton.height = "30px";
-        closeButton.color = "white";
-        closeButton.background = "red";
-        closeButton.cornerRadius = 15;
-        closeButton.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        closeButton.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        closeButton.left = "-15px";
-        closeButton.top = "15px";
-        closeButton.onPointerClickObservable.add(() => {
-            inventoryPanel.isVisible = false;
-        });
-        inventoryPanel.addControl(closeButton);
+        // Background
+        const background = new BABYLON.GUI.Rectangle(`${id}Background`);
+        background.width = '100%';
+        background.height = `${height}px`;
+        background.color = 'black';
+        background.thickness = 0;
+        background.background = '#444444';
+        background.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        background.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        background.left = '0px';
+        background.top = '20px';
+        container.addControl(background);
         
-        // Add to UI
-        const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.GetFullscreenUI();
-        advancedTexture.addControl(inventoryPanel);
+        // Fill
+        const fill = new BABYLON.GUI.Rectangle(`${id}Fill`);
+        fill.width = '100%';
+        fill.height = '100%';
+        fill.color = 'transparent';
+        fill.thickness = 0;
+        fill.background = '#FF0000';
+        fill.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        fill.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        background.addControl(fill);
         
-        // Store reference
-        this.elements.inventoryPanel = inventoryPanel;
-    }
-
-    createQuestLogUI() {
-        // Similar to inventory UI, create a quest log panel
-        // This is a simplified version
-        const questPanel = new BABYLON.GUI.Rectangle();
-        questPanel.width = "300px";
-        questPanel.height = "400px";
-        questPanel.color = "white";
-        questPanel.thickness = 2;
-        questPanel.background = "rgba(0, 0, 0, 0.7)";
-        questPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        questPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        questPanel.top = "50px";
-        questPanel.right = "10px";
-        questPanel.isVisible = false;
+        // Value text
+        const valueText = new BABYLON.GUI.TextBlock(`${id}Value`, '100/100');
+        valueText.color = 'white';
+        valueText.fontSize = 12;
+        valueText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        valueText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        background.addControl(valueText);
         
-        // Add title
-        const title = new BABYLON.GUI.TextBlock();
-        title.text = "QUESTS";
-        title.color = "white";
-        title.fontSize = 20;
-        title.top = "-180px";
-        questPanel.addControl(title);
-        
-        // Add to UI
-        const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.GetFullscreenUI();
-        advancedTexture.addControl(questPanel);
-        
-        // Store reference
-        this.elements.questPanel = questPanel;
-    }
-
-    setupEventListeners() {
-        // Toggle inventory with 'I' key
-        window.addEventListener('keydown', (e) => {
-            if (e.key.toLowerCase() === 'i') {
-                this.toggleInventory();
-            } else if (e.key.toLowerCase() === 'l') {
-                this.toggleQuestLog();
-            }
-        });
-    }
-
-    toggleInventory() {
-        const panel = this.elements.inventoryPanel;
-        panel.isVisible = !panel.isVisible;
-    }
-
-    toggleQuestLog() {
-        const panel = this.elements.questPanel;
-        panel.isVisible = !panel.isVisible;
-    }
-
-    update() {
-        // Update HUD elements
-        if (this.player) {
-            // Update health
-            const healthPercent = (this.player.health / this.player.stats.maxHealth) * 100;
-            this.elements.healthBar.width = `${healthPercent * 2}px`;
-            this.elements.healthText.text = `Health: ${Math.ceil(this.player.health)}/${this.player.stats.maxHealth}`;
-            
-            // Update other stats as needed
-        }
-    }
-}
-
-// Crosshair
-function createCrosshair(scene) {
-    const crosshair = new BABYLON.GUI.Ellipse();
-    crosshair.width = "10px";
-    crosshair.height = "10px";
-    crosshair.color = "white";
-    crosshair.thickness = 2;
-    
-    const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.GetFullscreenUI();
-    advancedTexture.addControl(crosshair);
-    
-    return crosshair;
-}
+        // Set initial color
+        fill.background = `
