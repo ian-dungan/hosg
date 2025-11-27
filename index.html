@@ -33,10 +33,21 @@
       touch-action: none;
       display: block;
     }
+
+    #loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 18px;
+      z-index: 1000;
+    }
   </style>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
+  <div id="loading">Loading Heroes of Shady Grove...</div>
 
   <!-- Game scripts (order matters) -->
   <script src="js/core.js"></script>
@@ -53,9 +64,11 @@
 
       try {
         await game.init();
+        document.getElementById('loading').style.display = 'none';
         game.start();
       } catch (err) {
         console.error('Failed to start game', err);
+        document.getElementById('loading').textContent = 'Error loading game: ' + err.message;
       }
     });
   </script>
