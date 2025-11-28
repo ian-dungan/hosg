@@ -32,7 +32,7 @@ class Player {
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
             BABYLON.PhysicsImpostor.CapsuleImpostor,
-            { mass: 1, friction: 0.8, restitution: 0.0 },
+            { mass: 1, friction: 0.2, restitution: 0.1 },
             this.scene
         );
     }
