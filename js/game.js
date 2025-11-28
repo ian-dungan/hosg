@@ -1,66 +1,228 @@
-// Main Game Class
-class Game {
-    constructor(canvasId) {
-        // Get the canvas element
-        this.canvas = document.getElementById(canvasId);
-        if (!this.canvas) {
-            console.error('Canvas element not found!');
-            return;
-        }
+// Main Game orchestration
 
-        // Initialize the Babylon.js engine
-        this.engine = new BABYLON.Engine(this.canvas, true, {
-            preserveDrawingBuffer: true,
-            stencil: true
+class Game {
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    if (!this.canvas) {
+      console.error("[Game] Canvas element not found:", canvasId);
+      throw new Error("Canvas not found");
+    }
+
+    this.engine = new BABYLON.Engine(this.canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true
+    });
+
+    this.scene = new BABYLON.Scene(this.engine);
+    this.scene.collisionsEnabled = true;
+
+    // Physics setup
+    if (typeof CANNON !== "undefined") {
+      const gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
+      try {
+        this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
+        console.log("[Game] Physics engine enabled (Cannon.js)");
+      } catch (err) {
+        console.error("[Game] Failed to enable physics:", err);
+      }
+    } else {
+      console.warn("[Game] CANNON.js not found - physics disabled");
+    }
+
+    this.world = null;
+    this.player = null;
+    this.ui = null;
+    this.network = null;
+
+    this._lastFrameTime = performance.now();
+    this._running = false;
+
+    window.addEventListener("resize", () => {
+      this.engine.resize();
+    });
+  }
+
+  async init() {
+    console.log("[Game] Initializing...");
+
+    // Basic lighting (will be overridden by World class)
+    const hemi = new BABYLON.HemisphericLight(
+      "tempLight",
+      new BABYLON.Vector3(0, 1, 0),
+      this.scene
+    );
+    hemi.intensity = 0.6;
+
+    // World
+    try {
+      this.world = new World(this.scene, {
+        size: CONFIG.WORLD.SIZE,
+        waterLevel: CONFIG.WORLD.WATER_LEVEL
+      });
+      console.log("[Game] World initialized");
+    } catch (err) {
+      console.error("[Game] World initialization failed:", err);
+      throw err;
+    }
+
+    // Player
+    try {
+      this.player = new Player(this.scene);
+      console.log("[Game] Player initialized");
+    } catch (err) {
+      console.error("[Game] Player initialization failed:", err);
+      throw err;
+    }
+
+    // UI
+    try {
+      this.ui = new UIManager(this);
+      console.log("[Game] UI initialized");
+    } catch (err) {
+      console.error("[Game] UI initialization failed:", err);
+      throw err;
+    }
+
+    // Network (optional - game works without it)
+    if (window.NetworkManager) {
+      try {
+        this.network = new NetworkManager(CONFIG.NETWORK.WS_URL);
+        
+        // Setup network event handlers
+        this.network.on("open", () => {
+          console.log("[Game] Connected to multiplayer server");
+          if (this.ui) {
+            this.ui.showMessage("Connected to multiplayer server", 2000);
+          }
+        });
+        
+        this.network.on("close", () => {
+          console.log("[Game] Disconnected from multiplayer server");
+        });
+        
+        this.network.on("error", (err) => {
+          console.error("[Game] Network error:", err);
+        });
+        
+        this.network.on("maxReconnectReached", () => {
+          console.error("[Game] Failed to connect to multiplayer server");
+          if (this.ui) {
+            this.ui.showMessage("Playing in offline mode", 3000);
+          }
         });
 
-        // Create the scene
-        this.scene = new BABYLON.Scene(this.engine);
-        this.scene.clearColor = new BABYLON.Color4(0.1, 0.1, 0.2, 1);
-
-        // Store references
-        this.player = null;
-        this.world = null;
-        this.ui = null;
-
-        // Initialize the game
-        this.init();
+        // Connect (don't block game startup if it fails)
+        this.network.connect().catch((err) => {
+          console.warn("[Game] Failed to connect to multiplayer server:", err);
+          if (this.ui) {
+            this.ui.showMessage("Playing in offline mode", 3000);
+          }
+        });
+      } catch (err) {
+        console.error("[Game] Network initialization failed:", err);
+      }
     }
 
-    async init() {
+    console.log("[Game] Initialization complete");
+  }
+
+  start() {
+    if (this._running) {
+      console.warn("[Game] Already running");
+      return;
+    }
+
+    this._running = true;
+    this._lastFrameTime = performance.now();
+
+    console.log("[Game] Starting render loop");
+
+    this.engine.runRenderLoop(() => {
+      if (!this._running) return;
+
+      const now = performance.now();
+      const deltaTime = (now - this._lastFrameTime) / 1000;
+      this._lastFrameTime = now;
+
+      // Update player
+      if (this.player && typeof this.player.update === "function") {
         try {
-            // Setup scene
-            this.setupScene();
-
-            // Create world
-            this.world = new World(this.scene);
-
-            // Create player
-            this.player = new Player(this.scene);
-            
-            // Create UI
-            this.ui = new UIManager(this);
-            
-            // Create crosshair
-            createCrosshair(this.scene);
-
-            // Hide loading screen if any
-            const loadingScreen = document.getElementById('loadingScreen');
-            if (loadingScreen) {
-                loadingScreen.style.display = 'none';
-            }
-
-            // Start render loop
-            this.run();
-
-        } catch (error) {
-            console.error('Error initializing game:', error);
+          this.player.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] Player update error:", err);
         }
+      }
+
+      // Update world
+      if (this.world && typeof this.world.update === "function") {
+        try {
+          this.world.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] World update error:", err);
+        }
+      }
+
+      // Update UI
+      if (this.ui && typeof this.ui.update === "function") {
+        try {
+          this.ui.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] UI update error:", err);
+        }
+      }
+
+      // Render scene
+      try {
+        this.scene.render();
+      } catch (err) {
+        console.error("[Game] Render error:", err);
+      }
+    });
+
+    if (this.ui) {
+      this.ui.showMessage("Welcome to Heroes of Shady Grove!", 3000);
     }
+  }
 
-    setupScene() {
-        // Enable physics
-        this.scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
+  stop() {
+    this._running = false;
+    console.log("[Game] Stopped");
+  }
 
-        // Optimize scene
-        this.scene.optimize
+  dispose() {
+    console.log("[Game] Disposing resources");
+    this.stop();
+    
+    if (this.network) {
+      this.network.dispose();
+      this.network = null;
+    }
+    
+    if (this.ui) {
+      this.ui.dispose();
+      this.ui = null;
+    }
+    
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
+    
+    if (this.world && typeof this.world.dispose === "function") {
+      this.world.dispose();
+      this.world = null;
+    }
+    
+    if (this.scene) {
+      this.scene.dispose();
+      this.scene = null;
+    }
+    
+    if (this.engine) {
+      this.engine.dispose();
+      this.engine = null;
+    }
+  }
+}
+
+window.Game = Game;
