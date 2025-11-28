@@ -1,4 +1,4 @@
-// Networking: Supabase + WebSocket client
+// Supabase + WebSocket networking
 
 class SupabaseService {
   constructor(config) {
@@ -8,66 +8,38 @@ class SupabaseService {
   }
 
   _init() {
-    if (typeof window === "undefined") return;
+    if (typeof window === 'undefined') return;
 
-    if (!window.supabase) {
-      console.warn("[Supabase] supabase-js CDN script not loaded; client not initialized.");
+    // Supabase SDK must be loaded from CDN
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+      console.warn('[Supabase] supabase-js CDN script not loaded; client not initialized.');
       return;
     }
 
-    const { createClient } = window.supabase || {};
-    if (!createClient) {
-      console.warn("[Supabase] createClient not available on global supabase.");
-      return;
-    }
+    const { createClient } = window.supabase;
 
     try {
-      this.client = createClient(this.config.URL, this.config.KEY);
-      console.log("[Supabase] Client initialized successfully");
+      this.client = createClient(this.config.url, this.config.key);
+      console.log('[Supabase] client initialized');
     } catch (err) {
-      console.error("[Supabase] Failed to initialize client", err);
+      console.error('[Supabase] Failed to create client:', err);
+      this.client = null;
     }
   }
 
-  isReady() {
-    return !!this.client;
-  }
-
-  // Example table helpers - add more as needed
-  async getProfileById(id) {
-    if (!this.isReady()) return null;
-    try {
-      const { data, error } = await this.client
-        .from('profiles')
-        .select('*')
-        .eq('id', id)
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (err) {
-      console.error('[Supabase] getProfileById error:', err);
-      return null;
-    }
-  }
-
-  async upsertProfile(profile) {
-    if (!this.isReady()) return false;
-    try {
-      const { error } = await this.client
-        .from('profiles')
-        .upsert(profile);
-      
-      if (error) throw error;
-      return true;
-    } catch (err) {
-      console.error('[Supabase] upsertProfile error:', err);
-      return false;
-    }
+  getClient() {
+    return this.client;
   }
 }
 
-const supabaseService = new SupabaseService(CONFIG.SUPABASE);
+// Global Supabase instance – safe even if SDK is missing
+window.supabaseService = new SupabaseService(
+  window.SUPABASE_CONFIG || {
+    url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
+    key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
+  }
+);
+
 
 class NetworkManager {
   constructor(url) {
