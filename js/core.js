@@ -4,6 +4,11 @@ const CONFIG = {
   VERSION: "1.0.0",
   DEBUG: true,
 
+  // somewhere in your init (e.g. in core.js or game.js)
+const network = new NetworkManager('wss://hosg.onrender.com/');
+network.connect();
+window.network = network; // if you want it in the console
+  
   GAME: {
     FPS: 60,
     GRAVITY: 9.81,
