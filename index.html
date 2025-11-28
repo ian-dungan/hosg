@@ -48,5 +48,23 @@
   <script src="js/ui.js"></script>
   <script src="js/network.js"></script>
   <script src="js/game.js"></script>
+
+  <script>
+    window.addEventListener("DOMContentLoaded", async () => {
+      try {
+        console.log("[Bootstrap] Creating game...");
+        const game = new Game("renderCanvas");
+        window.hosgGame = game;
+
+        console.log("[Bootstrap] Initializing game...");
+        await game.init();
+
+        console.log("[Bootstrap] Starting game...");
+        game.start();
+      } catch (err) {
+        console.error("[Bootstrap] Game failed to start:", err);
+      }
+    });
+  </script>
 </body>
 </html>
