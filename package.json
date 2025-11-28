@@ -4,7 +4,7 @@
   "description": "Heroes of Shady Grove Multiplayer Server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node hosg_server_1.0.3.js"
   },
   "dependencies": {
     "ws": "^8.17.0"
