@@ -68,6 +68,8 @@ class Game {
     // Player
     try {
       this.player = new Player(this.scene);
+      // Expose player on the scene so AI and other systems can find it
+      this.scene.player = this.player;
       console.log("[Game] Player initialized");
     } catch (err) {
       console.error("[Game] Player initialization failed:", err);
