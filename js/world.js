@@ -110,36 +110,33 @@ class World {
         // Generate heightmap
         this.generateHeightmap();
         
-        // Create material
-        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', this.scene);
-
-// Use physically-based shading for nicer lighting
+        // Create PBR material for terrain using local grass textures
+        const scene = this.scene;
+        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
         this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         this.terrainMaterial.metallic = 0.0;
         this.terrainMaterial.roughness = 1.0;
 
-// Albedo / color
-        const albedoTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Color.jpg', this.scene);
+        // Albedo / base color texture
+        const albedoTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Color.jpg', scene);
         albedoTexture.uScale = 16;
         albedoTexture.vScale = 16;
 
-// Normal map
-        const normalTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Normal.jpg', this.scene);
+        // Normal map for small surface detail
+        const normalTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Normal.jpg', scene);
         normalTexture.uScale = 16;
         normalTexture.vScale = 16;
 
-// Optional roughness / AO maps (use if you add them)
+        // Optional roughness map (game still runs if missing)
         let roughnessTexture = null;
         try {
-            roughnessTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Roughness.jpg', this.scene);
+            roughnessTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Roughness.jpg', scene);
             roughnessTexture.uScale = 16;
             roughnessTexture.vScale = 16;
         } catch (e) {
-            // Texture is optional – game will still run if it's missing
             console.warn('[World] Roughness texture not found or failed to load:', e);
         }
 
-// Assign textures to the PBR material
         this.terrainMaterial.albedoTexture = albedoTexture;
         this.terrainMaterial.bumpTexture = normalTexture;
         if (roughnessTexture) {
@@ -147,14 +144,13 @@ class World {
             this.terrainMaterial.useRoughnessFromMetallicTextureAlpha = false;
         }
 
-// Slightly boost contrast so distant terrain looks less flat
+        // Slight parallax for extra depth
         this.terrainMaterial.useParallax = true;
         this.terrainMaterial.useParallaxOcclusion = true;
         this.terrainMaterial.parallaxScaleBias = 0.02;
 
         this.terrain.material = this.terrainMaterial;
-
-// Enable collisions
+        // Enable collisions
         this.terrain.checkCollisions = true;
         
         // Add physics
