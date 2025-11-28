@@ -43,88 +43,58 @@ window.supabaseService = new SupabaseService(
 
 class NetworkManager {
   constructor(url) {
-    this.url = url || CONFIG.NETWORK.WS_URL;
+    this.url = url;
     this.socket = null;
     this.connected = false;
-    this.shouldReconnect = true;
-    this.reconnectDelay = CONFIG.NETWORK.RECONNECT_DELAY_MS || 5000;
-    this.listeners = {}; // eventName -> Set<handler>
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
   }
 
-  async connect() {
-    if (typeof window === "undefined" || !("WebSocket" in window)) {
-      console.error("[Network] WebSocket not supported in this environment");
-      return Promise.reject(new Error("WebSocket not supported"));
-    }
+  connect() {
+    if (this.connected || this.socket) return;
 
-    if (
-      this.socket &&
-      (this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING)
-    ) {
-      return Promise.resolve();
-    }
+    this.socket = new WebSocket(this.url);
 
-    return new Promise((resolve, reject) => {
-      console.log("[Network] Connecting to", this.url);
-      
-      try {
-        const socket = new WebSocket(this.url);
-        this.socket = socket;
+    this.socket.addEventListener('open', () => {
+      this.connected = true;
+      console.log('[Network] Connected to', this.url);
+    });
 
-        const timeout = setTimeout(() => {
-          if (socket.readyState !== WebSocket.OPEN) {
-            socket.close();
-            reject(new Error("Connection timeout"));
-          }
-        }, CONFIG.NETWORK.TIMEOUT);
+    this.socket.addEventListener('message', (event) => {
+      // Handle messages from server
+      // console.log('[Network] Message:', event.data);
+    });
 
-        socket.onopen = () => {
-          clearTimeout(timeout);
-          console.log("[Network] Connected successfully");
-          this.connected = true;
-          this.reconnectAttempts = 0;
-          this._emit("open");
-          resolve();
-        };
+    this.socket.addEventListener('close', () => {
+      this.connected = false;
+      this.socket = null;
+      console.log('[Network] Disconnected');
+    });
 
-        socket.onmessage = (event) => {
-          this._handleMessage(event);
-        };
-
-        socket.onerror = (error) => {
-          clearTimeout(timeout);
-          console.error("[Network] WebSocket error", error);
-          this._emit("error", error);
-        };
-
-        socket.onclose = (event) => {
-          clearTimeout(timeout);
-          console.warn("[Network] Disconnected", event.code, event.reason);
-          this.connected = false;
-          this._emit("close", event);
-
-          if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, 5);
-            console.log(`[Network] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-            
-            setTimeout(() => {
-              this.connect().catch(() => {});
-            }, delay);
-          } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error("[Network] Max reconnection attempts reached");
-            this._emit("maxReconnectReached");
-          }
-        };
-      } catch (err) {
-        console.error("[Network] Failed to create WebSocket:", err);
-        reject(err);
-      }
+    this.socket.addEventListener('error', (err) => {
+      console.error('[Network] WebSocket error:', err);
     });
   }
+
+  send(data) {
+    if (!this.connected || !this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify(data));
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+    this.connected = false;
+  }
+
+  dispose() {
+    this.disconnect();
+  }
+}
+
+// Expose globally if other scripts need it
+window.NetworkManager = NetworkManager;
+
 
   _handleMessage(event) {
     let payload = event.data;
