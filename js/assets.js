@@ -27,7 +27,7 @@ const ASSET_MANIFEST = {
             },
             dirt: {
                 diffuse: 'textures/terrain/dirt_diffuse.jpg',
-                normal: 'textures/terrain/dirt_normal.jpg',
+                normal: 'textures/ground/dirt/Ground037_4K-JPG_Roughness.jpg',
                 ao: 'textures/terrain/dirt_ao.jpg',
                 scale: 50,
                 required: false
