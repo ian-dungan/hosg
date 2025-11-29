@@ -1,3 +1,13 @@
+// Player and inventory logic. Guarded to avoid redeclaration when scripts reload.
+(function (global) {
+    if (global.Player) {
+        console.warn('[Player] Existing Player detected; skipping redefinition.');
+        return;
+    }
+
+    const BABYLON = global.BABYLON;
+    const CONFIG = global.CONFIG || {};
+
 class Player {
     constructor(scene) {
         this.scene = scene;
@@ -192,3 +202,11 @@ Inventory.prototype.useEquippedItem = function() {
     }
     return false;
 };
+
+    global.Player = Player;
+    global.Inventory = Inventory;
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { Player, Inventory };
+    }
+})(typeof window !== 'undefined' ? window : globalThis);
