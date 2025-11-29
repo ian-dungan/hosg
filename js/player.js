@@ -149,48 +149,46 @@ class Player {
     }
 }
 
-class Inventory {
-    constructor(size) {
-        this.size = size;
-
-  addGold(amount) {
-    if (typeof amount === "number" && !isNaN(amount)) {
-      this.gold += amount;
-    }
-  }
-        this.items = [];
-        this.equippedItem = null;
-        this.gold = 0;
-    }
-
-    addItem(item) {
-        if (this.items.length < this.size) {
-            this.items.push(item);
-            return true;
-        }
-        return false;
-    }
-
-    removeItem(index) {
-        if (index >= 0 && index < this.items.length) {
-            return this.items.splice(index, 1)[0];
-        }
-        return null;
-    }
-
-    equipItem(index) {
-        if (index >= 0 && index < this.items.length) {
-            this.equippedItem = this.items[index];
-            return true;
-        }
-        return false;
-    }
-
-    useEquippedItem() {
-        if (this.equippedItem) {
-            // Use the equipped item
-            return true;
-        }
-        return false;
-    }
+function Inventory(size) {
+    this.size = size;
+    this.items = [];
+    this.equippedItem = null;
+    this.gold = 0;
 }
+
+Inventory.prototype.addGold = function(amount) {
+    if (typeof amount === "number" && !isNaN(amount)) {
+        this.gold += amount;
+    }
+};
+
+Inventory.prototype.addItem = function(item) {
+    if (this.items.length < this.size) {
+        this.items.push(item);
+        return true;
+    }
+    return false;
+};
+
+Inventory.prototype.removeItem = function(index) {
+    if (index >= 0 && index < this.items.length) {
+        return this.items.splice(index, 1)[0];
+    }
+    return null;
+};
+
+Inventory.prototype.equipItem = function(index) {
+    if (index >= 0 && index < this.items.length) {
+        this.equippedItem = this.items[index];
+        return true;
+    }
+    return false;
+};
+
+Inventory.prototype.useEquippedItem = function() {
+    if (this.equippedItem) {
+        // Use the equipped item
+        return true;
+    }
+    return false;
+};
