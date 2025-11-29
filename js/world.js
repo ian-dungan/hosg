@@ -85,9 +85,12 @@
         this.sunLight = null;
         this.ambientLight = null;
         this.shadowGenerator = null;
-        
+
         // Physics
         this.gravity = new BABYLON.Vector3(0, -9.81, 0);
+
+        // Asset cache so we only fetch textures once
+        this.textureCache = new Map();
         
         // Initialize
         this.init();
@@ -179,11 +182,6 @@
         this.terrainMaterial.albedoColor = new BABYLON.Color3(0.35, 0.55, 0.32);
         this.terrainMaterial.metallic = 0.0;
         this.terrainMaterial.roughness = 0.95;
-
-        // Slight parallax for extra depth
-        this.terrainMaterial.useParallax = true;
-        this.terrainMaterial.useParallaxOcclusion = true;
-        this.terrainMaterial.parallaxScaleBias = 0.02;
 
         this.terrain.material = this.terrainMaterial;
         // Enable collisions
@@ -294,9 +292,46 @@
         
         this.waterMaterial.specularPower = 64;
         this.waterMaterial.alpha = 0.8;
-        
+
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
+    }
+
+    createWaterBumpTexture() {
+        let bump = null;
+
+        // First try Babylon's built-in noise procedural texture
+        if (BABYLON.NoiseProceduralTexture) {
+            try {
+                const noise = new BABYLON.NoiseProceduralTexture('waterBump', 256, this.scene);
+                if (noise) {
+                    noise.animationSpeedFactor = 2;
+                    noise.persistence = 1.2;
+                    noise.brightness = 0.2;
+                    noise.octaves = 2;
+                    noise.level = 0.35;
+                    bump = noise;
+                }
+            } catch (e) {
+                console.warn('[World] Error creating procedural water bump texture; will try asset fallback', e);
+            }
+        }
+
+        // Fallback to a bundled normal map so we always have some wave detail
+        if (!bump) {
+            const fallback = this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_NormalGL.jpg', {
+                uScale: 4,
+                vScale: 4
+            });
+            if (fallback) {
+                fallback.level = 0.35;
+                bump = fallback;
+            } else {
+                console.warn('[World] Water bump texture unavailable; water surface will be flat.');
+            }
+        }
+
+        return bump;
     }
 
     populateWorld() {
@@ -307,11 +342,46 @@
         this.createNPCs(10);
         this.createEnemies(20);
         this.createItems(30);
+
+        this.updateWaterReflectionList();
+    }
+
+    updateWaterReflectionList() {
+        if (!this.waterMaterial?.reflectionTexture || !this.waterMaterial?.refractionTexture) return;
+
+        const renderList = [
+            this.terrain,
+            ...this.trees,
+            ...this.rocks,
+            ...this.buildings,
+            ...this.grass,
+            ...this.npcs.map(n => n.mesh).filter(Boolean),
+            ...this.enemies.map(e => e.mesh).filter(Boolean)
+        ].filter(Boolean);
+
+        this.waterMaterial.reflectionTexture.renderList = renderList;
+        this.waterMaterial.refractionTexture.renderList = renderList;
     }
 
     createTrees(count) {
         const treeMaterial = new BABYLON.StandardMaterial('treeMaterial', this.scene);
         treeMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.2);
+        const leafTexture = this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_Color.jpg', {
+            hasAlpha: true,
+            uScale: 1,
+            vScale: 1
+        });
+        const leafOpacity = this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_Opacity.jpg', {
+            hasAlpha: true
+        });
+        if (leafTexture) {
+            treeMaterial.diffuseTexture = leafTexture;
+            treeMaterial.useAlphaFromDiffuseTexture = true;
+            treeMaterial.backFaceCulling = false;
+        }
+        if (leafOpacity) {
+            treeMaterial.opacityTexture = leafOpacity;
+        }
         
         for (let i = 0; i < count; i++) {
             // Create trunk
@@ -394,9 +464,20 @@
 
     createGrass(count) {
         const grassMaterial = new BABYLON.StandardMaterial('grassMaterial', this.scene);
-        grassMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
-        grassMaterial.alpha = 0.8;
-        grassMaterial.backFaceCulling = false;
+        const grassDiffuse = this.getTexture('assets/environment/Grass.png', {
+            hasAlpha: true,
+            uScale: 2,
+            vScale: 2
+        }) || this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_Color.jpg', { hasAlpha: true });
+        if (grassDiffuse) {
+            grassMaterial.diffuseTexture = grassDiffuse;
+            grassMaterial.useAlphaFromDiffuseTexture = true;
+            grassMaterial.backFaceCulling = false;
+        } else {
+            grassMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
+            grassMaterial.alpha = 0.8;
+            grassMaterial.backFaceCulling = false;
+        }
         
         for (let i = 0; i < count; i++) {
             // Create a simple grass patch
@@ -612,8 +693,39 @@
         const x = (Math.random() - 0.5) * this.options.size * 0.9;
         const z = (Math.random() - 0.5) * this.options.size * 0.9;
         const y = this.getHeightAt(x, z) + heightOffset;
-        
+
         return new BABYLON.Vector3(x, y, z);
+    }
+
+    getTexture(path, options = {}) {
+        if (this.textureCache.has(path)) {
+            return this.textureCache.get(path);
+        }
+
+        let texture = null;
+        try {
+            texture = new BABYLON.Texture(
+                path,
+                this.scene,
+                true,
+                false,
+                BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+                null,
+                (message) => console.warn(`[World] Failed to load texture ${path}:`, message)
+            );
+
+            if (texture) {
+                texture.hasAlpha = !!options.hasAlpha;
+                texture.uScale = options.uScale ?? 1;
+                texture.vScale = options.vScale ?? 1;
+                this.textureCache.set(path, texture);
+            }
+        } catch (e) {
+            console.warn(`[World] Error loading texture ${path}:`, e);
+            texture = null;
+        }
+
+        return texture;
     }
 
     setupEventListeners() {
