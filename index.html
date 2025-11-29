@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Heroes of Shady Grove v1.0.7</title>
+  <title>Heroes of Shady Grove</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Physics engine (Cannon.js) -->
@@ -15,6 +15,13 @@
 
   <!-- Supabase JS SDK (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // Make Supabase config available before our own scripts
+    window.SUPABASE_CONFIG = {
+      url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
+      key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
+    };
+  </script>
 
   <style>
     html, body {
@@ -23,41 +30,20 @@
       margin: 0;
       padding: 0;
       overflow: hidden;
-      background: #000;
     }
     #renderCanvas {
       width: 100%;
       height: 100%;
       touch-action: none;
-      display: block;
-    }
-    #loading {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: white;
-      font-family: Arial, sans-serif;
-      font-size: 24px;
-      text-align: center;
-      z-index: 1000;
-    }
-    #loading.hidden {
-      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="loading">
-    <div>Heroes of Shady Grove</div>
-    <div style="font-size: 14px; margin-top: 10px;">Loading...</div>
-  </div>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Load game scripts in order -->
+  <!-- Load your game scripts in whatever order you were using -->
   <script src="js/core.js"></script>
-  <script src="js/asset_manifest.js"></script>
-  <script src="js/asset_loader.js"></script>
+  <script src="js/assets.js"></script>
   <script src="js/world.js"></script>
   <script src="js/player.js"></script>
   <script src="js/ui.js"></script>
@@ -66,10 +52,7 @@
 
   <script>
     window.addEventListener("DOMContentLoaded", async () => {
-      const loadingDiv = document.getElementById('loading');
-      
       try {
-        console.log("[Bootstrap] Heroes of Shady Grove v1.0.7");
         console.log("[Bootstrap] Creating game...");
         const game = new Game("renderCanvas");
         window.hosgGame = game;
@@ -79,26 +62,8 @@
 
         console.log("[Bootstrap] Starting game...");
         game.start();
-
-        // Hide loading screen
-        if (loadingDiv) {
-          loadingDiv.classList.add('hidden');
-        }
-
-        console.log("[Bootstrap] ✅ Game started successfully!");
       } catch (err) {
-        console.error("[Bootstrap] ❌ Game failed to start:", err);
-        if (loadingDiv) {
-          loadingDiv.innerHTML = `
-            <div>Failed to start game</div>
-            <div style="font-size: 14px; margin-top: 10px; color: #ff4444;">
-              ${err.message}
-            </div>
-            <div style="font-size: 12px; margin-top: 20px;">
-              Check console (F12) for details
-            </div>
-          `;
-        }
+        console.error("[Bootstrap] Game failed to start:", err);
       }
     });
   </script>
