@@ -20,18 +20,30 @@ class Player {
     }
 
     createPlayerMesh() {
-        this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
+        // Capsule for visuals
+        const visualMesh = BABYLON.MeshBuilder.CreateCapsule('playerVisual', {
             height: 1.8,
             radius: 0.3
         }, this.scene);
         
-        this.mesh.position.y = 2;
-        this.mesh.checkCollisions = true;
+        // Box for physics (CapsuleImpostor not supported in Cannon.js)
+        this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
+            width: 0.6,
+            height: 1.8,
+            depth: 0.6
+        }, this.scene);
         
-        // Setup physics
+        this.mesh.position.y = 2;
+        this.mesh.visibility = 0; // Invisible physics body
+        
+        // Attach visual mesh as child
+        visualMesh.parent = this.mesh;
+        visualMesh.visibility = 1;
+        
+        // Setup physics with BoxImpostor
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
-            BABYLON.PhysicsImpostor.CapsuleImpostor,
+            BABYLON.PhysicsImpostor.BoxImpostor,
             { mass: 1, friction: 0.2, restitution: 0.1 },
             this.scene
         );

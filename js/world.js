@@ -207,10 +207,10 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add physics
+        // Add simple box physics (HeightmapImpostor causes issues with Cannon.js)
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            BABYLON.PhysicsImpostor.BoxImpostor,
             { mass: 0, friction: 0.9, restitution: 0.2 },
             this.scene
         );
