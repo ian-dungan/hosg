@@ -1,42 +1,51 @@
-// Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
-function Entity(scene, position) {
-  this.scene = scene;
+(function (global) {
+  if (global.World) {
+    console.warn('[World] Existing World detected; skipping redefinition.');
+    return;
+  }
 
-  if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-    if (position instanceof BABYLON.Vector3) {
-      this.position = position.clone();
-    } else if (position && typeof position === "object" &&
-               "x" in position && "y" in position && "z" in position) {
-      this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+  const BABYLON = global.BABYLON;
+  const CONFIG = global.CONFIG || {};
+
+  // Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
+  function Entity(scene, position) {
+    this.scene = scene;
+
+    if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+      if (position instanceof BABYLON.Vector3) {
+        this.position = position.clone();
+      } else if (position && typeof position === "object" &&
+                 "x" in position && "y" in position && "z" in position) {
+        this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+      } else {
+        this.position = BABYLON.Vector3.Zero();
+      }
     } else {
-      this.position = BABYLON.Vector3.Zero();
+      this.position = position || { x: 0, y: 0, z: 0 };
     }
-  } else {
-    this.position = position || { x: 0, y: 0, z: 0 };
-  }
 
-  this.mesh = null;
-  this._isDisposed = false;
-}
-
-Entity.prototype.update = function (deltaTime) {
-  if (this.mesh && this.mesh.position && this.position &&
-      typeof this.mesh.position.copyFrom === "function") {
-    this.mesh.position.copyFrom(this.position);
-  }
-};
-
-Entity.prototype.dispose = function () {
-  this._isDisposed = true;
-  if (this.mesh && typeof this.mesh.dispose === "function") {
-    this.mesh.dispose();
     this.mesh = null;
+    this._isDisposed = false;
   }
-};
 
-// World Class
+  Entity.prototype.update = function (deltaTime) {
+    if (this.mesh && this.mesh.position && this.position &&
+        typeof this.mesh.position.copyFrom === "function") {
+      this.mesh.position.copyFrom(this.position);
+    }
+  };
 
-class World {
+  Entity.prototype.dispose = function () {
+    this._isDisposed = true;
+    if (this.mesh && typeof this.mesh.dispose === "function") {
+      this.mesh.dispose();
+      this.mesh = null;
+    }
+  };
+
+  // World Class
+
+  class World {
     constructor(scene, options = {}) {
         this.scene = scene;
         this.options = {
@@ -2005,13 +2014,20 @@ class SimplexNoise {
     }
 }
 
-// Export for Node.js/CommonJS
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        World,
-        NPC,
-        Enemy,
-        Item,
-        SimplexNoise
-    };
-}
+  // Export for Node.js/CommonJS and attach to browser global
+  global.World = World;
+  global.NPC = NPC;
+  global.Enemy = Enemy;
+  global.Item = Item;
+  global.SimplexNoise = SimplexNoise;
+
+  if (typeof module !== 'undefined' && module.exports) {
+      module.exports = {
+          World,
+          NPC,
+          Enemy,
+          Item,
+          SimplexNoise
+      };
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
