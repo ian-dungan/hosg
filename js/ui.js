@@ -216,9 +216,16 @@ class UIManager {
         }, duration);
     }
 
+    dispose() {
+        if (this.gui) {
+            this.gui.dispose();
+            this.gui = null;
+        }
+    }
+
     showDamageNumber(amount, position, isPlayerHit) {
-        const prefix = isPlayerHit ? "-" : "";
-        const text = "" + prefix + amount;
+        var prefix = isPlayerHit ? "-" : "";
+        var text = "" + prefix + amount;
         this.showFloatingText(text, position, isPlayerHit ? "playerDamage" : "enemyDamage", 800);
     }
 
@@ -230,7 +237,7 @@ class UIManager {
         if (typeof type === "undefined") type = "default";
         if (typeof duration === "undefined") duration = 1500;
 
-        const label = new BABYLON.GUI.TextBlock("floatingText");
+        var label = new BABYLON.GUI.TextBlock("floatingText");
         label.text = text;
         label.fontSize = 20;
         label.outlineWidth = 2;
@@ -253,30 +260,22 @@ class UIManager {
 
         this.gui.addControl(label);
 
-        const scene = this.scene;
-        const startTime = performance.now();
-        const total = duration;
+        var scene = this.scene;
+        var startTime = performance.now();
+        var total = duration;
 
-        const observer = scene.onBeforeRenderObservable.add(() => {
-            const t = (performance.now() - startTime) / total;
+        var observer = scene.onBeforeRenderObservable.add(function () {
+            var t = (performance.now() - startTime) / total;
             if (t >= 1) {
                 scene.onBeforeRenderObservable.remove(observer);
                 this.gui.removeControl(label);
             } else {
-                const offset = -35 - t * 15;
+                var offset = -35 - t * 15;
                 label.top = offset + "%";
                 label.alpha = 1 - t;
             }
-        });
-    }
-
-    dispose() {
-        if (this.gui) {
-            this.gui.dispose();
-            this.gui = null;
-        }
+        }.bind(this));
     }
 }
 
 window.UIManager = UIManager;
-
