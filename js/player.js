@@ -154,6 +154,13 @@ class Inventory {
         this.size = size;
         this.items = [];
         this.equippedItem = null;
+        this.gold = 0;
+    }
+
+    addGold(amount) {
+        if (typeof amount === "number" && !isNaN(amount)) {
+            this.gold += amount;
+        }
     }
 
     addItem(item) {

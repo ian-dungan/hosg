@@ -1,3 +1,44 @@
+// Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
+class Entity {
+    constructor(scene, position) {
+        this.scene = scene;
+
+        // Normalize position into a Babylon Vector3 when possible
+        if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+            if (position instanceof BABYLON.Vector3) {
+                this.position = position.clone();
+            } else if (position && typeof position === "object" &&
+                       "x" in position && "y" in position && "z" in position) {
+                this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+            } else {
+                this.position = BABYLON.Vector3.Zero();
+            }
+        } else {
+            // Very defensive fallback; shouldn't happen in normal runs
+            this.position = position || { x: 0, y: 0, z: 0 };
+        }
+
+        this.mesh = null;
+        this._isDisposed = false;
+    }
+
+    update(deltaTime) {
+        // Default implementation keeps the mesh in sync with the logical position
+        if (this.mesh && this.mesh.position && this.position &&
+            typeof this.mesh.position.copyFrom === "function") {
+            this.mesh.position.copyFrom(this.position);
+        }
+    }
+
+    dispose() {
+        this._isDisposed = true;
+        if (this.mesh && typeof this.mesh.dispose === "function") {
+            this.mesh.dispose();
+            this.mesh = null;
+        }
+    }
+}
+
 // World Class
 class World {
     constructor(scene, options = {}) {
@@ -82,21 +123,39 @@ class World {
         const skyboxMaterial = new BABYLON.StandardMaterial('skyboxMaterial', this.scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
-        
-        // Create a gradient texture for the sky
-        const skyTexture = new BABYLON.Texture.CreateGradientRampTexture('skyGradient', 512, this.scene, (gradient) => {
-            // Sky gradient from top to bottom
-            gradient.addColorStop(0, '#87CEEB'); // Sky blue at top
-            gradient.addColorStop(0.5, '#1E90FF'); // Dodger blue in middle
-            gradient.addColorStop(1, '#E0F7FF'); // Light cyan at bottom
-        });
-        
-        skyboxMaterial.reflectionTexture = skyTexture;
-        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-        skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+
+        // Try to create a gradient-style sky texture if this Babylon build supports it.
+        let skyTexture = null;
+        try {
+            if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
+                skyTexture = BABYLON.Texture.CreateGradientTexture('skyGradient', this.scene, 512, (gradient) => {
+                    // Sky gradient from top to bottom
+                    gradient.addColorStop(0, '#87CEEB'); // Sky blue at top
+                    gradient.addColorStop(0.5, '#1E90FF'); // Dodger blue in middle
+                    gradient.addColorStop(1, '#E0F7FF'); // Light cyan at bottom
+                });
+            }
+        } catch (e) {
+            console.warn("[World] Failed to create gradient sky texture, falling back to solid color sky:", e);
+            skyTexture = null;
+        }
+
+        if (skyTexture) {
+            skyboxMaterial.reflectionTexture = skyTexture;
+            skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+            skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+            skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+        } else {
+            // Fallback: solid sky color if gradient textures are not available
+            this.scene.clearColor = new BABYLON.Color4(0.45, 0.65, 0.9, 1.0);
+            skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+            skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+            skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+        }
+
         this.skybox.material = skyboxMaterial;
     }
+
 
     createTerrain() {
         // Create a large ground
