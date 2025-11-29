@@ -176,32 +176,12 @@
         // Generate heightmap
         this.generateHeightmap();
         
-        // Create a textured material from local assets for richer visuals
+        // Create a simple PBR material with solid colors to avoid relying on
+        // external texture files (which may be missing in static deployments).
         this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', this.scene);
-        const groundTexture = this.getTexture('assets/textures/ground/dirt/Ground037.png', {
-            uScale: 6,
-            vScale: 6
-        });
-        const roughnessTexture = this.getTexture('assets/textures/ground/dirt/Ground037_4K-JPG_Roughness.jpg', {
-            uScale: 6,
-            vScale: 6
-        });
-
-        if (groundTexture) {
-            this.terrainMaterial.albedoTexture = groundTexture;
-        } else {
-            this.terrainMaterial.albedoColor = new BABYLON.Color3(0.35, 0.55, 0.32);
-        }
-
-        if (roughnessTexture) {
-            this.terrainMaterial.metallic = 0;
-            this.terrainMaterial.roughness = 1;
-            this.terrainMaterial.metallicF0Factor = 0.1;
-            this.terrainMaterial.metallicTexture = roughnessTexture;
-        } else {
-            this.terrainMaterial.metallic = 0.0;
-            this.terrainMaterial.roughness = 0.95;
-        }
+        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.35, 0.55, 0.32);
+        this.terrainMaterial.metallic = 0.0;
+        this.terrainMaterial.roughness = 0.95;
 
         this.terrain.material = this.terrainMaterial;
         // Enable collisions
@@ -296,12 +276,11 @@
         this.waterMaterial.refractionTexture.depth = 0.1;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
-        // Add waves using procedural noise, with a local texture fallback if creation fails
-        const bumpTexture = this.createWaterBumpTexture();
-        if (bumpTexture) {
-            this.waterMaterial.bumpTexture = bumpTexture;
-        }
-
+        // Add waves
+        // Avoid external texture dependencies for water and rely on simple
+        // color/reflectivity settings instead.
+        this.waterMaterial.bumpTexture.level = 0.5;
+        
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;
         this.waterMaterial.useRefractionFresnel = true;
