@@ -1,42 +1,51 @@
-// Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
-function Entity(scene, position) {
-  this.scene = scene;
+(function (global) {
+  if (global.World) {
+    console.warn('[World] Existing World detected; skipping redefinition.');
+    return;
+  }
 
-  if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-    if (position instanceof BABYLON.Vector3) {
-      this.position = position.clone();
-    } else if (position && typeof position === "object" &&
-               "x" in position && "y" in position && "z" in position) {
-      this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+  const BABYLON = global.BABYLON;
+  const CONFIG = global.CONFIG || {};
+
+  // Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
+  function Entity(scene, position) {
+    this.scene = scene;
+
+    if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+      if (position instanceof BABYLON.Vector3) {
+        this.position = position.clone();
+      } else if (position && typeof position === "object" &&
+                 "x" in position && "y" in position && "z" in position) {
+        this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+      } else {
+        this.position = BABYLON.Vector3.Zero();
+      }
     } else {
-      this.position = BABYLON.Vector3.Zero();
+      this.position = position || { x: 0, y: 0, z: 0 };
     }
-  } else {
-    this.position = position || { x: 0, y: 0, z: 0 };
-  }
 
-  this.mesh = null;
-  this._isDisposed = false;
-}
-
-Entity.prototype.update = function (deltaTime) {
-  if (this.mesh && this.mesh.position && this.position &&
-      typeof this.mesh.position.copyFrom === "function") {
-    this.mesh.position.copyFrom(this.position);
-  }
-};
-
-Entity.prototype.dispose = function () {
-  this._isDisposed = true;
-  if (this.mesh && typeof this.mesh.dispose === "function") {
-    this.mesh.dispose();
     this.mesh = null;
+    this._isDisposed = false;
   }
-};
 
-// World Class
+  Entity.prototype.update = function (deltaTime) {
+    if (this.mesh && this.mesh.position && this.position &&
+        typeof this.mesh.position.copyFrom === "function") {
+      this.mesh.position.copyFrom(this.position);
+    }
+  };
 
-class World {
+  Entity.prototype.dispose = function () {
+    this._isDisposed = true;
+    if (this.mesh && typeof this.mesh.dispose === "function") {
+      this.mesh.dispose();
+      this.mesh = null;
+    }
+  };
+
+  // World Class
+
+  class World {
     constructor(scene, options = {}) {
         this.scene = scene;
         this.options = {
@@ -164,39 +173,12 @@ class World {
         // Generate heightmap
         this.generateHeightmap();
         
-        // Create PBR material for terrain using local grass textures
-        const scene = this.scene;
-        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
-        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        // Create a simple PBR material with solid colors to avoid relying on
+        // external texture files (which may be missing in static deployments).
+        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', this.scene);
+        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.35, 0.55, 0.32);
         this.terrainMaterial.metallic = 0.0;
-        this.terrainMaterial.roughness = 1.0;
-
-        // Albedo / base color texture
-        const albedoTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Color.jpg', scene);
-        albedoTexture.uScale = 16;
-        albedoTexture.vScale = 16;
-
-        // Normal map for small surface detail
-        const normalTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Normal.jpg', scene);
-        normalTexture.uScale = 16;
-        normalTexture.vScale = 16;
-
-        // Optional roughness map (game still runs if missing)
-        let roughnessTexture = null;
-        try {
-            roughnessTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Roughness.jpg', scene);
-            roughnessTexture.uScale = 16;
-            roughnessTexture.vScale = 16;
-        } catch (e) {
-            console.warn('[World] Roughness texture not found or failed to load:', e);
-        }
-
-        this.terrainMaterial.albedoTexture = albedoTexture;
-        this.terrainMaterial.bumpTexture = normalTexture;
-        if (roughnessTexture) {
-            this.terrainMaterial.metallicTexture = roughnessTexture;
-            this.terrainMaterial.useRoughnessFromMetallicTextureAlpha = false;
-        }
+        this.terrainMaterial.roughness = 0.95;
 
         // Slight parallax for extra depth
         this.terrainMaterial.useParallax = true;
@@ -296,9 +278,16 @@ class World {
         this.waterMaterial.refractionTexture.depth = 0.1;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
-        // Add waves
-        this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
-        this.waterMaterial.bumpTexture.level = 0.5;
+        // Add procedural waves without external texture dependencies
+        if (BABYLON.NoiseProceduralTexture) {
+            const bump = new BABYLON.NoiseProceduralTexture('waterBump', 256, this.scene);
+            bump.animationSpeedFactor = 2;
+            bump.persistence = 1.2;
+            bump.brightness = 0.2;
+            bump.octaves = 2;
+            this.waterMaterial.bumpTexture = bump;
+            this.waterMaterial.bumpTexture.level = 0.35;
+        }
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;
@@ -760,7 +749,12 @@ class World {
         if (this.rainSystem) return;
         
         this.rainSystem = new BABYLON.ParticleSystem('rain', 5000, this.scene);
-        this.rainSystem.particleTexture = new BABYLON.Texture('assets/textures/rain.png', this.scene);
+        const particleBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAn8B9p1NsVsAAAAASUVORK5CYII=";
+        this.rainSystem.particleTexture = BABYLON.Texture.CreateFromBase64String(
+            'rainParticle',
+            particleBase64,
+            this.scene
+        );
         
         // Configure rain
         this.rainSystem.emitter = new BABYLON.Vector3(0, 50, 0);
@@ -799,7 +793,12 @@ class World {
         if (this.snowSystem) return;
         
         this.snowSystem = new BABYLON.ParticleSystem('snow', 5000, this.scene);
-        this.snowSystem.particleTexture = new BABYLON.Texture('assets/textures/snowflake.png', this.scene);
+        const particleBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAn8B9p1NsVsAAAAASUVORK5CYII=";
+        this.snowSystem.particleTexture = BABYLON.Texture.CreateFromBase64String(
+            'snowParticle',
+            particleBase64,
+            this.scene
+        );
         
         // Configure snow
         this.snowSystem.emitter = new BABYLON.Vector3(0, 50, 0);
@@ -2021,13 +2020,20 @@ class SimplexNoise {
     }
 }
 
-// Export for Node.js/CommonJS
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        World,
-        NPC,
-        Enemy,
-        Item,
-        SimplexNoise
-    };
-}
+  // Export for Node.js/CommonJS and attach to browser global
+  global.World = World;
+  global.NPC = NPC;
+  global.Enemy = Enemy;
+  global.Item = Item;
+  global.SimplexNoise = SimplexNoise;
+
+  if (typeof module !== 'undefined' && module.exports) {
+      module.exports = {
+          World,
+          NPC,
+          Enemy,
+          Item,
+          SimplexNoise
+      };
+  }
+})(typeof window !== 'undefined' ? window : globalThis);

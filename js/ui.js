@@ -1,3 +1,12 @@
+// UI Manager, guarded to avoid redeclaration across multiple script loads.
+(function (global) {
+    if (global.UIManager) {
+        console.warn('[UIManager] Existing UIManager detected; skipping redefinition.');
+        return;
+    }
+
+    const BABYLON = global.BABYLON;
+
 // UI Manager - simple HUD with health/mana/stamina bars
 class UIManager {
     constructor(game) {
@@ -277,4 +286,9 @@ class UIManager {
     }
 }
 
-window.UIManager = UIManager;
+    global.UIManager = UIManager;
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { UIManager };
+    }
+})(typeof window !== 'undefined' ? window : globalThis);

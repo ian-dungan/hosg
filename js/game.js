@@ -1,5 +1,14 @@
 // Main Game orchestration
 
+(function (global) {
+  if (global.Game) {
+    console.warn('[Game] Existing Game detected; skipping redefinition.');
+    return;
+  }
+
+  const BABYLON = global.BABYLON;
+  const CONFIG = global.CONFIG || {};
+
 class Game {
   constructor(canvasId) {
     this.canvas = document.getElementById(canvasId);
@@ -231,4 +240,9 @@ class Game {
   }
 }
 
-window.Game = Game;
+  global.Game = Game;
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { Game };
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
