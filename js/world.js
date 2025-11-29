@@ -1,45 +1,41 @@
 // Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
-class Entity {
-    constructor(scene, position) {
-        this.scene = scene;
+function Entity(scene, position) {
+  this.scene = scene;
 
-        // Normalize position into a Babylon Vector3 when possible
-        if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-            if (position instanceof BABYLON.Vector3) {
-                this.position = position.clone();
-            } else if (position && typeof position === "object" &&
-                       "x" in position && "y" in position && "z" in position) {
-                this.position = new BABYLON.Vector3(position.x, position.y, position.z);
-            } else {
-                this.position = BABYLON.Vector3.Zero();
-            }
-        } else {
-            // Very defensive fallback; shouldn't happen in normal runs
-            this.position = position || { x: 0, y: 0, z: 0 };
-        }
-
-        this.mesh = null;
-        this._isDisposed = false;
+  if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+    if (position instanceof BABYLON.Vector3) {
+      this.position = position.clone();
+    } else if (position && typeof position === "object" &&
+               "x" in position && "y" in position && "z" in position) {
+      this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+    } else {
+      this.position = BABYLON.Vector3.Zero();
     }
+  } else {
+    this.position = position || { x: 0, y: 0, z: 0 };
+  }
 
-    update(deltaTime) {
-        // Default implementation keeps the mesh in sync with the logical position
-        if (this.mesh && this.mesh.position && this.position &&
-            typeof this.mesh.position.copyFrom === "function") {
-            this.mesh.position.copyFrom(this.position);
-        }
-    }
-
-    dispose() {
-        this._isDisposed = true;
-        if (this.mesh && typeof this.mesh.dispose === "function") {
-            this.mesh.dispose();
-            this.mesh = null;
-        }
-    }
+  this.mesh = null;
+  this._isDisposed = false;
 }
 
+Entity.prototype.update = function (deltaTime) {
+  if (this.mesh && this.mesh.position && this.position &&
+      typeof this.mesh.position.copyFrom === "function") {
+    this.mesh.position.copyFrom(this.position);
+  }
+};
+
+Entity.prototype.dispose = function () {
+  this._isDisposed = true;
+  if (this.mesh && typeof this.mesh.dispose === "function") {
+    this.mesh.dispose();
+    this.mesh = null;
+  }
+};
+
 // World Class
+
 class World {
     constructor(scene, options = {}) {
         this.scene = scene;
@@ -119,24 +115,23 @@ class World {
 
     createSkybox() {
         // Create a simple skybox
-        this.skybox = BABYLON.MeshBuilder.CreateBox('skybox', { size: 10000 }, this.scene);
-        const skyboxMaterial = new BABYLON.StandardMaterial('skyboxMaterial', this.scene);
+        this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
+        var skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
 
-        // Try to create a gradient-style sky texture if this Babylon build supports it.
-        let skyTexture = null;
+        var skyTexture = null;
         try {
+            // Prefer a gradient texture if this Babylon build supports it
             if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
-                skyTexture = BABYLON.Texture.CreateGradientTexture('skyGradient', this.scene, 512, (gradient) => {
-                    // Sky gradient from top to bottom
-                    gradient.addColorStop(0, '#87CEEB'); // Sky blue at top
-                    gradient.addColorStop(0.5, '#1E90FF'); // Dodger blue in middle
-                    gradient.addColorStop(1, '#E0F7FF'); // Light cyan at bottom
+                skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", this.scene, 512, function (gradient) {
+                    gradient.addColorStop(0, "#87CEEB");
+                    gradient.addColorStop(0.5, "#1E90FF");
+                    gradient.addColorStop(1, "#E0F7FF");
                 });
             }
         } catch (e) {
-            console.warn("[World] Failed to create gradient sky texture, falling back to solid color sky:", e);
+            console.warn("[World] Failed to create gradient sky texture, falling back to solid sky:", e);
             skyTexture = null;
         }
 

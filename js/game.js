@@ -59,7 +59,7 @@ class Game {
         size: CONFIG.WORLD.SIZE,
         waterLevel: CONFIG.WORLD.WATER_LEVEL
       });
-      // Expose world on the scene so other systems (enemies/items) can find it
+      // Expose world on the scene for other systems
       this.scene.world = this.world;
       console.log("[Game] World initialized");
     } catch (err) {
@@ -70,7 +70,7 @@ class Game {
     // Player
     try {
       this.player = new Player(this.scene);
-      // Expose the player on the scene so world systems can reference it
+      // Expose player on the scene
       this.scene.player = this.player;
       console.log("[Game] Player initialized");
     } catch (err) {
@@ -81,7 +81,7 @@ class Game {
     // UI
     try {
       this.ui = new UIManager(this);
-      // Expose UI on the scene so world entities can trigger UI feedback
+      // Expose UI on the scene
       this.scene.ui = this.ui;
       console.log("[Game] UI initialized");
     } catch (err) {

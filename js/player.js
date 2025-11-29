@@ -152,15 +152,15 @@ class Player {
 class Inventory {
     constructor(size) {
         this.size = size;
+
+  addGold(amount) {
+    if (typeof amount === "number" && !isNaN(amount)) {
+      this.gold += amount;
+    }
+  }
         this.items = [];
         this.equippedItem = null;
         this.gold = 0;
-    }
-
-    addGold(amount) {
-        if (typeof amount === "number" && !isNaN(amount)) {
-            this.gold += amount;
-        }
     }
 
     addItem(item) {

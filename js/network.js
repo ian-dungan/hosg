@@ -3,92 +3,97 @@
 //
 // Supabase wrapper
 //
-class SupabaseService {
-  constructor(config) {
-    this.config = config || {};
-    this.client = null;
-    this._init();
-  }
-
-  _init() {
-    if (typeof window === "undefined") return;
-
-    // Supabase SDK must be loaded from CDN (index.html already includes it)
-    if (!window.supabase || typeof window.supabase.createClient !== "function") {
-      console.warn("[Supabase] supabase-js CDN script not loaded; client not initialized.");
-      return;
-    }
-
-    if (!this.config.url || !this.config.key) {
-      console.warn("[Supabase] Missing URL or key; client not initialized.");
-      return;
-    }
-
-    const { createClient } = window.supabase;
-
-    try {
-      this.client = createClient(this.config.url, this.config.key);
-      console.log("[Supabase] client initialized");
-    } catch (err) {
-      console.error("[Supabase] Failed to create client:", err);
-      this.client = null;
-    }
-  }
-
-  getClient() {
-    return this.client;
-  }
-
-  dispose() {
-    this.client = null;
-  }
+function SupabaseService(config) {
+  this.config = config || {};
+  this.client = null;
+  this._init();
 }
 
-// Global Supabase instance – safe even if SDK or config is missing
-const supabaseService = new SupabaseService(window.SUPABASE_CONFIG || {});
+SupabaseService.prototype._init = function () {
+  if (typeof window === "undefined") return;
 
-//
-// NetworkManager – evented WebSocket wrapper
-//
-function NetworkManager(url, options) {
-  if (!(this instanceof NetworkManager)) {
-    return new NetworkManager(url, options);
+  // Prefer explicit SUPABASE_CONFIG first, then CONFIG.SUPABASE if available
+  var globalConfig = window.SUPABASE_CONFIG || (typeof CONFIG !== "undefined" ? CONFIG.SUPABASE : null);
+  if (globalConfig) {
+    for (var k in globalConfig) {
+      if (Object.prototype.hasOwnProperty.call(globalConfig, k)) {
+        this.config[k] = globalConfig[k];
+      }
+    }
   }
 
-  options = options || {};
+  if (!window.supabase || typeof window.supabase.createClient !== "function") {
+    console.warn("[Supabase] supabase-js CDN script not loaded; client not initialized.");
+    return;
+  }
 
+  if (!this.config.url || !this.config.key) {
+    console.warn("[Supabase] Missing URL or key; client not initialized.");
+    return;
+  }
+
+  try {
+    this.client = window.supabase.createClient(this.config.url, this.config.key);
+    console.log("[Supabase] Client initialized");
+  } catch (err) {
+    console.error("[Supabase] Failed to create client:", err);
+    this.client = null;
+  }
+};
+
+SupabaseService.prototype.getClient = function () {
+  return this.client;
+};
+
+var supabaseService = new SupabaseService();
+
+//
+// Simple WebSocket-based network manager
+//
+function NetworkManager(url, options) {
+  options = options || {};
   this.url = url;
   this.socket = null;
   this.connected = false;
-
-  this.shouldReconnect = true;
-  this.reconnectAttempts = 0;
-  this.maxReconnectAttempts =
-    options.maxReconnectAttempts != null ? options.maxReconnectAttempts : 5;
-  this.reconnectDelay =
-    options.reconnectDelay != null ? options.reconnectDelay : 3000;
-
   this.listeners = {};
+
+  this.shouldReconnect = options.shouldReconnect !== false;
+  var defaultDelay = (typeof CONFIG !== "undefined" && CONFIG.NETWORK && CONFIG.NETWORK.RECONNECT_DELAY_MS) ? CONFIG.NETWORK.RECONNECT_DELAY_MS : 5000;
+  this.reconnectDelay = options.reconnectDelay || defaultDelay;
+  this.maxReconnectAttempts = options.maxReconnectAttempts || 5;
+  this.reconnectAttempts = 0;
 }
 
+NetworkManager.prototype.on = function (eventName, handler) {
+  if (!this.listeners[eventName]) {
+    this.listeners[eventName] = [];
+  }
+  this.listeners[eventName].push(handler);
+};
+
+NetworkManager.prototype._emit = function (eventName, payload) {
+  var list = this.listeners[eventName];
+  if (!list || !list.length) return;
+  for (var i = 0; i < list.length; i++) {
+    try {
+      list[i](payload);
+    } catch (err) {
+      console.error("[Network] Listener for '" + eventName + "' threw:", err);
+    }
+  }
+};
+
 NetworkManager.prototype.connect = function () {
-  const self = this;
+  var self = this;
 
-  if (typeof window === "undefined" || !("WebSocket" in window)) {
-    console.warn("[Network] WebSocket not supported in this environment");
-    return Promise.resolve();
+  if (!self.url) {
+    var err = new Error("WebSocket URL not configured");
+    console.error("[Network] " + err.message);
+    return Promise.reject(err);
   }
 
-  if (self.connected) {
+  if (self.socket && (self.socket.readyState === WebSocket.OPEN || self.socket.readyState === WebSocket.CONNECTING)) {
     return Promise.resolve();
-  }
-
-  if (self.socket && self.socket.readyState === WebSocket.CONNECTING) {
-    // Already connecting; return a promise that resolves on open/error
-    return new Promise(function (resolve, reject) {
-      self.on("open", function () { resolve(); });
-      self.on("error", function (err) { reject(err); });
-    });
   }
 
   return new Promise(function (resolve, reject) {
@@ -116,7 +121,6 @@ NetworkManager.prototype.connect = function () {
       self.connected = false;
       self.socket = null;
       console.log("[Network] Disconnected", event);
-
       self._emit("close", event);
 
       if (!self.shouldReconnect) return;
@@ -135,7 +139,7 @@ NetworkManager.prototype.connect = function () {
         );
         setTimeout(function () {
           self.connect().catch(function () {
-            // Further close/error events will handle logging
+            // Errors will be handled by error/close events
           });
         }, delay);
       } else {
@@ -160,41 +164,7 @@ NetworkManager.prototype._handleMessage = function (event) {
     // Not JSON - leave as raw string
   }
 
-  var eventName =
-    (payload && (payload.event || payload.type || payload.action)) ||
-    "message";
-
-  this._emit(eventName, payload);
   this._emit("message", payload);
-};
-
-NetworkManager.prototype.on = function (eventName, handler) {
-  if (!this.listeners[eventName]) {
-    this.listeners[eventName] = new Set();
-  }
-  this.listeners[eventName].add(handler);
-};
-
-NetworkManager.prototype.off = function (eventName, handler) {
-  var set = this.listeners[eventName];
-  if (!set) return;
-  set.delete(handler);
-  if (set.size === 0) {
-    delete this.listeners[eventName];
-  }
-};
-
-NetworkManager.prototype._emit = function (eventName, data) {
-  var set = this.listeners[eventName];
-  if (!set) return;
-
-  set.forEach(function (handler) {
-    try {
-      handler(data);
-    } catch (err) {
-      console.error("[Network] Listener error for", eventName, err);
-    }
-  });
 };
 
 /**
@@ -207,21 +177,27 @@ NetworkManager.prototype.send = function (eventName, data) {
     return false;
   }
 
-  try {
-    var payload;
+  var payload;
 
+  try {
     if (eventName == null) {
-      payload = typeof data === "string" ? data : JSON.stringify(data);
+      payload = data;
     } else {
       payload = JSON.stringify({ event: eventName, data: data });
     }
-
-    this.socket.send(payload);
-    return true;
   } catch (err) {
-    console.error("[Network] Send error:", err);
+    console.error("[Network] Failed to serialize message:", err);
     return false;
   }
+
+  try {
+    this.socket.send(payload);
+  } catch (err) {
+    console.error("[Network] Failed to send message:", err);
+    return false;
+  }
+
+  return true;
 };
 
 NetworkManager.prototype.disconnect = function () {
