@@ -627,11 +627,13 @@
 
     updateWater() {
         if (!this.waterMaterial) return;
-        
+
         // Animate water
         const time = Date.now() * 0.001;
-        this.waterMaterial.bumpTexture.uOffset += 0.001;
-        this.waterMaterial.bumpTexture.vOffset += 0.001;
+        if (this.waterMaterial.bumpTexture) {
+            this.waterMaterial.bumpTexture.uOffset += 0.001;
+            this.waterMaterial.bumpTexture.vOffset += 0.001;
+        }
     }
 
     updateTime() {
