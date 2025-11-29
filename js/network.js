@@ -1,3 +1,12 @@
+// Networking helpers, guarded to avoid redeclaration when scripts reload.
+(function (global) {
+  if (global.NetworkManager) {
+    console.warn('[Network] Existing NetworkManager detected; skipping redefinition.');
+    return;
+  }
+
+  const CONFIG = global.CONFIG || {};
+
 // Supabase + WebSocket networking
 
 //
@@ -214,6 +223,12 @@ NetworkManager.prototype.dispose = function () {
   this.listeners = {};
 };
 
-window.SupabaseService = SupabaseService;
-window.supabaseService = supabaseService;
-window.NetworkManager = NetworkManager;
+  global.SupabaseService = SupabaseService;
+  global.supabaseService = supabaseService;
+  global.NetworkManager = NetworkManager;
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { SupabaseService, NetworkManager, supabaseService };
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+
