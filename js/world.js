@@ -278,31 +278,10 @@
         this.waterMaterial.refractionTexture.depth = 0.1;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
-        // Add procedural waves without external texture dependencies
-        if (BABYLON.NoiseProceduralTexture) {
-            try {
-                const bump = new BABYLON.NoiseProceduralTexture('waterBump', 256, this.scene);
-                if (bump) {
-                    bump.animationSpeedFactor = 2;
-                    bump.persistence = 1.2;
-                    bump.brightness = 0.2;
-                    bump.octaves = 2;
-                    this.waterMaterial.bumpTexture = bump;
-
-                    // Some platforms return null if the procedural texture cannot be created;
-                    // guard before setting level to avoid runtime errors.
-                    if (this.waterMaterial.bumpTexture) {
-                        this.waterMaterial.bumpTexture.level = 0.35;
-                    }
-                } else {
-                    console.warn('[World] Failed to create water bump texture; using flat water surface');
-                    this.waterMaterial.bumpTexture = null;
-                }
-            } catch (e) {
-                console.warn('[World] Error creating water bump texture; continuing without waves', e);
-                this.waterMaterial.bumpTexture = null;
-            }
-        }
+        // Add waves
+        // Avoid external texture dependencies for water and rely on simple
+        // color/reflectivity settings instead.
+        this.waterMaterial.bumpTexture.level = 0.5;
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;
