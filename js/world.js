@@ -164,39 +164,12 @@ class World {
         // Generate heightmap
         this.generateHeightmap();
         
-        // Create PBR material for terrain using local grass textures
-        const scene = this.scene;
-        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
-        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        // Create a simple PBR material with solid colors to avoid relying on
+        // external texture files (which may be missing in static deployments).
+        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', this.scene);
+        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.35, 0.55, 0.32);
         this.terrainMaterial.metallic = 0.0;
-        this.terrainMaterial.roughness = 1.0;
-
-        // Albedo / base color texture
-        const albedoTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Color.jpg', scene);
-        albedoTexture.uScale = 16;
-        albedoTexture.vScale = 16;
-
-        // Normal map for small surface detail
-        const normalTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Normal.jpg', scene);
-        normalTexture.uScale = 16;
-        normalTexture.vScale = 16;
-
-        // Optional roughness map (game still runs if missing)
-        let roughnessTexture = null;
-        try {
-            roughnessTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Roughness.jpg', scene);
-            roughnessTexture.uScale = 16;
-            roughnessTexture.vScale = 16;
-        } catch (e) {
-            console.warn('[World] Roughness texture not found or failed to load:', e);
-        }
-
-        this.terrainMaterial.albedoTexture = albedoTexture;
-        this.terrainMaterial.bumpTexture = normalTexture;
-        if (roughnessTexture) {
-            this.terrainMaterial.metallicTexture = roughnessTexture;
-            this.terrainMaterial.useRoughnessFromMetallicTextureAlpha = false;
-        }
+        this.terrainMaterial.roughness = 0.95;
 
         // Slight parallax for extra depth
         this.terrainMaterial.useParallax = true;
@@ -297,7 +270,8 @@ class World {
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
         // Add waves
-        this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
+        // Avoid external texture dependencies for water and rely on simple
+        // color/reflectivity settings instead.
         this.waterMaterial.bumpTexture.level = 0.5;
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
@@ -760,7 +734,12 @@ class World {
         if (this.rainSystem) return;
         
         this.rainSystem = new BABYLON.ParticleSystem('rain', 5000, this.scene);
-        this.rainSystem.particleTexture = new BABYLON.Texture('assets/textures/rain.png', this.scene);
+        const particleBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAn8B9p1NsVsAAAAASUVORK5CYII=";
+        this.rainSystem.particleTexture = BABYLON.Texture.CreateFromBase64String(
+            'rainParticle',
+            particleBase64,
+            this.scene
+        );
         
         // Configure rain
         this.rainSystem.emitter = new BABYLON.Vector3(0, 50, 0);
@@ -799,7 +778,12 @@ class World {
         if (this.snowSystem) return;
         
         this.snowSystem = new BABYLON.ParticleSystem('snow', 5000, this.scene);
-        this.snowSystem.particleTexture = new BABYLON.Texture('assets/textures/snowflake.png', this.scene);
+        const particleBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAn8B9p1NsVsAAAAASUVORK5CYII=";
+        this.snowSystem.particleTexture = BABYLON.Texture.CreateFromBase64String(
+            'snowParticle',
+            particleBase64,
+            this.scene
+        );
         
         // Configure snow
         this.snowSystem.emitter = new BABYLON.Vector3(0, 50, 0);
