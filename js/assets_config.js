@@ -11,7 +11,7 @@ const WORLD_ASSETS = {
     // Texture paths (relative to repo root)
     TEXTURES: {
         // Ground/terrain
-        grass: 'assets/textures/ground037.png',
+        grass: 'assets/textures/ground/dirt/Ground037_4K-JPG_AmbientOcclusion.jpg',
         dirt: 'assets/textures/dirt.jpg',
         sand: 'assets/textures/sand.jpg',
         rock: 'assets/textures/rock.png',
