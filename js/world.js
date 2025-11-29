@@ -1,51 +1,42 @@
-(function (global) {
-  if (global.World) {
-    console.warn('[World] Existing World detected; skipping redefinition.');
-    return;
-  }
+// Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
+function Entity(scene, position) {
+  this.scene = scene;
 
-  const BABYLON = global.BABYLON;
-  const CONFIG = global.CONFIG || {};
-
-  // Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
-  function Entity(scene, position) {
-    this.scene = scene;
-
-    if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-      if (position instanceof BABYLON.Vector3) {
-        this.position = position.clone();
-      } else if (position && typeof position === "object" &&
-                 "x" in position && "y" in position && "z" in position) {
-        this.position = new BABYLON.Vector3(position.x, position.y, position.z);
-      } else {
-        this.position = BABYLON.Vector3.Zero();
-      }
+  if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+    if (position instanceof BABYLON.Vector3) {
+      this.position = position.clone();
+    } else if (position && typeof position === "object" &&
+               "x" in position && "y" in position && "z" in position) {
+      this.position = new BABYLON.Vector3(position.x, position.y, position.z);
     } else {
-      this.position = position || { x: 0, y: 0, z: 0 };
+      this.position = BABYLON.Vector3.Zero();
     }
-
-    this.mesh = null;
-    this._isDisposed = false;
+  } else {
+    this.position = position || { x: 0, y: 0, z: 0 };
   }
 
-  Entity.prototype.update = function (deltaTime) {
-    if (this.mesh && this.mesh.position && this.position &&
-        typeof this.mesh.position.copyFrom === "function") {
-      this.mesh.position.copyFrom(this.position);
-    }
-  };
+  this.mesh = null;
+  this._isDisposed = false;
+}
 
-  Entity.prototype.dispose = function () {
-    this._isDisposed = true;
-    if (this.mesh && typeof this.mesh.dispose === "function") {
-      this.mesh.dispose();
-      this.mesh = null;
-    }
-  };
+Entity.prototype.update = function (deltaTime) {
+  if (this.mesh && this.mesh.position && this.position &&
+      typeof this.mesh.position.copyFrom === "function") {
+    this.mesh.position.copyFrom(this.position);
+  }
+};
 
-  // World Class
+Entity.prototype.dispose = function () {
+  this._isDisposed = true;
+  if (this.mesh && typeof this.mesh.dispose === "function") {
+    this.mesh.dispose();
+    this.mesh = null;
+  }
+};
 
-  class World {
+// World Class
+
+class World {
     constructor(scene, options = {}) {
         this.scene = scene;
         this.options = {
@@ -85,12 +76,9 @@
         this.sunLight = null;
         this.ambientLight = null;
         this.shadowGenerator = null;
-
+        
         // Physics
         this.gravity = new BABYLON.Vector3(0, -9.81, 0);
-
-        // Asset cache so we only fetch textures once
-        this.textureCache = new Map();
         
         // Initialize
         this.init();
@@ -176,12 +164,44 @@
         // Generate heightmap
         this.generateHeightmap();
         
-        // Create a simple PBR material with solid colors to avoid relying on
-        // external texture files (which may be missing in static deployments).
-        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', this.scene);
-        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.35, 0.55, 0.32);
+        // Create PBR material for terrain using local grass textures
+        const scene = this.scene;
+        this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
+        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         this.terrainMaterial.metallic = 0.0;
-        this.terrainMaterial.roughness = 0.95;
+        this.terrainMaterial.roughness = 1.0;
+
+        // Albedo / base color texture
+        const albedoTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Color.jpg', scene);
+        albedoTexture.uScale = 16;
+        albedoTexture.vScale = 16;
+
+        // Normal map for small surface detail
+        const normalTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Normal.jpg', scene);
+        normalTexture.uScale = 16;
+        normalTexture.vScale = 16;
+
+        // Optional roughness map (game still runs if missing)
+        let roughnessTexture = null;
+        try {
+            roughnessTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Roughness.jpg', scene);
+            roughnessTexture.uScale = 16;
+            roughnessTexture.vScale = 16;
+        } catch (e) {
+            console.warn('[World] Roughness texture not found or failed to load:', e);
+        }
+
+        this.terrainMaterial.albedoTexture = albedoTexture;
+        this.terrainMaterial.bumpTexture = normalTexture;
+        if (roughnessTexture) {
+            this.terrainMaterial.metallicTexture = roughnessTexture;
+            this.terrainMaterial.useRoughnessFromMetallicTextureAlpha = false;
+        }
+
+        // Slight parallax for extra depth
+        this.terrainMaterial.useParallax = true;
+        this.terrainMaterial.useParallaxOcclusion = true;
+        this.terrainMaterial.parallaxScaleBias = 0.02;
 
         this.terrain.material = this.terrainMaterial;
         // Enable collisions
@@ -277,8 +297,7 @@
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
         // Add waves
-        // Avoid external texture dependencies for water and rely on simple
-        // color/reflectivity settings instead.
+        this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
         this.waterMaterial.bumpTexture.level = 0.5;
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
@@ -292,46 +311,9 @@
         
         this.waterMaterial.specularPower = 64;
         this.waterMaterial.alpha = 0.8;
-
+        
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
-    }
-
-    createWaterBumpTexture() {
-        let bump = null;
-
-        // First try Babylon's built-in noise procedural texture
-        if (BABYLON.NoiseProceduralTexture) {
-            try {
-                const noise = new BABYLON.NoiseProceduralTexture('waterBump', 256, this.scene);
-                if (noise) {
-                    noise.animationSpeedFactor = 2;
-                    noise.persistence = 1.2;
-                    noise.brightness = 0.2;
-                    noise.octaves = 2;
-                    noise.level = 0.35;
-                    bump = noise;
-                }
-            } catch (e) {
-                console.warn('[World] Error creating procedural water bump texture; will try asset fallback', e);
-            }
-        }
-
-        // Fallback to a bundled normal map so we always have some wave detail
-        if (!bump) {
-            const fallback = this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_NormalGL.jpg', {
-                uScale: 4,
-                vScale: 4
-            });
-            if (fallback) {
-                fallback.level = 0.35;
-                bump = fallback;
-            } else {
-                console.warn('[World] Water bump texture unavailable; water surface will be flat.');
-            }
-        }
-
-        return bump;
     }
 
     populateWorld() {
@@ -342,46 +324,11 @@
         this.createNPCs(10);
         this.createEnemies(20);
         this.createItems(30);
-
-        this.updateWaterReflectionList();
-    }
-
-    updateWaterReflectionList() {
-        if (!this.waterMaterial?.reflectionTexture || !this.waterMaterial?.refractionTexture) return;
-
-        const renderList = [
-            this.terrain,
-            ...this.trees,
-            ...this.rocks,
-            ...this.buildings,
-            ...this.grass,
-            ...this.npcs.map(n => n.mesh).filter(Boolean),
-            ...this.enemies.map(e => e.mesh).filter(Boolean)
-        ].filter(Boolean);
-
-        this.waterMaterial.reflectionTexture.renderList = renderList;
-        this.waterMaterial.refractionTexture.renderList = renderList;
     }
 
     createTrees(count) {
         const treeMaterial = new BABYLON.StandardMaterial('treeMaterial', this.scene);
         treeMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.2);
-        const leafTexture = this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_Color.jpg', {
-            hasAlpha: true,
-            uScale: 1,
-            vScale: 1
-        });
-        const leafOpacity = this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_Opacity.jpg', {
-            hasAlpha: true
-        });
-        if (leafTexture) {
-            treeMaterial.diffuseTexture = leafTexture;
-            treeMaterial.useAlphaFromDiffuseTexture = true;
-            treeMaterial.backFaceCulling = false;
-        }
-        if (leafOpacity) {
-            treeMaterial.opacityTexture = leafOpacity;
-        }
         
         for (let i = 0; i < count; i++) {
             // Create trunk
@@ -464,20 +411,9 @@
 
     createGrass(count) {
         const grassMaterial = new BABYLON.StandardMaterial('grassMaterial', this.scene);
-        const grassDiffuse = this.getTexture('assets/environment/Grass.png', {
-            hasAlpha: true,
-            uScale: 2,
-            vScale: 2
-        }) || this.getTexture('assets/textures/foliage/Foliage001_2K-JPG_Color.jpg', { hasAlpha: true });
-        if (grassDiffuse) {
-            grassMaterial.diffuseTexture = grassDiffuse;
-            grassMaterial.useAlphaFromDiffuseTexture = true;
-            grassMaterial.backFaceCulling = false;
-        } else {
-            grassMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
-            grassMaterial.alpha = 0.8;
-            grassMaterial.backFaceCulling = false;
-        }
+        grassMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
+        grassMaterial.alpha = 0.8;
+        grassMaterial.backFaceCulling = false;
         
         for (let i = 0; i < count; i++) {
             // Create a simple grass patch
@@ -693,39 +629,8 @@
         const x = (Math.random() - 0.5) * this.options.size * 0.9;
         const z = (Math.random() - 0.5) * this.options.size * 0.9;
         const y = this.getHeightAt(x, z) + heightOffset;
-
+        
         return new BABYLON.Vector3(x, y, z);
-    }
-
-    getTexture(path, options = {}) {
-        if (this.textureCache.has(path)) {
-            return this.textureCache.get(path);
-        }
-
-        let texture = null;
-        try {
-            texture = new BABYLON.Texture(
-                path,
-                this.scene,
-                true,
-                false,
-                BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-                null,
-                (message) => console.warn(`[World] Failed to load texture ${path}:`, message)
-            );
-
-            if (texture) {
-                texture.hasAlpha = !!options.hasAlpha;
-                texture.uScale = options.uScale ?? 1;
-                texture.vScale = options.vScale ?? 1;
-                this.textureCache.set(path, texture);
-            }
-        } catch (e) {
-            console.warn(`[World] Error loading texture ${path}:`, e);
-            texture = null;
-        }
-
-        return texture;
     }
 
     setupEventListeners() {
@@ -739,13 +644,11 @@
 
     updateWater() {
         if (!this.waterMaterial) return;
-
+        
         // Animate water
         const time = Date.now() * 0.001;
-        if (this.waterMaterial.bumpTexture) {
-            this.waterMaterial.bumpTexture.uOffset += 0.001;
-            this.waterMaterial.bumpTexture.vOffset += 0.001;
-        }
+        this.waterMaterial.bumpTexture.uOffset += 0.001;
+        this.waterMaterial.bumpTexture.vOffset += 0.001;
     }
 
     updateTime() {
@@ -857,12 +760,7 @@
         if (this.rainSystem) return;
         
         this.rainSystem = new BABYLON.ParticleSystem('rain', 5000, this.scene);
-        const particleBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAn8B9p1NsVsAAAAASUVORK5CYII=";
-        this.rainSystem.particleTexture = BABYLON.Texture.CreateFromBase64String(
-            'rainParticle',
-            particleBase64,
-            this.scene
-        );
+        this.rainSystem.particleTexture = new BABYLON.Texture('assets/textures/rain.png', this.scene);
         
         // Configure rain
         this.rainSystem.emitter = new BABYLON.Vector3(0, 50, 0);
@@ -901,12 +799,7 @@
         if (this.snowSystem) return;
         
         this.snowSystem = new BABYLON.ParticleSystem('snow', 5000, this.scene);
-        const particleBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAn8B9p1NsVsAAAAASUVORK5CYII=";
-        this.snowSystem.particleTexture = BABYLON.Texture.CreateFromBase64String(
-            'snowParticle',
-            particleBase64,
-            this.scene
-        );
+        this.snowSystem.particleTexture = new BABYLON.Texture('assets/textures/snowflake.png', this.scene);
         
         // Configure snow
         this.snowSystem.emitter = new BABYLON.Vector3(0, 50, 0);
@@ -2128,20 +2021,13 @@ class SimplexNoise {
     }
 }
 
-  // Export for Node.js/CommonJS and attach to browser global
-  global.World = World;
-  global.NPC = NPC;
-  global.Enemy = Enemy;
-  global.Item = Item;
-  global.SimplexNoise = SimplexNoise;
-
-  if (typeof module !== 'undefined' && module.exports) {
-      module.exports = {
-          World,
-          NPC,
-          Enemy,
-          Item,
-          SimplexNoise
-      };
-  }
-})(typeof window !== 'undefined' ? window : globalThis);
+// Export for Node.js/CommonJS
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        World,
+        NPC,
+        Enemy,
+        Item,
+        SimplexNoise
+    };
+}

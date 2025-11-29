@@ -1,12 +1,3 @@
-// UI Manager, guarded to avoid redeclaration across multiple script loads.
-(function (global) {
-    if (global.UIManager) {
-        console.warn('[UIManager] Existing UIManager detected; skipping redefinition.');
-        return;
-    }
-
-    const BABYLON = global.BABYLON;
-
 // UI Manager - simple HUD with health/mana/stamina bars
 class UIManager {
     constructor(game) {
@@ -226,56 +217,57 @@ class UIManager {
     }
 
     showDamageNumber(amount, position, isPlayerHit) {
-        var prefix = isPlayerHit ? "-" : "";
-        var text = "" + prefix + amount;
-        this.showFloatingText(text, position, isPlayerHit ? "playerDamage" : "enemyDamage", 800);
+    var prefix = isPlayerHit ? "-" : "";
+    var text = "" + prefix + amount;
+    this.showFloatingText(text, position, isPlayerHit ? "playerDamage" : "enemyDamage", 800);
     }
-
+    
     showFloatingText(text, position, type, duration) {
-        if (!this.gui || !this.scene || typeof BABYLON === "undefined" || !BABYLON.GUI) {
-            return;
-        }
-
-        if (typeof type === "undefined") type = "default";
-        if (typeof duration === "undefined") duration = 1500;
-
-        var label = new BABYLON.GUI.TextBlock("floatingText");
-        label.text = text;
-        label.fontSize = 20;
-        label.outlineWidth = 2;
-        label.outlineColor = "black";
-
-        if (type === "gold") {
-            label.color = "#ffd700";
-        } else if (type === "playerDamage") {
-            label.color = "#ff3333";
-        } else if (type === "enemyDamage") {
-            label.color = "#ffffff";
-        } else {
-            label.color = "white";
-        }
-
-        label.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        label.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        label.top = "-35%";
-
-        this.gui.addControl(label);
-
-        var scene = this.scene;
-        var startTime = performance.now();
-        var total = duration;
-
-        var observer = scene.onBeforeRenderObservable.add(function () {
-            var t = (performance.now() - startTime) / total;
-            if (t >= 1) {
-                scene.onBeforeRenderObservable.remove(observer);
-                this.gui.removeControl(label);
-            } else {
-                var offset = -35 - t * 15;
-                label.top = offset + "%";
-                label.alpha = 1 - t;
-            }
-        }.bind(this));
+    if (!this.gui || !this.scene || typeof BABYLON === "undefined" || !BABYLON.GUI) {
+    return;
+    }
+    
+    if (typeof type === "undefined") type = "default";
+    if (typeof duration === "undefined") duration = 1500;
+    
+    var label = new BABYLON.GUI.TextBlock("floatingText");
+    label.text = text;
+    label.fontSize = 20;
+    label.outlineWidth = 2;
+    label.outlineColor = "black";
+    
+    if (type === "gold") {
+    label.color = "#ffd700";
+    } else if (type === "playerDamage") {
+    label.color = "#ff3333";
+    } else if (type === "enemyDamage") {
+    label.color = "#ffffff";
+    } else {
+    label.color = "white";
+    }
+    
+    label.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+    label.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+    label.top = "-35%";
+    label.left = "0px";
+    
+    this.gui.addControl(label);
+    
+    var scene = this.scene;
+    var startTime = performance.now();
+    var total = duration;
+    
+    var observer = scene.onBeforeRenderObservable.add(function () {
+    var t = (performance.now() - startTime) / total;
+    if (t >= 1) {
+    scene.onBeforeRenderObservable.remove(observer);
+    this.gui.removeControl(label);
+    } else {
+    var offset = -35 - t * 15;
+    label.top = offset + "%";
+    label.alpha = 1 - t;
+    }
+    }.bind(this));
     }
 
     dispose() {
@@ -286,9 +278,4 @@ class UIManager {
     }
 }
 
-    global.UIManager = UIManager;
-
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { UIManager };
-    }
-})(typeof window !== 'undefined' ? window : globalThis);
+window.UIManager = UIManager;
