@@ -24,12 +24,12 @@ const WORLD_ASSETS = {
         
         // Skybox (6 faces)
         skybox: {
-            px: 'assets/textures/skybox/px.jpg', // +X
-            nx: 'assets/textures/skybox/nx.jpg', // -X
-            py: 'assets/textures/skybox/py.jpg', // +Y
-            ny: 'assets/textures/skybox/ny.jpg', // -Y
-            pz: 'assets/textures/skybox/pz.jpg', // +Z
-            nz: 'assets/textures/skybox/nz.jpg'  // -Z
+            px: 'assets/sky/DaySkyHDRI059A_2K.blend', // +X
+            nx: 'assets/sky/DaySkyHDRI059A_2K.blend', // -X
+            py: 'assets/sky/DaySkyHDRI059A_2K.blend', // +Y
+            ny: 'assets/sky/DaySkyHDRI059A_2K.blend', // -Y
+            pz: 'assets/sky/DaySkyHDRI059A_2K.blend', // +Z
+            nz: 'assets/sky/DaySkyHDRI059A_2K.blend'  // -Z
         },
         
         // Weather particles
