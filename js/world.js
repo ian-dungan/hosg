@@ -115,7 +115,7 @@ class World {
 
     createSkybox() {
         // Try to load custom HDRI skybox
-        const skyPath = 'assets/sky/DaySkyHDRI059A_2K_TONEMAPPED.jpg';
+        const skyPath = 'assets/sky/DaySkyHDRI015B_4K_TONEMAPPED.jpg';
         
         try {
             // Use PhotoDome for 360° panoramic skybox
