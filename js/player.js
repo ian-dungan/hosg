@@ -68,17 +68,19 @@ class Player {
         
         console.log('[Player] ✓ Terrain ready, creating player...');
         
-        // Get spawn height from terrain
+        // Get spawn height from terrain with EXTRA clearance
         const world = this.scene.game?.world;
-        let spawnY = 5; // Safe default
+        let spawnY = 10; // Safe high default
         
         if (world && world.getHeightAt) {
             const groundY = world.getHeightAt(0, 0);
-            spawnY = groundY + 3; // 3 units above ground
+            spawnY = groundY + 10; // 10 units above ground for safety!
             console.log(`[Player] Ground at y=${groundY.toFixed(2)}, spawning at y=${spawnY.toFixed(2)}`);
+        } else {
+            console.warn('[Player] Could not get terrain height, using default spawn y=10');
         }
         
-        // Create player mesh with physics
+        // Create player mesh with physics (spawnY +5 added in createPlayerMesh)
         this.createPlayerMesh(spawnY);
         
         // Load character model
@@ -114,42 +116,54 @@ class Player {
     }
     
     createPlayerMesh(spawnY) {
-        // Create simple capsule for physics
+        // Create simple capsule for visual representation
         this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
             radius: 0.5,
             height: 1.8,
             tessellation: 8
         }, this.scene);
         
-        this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
+        // Spawn HIGHER to avoid terrain collision
+        this.mesh.position = new BABYLON.Vector3(0, spawnY + 5, 0); // +5 extra clearance!
         this.mesh.visibility = 0; // Invisible (character model will be visible)
         
         // CRITICAL: Enable collisions
         this.mesh.checkCollisions = true;
         
-        // Create physics impostor with CAPSULE - wait a frame for mesh to be ready
+        // Create physics impostor with BOX (Cannon.js doesn't support capsule!)
         setTimeout(() => {
-            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                this.mesh,
-                BABYLON.PhysicsImpostor.CapsuleImpostor,
-                {
-                    mass: 1,
-                    friction: 0.5,
-                    restitution: 0
-                },
-                this.scene
-            );
-            
-            // Lock rotation so player doesn't tip over
-            const body = this.mesh.physicsImpostor.physicsBody;
-            if (body) {
-                body.fixedRotation = true;
-                body.updateMassProperties();
-                this.physicsReady = true;
-                console.log(`[Player] ✓ Physics enabled: mass=1, friction=0.5, body ready`);
-            } else {
-                console.error('[Player] ✗ Physics body is NULL! Using fallback movement');
-                this.physicsReady = false;
+            try {
+                this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    this.mesh,
+                    BABYLON.PhysicsImpostor.BoxImpostor, // BOX instead of CAPSULE!
+                    {
+                        mass: 1,
+                        friction: 0.5,
+                        restitution: 0
+                    },
+                    this.scene
+                );
+                
+                // Check if body actually created
+                const body = this.mesh.physicsImpostor.physicsBody;
+                if (body) {
+                    body.fixedRotation = true;
+                    body.updateMassProperties();
+                    this.physicsReady = true;
+                    console.log(`[Player] ✓ Physics enabled: BoxImpostor mass=1, friction=0.5`);
+                } else {
+                    console.warn('[Player] ✗ Physics body is NULL! Disposing impostor and using direct movement');
+                    this.mesh.physicsImpostor.dispose();
+                    this.mesh.physicsImpostor = null;
+                    this.physicsReady = true; // Allow update to run with fallback
+                }
+            } catch (error) {
+                console.error('[Player] ✗ Physics impostor creation FAILED:', error.message);
+                if (this.mesh.physicsImpostor) {
+                    this.mesh.physicsImpostor.dispose();
+                    this.mesh.physicsImpostor = null;
+                }
+                this.physicsReady = true; // Allow update to run with fallback
             }
         }, 100);
         
@@ -339,12 +353,10 @@ class Player {
     update(deltaTime) {
         if (!this.mesh) return;
         
-        // CRITICAL: Don't run update until physics is initialized
-        // The createPlayerMesh setTimeout needs 100ms to complete
+        // CRITICAL: Don't run update until physics initialization attempt is complete
         if (!this.physicsReady) {
-            // Still show "waiting" message occasionally
             if (!this._waitingLogged) {
-                console.log('[Player] Waiting for physics to initialize...');
+                console.log('[Player] Waiting for physics initialization...');
                 this._waitingLogged = true;
             }
             return;
@@ -353,7 +365,7 @@ class Player {
         // Update gamepad state
         this.updateGamepad();
         
-        const dt = deltaTime * 60; // Scale to 60fps baseline
+        const dt = deltaTime / 16.67; // Normalize to 60fps baseline
         
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
@@ -379,9 +391,8 @@ class Player {
             moveDir.addInPlace(gamepadMove);
         }
         
-        // Check if physics is ready and body exists
-        const hasPhysics = this.physicsReady && 
-                          this.mesh.physicsImpostor && 
+        // Check if physics impostor exists and is valid
+        const hasPhysics = this.mesh.physicsImpostor && 
                           this.mesh.physicsImpostor.physicsBody;
         
         // Apply movement
@@ -403,20 +414,13 @@ class Player {
                         )
                     );
                 } catch (e) {
-                    console.warn('[Player] Physics error, using direct movement:', e.message);
+                    console.warn('[Player] Physics error:', e.message);
+                    // Fall through to direct movement
                     this.mesh.position.addInPlace(velocity);
                 }
             } else {
                 // Fallback: Direct position manipulation
                 this.mesh.position.addInPlace(velocity);
-                
-                // Apply gravity manually
-                if (this.mesh.position.y > 0) {
-                    this.mesh.position.y -= 0.5 * dt;
-                }
-                if (this.mesh.position.y < 0) {
-                    this.mesh.position.y = 0;
-                }
             }
             
             // Rotate player to face movement direction
@@ -457,28 +461,38 @@ class Player {
                         new BABYLON.Vector3(currentVel.x, this.jumpForce, currentVel.z)
                     );
                 } catch (e) {
-                    this.mesh.position.y += 2;
+                    this.mesh.position.y += this.jumpForce;
                 }
             } else {
-                this.mesh.position.y += 2;
+                // Fallback: Direct position jump
+                this.mesh.position.y += this.jumpForce;
             }
             this.onGround = false;
             this.input.jump = false; // Reset jump
+        }
+        
+        // Apply gravity if not using physics
+        if (!hasPhysics && this.mesh.position.y > 0.5) {
+            this.mesh.position.y -= 0.5 * dt;
+            if (this.mesh.position.y < 0.5) {
+                this.mesh.position.y = 0.5;
+                this.onGround = true;
+            }
         }
         
         // Ground check
         const ray = new BABYLON.Ray(
             this.mesh.position,
             new BABYLON.Vector3(0, -1, 0),
-            1.2
+            1.5
         );
         const hit = this.scene.pickWithRay(ray, (mesh) => mesh.name === 'terrain');
         this.onGround = hit && hit.hit;
         
         // Safety check - if falling below world, reset
         if (this.mesh.position.y < -10) {
-            console.warn('[Player] Fell through world! Resetting...');
-            this.mesh.position = new BABYLON.Vector3(0, 10, 0);
+            console.warn('[Player] Fell through world! Resetting to y=20...');
+            this.mesh.position = new BABYLON.Vector3(0, 20, 0);
             if (hasPhysics) {
                 try {
                     this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
