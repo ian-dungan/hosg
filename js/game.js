@@ -15,6 +15,7 @@ class Game {
 
     this.scene = new BABYLON.Scene(this.engine);
     this.scene.collisionsEnabled = true;
+    this.scene.game = this; // Allow access to game from scene
 
     // Physics setup
     if (typeof CANNON !== "undefined") {

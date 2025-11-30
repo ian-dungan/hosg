@@ -22,6 +22,11 @@ class Player {
         this.leftLeg = null;
         this.rightLeg = null;
         
+        // Safety system for falling through world
+        this.safeSpawnPosition = new BABYLON.Vector3(0, 5, 0);
+        this.fallThroughThreshold = -10; // If below this Y, reset position
+        this.spawnHeightSet = false;
+        
         this.init();
     }
 
@@ -39,8 +44,8 @@ class Player {
             depth: 0.5
         }, this.scene);
         
-        // Spawn at safe height (will drop to terrain)
-        this.mesh.position.y = 20;
+        // Start at temporary safe height
+        this.mesh.position = new BABYLON.Vector3(0, 50, 0);
         this.mesh.visibility = 0;
         
         // Create knight character as visual
@@ -61,6 +66,52 @@ class Player {
         // Apply damping to prevent sliding
         this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
         this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+        
+        // Set proper spawn height after world is loaded
+        this.setProperSpawnHeight();
+    }
+    
+    setProperSpawnHeight() {
+        // Wait for world to be fully loaded
+        const checkWorld = () => {
+            // Access world through game instance if available
+            const world = this.scene.game?.world;
+            
+            if (world && world.terrain && typeof world.getHeightAt === 'function') {
+                // Get actual ground height at spawn position (0, 0)
+                const groundHeight = world.getHeightAt(0, 0);
+                
+                // Place player just above ground (height 1.8 = player height, +0.5 = safety buffer)
+                const spawnY = groundHeight + 2.3;
+                
+                // Set position
+                this.mesh.position.y = spawnY;
+                
+                // Store as safe spawn position for fall-through recovery
+                this.safeSpawnPosition = new BABYLON.Vector3(0, spawnY, 0);
+                this.spawnHeightSet = true;
+                
+                console.log(`[Player] Spawn height set to ${spawnY.toFixed(2)} (ground: ${groundHeight.toFixed(2)})`);
+            } else {
+                // World not ready yet, try again next frame
+                setTimeout(checkWorld, 100);
+            }
+        };
+        
+        checkWorld();
+    }
+    
+    resetToSafePosition() {
+        if (this.mesh && this.mesh.physicsImpostor) {
+            // Reset position
+            this.mesh.position.copyFrom(this.safeSpawnPosition);
+            
+            // Stop all velocity
+            this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+            
+            console.log('[Player] Reset to safe position after falling through world');
+        }
     }
     
     createKnightModel() {
@@ -309,6 +360,9 @@ class Player {
         
         // Ground detection
         this.checkGroundContact();
+        
+        // Safety check: reset if fallen through world
+        this.checkFallThrough();
     }
     
     animateWalking(deltaTime, isRunning) {
@@ -347,6 +401,16 @@ class Player {
         
         // Consider grounded if hit within threshold
         this.isOnGround = hit && hit.hit && hit.distance < 0.95;
+    }
+    
+    checkFallThrough() {
+        // Safety check: if player has fallen below the world, reset them
+        if (!this.mesh) return;
+        
+        if (this.mesh.position.y < this.fallThroughThreshold) {
+            console.warn('[Player] Fell through world! Resetting to safe position...');
+            this.resetToSafePosition();
+        }
     }
 
     jump() {
