@@ -44,36 +44,28 @@ class Player {
             depth: 0.5
         }, this.scene);
         
-        // Start at temporary safe height
-        this.mesh.position = new BABYLON.Vector3(0, 50, 0);
+        // Start VERY high to give world time to load
+        this.mesh.position = new BABYLON.Vector3(0, 100, 0);
         this.mesh.visibility = 0;
         
         // Create knight character as visual
         this.createKnightModel();
         
-        // Enhanced physics with better values for smooth movement
-        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.mesh,
-            BABYLON.PhysicsImpostor.BoxImpostor,
-            { 
-                mass: 15,           // Heavier = more stable, less sliding
-                friction: 0.2,      // Ground friction
-                restitution: 0.0    // No bounce
-            },
-            this.scene
-        );
-        
-        // Apply damping to prevent sliding
-        this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
-        this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+        // DON'T create physics yet - wait for proper spawn height first
+        console.log('[Player] Mesh created at y=100, waiting for world...');
         
         // Set proper spawn height after world is loaded
         this.setProperSpawnHeight();
     }
     
     setProperSpawnHeight() {
+        let attempts = 0;
+        const maxAttempts = 100; // 10 seconds max wait
+        
         // Wait for world to be fully loaded
         const checkWorld = () => {
+            attempts++;
+            
             // Access world through game instance if available
             const world = this.scene.game?.world;
             
@@ -84,17 +76,55 @@ class Player {
                 // Place player just above ground (height 1.8 = player height, +0.5 = safety buffer)
                 const spawnY = groundHeight + 2.3;
                 
-                // Set position
-                this.mesh.position.y = spawnY;
+                // Set position FIRST
+                this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
+                
+                // NOW create physics impostor at correct position
+                this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    this.mesh,
+                    BABYLON.PhysicsImpostor.BoxImpostor,
+                    { 
+                        mass: 15,           // Heavier = more stable, less sliding
+                        friction: 0.2,      // Ground friction
+                        restitution: 0.0    // No bounce
+                    },
+                    this.scene
+                );
+                
+                // Apply damping to prevent sliding
+                this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
+                this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
                 
                 // Store as safe spawn position for fall-through recovery
                 this.safeSpawnPosition = new BABYLON.Vector3(0, spawnY, 0);
                 this.spawnHeightSet = true;
                 
-                console.log(`[Player] Spawn height set to ${spawnY.toFixed(2)} (ground: ${groundHeight.toFixed(2)})`);
+                console.log(`[Player] ✓ Spawned at y=${spawnY.toFixed(2)} (ground=${groundHeight.toFixed(2)}) after ${attempts} attempts`);
             } else {
-                // World not ready yet, try again next frame
-                setTimeout(checkWorld, 100);
+                // World not ready yet
+                if (attempts < maxAttempts) {
+                    if (attempts % 10 === 0) {
+                        console.log(`[Player] Waiting for world... (attempt ${attempts}/${maxAttempts})`);
+                    }
+                    setTimeout(checkWorld, 100);
+                } else {
+                    // Fallback: spawn at safe default height
+                    console.warn('[Player] World load timeout! Using fallback spawn at y=5');
+                    this.mesh.position = new BABYLON.Vector3(0, 5, 0);
+                    
+                    // Create physics at fallback position
+                    this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                        this.mesh,
+                        BABYLON.PhysicsImpostor.BoxImpostor,
+                        { mass: 15, friction: 0.2, restitution: 0.0 },
+                        this.scene
+                    );
+                    this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
+                    this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+                    
+                    this.safeSpawnPosition = new BABYLON.Vector3(0, 5, 0);
+                    this.spawnHeightSet = true;
+                }
             }
         };
         
@@ -102,16 +132,18 @@ class Player {
     }
     
     resetToSafePosition() {
-        if (this.mesh && this.mesh.physicsImpostor) {
-            // Reset position
-            this.mesh.position.copyFrom(this.safeSpawnPosition);
-            
-            // Stop all velocity
+        if (!this.mesh) return;
+        
+        // Reset position
+        this.mesh.position.copyFrom(this.safeSpawnPosition);
+        
+        // Stop all velocity if physics exists
+        if (this.mesh.physicsImpostor) {
             this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
             this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
-            
-            console.log('[Player] Reset to safe position after falling through world');
         }
+        
+        console.log(`[Player] ✓ Reset to safe position (${this.safeSpawnPosition.y.toFixed(2)})`);
     }
     
     createKnightModel() {
@@ -407,9 +439,21 @@ class Player {
         // Safety check: if player has fallen below the world, reset them
         if (!this.mesh) return;
         
+        // Don't check until spawn height is set and physics is enabled
+        if (!this.spawnHeightSet || !this.mesh.physicsImpostor) return;
+        
         if (this.mesh.position.y < this.fallThroughThreshold) {
-            console.warn('[Player] Fell through world! Resetting to safe position...');
+            console.warn(`[Player] ⚠️ FELL THROUGH at y=${this.mesh.position.y.toFixed(2)}! Resetting...`);
             this.resetToSafePosition();
+        }
+        
+        // Also check if we're moving downward very fast (potential glitch)
+        if (this.mesh.physicsImpostor) {
+            const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+            if (velocity.y < -50) { // Falling way too fast
+                console.warn(`[Player] ⚠️ Excessive fall speed (${velocity.y.toFixed(1)})! Resetting...`);
+                this.resetToSafePosition();
+            }
         }
     }
 
