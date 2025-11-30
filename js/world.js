@@ -1002,7 +1002,6 @@ class World {
  // Subtle scaling for more natural movement
  this.waterMaterial.bumpTexture.uScale = 10 + Math.sin(time * 0.1) * 0.2;
  this.waterMaterial.bumpTexture.vScale = 10 + Math.cos(time * 0.1) * 0.2;
- }
  // Gentle color variation (very subtle)
  if (time % 10 < 0.1) { // Only update color occasionally to make it very subtle
  const waveFactor = Math.sin(time * 0.2) * 0.02; // Very small multiplier for subtlety
