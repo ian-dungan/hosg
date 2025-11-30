@@ -115,7 +115,7 @@ class World {
 
     createSkybox() {
         // Try to load custom HDRI skybox
-        const skyPath = 'assets/sky/DaySkyHDRI007B_1K_TONEMAPPED.jpg';
+        const skyPath = 'assets/sky/DaySkyHDRI059A_2K_TONEMAPPED.jpg';
         
         try {
             // Use PhotoDome for 360° panoramic skybox
@@ -177,6 +177,11 @@ class World {
 
 
     createTerrain() {
+        // STEP 1: Create GUARANTEED SOLID spawn platform FIRST
+        console.log('[World] Creating spawn platform...');
+        this.createSpawnPlatform();
+        
+        // STEP 2: Create terrain
         // Create a large ground
         this.terrain = BABYLON.MeshBuilder.CreateGround('terrain', {
             width: this.options.size,
@@ -379,6 +384,114 @@ class World {
         } catch (error) {
             console.log('[World] Asset loading skipped or failed, using procedural terrain');
         }
+    }
+    
+    createSpawnPlatform() {
+        // Create a VISIBLE, SOLID platform at spawn point
+        // This guarantees the player has something to stand on
+        console.log('[World] 🏗️ Creating spawn platform...');
+        
+        const scene = this.scene;
+        const platformSize = 20; // 20x20 platform
+        const platformHeight = 2; // 2 units tall
+        const platformY = 15; // Spawn at y=15 (well above everything)
+        
+        // Create solid platform base
+        this.spawnPlatform = BABYLON.MeshBuilder.CreateBox('spawnPlatform', {
+            width: platformSize,
+            height: platformHeight,
+            depth: platformSize
+        }, scene);
+        
+        this.spawnPlatform.position = new BABYLON.Vector3(0, platformY - platformHeight/2, 0);
+        
+        // Make it SUPER visible and solid
+        const platformMat = new BABYLON.StandardMaterial('spawnPlatformMat', scene);
+        platformMat.diffuseColor = new BABYLON.Color3(0.8, 0.6, 0.3); // Beige/stone color
+        platformMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+        platformMat.emissiveColor = new BABYLON.Color3(0.1, 0.08, 0.05); // Slight glow so you can see it
+        this.spawnPlatform.material = platformMat;
+        
+        // CRITICAL: Enable collisions
+        this.spawnPlatform.checkCollisions = true;
+        this.spawnPlatform.isVisible = true;
+        this.spawnPlatform.setEnabled(true);
+        
+        // CRITICAL: Create STRONG physics impostor
+        this.spawnPlatform.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.spawnPlatform,
+            BABYLON.PhysicsImpostor.BoxImpostor,
+            { 
+                mass: 0,           // Static (doesn't move)
+                friction: 1.0,     // Maximum friction
+                restitution: 0.0   // No bounce
+            },
+            scene
+        );
+        
+        // Add shadows
+        if (scene.shadowGenerator) {
+            this.spawnPlatform.receiveShadows = true;
+        }
+        
+        // Add decorative border so player can see the edges
+        const borderMat = new BABYLON.StandardMaterial('borderMat', scene);
+        borderMat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2); // Darker border
+        borderMat.emissiveColor = new BABYLON.Color3(0.15, 0.1, 0.05);
+        
+        // Create 4 border walls
+        const borderHeight = 1;
+        const borderThickness = 0.5;
+        
+        // North wall
+        const northWall = BABYLON.MeshBuilder.CreateBox('northWall', {
+            width: platformSize + 2,
+            height: borderHeight,
+            depth: borderThickness
+        }, scene);
+        northWall.position = new BABYLON.Vector3(0, platformY + platformHeight/2 + borderHeight/2, platformSize/2);
+        northWall.material = borderMat;
+        northWall.checkCollisions = true;
+        
+        // South wall  
+        const southWall = BABYLON.MeshBuilder.CreateBox('southWall', {
+            width: platformSize + 2,
+            height: borderHeight,
+            depth: borderThickness
+        }, scene);
+        southWall.position = new BABYLON.Vector3(0, platformY + platformHeight/2 + borderHeight/2, -platformSize/2);
+        southWall.material = borderMat;
+        southWall.checkCollisions = true;
+        
+        // East wall
+        const eastWall = BABYLON.MeshBuilder.CreateBox('eastWall', {
+            width: borderThickness,
+            height: borderHeight,
+            depth: platformSize
+        }, scene);
+        eastWall.position = new BABYLON.Vector3(platformSize/2, platformY + platformHeight/2 + borderHeight/2, 0);
+        eastWall.material = borderMat;
+        eastWall.checkCollisions = true;
+        
+        // West wall
+        const westWall = BABYLON.MeshBuilder.CreateBox('westWall', {
+            width: borderThickness,
+            height: borderHeight,
+            depth: platformSize
+        }, scene);
+        westWall.position = new BABYLON.Vector3(-platformSize/2, platformY + platformHeight/2 + borderHeight/2, 0);
+        westWall.material = borderMat;
+        westWall.checkCollisions = true;
+        
+        // Store platform spawn height for player
+        this.spawnPlatformY = platformY + platformHeight/2 + 2; // Top of platform + 2 units
+        window.spawnPlatformY = this.spawnPlatformY; // Global access for player
+        
+        console.log(`[World] ✅ Spawn platform created at y=${this.spawnPlatformY.toFixed(2)}`);
+        console.log(`[World]    - Size: ${platformSize}x${platformSize}`);
+        console.log(`[World]    - VISIBLE: YES`);
+        console.log(`[World]    - SOLID: YES`);
+        console.log(`[World]    - PHYSICS: YES (mass=0, static)`);
     }
 
     createWater() {
@@ -992,48 +1105,15 @@ class World {
     }
 
     updateWater() {
-    if (!this.waterMaterial) return;
-    
-    const time = Date.now() * 0.0005; // Current time in seconds
-    
-   // Gentle circular motion for the bump map
- this.waterMaterial.bumpTexture.uOffset = Math.sin(time * 0.3) * 0.05;
- this.waterMaterial.bumpTexture.vOffset = Math.cos(time * 0.3) * 0.05;
- // Subtle scaling for more natural movement
- this.waterMaterial.bumpTexture.uScale = 10 + Math.sin(time * 0.1) * 0.2;
- this.waterMaterial.bumpTexture.vScale = 10 + Math.cos(time * 0.1) * 0.2;
- // Gentle color variation (very subtle)
- if (time % 10 < 0.1) { // Only update color occasionally to make it very subtle
- const waveFactor = Math.sin(time * 0.2) * 0.02; // Very small multiplier for subtlety
- this.waterMaterial.diffuseColor = new BABYLON.Color3(
- 0.1 + waveFactor * 0.05,
- 0.3 + waveFactor * 0.02,
- 0.5 + waveFactor * 0.05
- );
-}
-}
+        if (!this.waterMaterial) return;
         
-        // Add some subtle scaling variation
-        this.waterMaterial.bumpTexture.uScale = 8 + Math.sin(time * 0.2) * 0.5;
-        this.waterMaterial.bumpTexture.vScale = 8 + Math.cos(time * 0.2) * 0.5;
+        // Animate water bump texture if it exists
+        if (this.waterMaterial.bumpTexture) {
+            const time = Date.now() * 0.001;
+            this.waterMaterial.bumpTexture.uOffset += 0.001;
+            this.waterMaterial.bumpTexture.vOffset += 0.001;
+        }
     }
-    
-    // Animate reflection/refraction
-    if (this.waterMaterial.reflectionTexture) {
-        this.waterMaterial.reflectionTexture.renderList = [this.terrain, ...this.trees, ...this.buildings];
-    }
-    
-    // Add some subtle color variation
-    const waveFactor = Math.sin(time * 0.5) * 0.1;
-    this.waterMaterial.diffuseColor = new BABYLON.Color3(
-        0.1 + waveFactor * 0.1, 
-        0.3 + waveFactor * 0.05, 
-        0.5 + waveFactor * 0.2
-    );
-    
-    // Animate specular highlights
-    this.waterMaterial.specularPower = 32 + Math.sin(time * 0.5) * 16;
-}
 
     updateTime() {
         // Update time of day (24-hour cycle)
