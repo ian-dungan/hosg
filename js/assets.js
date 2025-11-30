@@ -20,7 +20,7 @@ const ASSET_MANIFEST = {
     CHARACTERS: {
         PLAYER: {
             knight: {
-                model: 'player/character/knight.glb',
+                model: 'player/character/knight02.glb',
                 scale: 1.0,
                 offset: { x: 0, y: -0.9, z: 0 }, // Position relative to physics body
                 required: true,
