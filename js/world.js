@@ -1109,7 +1109,7 @@ class World {
         
         // Animate water bump texture if it exists
         if (this.waterMaterial.bumpTexture) {
-            const time = Date.now() * 0.0005;
+            const time = Date.now() * 0.001;
             this.waterMaterial.bumpTexture.uOffset += 0.001;
             this.waterMaterial.bumpTexture.vOffset += 0.001;
         }
