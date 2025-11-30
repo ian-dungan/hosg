@@ -164,18 +164,23 @@ class World {
         // Generate heightmap
         this.generateHeightmap();
         
-        // Create PBR material for terrain using local grass textures
+        // Create PBR material for terrain
         const scene = this.scene;
         this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
         this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         this.terrainMaterial.metallic = 0.0;
         this.terrainMaterial.roughness = 1.0;
 
-        // Use simple procedural green color (no external textures)
+        // Default: simple procedural green color
         this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
         
-        // Assign material to terrain
+        // Assign material to terrain NOW (so we have green grass immediately)
         this.terrain.material = this.terrainMaterial;
+        
+        // Try to load custom textures if AssetLoader is available
+        if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
+            this.loadTerrainAssets();
+        }
         
         // Enable collisions
         this.terrain.checkCollisions = true;
@@ -242,6 +247,71 @@ class World {
         this.terrain.updateVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
     }
 
+    async loadTerrainAssets() {
+        try {
+            const loader = new AssetLoader(this.scene);
+            
+            // Try to load grass textures
+            const grassData = ASSET_MANIFEST.TERRAIN.GROUND.grass;
+            
+            if (grassData && grassData.diffuse) {
+                console.log('[World] Attempting to load grass textures...');
+                
+                // Load diffuse texture
+                try {
+                    const diffuseTexture = await loader.loadTexture(grassData.diffuse, {
+                        uScale: grassData.scale || 50,
+                        vScale: grassData.scale || 50
+                    });
+                    
+                    if (diffuseTexture) {
+                        this.terrainMaterial.albedoTexture = diffuseTexture;
+                        this.terrainMaterial.albedoColor = new BABYLON.Color3(1, 1, 1); // Reset to white to show texture
+                        console.log('[World] ✓ Grass diffuse texture loaded');
+                    }
+                } catch (e) {
+                    console.log('[World] Grass diffuse texture not found, using procedural green');
+                }
+                
+                // Try to load normal map
+                if (grassData.normal) {
+                    try {
+                        const normalTexture = await loader.loadTexture(grassData.normal, {
+                            uScale: grassData.scale || 50,
+                            vScale: grassData.scale || 50
+                        });
+                        
+                        if (normalTexture) {
+                            this.terrainMaterial.bumpTexture = normalTexture;
+                            console.log('[World] ✓ Grass normal texture loaded');
+                        }
+                    } catch (e) {
+                        console.log('[World] Grass normal texture not found, continuing without it');
+                    }
+                }
+                
+                // Try to load AO map
+                if (grassData.ao) {
+                    try {
+                        const aoTexture = await loader.loadTexture(grassData.ao, {
+                            uScale: grassData.scale || 50,
+                            vScale: grassData.scale || 50
+                        });
+                        
+                        if (aoTexture) {
+                            this.terrainMaterial.ambientTexture = aoTexture;
+                            console.log('[World] ✓ Grass AO texture loaded');
+                        }
+                    } catch (e) {
+                        console.log('[World] Grass AO texture not found, continuing without it');
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('[World] Asset loading skipped or failed, using procedural terrain');
+        }
+    }
+
     createWater() {
         // Create a water plane
         this.water = BABYLON.MeshBuilder.CreateGround('water', {
@@ -282,6 +352,38 @@ class World {
         
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
+        
+        // Try to load water bump texture if available
+        if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
+            this.loadWaterAssets();
+        }
+    }
+
+    async loadWaterAssets() {
+        try {
+            const loader = new AssetLoader(this.scene);
+            const waterData = ASSET_MANIFEST.WATER;
+            
+            if (waterData && waterData.bump) {
+                console.log('[World] Attempting to load water bump texture...');
+                
+                try {
+                    const bumpTexture = await loader.loadTexture(waterData.bump, {
+                        uScale: 10,
+                        vScale: 10
+                    });
+                    
+                    if (bumpTexture) {
+                        this.waterMaterial.bumpTexture = bumpTexture;
+                        console.log('[World] ✓ Water bump texture loaded');
+                    }
+                } catch (e) {
+                    console.log('[World] Water bump texture not found, using smooth water');
+                }
+            }
+        } catch (error) {
+            console.log('[World] Water asset loading skipped');
+        }
     }
 
     populateWorld() {

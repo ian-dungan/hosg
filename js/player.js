@@ -10,6 +10,12 @@ class Player {
         this.maxHealth = CONFIG.PLAYER.HEALTH;
         this.moveSpeed = CONFIG.PLAYER.MOVE_SPEED;
         this.jumpForce = CONFIG.PLAYER.JUMP_FORCE;
+        
+        // Gamepad support
+        this.gamepad = null;
+        this.gamepadIndex = -1;
+        this.lastJumpButton = false;
+        
         this.init();
     }
 
@@ -94,6 +100,9 @@ class Player {
     update(deltaTime) {
         if (!this.mesh || !this.mesh.physicsImpostor) return;
 
+        // Poll gamepad if available
+        this.updateGamepadInput();
+
         // Get movement direction from camera
         const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();
         const right = this.camera.getDirection(BABYLON.Vector3.Right());
@@ -102,7 +111,7 @@ class Player {
         forward.normalize();
         right.normalize();
 
-        // Calculate movement vector
+        // Calculate movement vector (supports both keyboard and gamepad)
         const moveDirection = new BABYLON.Vector3();
         if (this.input.forward) moveDirection.addInPlace(forward);
         if (this.input.backward) moveDirection.subtractInPlace(forward);
@@ -141,6 +150,61 @@ class Player {
             );
             this.isOnGround = false;
         }
+    }
+
+    updateGamepadInput() {
+        // Check for connected gamepads
+        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+        
+        if (!this.gamepad || this.gamepadIndex === -1) {
+            // Find first connected gamepad
+            for (let i = 0; i < gamepads.length; i++) {
+                if (gamepads[i]) {
+                    this.gamepad = gamepads[i];
+                    this.gamepadIndex = i;
+                    console.log('[Player] Gamepad connected:', this.gamepad.id);
+                    break;
+                }
+            }
+        } else {
+            // Update existing gamepad reference
+            this.gamepad = gamepads[this.gamepadIndex];
+        }
+        
+        if (!this.gamepad) return;
+        
+        const deadzone = CONFIG.CONTROLS.GAMEPAD.DEADZONE;
+        
+        // Left stick - movement (axes 0 and 1)
+        const leftX = Math.abs(this.gamepad.axes[0]) > deadzone ? this.gamepad.axes[0] : 0;
+        const leftY = Math.abs(this.gamepad.axes[1]) > deadzone ? this.gamepad.axes[1] : 0;
+        
+        // Map analog stick to digital input
+        if (leftY < -deadzone) this.input.forward = true;
+        else if (!this.input.forward) this.input.forward = false;
+        
+        if (leftY > deadzone) this.input.backward = true;
+        else if (!this.input.backward) this.input.backward = false;
+        
+        if (leftX < -deadzone) this.input.left = true;
+        else if (!this.input.left) this.input.left = false;
+        
+        if (leftX > deadzone) this.input.right = true;
+        else if (!this.input.right) this.input.right = false;
+        
+        // A button (0) - jump
+        const jumpButton = this.gamepad.buttons[0] && this.gamepad.buttons[0].pressed;
+        if (jumpButton && !this.lastJumpButton) {
+            this.input.jump = true;
+        } else {
+            this.input.jump = false;
+        }
+        this.lastJumpButton = jumpButton;
+        
+        // Right trigger (7) or Right bumper (5) - run
+        const runButton = (this.gamepad.buttons[7] && this.gamepad.buttons[7].pressed) ||
+                         (this.gamepad.buttons[5] && this.gamepad.buttons[5].pressed);
+        this.input.run = runButton;
     }
 
     takeDamage(amount) {
