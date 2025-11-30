@@ -114,41 +114,65 @@ class World {
     }
 
     createSkybox() {
-        // Create a simple skybox
-        this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
-        var skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
-        skyboxMaterial.backFaceCulling = false;
-        skyboxMaterial.disableLighting = true;
-
-        var skyTexture = null;
+        // Try to load custom HDRI skybox
+        const skyPath = 'assets/sky/DaySkyHDRI059A_2K_TONEMAPPED.jpg';
+        
         try {
-            // Prefer a gradient texture if this Babylon build supports it
-            if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
-                skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", this.scene, 512, function (gradient) {
-                    gradient.addColorStop(0, "#87CEEB");
-                    gradient.addColorStop(0.5, "#1E90FF");
-                    gradient.addColorStop(1, "#E0F7FF");
-                });
-            }
+            // Use PhotoDome for 360° panoramic skybox
+            this.skybox = new BABYLON.PhotoDome(
+                "skyDome",
+                skyPath,
+                {
+                    resolution: 32,
+                    size: 5000,
+                    useDirectMapping: false
+                },
+                this.scene
+            );
+            
+            console.log('[World] ✓ Custom HDRI skybox loaded');
+            
+            // Set scene clear color to match sky
+            this.scene.clearColor = new BABYLON.Color4(0.5, 0.7, 0.9, 1.0);
+            
         } catch (e) {
-            console.warn("[World] Failed to create gradient sky texture, falling back to solid sky:", e);
-            skyTexture = null;
-        }
+            console.warn('[World] Failed to load HDRI skybox, using fallback:', e);
+            
+            // Fallback: Create simple box skybox
+            this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
+            const skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
+            skyboxMaterial.backFaceCulling = false;
+            skyboxMaterial.disableLighting = true;
+            
+            // Try gradient texture
+            let skyTexture = null;
+            try {
+                if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
+                    skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", this.scene, 512, function (gradient) {
+                        gradient.addColorStop(0, "#87CEEB");
+                        gradient.addColorStop(0.5, "#1E90FF");
+                        gradient.addColorStop(1, "#E0F7FF");
+                    });
+                }
+            } catch (gradErr) {
+                console.warn("[World] Gradient texture failed:", gradErr);
+            }
 
-        if (skyTexture) {
-            skyboxMaterial.reflectionTexture = skyTexture;
-            skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-            skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-            skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-        } else {
-            // Fallback: solid sky color if gradient textures are not available
-            this.scene.clearColor = new BABYLON.Color4(0.45, 0.65, 0.9, 1.0);
-            skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-            skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-            skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-        }
+            if (skyTexture) {
+                skyboxMaterial.reflectionTexture = skyTexture;
+                skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+                skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+                skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+            } else {
+                // Solid color fallback
+                this.scene.clearColor = new BABYLON.Color4(0.45, 0.65, 0.9, 1.0);
+                skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+                skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+                skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+            }
 
-        this.skybox.material = skyboxMaterial;
+            this.skybox.material = skyboxMaterial;
+        }
     }
 
 
