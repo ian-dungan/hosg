@@ -994,13 +994,25 @@ class World {
     updateWater() {
     if (!this.waterMaterial) return;
     
-    const time = Date.now() * 0.001; // Current time in seconds
+    const time = Date.now() * 0.0005; // Current time in seconds
     
-    // Animate water bump texture if it exists
-    if (this.waterMaterial.bumpTexture) {
-        // More organic movement with different speeds for different directions
-        this.waterMaterial.bumpTexture.uOffset = Math.sin(time * 0.5) * 0.1;
-        this.waterMaterial.bumpTexture.vOffset = Math.cos(time * 0.5) * 0.1;
+   // Gentle circular motion for the bump map
+ this.waterMaterial.bumpTexture.uOffset = Math.sin(time * 0.3) * 0.05;
+ this.waterMaterial.bumpTexture.vOffset = Math.cos(time * 0.3) * 0.05;
+ // Subtle scaling for more natural movement
+ this.waterMaterial.bumpTexture.uScale = 10 + Math.sin(time * 0.1) * 0.2;
+ this.waterMaterial.bumpTexture.vScale = 10 + Math.cos(time * 0.1) * 0.2;
+ }
+ // Gentle color variation (very subtle)
+ if (time % 10 < 0.1) { // Only update color occasionally to make it very subtle
+ const waveFactor = Math.sin(time * 0.2) * 0.02; // Very small multiplier for subtlety
+ this.waterMaterial.diffuseColor = new BABYLON.Color3(
+ 0.1 + waveFactor * 0.05,
+ 0.3 + waveFactor * 0.02,
+ 0.5 + waveFactor * 0.05
+ );
+}
+}
         
         // Add some subtle scaling variation
         this.waterMaterial.bumpTexture.uScale = 8 + Math.sin(time * 0.2) * 0.5;
