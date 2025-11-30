@@ -77,8 +77,7 @@ const ASSET_MANIFEST = {
             animations: ['idle', 'walk', 'run', 'attack', 'die'],
             scale: 0.8
         }
-    }
-    PLAYER: {
+        PLAYER: {
     model: 'models/player/knight.glb',  // Path to your model file
     scale: 1.0,                           // Adjust scale as needed
     animations: ['idle', 'walk', 'run'],  // List of animation names in your model
@@ -86,6 +85,7 @@ const ASSET_MANIFEST = {
     width: 0.7,                          // Character width in world units
     depth: 0.5                           // Character depth in world units
 }
+    }
 };
 
 // ==================== ASSET LOADER ====================
