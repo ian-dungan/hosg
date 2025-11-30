@@ -91,6 +91,18 @@ class World {
         this.createWater();
         this.populateWorld();
         this.setupEventListeners();
+        
+        // CRITICAL: Signal player that world is ready
+        // Wait a bit to ensure physics is fully stabilized
+        setTimeout(() => {
+            console.log('[World] ✅ World fully initialized, signaling player...');
+            const player = this.scene.player || this.scene.game?.player;
+            if (player && typeof player.startAfterWorldReady === 'function') {
+                player.startAfterWorldReady();
+            } else {
+                console.warn('[World] Player not found or startAfterWorldReady not available');
+            }
+        }, 500); // 500ms delay to ensure physics is stable
     }
 
     createLights() {
@@ -115,7 +127,7 @@ class World {
 
     createSkybox() {
         // Try to load custom HDRI skybox
-        const skyPath = 'assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg';
+        const skyPath = 'assets/sky/DaySkyHDRI059A_2K_TONEMAPPED.jpg';
         
         try {
             // Use PhotoDome for 360° panoramic skybox
@@ -177,11 +189,6 @@ class World {
 
 
     createTerrain() {
-        // STEP 1: Create GUARANTEED SOLID spawn platform FIRST
-        console.log('[World] Creating spawn platform...');
-        this.createSpawnPlatform();
-        
-        // STEP 2: Create terrain
         // Create a large ground
         this.terrain = BABYLON.MeshBuilder.CreateGround('terrain', {
             width: this.options.size,
@@ -386,114 +393,6 @@ class World {
         }
     }
     
-    createSpawnPlatform() {
-        // Create a VISIBLE, SOLID platform at spawn point
-        // This guarantees the player has something to stand on
-        console.log('[World] 🏗️ Creating spawn platform...');
-        
-        const scene = this.scene;
-        const platformSize = 20; // 20x20 platform
-        const platformHeight = 2; // 2 units tall
-        const platformY = 15; // Spawn at y=15 (well above everything)
-        
-        // Create solid platform base
-        this.spawnPlatform = BABYLON.MeshBuilder.CreateBox('spawnPlatform', {
-            width: platformSize,
-            height: platformHeight,
-            depth: platformSize
-        }, scene);
-        
-        this.spawnPlatform.position = new BABYLON.Vector3(0, platformY - platformHeight/2, 0);
-        
-        // Make it SUPER visible and solid
-        const platformMat = new BABYLON.StandardMaterial('spawnPlatformMat', scene);
-        platformMat.diffuseColor = new BABYLON.Color3(0.8, 0.6, 0.3); // Beige/stone color
-        platformMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-        platformMat.emissiveColor = new BABYLON.Color3(0.1, 0.08, 0.05); // Slight glow so you can see it
-        this.spawnPlatform.material = platformMat;
-        
-        // CRITICAL: Enable collisions
-        this.spawnPlatform.checkCollisions = true;
-        this.spawnPlatform.isVisible = true;
-        this.spawnPlatform.setEnabled(true);
-        
-        // CRITICAL: Create STRONG physics impostor
-        this.spawnPlatform.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.spawnPlatform,
-            BABYLON.PhysicsImpostor.BoxImpostor,
-            { 
-                mass: 0,           // Static (doesn't move)
-                friction: 1.0,     // Maximum friction
-                restitution: 0.0   // No bounce
-            },
-            scene
-        );
-        
-        // Add shadows
-        if (scene.shadowGenerator) {
-            this.spawnPlatform.receiveShadows = true;
-        }
-        
-        // Add decorative border so player can see the edges
-        const borderMat = new BABYLON.StandardMaterial('borderMat', scene);
-        borderMat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2); // Darker border
-        borderMat.emissiveColor = new BABYLON.Color3(0.15, 0.1, 0.05);
-        
-        // Create 4 border walls
-        const borderHeight = 1;
-        const borderThickness = 0.5;
-        
-        // North wall
-        const northWall = BABYLON.MeshBuilder.CreateBox('northWall', {
-            width: platformSize + 2,
-            height: borderHeight,
-            depth: borderThickness
-        }, scene);
-        northWall.position = new BABYLON.Vector3(0, platformY + platformHeight/2 + borderHeight/2, platformSize/2);
-        northWall.material = borderMat;
-        northWall.checkCollisions = true;
-        
-        // South wall  
-        const southWall = BABYLON.MeshBuilder.CreateBox('southWall', {
-            width: platformSize + 2,
-            height: borderHeight,
-            depth: borderThickness
-        }, scene);
-        southWall.position = new BABYLON.Vector3(0, platformY + platformHeight/2 + borderHeight/2, -platformSize/2);
-        southWall.material = borderMat;
-        southWall.checkCollisions = true;
-        
-        // East wall
-        const eastWall = BABYLON.MeshBuilder.CreateBox('eastWall', {
-            width: borderThickness,
-            height: borderHeight,
-            depth: platformSize
-        }, scene);
-        eastWall.position = new BABYLON.Vector3(platformSize/2, platformY + platformHeight/2 + borderHeight/2, 0);
-        eastWall.material = borderMat;
-        eastWall.checkCollisions = true;
-        
-        // West wall
-        const westWall = BABYLON.MeshBuilder.CreateBox('westWall', {
-            width: borderThickness,
-            height: borderHeight,
-            depth: platformSize
-        }, scene);
-        westWall.position = new BABYLON.Vector3(-platformSize/2, platformY + platformHeight/2 + borderHeight/2, 0);
-        westWall.material = borderMat;
-        westWall.checkCollisions = true;
-        
-        // Store platform spawn height for player
-        this.spawnPlatformY = platformY + platformHeight/2 + 2; // Top of platform + 2 units
-        window.spawnPlatformY = this.spawnPlatformY; // Global access for player
-        
-        console.log(`[World] ✅ Spawn platform created at y=${this.spawnPlatformY.toFixed(2)}`);
-        console.log(`[World]    - Size: ${platformSize}x${platformSize}`);
-        console.log(`[World]    - VISIBLE: YES`);
-        console.log(`[World]    - SOLID: YES`);
-        console.log(`[World]    - PHYSICS: YES (mass=0, static)`);
-    }
-
     createWater() {
         // Create a water plane
         this.water = BABYLON.MeshBuilder.CreateGround('water', {

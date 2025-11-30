@@ -68,9 +68,10 @@ class Game {
       throw err;
     }
 
-    // Player
+    // Player - WAIT for terrain first, then init
     try {
       this.player = new Player(this.scene);
+      await this.player.init(); // CRITICAL: Wait for player to initialize
       // Expose player on the scene
       this.scene.player = this.player;
       console.log("[Game] Player initialized");
