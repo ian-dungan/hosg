@@ -19,9 +19,9 @@ const ASSET_MANIFEST = {
     TERRAIN: {
         GROUND: {
             grass: {
-                diffuse: 'textures/ground/Grass004_2K-JPG_NormalGL.jpg',
-                normal: 'textures/gound/Grass004_2K-JPG_NormalGL.jpg',
-                ao: 'textures/ground/Grass004_2K-JPG_NormalGL.jpg',
+                diffuse: 'textures/ground/Grass004_2K-JPG_Color.jpg',
+                normal: 'textures/gound/Grass004_2K-JPG_Color.jpg',
+                ao: 'textures/ground/Grass004_2K-JPG_Color.jpg',
                 scale: 50,
                 required: true
             },
