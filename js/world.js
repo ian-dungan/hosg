@@ -191,20 +191,52 @@ class World {
         // Create PBR material for terrain
         const scene = this.scene;
         this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
-        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         this.terrainMaterial.metallic = 0.0;
-        this.terrainMaterial.roughness = 1.0;
+        this.terrainMaterial.roughness = 0.8; // Slightly shiny grass
 
-        // Default: simple procedural green color
-        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
+        // Load realistic grass textures
+        const grassPath = 'assets/textures/ground/grass/';
+        const tileScale = 40; // How many times texture repeats across terrain
         
-        // Assign material to terrain NOW (so we have green grass immediately)
-        this.terrain.material = this.terrainMaterial;
-        
-        // Try to load custom textures if AssetLoader is available
-        if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
-            this.loadTerrainAssets();
+        try {
+            // Color/Albedo texture (main appearance)
+            const colorTex = new BABYLON.Texture(
+                grassPath + 'Grass004_2K-JPG_Color.jpg',
+                scene
+            );
+            colorTex.uScale = tileScale;
+            colorTex.vScale = tileScale;
+            this.terrainMaterial.albedoTexture = colorTex;
+            console.log('[World] ✓ Grass color texture loaded');
+            
+            // Normal map (surface detail/bumps)
+            const normalTex = new BABYLON.Texture(
+                grassPath + 'Grass004_2K-JPG_NormalGL.jpg',
+                scene
+            );
+            normalTex.uScale = tileScale;
+            normalTex.vScale = tileScale;
+            this.terrainMaterial.bumpTexture = normalTex;
+            console.log('[World] ✓ Grass normal texture loaded');
+            
+            // Ambient Occlusion (adds depth to crevices)
+            const aoTex = new BABYLON.Texture(
+                grassPath + 'Grass004_2K-JPG_AmbientOcclusion.jpg',
+                scene
+            );
+            aoTex.uScale = tileScale;
+            aoTex.vScale = tileScale;
+            this.terrainMaterial.ambientTexture = aoTex;
+            console.log('[World] ✓ Grass AO texture loaded');
+            
+        } catch (error) {
+            // Fallback to simple green if textures fail
+            console.warn('[World] Failed to load grass textures, using procedural green:', error);
+            this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
         }
+        
+        // Assign material to terrain
+        this.terrain.material = this.terrainMaterial;
         
         // Enable collisions
         this.terrain.checkCollisions = true;
