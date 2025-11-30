@@ -32,32 +32,79 @@ class Player {
         this.setupInput();
     }
 
-    createPlayerMesh() {
+        createPlayerMesh() {
         // Physics body (invisible box)
         this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
             width: 0.7,
             height: 1.8,
             depth: 0.5
         }, this.scene);
-        
-        // Spawn at safe height (will drop to terrain)
+
+        const halfHeight = 1.8 * 0.5;
+
+        // Default spawn in case world/height lookup fails
         const defaultSpawnY = (CONFIG && CONFIG.PLAYER && typeof CONFIG.PLAYER.SPAWN_HEIGHT === 'number')
             ? CONFIG.PLAYER.SPAWN_HEIGHT
             : 20;
-        const spawnX = 0;
-        const spawnZ = 0;
+        let spawnX = 0;
+        let spawnZ = 0;
         let spawnY = defaultSpawnY;
 
         const world = this.scene && this.scene.world;
         if (world && typeof world.getHeightAt === "function") {
             try {
-                const terrainY = world.getHeightAt(spawnX, spawnZ);
-                if (typeof terrainY === "number" && isFinite(terrainY)) {
-                    const halfHeight = 1.8 * 0.5;
-                    spawnY = terrainY + halfHeight + 0.1;
+                const opts = world.options || {};
+                const maxH = (typeof opts.maxHeight === "number") ? opts.maxHeight : 20;
+                const waterLevel = (typeof opts.waterLevel === "number") ? opts.waterLevel : 0.2;
+                const waterY = maxH * waterLevel;
+                const minDryHeight = waterY + 1.0;
+
+                // Try to find a nearby "dry" spawn point above water level.
+                let found = false;
+                const worldSize = (typeof opts.size === "number") ? opts.size : 1000;
+                const maxRadius = worldSize * 0.35;
+                const samples = 24;
+
+                for (let radiusFactor = 0.1; radiusFactor <= 1.0 && !found; radiusFactor += 0.15) {
+                    const radius = maxRadius * radiusFactor;
+                    for (let i = 0; i < samples; i++) {
+                        const angle = (Math.PI * 2 * i) / samples;
+                        const x = Math.cos(angle) * radius;
+                        const z = Math.sin(angle) * radius;
+
+                        let y;
+                        try {
+                            y = world.getHeightAt(x, z);
+                        } catch (e) {
+                            continue;
+                        }
+
+                        if (typeof y === "number" && isFinite(y) && y > minDryHeight) {
+                            spawnX = x;
+                            spawnZ = z;
+                            spawnY = y + halfHeight + 0.1;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback: use center of the world if no dry spot was found
+                if (!found) {
+                    const centerY = world.getHeightAt(0, 0);
+                    if (typeof centerY === "number" && isFinite(centerY)) {
+                        spawnX = 0;
+                        spawnZ = 0;
+                        spawnY = centerY + halfHeight + 0.1;
+                    }
+                }
+
+                // As an extra safeguard, make sure we start at least slightly above water level
+                if (spawnY < waterY + halfHeight + 0.5) {
+                    spawnY = waterY + halfHeight + 0.5;
                 }
             } catch (e) {
-                console.warn('[Player] getHeightAt failed, using default spawn height', e);
+                console.warn('[Player] getHeightAt / spawn search failed, using default spawn height', e);
             }
         }
 
@@ -65,7 +112,7 @@ class Player {
         this.lastSafePosition = this.mesh.position.clone();
         this.mesh.visibility = 0;
 
-// Create knight character as visual
+        // Create knight character as visual
         this.createKnightModel();
         
         // Enhanced physics with better values for smooth movement

@@ -114,65 +114,41 @@ class World {
     }
 
     createSkybox() {
-        // Try to load custom HDRI skybox
-        const skyPath = 'assets/sky/DaySkyHDRI059A_2K_TONEMAPPED.jpg';
-        
+        // Create a simple skybox
+        this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
+        var skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
+        skyboxMaterial.backFaceCulling = false;
+        skyboxMaterial.disableLighting = true;
+
+        var skyTexture = null;
         try {
-            // Use PhotoDome for 360° panoramic skybox
-            this.skybox = new BABYLON.PhotoDome(
-                "skyDome",
-                skyPath,
-                {
-                    resolution: 32,
-                    size: 5000,
-                    useDirectMapping: false
-                },
-                this.scene
-            );
-            
-            console.log('[World] ✓ Custom HDRI skybox loaded');
-            
-            // Set scene clear color to match sky
-            this.scene.clearColor = new BABYLON.Color4(0.5, 0.7, 0.9, 1.0);
-            
+            // Prefer a gradient texture if this Babylon build supports it
+            if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
+                skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", this.scene, 512, function (gradient) {
+                    gradient.addColorStop(0, "#87CEEB");
+                    gradient.addColorStop(0.5, "#1E90FF");
+                    gradient.addColorStop(1, "#E0F7FF");
+                });
+            }
         } catch (e) {
-            console.warn('[World] Failed to load HDRI skybox, using fallback:', e);
-            
-            // Fallback: Create simple box skybox
-            this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
-            const skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
-            skyboxMaterial.backFaceCulling = false;
-            skyboxMaterial.disableLighting = true;
-            
-            // Try gradient texture
-            let skyTexture = null;
-            try {
-                if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
-                    skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", this.scene, 512, function (gradient) {
-                        gradient.addColorStop(0, "#87CEEB");
-                        gradient.addColorStop(0.5, "#1E90FF");
-                        gradient.addColorStop(1, "#E0F7FF");
-                    });
-                }
-            } catch (gradErr) {
-                console.warn("[World] Gradient texture failed:", gradErr);
-            }
-
-            if (skyTexture) {
-                skyboxMaterial.reflectionTexture = skyTexture;
-                skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-                skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-                skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-            } else {
-                // Solid color fallback
-                this.scene.clearColor = new BABYLON.Color4(0.45, 0.65, 0.9, 1.0);
-                skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-                skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-                skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-            }
-
-            this.skybox.material = skyboxMaterial;
+            console.warn("[World] Failed to create gradient sky texture, falling back to solid sky:", e);
+            skyTexture = null;
         }
+
+        if (skyTexture) {
+            skyboxMaterial.reflectionTexture = skyTexture;
+            skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+            skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+            skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+        } else {
+            // Fallback: solid sky color if gradient textures are not available
+            this.scene.clearColor = new BABYLON.Color4(0.45, 0.65, 0.9, 1.0);
+            skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+            skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+            skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+        }
+
+        this.skybox.material = skyboxMaterial;
     }
 
 
@@ -191,76 +167,31 @@ class World {
         // Create PBR material for terrain
         const scene = this.scene;
         this.terrainMaterial = new BABYLON.PBRMaterial('terrainMaterial', scene);
+        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         this.terrainMaterial.metallic = 0.0;
-        this.terrainMaterial.roughness = 0.8; // Slightly shiny grass
+        this.terrainMaterial.roughness = 1.0;
 
-        // Load realistic grass textures
-        const grassPath = 'assets/textures/ground/grass/';
-        const tileScale = 40; // How many times texture repeats across terrain
+        // Default: simple procedural green color
+        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
         
-        try {
-            // Color/Albedo texture (main appearance)
-            const colorTex = new BABYLON.Texture(
-                grassPath + 'Grass004_2K-JPG_Color.jpg',
-                scene
-            );
-            colorTex.uScale = tileScale;
-            colorTex.vScale = tileScale;
-            this.terrainMaterial.albedoTexture = colorTex;
-            console.log('[World] ✓ Grass color texture loaded');
-            
-            // Normal map (surface detail/bumps)
-            const normalTex = new BABYLON.Texture(
-                grassPath + 'Grass004_2K-JPG_NormalGL.jpg',
-                scene
-            );
-            normalTex.uScale = tileScale;
-            normalTex.vScale = tileScale;
-            this.terrainMaterial.bumpTexture = normalTex;
-            console.log('[World] ✓ Grass normal texture loaded');
-            
-            // Ambient Occlusion (adds depth to crevices)
-            const aoTex = new BABYLON.Texture(
-                grassPath + 'Grass004_2K-JPG_AmbientOcclusion.jpg',
-                scene
-            );
-            aoTex.uScale = tileScale;
-            aoTex.vScale = tileScale;
-            this.terrainMaterial.ambientTexture = aoTex;
-            console.log('[World] ✓ Grass AO texture loaded');
-            
-        } catch (error) {
-            // Fallback to simple green if textures fail
-            console.warn('[World] Failed to load grass textures, using procedural green:', error);
-            this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
-        }
-        
-        // Assign material to terrain
+        // Assign material to terrain NOW (so we have green grass immediately)
         this.terrain.material = this.terrainMaterial;
         
-        // CRITICAL: Make terrain visible and enabled IMMEDIATELY
-        this.terrain.isVisible = true;
-        this.terrain.setEnabled(true);
+        // Try to load custom textures if AssetLoader is available
+        if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
+            this.loadTerrainAssets();
+        }
         
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID box physics
+        // Add simple box physics (HeightmapImpostor causes issues with Cannon.js)
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
             BABYLON.PhysicsImpostor.BoxImpostor,
-            { 
-                mass: 0,              // Static (immovable)
-                friction: 0.9,        // High friction
-                restitution: 0.0      // No bounce
-            },
+            { mass: 0, friction: 0.9, restitution: 0.2 },
             this.scene
         );
-        
-        // Make terrain globally accessible for player spawn
-        window.gameWorld = this;
-        
-        console.log('[World] ✓ Terrain physics created and enabled');
     }
 
     generateHeightmap() {
@@ -421,9 +352,6 @@ class World {
         
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
-        this.water.checkCollisions = false; // CRITICAL: Don't block player movement!
-        
-        console.log(`[World] ✓ Water created at y=${this.water.position.y.toFixed(2)} (non-solid)`);
         
         // Try to load water bump texture if available
         if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
@@ -459,192 +387,13 @@ class World {
     }
 
     populateWorld() {
-        // Define static landmark positions for consistent world
-        this.landmarks = [
-            // Town Center
-            { type: 'building', name: 'Town Hall', x: 0, z: 0, scale: 1.5 },
-            { type: 'building', name: 'Inn', x: 15, z: 10, scale: 1.2 },
-            { type: 'building', name: 'Blacksmith', x: -12, z: 8, scale: 1.0 },
-            { type: 'building', name: 'Market', x: 10, z: -15, scale: 1.3 },
-            { type: 'building', name: 'Temple', x: -20, z: -10, scale: 1.4 },
-            
-            // Forest Areas
-            { type: 'tree_grove', name: 'Dark Forest', x: -50, z: 50, count: 20 },
-            { type: 'tree_grove', name: 'Whispering Woods', x: 60, z: -40, count: 15 },
-            { type: 'tree_grove', name: 'Ancient Grove', x: 40, z: 60, count: 12 },
-            
-            // Points of Interest
-            { type: 'rock_formation', name: 'Stone Circle', x: -70, z: -70, count: 8 },
-            { type: 'rock_formation', name: 'Boulder Field', x: 80, z: 20, count: 12 },
-            
-            // Scattered objects
-            { type: 'scatter_trees', count: 50 },
-            { type: 'scatter_rocks', count: 30 },
-            { type: 'scatter_grass', count: 100 }
-        ];
-        
-        // Create landmarks
-        this.createLandmarks();
-        
-        // NPCs, enemies, items still placed (for gameplay)
+        this.createTrees(100);
+        this.createRocks(50);
+        this.createGrass(200);
+        this.createBuildings(5);
         this.createNPCs(10);
         this.createEnemies(20);
         this.createItems(30);
-        
-        console.log('[World] Static world with', this.landmarks.length, 'landmarks created');
-    }
-    
-    createLandmarks() {
-        for (const landmark of this.landmarks) {
-            switch (landmark.type) {
-                case 'building':
-                    this.createNamedBuilding(landmark);
-                    break;
-                case 'tree_grove':
-                    this.createTreeGrove(landmark);
-                    break;
-                case 'rock_formation':
-                    this.createRockFormation(landmark);
-                    break;
-                case 'scatter_trees':
-                    this.createTrees(landmark.count);
-                    break;
-                case 'scatter_rocks':
-                    this.createRocks(landmark.count);
-                    break;
-                case 'scatter_grass':
-                    this.createGrass(landmark.count);
-                    break;
-            }
-        }
-    }
-    
-    createNamedBuilding(landmark) {
-        const { name, x, z, scale } = landmark;
-        
-        // Create building at specific position
-        const building = BABYLON.MeshBuilder.CreateBox(name, {
-            width: 3 * scale,
-            height: 4 * scale,
-            depth: 3 * scale
-        }, this.scene);
-        
-        const y = this.getHeightAt(x, z);
-        building.position = new BABYLON.Vector3(x, y + 2 * scale, z);
-        building.checkCollisions = true;
-        
-        const buildingMaterial = new BABYLON.StandardMaterial('buildingMaterial', this.scene);
-        buildingMaterial.diffuseColor = new BABYLON.Color3(0.7, 0.6, 0.5);
-        building.material = buildingMaterial;
-        
-        // Add a roof
-        const roof = BABYLON.MeshBuilder.CreateCylinder(`${name}_roof`, {
-            diameter: Math.max(3, 3) * scale * 1.2,
-            height: 0.5 * scale,
-            tessellation: 4
-        }, this.scene);
-        
-        roof.position = building.position.clone();
-        roof.position.y += 2 * scale + 0.25 * scale;
-        roof.rotation.y = Math.PI / 4;
-        
-        const roofMaterial = new BABYLON.StandardMaterial('roofMaterial', this.scene);
-        roofMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.2, 0.1);
-        roof.material = roofMaterial;
-        
-        // Enable shadows
-        this.shadowGenerator.addShadowCaster(building);
-        this.shadowGenerator.addShadowCaster(roof);
-        
-        // Store landmark info
-        building.landmarkData = { name, type: 'building', position: { x, z } };
-        
-        this.buildings.push(building);
-        this.buildings.push(roof);
-    }
-    
-    createTreeGrove(landmark) {
-        const { name, x, z, count } = landmark;
-        const treeMaterial = new BABYLON.StandardMaterial('treeMaterial', this.scene);
-        treeMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.2);
-        
-        // Create trees in a cluster
-        for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2;
-            const radius = 5 + Math.random() * 10;
-            const treeX = x + Math.cos(angle) * radius + (Math.random() - 0.5) * 5;
-            const treeZ = z + Math.sin(angle) * radius + (Math.random() - 0.5) * 5;
-            
-            // Create trunk
-            const trunk = BABYLON.MeshBuilder.CreateCylinder(`treeTrunk_${name}_${i}`, {
-                height: 1 + Math.random() * 2,
-                diameterTop: 0.3 + Math.random() * 0.2,
-                diameterBottom: 0.5 + Math.random() * 0.3
-            }, this.scene);
-            
-            // Create leaves
-            const leaves = BABYLON.MeshBuilder.CreateSphere(`treeLeaves_${name}_${i}`, {
-                diameter: 2 + Math.random() * 2
-            }, this.scene);
-            
-            leaves.position.y = trunk.scaling.y + leaves.scaling.y * 0.8;
-            
-            const tree = BABYLON.Mesh.MergeMeshes([trunk, leaves], true);
-            tree.name = `tree_${name}_${i}`;
-            tree.material = treeMaterial;
-            
-            const treeY = this.getHeightAt(treeX, treeZ);
-            tree.position = new BABYLON.Vector3(treeX, treeY, treeZ);
-            tree.rotation.y = Math.random() * Math.PI * 2;
-            
-            const scale = 0.5 + Math.random() * 0.5;
-            tree.scaling = new BABYLON.Vector3(scale, scale, scale);
-            
-            this.shadowGenerator.addShadowCaster(tree);
-            
-            // Store landmark info on first tree of grove
-            if (i === 0) {
-                tree.landmarkData = { name, type: 'tree_grove', position: { x, z } };
-            }
-            
-            this.trees.push(tree);
-        }
-    }
-    
-    createRockFormation(landmark) {
-        const { name, x, z, count } = landmark;
-        const rockMaterial = new BABYLON.StandardMaterial('rockMaterial', this.scene);
-        rockMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
-        
-        // Create rocks in formation
-        for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2;
-            const radius = 3 + Math.random() * 5;
-            const rockX = x + Math.cos(angle) * radius;
-            const rockZ = z + Math.sin(angle) * radius;
-            
-            const rock = BABYLON.MeshBuilder.CreateIcoSphere(`rock_${name}_${i}`, {
-                radius: 0.5 + Math.random() * 1.0,
-                subdivisions: 2
-            }, this.scene);
-            
-            rock.scaling.y *= 0.5 + Math.random() * 0.5;
-            rock.scaling.x *= 0.7 + Math.random() * 0.6;
-            rock.scaling.z *= 0.7 + Math.random() * 0.6;
-            
-            rock.material = rockMaterial;
-            
-            const rockY = this.getHeightAt(rockX, rockZ);
-            rock.position = new BABYLON.Vector3(rockX, rockY, rockZ);
-            rock.rotation.y = Math.random() * Math.PI * 2;
-            
-            // Store landmark info on first rock
-            if (i === 0) {
-                rock.landmarkData = { name, type: 'rock_formation', position: { x, z } };
-            }
-            
-            this.rocks.push(rock);
-        }
     }
 
     createTrees(count) {
@@ -890,34 +639,6 @@ class World {
             this.items.push(item);
         }
     }
-    
-    getLandmarks() {
-        // Return all static landmarks for minimap display
-        const landmarks = [];
-        
-        // Add buildings
-        for (const building of this.buildings) {
-            if (building.landmarkData) {
-                landmarks.push(building.landmarkData);
-            }
-        }
-        
-        // Add tree groves
-        for (const tree of this.trees) {
-            if (tree.landmarkData) {
-                landmarks.push(tree.landmarkData);
-            }
-        }
-        
-        // Add rock formations
-        for (const rock of this.rocks) {
-            if (rock.landmarkData) {
-                landmarks.push(rock.landmarkData);
-            }
-        }
-        
-        return landmarks;
-    }
 
     placeOnTerrain(mesh) {
         // Position mesh on terrain with random rotation and scale
@@ -936,16 +657,28 @@ class World {
         return mesh.position.clone();
     }
 
-    getHeightAt(x, z) {
-        // Cast a ray downward to find the terrain height
+        getHeightAt(x, z) {
+        // Cast a ray downward to find the terrain height.
+        // Use a very tall ray so we are always above even the tallest mountains.
+        const maxH = (this.options && typeof this.options.maxHeight === "number")
+            ? this.options.maxHeight
+            : 20;
+
+        const originY = maxH * 10;   // start well above any expected terrain
+        const length = maxH * 20;    // long enough to pass through entire world
+
         const ray = new BABYLON.Ray(
-            new BABYLON.Vector3(x, this.options.maxHeight * 2, z),
+            new BABYLON.Vector3(x, originY, z),
             new BABYLON.Vector3(0, -1, 0),
-            this.options.maxHeight * 3
+            length
         );
-        
+
         const hit = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
-        return hit.pickedPoint ? hit.pickedPoint.y : 0;
+        if (hit && hit.hit && hit.pickedPoint) {
+            return hit.pickedPoint.y;
+        }
+        // Fallback to sea level if nothing was hit
+        return 0;
     }
 
     isAreaFlat(position, width, depth, maxSlope = 0.1) {
