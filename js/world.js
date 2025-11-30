@@ -992,15 +992,37 @@ class World {
     }
 
     updateWater() {
-        if (!this.waterMaterial) return;
+    if (!this.waterMaterial) return;
+    
+    const time = Date.now() * 0.001; // Current time in seconds
+    
+    // Animate water bump texture if it exists
+    if (this.waterMaterial.bumpTexture) {
+        // More organic movement with different speeds for different directions
+        this.waterMaterial.bumpTexture.uOffset = Math.sin(time * 0.5) * 0.1;
+        this.waterMaterial.bumpTexture.vOffset = Math.cos(time * 0.5) * 0.1;
         
-        // Animate water bump texture if it exists
-        if (this.waterMaterial.bumpTexture) {
-            const time = Date.now() * 0.001;
-            this.waterMaterial.bumpTexture.uOffset += 0.001;
-            this.waterMaterial.bumpTexture.vOffset += 0.001;
-        }
+        // Add some subtle scaling variation
+        this.waterMaterial.bumpTexture.uScale = 8 + Math.sin(time * 0.2) * 0.5;
+        this.waterMaterial.bumpTexture.vScale = 8 + Math.cos(time * 0.2) * 0.5;
     }
+    
+    // Animate reflection/refraction
+    if (this.waterMaterial.reflectionTexture) {
+        this.waterMaterial.reflectionTexture.renderList = [this.terrain, ...this.trees, ...this.buildings];
+    }
+    
+    // Add some subtle color variation
+    const waveFactor = Math.sin(time * 0.5) * 0.1;
+    this.waterMaterial.diffuseColor = new BABYLON.Color3(
+        0.1 + waveFactor * 0.1, 
+        0.3 + waveFactor * 0.05, 
+        0.5 + waveFactor * 0.2
+    );
+    
+    // Animate specular highlights
+    this.waterMaterial.specularPower = 32 + Math.sin(time * 0.5) * 16;
+}
 
     updateTime() {
         // Update time of day (24-hour cycle)
