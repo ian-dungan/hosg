@@ -14,9 +14,6 @@ const CONFIG = {
     },
     
     PLAYER: {
-        WIDTH: 0.7,      // Match your model's width
-        HEIGHT: 1.8,     // Match your model's height
-        DEPTH: 0.5,      // Match your model's depth
         MOVE_SPEED: 0.15,
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 0.22,
