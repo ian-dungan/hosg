@@ -171,26 +171,8 @@ class World {
         this.terrainMaterial.metallic = 0.0;
         this.terrainMaterial.roughness = 1.0;
 
-        // Try to load textures, fallback to simple color if they fail
-        const albedoTexture = new BABYLON.Texture('assets/textures/ground/grass/Grass004_2K_Color.jpg', scene);
-        albedoTexture.uScale = 16;
-        albedoTexture.vScale = 16;
-        
-        // Listen for texture load failure and use procedural fallback
-        albedoTexture.onLoadObservable.addOnce(() => {
-            console.log('[World] Grass texture loaded successfully');
-        });
-        
-        albedoTexture.onErrorObservable.addOnce(() => {
-            console.log('[World] Grass texture failed, using procedural green');
-            // Use simple green color instead
-            this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
-            this.terrainMaterial.albedoTexture = null;
-            this.terrainMaterial.bumpTexture = null;
-            this.terrainMaterial.metallicTexture = null;
-        });
-
-        this.terrainMaterial.albedoTexture = albedoTexture;
+        // Use simple procedural green color (no external textures)
+        this.terrainMaterial.albedoColor = new BABYLON.Color3(0.3, 0.6, 0.3);
         
         // Assign material to terrain
         this.terrain.material = this.terrainMaterial;
@@ -287,10 +269,6 @@ class World {
         this.waterMaterial.refractionTexture.depth = 0.1;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         
-        // Add waves
-        this.waterMaterial.bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
-        this.waterMaterial.bumpTexture.level = 0.5;
-        
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;
         this.waterMaterial.useRefractionFresnel = true;
@@ -300,19 +278,7 @@ class World {
         this.waterMaterial.reflectionFresnelParameters = new BABYLON.FresnelParameters();
         this.waterMaterial.reflectionFresnelParameters.bias = 0.1;
         
-        // Add waves with fallback
-        const bumpTexture = new BABYLON.Texture('assets/textures/waterbump.png', this.scene);
-        bumpTexture.level = 0.5;
-        
-        bumpTexture.onErrorObservable.addOnce(() => {
-            console.log('[World] Water bump texture failed, using procedural waves');
-            // Water will still work without bump texture
-        });
-        
-        this.waterMaterial.bumpTexture = bumpTexture;
-        
         this.waterMaterial.specularPower = 64;
-        this.waterMaterial.alpha = 0.8;
         
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
@@ -1382,16 +1348,20 @@ class Enemy extends Entity {
         // In a real game, you would use a spatial partitioning system
         // to efficiently find nearby players
         if (this.scene.player && 
-            this.scene.player.position &&
-            BABYLON.Vector3.Distance(this.position, this.scene.player.position) <= this.detectionRange) {
-            this.target = this.scene.player;
+            this.scene.player.mesh &&
+            this.scene.player.mesh.position) {
+            const playerPos = this.scene.player.mesh.position;
+            if (BABYLON.Vector3.Distance(this.position, playerPos) <= this.detectionRange) {
+                this.target = this.scene.player;
+            }
         }
     }
 
     chaseTarget(deltaTime) {
-        if (!this.target) return;
+        if (!this.target || !this.target.mesh || !this.target.mesh.position) return;
         
-        const direction = this.target.position.subtract(this.position);
+        const targetPos = this.target.mesh.position;
+        const direction = targetPos.subtract(this.position);
         const distance = direction.length();
         
         if (distance > 0) {
