@@ -39,19 +39,33 @@ class Player {
             depth: 0.5
         }, this.scene);
         
-        // Spawn at safe height (will drop to terrain)
-        this.mesh.position.y = 20;
+        // Spawn at a safe height relative to the terrain
+        const world = this.scene.world;
+        const halfHeight = 1.8 * 0.5;
+
+        if (world && typeof world.getHeightAt === "function") {
+            const spawnX = 0;
+            const spawnZ = 0;
+            const terrainY = world.getHeightAt(spawnX, spawnZ);
+
+            // Center of the box sits just above the ground
+            this.mesh.position.set(spawnX, terrainY + halfHeight + 0.1, spawnZ);
+        } else {
+            // Fallback to the old behavior if world isn't ready
+            this.mesh.position.y = 20;
+        }
+
         this.mesh.visibility = 0;
-        
+
         // Create knight character as visual
         this.createKnightModel();
-        
+
         // Enhanced physics with better values for smooth movement
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
             BABYLON.PhysicsImpostor.BoxImpostor,
             { 
-                mass: 5,           // Heavier = more stable, less sliding
+                mass: 15,           // Heavier = more stable, less sliding
                 friction: 0.2,      // Ground friction
                 restitution: 0.0    // No bounce
             },
@@ -67,7 +81,7 @@ class Player {
         // Container for all visual parts
         const visualRoot = new BABYLON.TransformNode('knightVisual', this.scene);
         visualRoot.parent = this.mesh;
-        visualRoot.position.y = -0.9; // Adjust to align with physics box
+        visualRoot.position.y = -0.35; // Adjust to align with physics box
         this.visualRoot = visualRoot;
         
         // Materials
@@ -309,6 +323,9 @@ class Player {
         
         // Ground detection
         this.checkGroundContact();
+
+        // Safety: if physics lets us sink into the terrain, push us back out
+        this.ensureNotInsideTerrain();
     }
     
     animateWalking(deltaTime, isRunning) {
@@ -334,6 +351,38 @@ class Player {
         this.rightLeg.rotation.x *= 0.9;
     }
     
+
+    ensureNotInsideTerrain() {
+        const world = this.scene && this.scene.world;
+        if (!world || typeof world.getHeightAt !== "function") return;
+        if (!this.mesh || !this.mesh.physicsImpostor) return;
+
+        const x = this.mesh.position.x;
+        const z = this.mesh.position.z;
+        const terrainY = world.getHeightAt(x, z);
+
+        const halfHeight = 1.8 * 0.5;
+        const minCenterY = terrainY + halfHeight * 0.8; // allow a tiny bit of sink
+
+        if (this.mesh.position.y < minCenterY) {
+            // Nudge the player up out of the ground
+            const pos = this.mesh.position;
+            this.mesh.position = new BABYLON.Vector3(
+                pos.x,
+                minCenterY + 0.05,
+                pos.z
+            );
+
+            // Clear downward velocity so we don't immediately re-penetrate
+            const v = this.mesh.physicsImpostor.getLinearVelocity();
+            if (v && v.y < 0) {
+                this.mesh.physicsImpostor.setLinearVelocity(
+                    new BABYLON.Vector3(v.x, 0, v.z)
+                );
+            }
+        }
+    }
+
     checkGroundContact() {
         // Raycast downward to detect ground
         const origin = this.mesh.position.clone();
