@@ -6,10 +6,10 @@ class Player {
         this.camera = null;
         this.characterModel = null;
         
-        // Movement speeds
-        this.speed = 8.0;              // Units per second (was 0.15 - too slow!)
-        this.runMultiplier = 2.0;      // Run = 16.0 units/sec
-        this.jumpForce = 8.0;          // Jump velocity (was 0.3 - barely jumped!)
+        // Movement speeds (increased for heavier mass)
+        this.speed = 15.0;             // Units per second (increased from 8.0)
+        this.runMultiplier = 2.0;      // Run = 30.0 units/sec
+        this.jumpForce = 12.0;         // Jump velocity (increased from 8.0)
         this.rotationSpeed = 0.1;
         
         // Input state
@@ -116,30 +116,33 @@ class Player {
     }
     
     createPlayerMesh(spawnY) {
-        // Create simple capsule for visual representation
-        this.mesh = BABYLON.MeshBuilder.CreateCapsule('player', {
-            radius: 0.5,
-            height: 1.8,
-            tessellation: 8
+        // Create invisible collision box (smaller, tighter to body)
+        this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
+            width: 1.0,   // Narrow width
+            height: 1.8,  // Human height
+            depth: 1.0    // Narrow depth
         }, this.scene);
         
         // Spawn HIGHER to avoid terrain collision
-        this.mesh.position = new BABYLON.Vector3(0, spawnY + 5, 0); // +5 extra clearance!
-        this.mesh.visibility = 0; // Invisible (character model will be visible)
+        this.mesh.position = new BABYLON.Vector3(0, spawnY + 5, 0);
+        
+        // CRITICAL: Make completely invisible
+        this.mesh.visibility = 0;
+        this.mesh.isVisible = false;
         
         // CRITICAL: Enable collisions
         this.mesh.checkCollisions = true;
         
-        // Create physics impostor with BOX (Cannon.js doesn't support capsule!)
+        // Create physics impostor with BOX
         setTimeout(() => {
             try {
                 this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                     this.mesh,
-                    BABYLON.PhysicsImpostor.BoxImpostor, // BOX instead of CAPSULE!
+                    BABYLON.PhysicsImpostor.BoxImpostor,
                     {
-                        mass: 1,
-                        friction: 0.5,
-                        restitution: 0
+                        mass: 70,        // Heavier (like a person)
+                        friction: 0.8,   // More friction to stick to ground
+                        restitution: 0   // No bouncing
                     },
                     this.scene
                 );
@@ -149,13 +152,22 @@ class Player {
                 if (body) {
                     body.fixedRotation = true;
                     body.updateMassProperties();
+                    
+                    // Add damping to prevent sliding
+                    body.linearDamping = 0.9;  // High damping = stops quickly
+                    body.angularDamping = 0.9;
+                    
+                    // CRITICAL: Set collision masks
+                    body.collisionFilterGroup = 1;
+                    body.collisionFilterMask = -1;
+                    
                     this.physicsReady = true;
-                    console.log(`[Player] ✓ Physics enabled: BoxImpostor mass=1, friction=0.5`);
+                    console.log(`[Player] ✓ Physics enabled: BoxImpostor mass=70, friction=0.8, damping=0.9`);
                 } else {
                     console.warn('[Player] ✗ Physics body is NULL! Disposing impostor and using direct movement');
                     this.mesh.physicsImpostor.dispose();
                     this.mesh.physicsImpostor = null;
-                    this.physicsReady = true; // Allow update to run with fallback
+                    this.physicsReady = true;
                 }
             } catch (error) {
                 console.error('[Player] ✗ Physics impostor creation FAILED:', error.message);
@@ -163,11 +175,11 @@ class Player {
                     this.mesh.physicsImpostor.dispose();
                     this.mesh.physicsImpostor = null;
                 }
-                this.physicsReady = true; // Allow update to run with fallback
+                this.physicsReady = true;
             }
         }, 100);
         
-        console.log(`[Player] ✓ Player mesh created at position (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z})`);
+        console.log(`[Player] ✓ Invisible collision box created at position (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z})`);
     }
     
     async loadCharacterModel() {
@@ -195,17 +207,34 @@ class Player {
             
             console.log(`[Player] ✓ Character model loaded (${result.meshes.length} meshes)`);
             
-            // Get root mesh
+            // Get root mesh and parent it to invisible physics box
             this.characterModel = result.meshes[0];
             this.characterModel.parent = this.mesh;
             
-            // Apply offset from config
+            // CRITICAL: Position character model to align with physics box
+            // Knight model needs to be centered and at the right height
             const offset = characterConfig.offset || { x: 0, y: -0.9, z: 0 };
             this.characterModel.position = new BABYLON.Vector3(offset.x, offset.y, offset.z);
             
             // Apply scale from config
             const scale = characterConfig.scale || 1.0;
             this.characterModel.scaling = new BABYLON.Vector3(scale, scale, scale);
+            
+            // Make sure ALL child meshes are visible and don't have physics
+            result.meshes.forEach((mesh, index) => {
+                if (index > 0) { // Skip root
+                    mesh.isVisible = true;
+                    mesh.visibility = 1;
+                    mesh.checkCollisions = false; // No collision on visual mesh
+                    mesh.isPickable = false;      // Don't interfere with raycasts
+                    
+                    // Remove any physics impostors from model parts
+                    if (mesh.physicsImpostor) {
+                        mesh.physicsImpostor.dispose();
+                        mesh.physicsImpostor = null;
+                    }
+                }
+            });
             
             // Store animations
             if (result.animationGroups && result.animationGroups.length > 0) {
@@ -237,7 +266,7 @@ class Player {
             
         } catch (error) {
             console.warn('[Player] Failed to load character model:', error.message);
-            console.log('[Player] Continuing with invisible capsule');
+            console.log('[Player] Continuing with invisible collision box');
         }
     }
     
@@ -400,26 +429,30 @@ class Player {
             moveDir.normalize();
             
             const speed = this.input.run ? this.speed * this.runMultiplier : this.speed;
-            const velocity = moveDir.scale(speed * dt);
             
             if (hasPhysics) {
-                // Use physics-based movement
+                // Use physics-based movement with force
                 try {
                     const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-                    this.mesh.physicsImpostor.setLinearVelocity(
-                        new BABYLON.Vector3(
-                            velocity.x,
-                            currentVel.y, // Keep vertical velocity
-                            velocity.z
-                        )
+                    
+                    // Apply force for smooth acceleration
+                    const targetVel = moveDir.scale(speed);
+                    const velDiff = targetVel.subtract(new BABYLON.Vector3(currentVel.x, 0, currentVel.z));
+                    const force = velDiff.scale(this.mesh.physicsImpostor.mass * 2); // Force = mass * acceleration
+                    
+                    this.mesh.physicsImpostor.applyImpulse(
+                        force,
+                        this.mesh.getAbsolutePosition()
                     );
                 } catch (e) {
                     console.warn('[Player] Physics error:', e.message);
                     // Fall through to direct movement
+                    const velocity = moveDir.scale(speed * dt);
                     this.mesh.position.addInPlace(velocity);
                 }
             } else {
                 // Fallback: Direct position manipulation
+                const velocity = moveDir.scale(speed * dt);
                 this.mesh.position.addInPlace(velocity);
             }
             
@@ -434,12 +467,14 @@ class Player {
                 this.playAnimation('walk');
             }
         } else {
-            // No movement - stop horizontal velocity
+            // No movement - apply damping force to stop
             if (hasPhysics) {
                 try {
                     const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-                    this.mesh.physicsImpostor.setLinearVelocity(
-                        new BABYLON.Vector3(0, currentVel.y, 0)
+                    const dampingForce = new BABYLON.Vector3(-currentVel.x * 50, 0, -currentVel.z * 50);
+                    this.mesh.physicsImpostor.applyImpulse(
+                        dampingForce,
+                        this.mesh.getAbsolutePosition()
                     );
                 } catch (e) {
                     // Ignore
@@ -456,9 +491,11 @@ class Player {
         if (this.input.jump && this.onGround) {
             if (hasPhysics) {
                 try {
-                    const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-                    this.mesh.physicsImpostor.setLinearVelocity(
-                        new BABYLON.Vector3(currentVel.x, this.jumpForce, currentVel.z)
+                    // Apply upward impulse
+                    const jumpImpulse = new BABYLON.Vector3(0, this.jumpForce * this.mesh.physicsImpostor.mass, 0);
+                    this.mesh.physicsImpostor.applyImpulse(
+                        jumpImpulse,
+                        this.mesh.getAbsolutePosition()
                     );
                 } catch (e) {
                     this.mesh.position.y += this.jumpForce;
