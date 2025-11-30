@@ -6,10 +6,10 @@ class Player {
         this.camera = null;
         this.characterModel = null;
         
-        // Movement speeds (increased for heavier mass)
-        this.speed = 15.0;             // Units per second (increased from 8.0)
-        this.runMultiplier = 2.0;      // Run = 30.0 units/sec
-        this.jumpForce = 12.0;         // Jump velocity (increased from 8.0)
+        // Movement speeds (direct movement - no physics)
+        this.speed = 0.25;             // Base walk speed
+        this.runMultiplier = 2.5;      // Run multiplier
+        this.jumpForce = 0.5;          // Jump initial velocity
         this.rotationSpeed = 0.1;
         
         // Input state
@@ -43,6 +43,7 @@ class Player {
         // Physics ready flag
         this.physicsReady = false;
         this.onGround = true;
+        this.verticalVelocity = 0; // For gravity simulation
         
         // Internal flags
         this._waitingLogged = false;
@@ -116,70 +117,26 @@ class Player {
     }
     
     createPlayerMesh(spawnY) {
-        // Create invisible collision box (smaller, tighter to body)
+        // Create TINY invisible point (just for position reference)
         this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
-            width: 1.0,   // Narrow width
-            height: 1.8,  // Human height
-            depth: 1.0    // Narrow depth
+            width: 0.01,   // TINY
+            height: 0.01,
+            depth: 0.01
         }, this.scene);
         
-        // Spawn HIGHER to avoid terrain collision
+        // Spawn HIGHER
         this.mesh.position = new BABYLON.Vector3(0, spawnY + 5, 0);
         
-        // CRITICAL: Make completely invisible
+        // MAKE COMPLETELY INVISIBLE - MULTIPLE METHODS
         this.mesh.visibility = 0;
         this.mesh.isVisible = false;
+        this.mesh.isPickable = false;
+        this.mesh.renderingGroupId = -1; // Don't render at all
         
-        // CRITICAL: Enable collisions
-        this.mesh.checkCollisions = true;
+        // NO PHYSICS! Just use direct movement
+        this.physicsReady = true; // Allow update to run immediately
         
-        // Create physics impostor with BOX
-        setTimeout(() => {
-            try {
-                this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                    this.mesh,
-                    BABYLON.PhysicsImpostor.BoxImpostor,
-                    {
-                        mass: 70,        // Heavier (like a person)
-                        friction: 0.8,   // More friction to stick to ground
-                        restitution: 0   // No bouncing
-                    },
-                    this.scene
-                );
-                
-                // Check if body actually created
-                const body = this.mesh.physicsImpostor.physicsBody;
-                if (body) {
-                    body.fixedRotation = true;
-                    body.updateMassProperties();
-                    
-                    // Add damping to prevent sliding
-                    body.linearDamping = 0.9;  // High damping = stops quickly
-                    body.angularDamping = 0.9;
-                    
-                    // CRITICAL: Set collision masks
-                    body.collisionFilterGroup = 1;
-                    body.collisionFilterMask = -1;
-                    
-                    this.physicsReady = true;
-                    console.log(`[Player] ✓ Physics enabled: BoxImpostor mass=70, friction=0.8, damping=0.9`);
-                } else {
-                    console.warn('[Player] ✗ Physics body is NULL! Disposing impostor and using direct movement');
-                    this.mesh.physicsImpostor.dispose();
-                    this.mesh.physicsImpostor = null;
-                    this.physicsReady = true;
-                }
-            } catch (error) {
-                console.error('[Player] ✗ Physics impostor creation FAILED:', error.message);
-                if (this.mesh.physicsImpostor) {
-                    this.mesh.physicsImpostor.dispose();
-                    this.mesh.physicsImpostor = null;
-                }
-                this.physicsReady = true;
-            }
-        }, 100);
-        
-        console.log(`[Player] ✓ Invisible collision box created at position (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z})`);
+        console.log(`[Player] ✓ Player anchor created at (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z}) - NO PHYSICS MODE`);
     }
     
     async loadCharacterModel() {
@@ -380,21 +337,12 @@ class Player {
     }
     
     update(deltaTime) {
-        if (!this.mesh) return;
-        
-        // CRITICAL: Don't run update until physics initialization attempt is complete
-        if (!this.physicsReady) {
-            if (!this._waitingLogged) {
-                console.log('[Player] Waiting for physics initialization...');
-                this._waitingLogged = true;
-            }
-            return;
-        }
+        if (!this.mesh || !this.physicsReady) return;
         
         // Update gamepad state
         this.updateGamepad();
         
-        const dt = deltaTime / 16.67; // Normalize to 60fps baseline
+        const dt = deltaTime / 16.67; // Normalize to 60fps
         
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
@@ -405,7 +353,7 @@ class Player {
         right.y = 0;
         right.normalize();
         
-        // Calculate movement direction from keyboard + gamepad
+        // Calculate movement direction
         let moveDir = BABYLON.Vector3.Zero();
         
         // Keyboard input
@@ -420,43 +368,17 @@ class Player {
             moveDir.addInPlace(gamepadMove);
         }
         
-        // Check if physics impostor exists and is valid
-        const hasPhysics = this.mesh.physicsImpostor && 
-                          this.mesh.physicsImpostor.physicsBody;
-        
-        // Apply movement
+        // DIRECT MOVEMENT - NO PHYSICS
         if (moveDir.lengthSquared() > 0) {
             moveDir.normalize();
             
             const speed = this.input.run ? this.speed * this.runMultiplier : this.speed;
+            const velocity = moveDir.scale(speed * dt);
             
-            if (hasPhysics) {
-                // Use physics-based movement with force
-                try {
-                    const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-                    
-                    // Apply force for smooth acceleration
-                    const targetVel = moveDir.scale(speed);
-                    const velDiff = targetVel.subtract(new BABYLON.Vector3(currentVel.x, 0, currentVel.z));
-                    const force = velDiff.scale(this.mesh.physicsImpostor.mass * 2); // Force = mass * acceleration
-                    
-                    this.mesh.physicsImpostor.applyImpulse(
-                        force,
-                        this.mesh.getAbsolutePosition()
-                    );
-                } catch (e) {
-                    console.warn('[Player] Physics error:', e.message);
-                    // Fall through to direct movement
-                    const velocity = moveDir.scale(speed * dt);
-                    this.mesh.position.addInPlace(velocity);
-                }
-            } else {
-                // Fallback: Direct position manipulation
-                const velocity = moveDir.scale(speed * dt);
-                this.mesh.position.addInPlace(velocity);
-            }
+            // Move directly
+            this.mesh.position.addInPlace(velocity);
             
-            // Rotate player to face movement direction
+            // Rotate to face movement
             const targetRotation = Math.atan2(moveDir.x, moveDir.z);
             this.mesh.rotation.y = targetRotation;
             
@@ -467,76 +389,59 @@ class Player {
                 this.playAnimation('walk');
             }
         } else {
-            // No movement - apply damping force to stop
-            if (hasPhysics) {
-                try {
-                    const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-                    const dampingForce = new BABYLON.Vector3(-currentVel.x * 50, 0, -currentVel.z * 50);
-                    this.mesh.physicsImpostor.applyImpulse(
-                        dampingForce,
-                        this.mesh.getAbsolutePosition()
-                    );
-                } catch (e) {
-                    // Ignore
-                }
-            }
-            
             // Play idle animation
             if (this.animations.idle) {
                 this.playAnimation('idle');
             }
         }
         
-        // Jump
+        // GRAVITY - Apply downward force
+        if (!this.onGround) {
+            this.verticalVelocity -= 0.8 * dt; // Gravity acceleration
+        } else {
+            this.verticalVelocity = 0;
+        }
+        
+        // Apply vertical velocity
+        this.mesh.position.y += this.verticalVelocity * dt;
+        
+        // JUMP
         if (this.input.jump && this.onGround) {
-            if (hasPhysics) {
-                try {
-                    // Apply upward impulse
-                    const jumpImpulse = new BABYLON.Vector3(0, this.jumpForce * this.mesh.physicsImpostor.mass, 0);
-                    this.mesh.physicsImpostor.applyImpulse(
-                        jumpImpulse,
-                        this.mesh.getAbsolutePosition()
-                    );
-                } catch (e) {
-                    this.mesh.position.y += this.jumpForce;
-                }
-            } else {
-                // Fallback: Direct position jump
-                this.mesh.position.y += this.jumpForce;
-            }
+            this.verticalVelocity = this.jumpForce;
             this.onGround = false;
-            this.input.jump = false; // Reset jump
+            this.input.jump = false;
         }
         
-        // Apply gravity if not using physics
-        if (!hasPhysics && this.mesh.position.y > 0.5) {
-            this.mesh.position.y -= 0.5 * dt;
-            if (this.mesh.position.y < 0.5) {
-                this.mesh.position.y = 0.5;
+        // GROUND CHECK - Raycast down to find terrain
+        const rayStart = this.mesh.position.clone();
+        rayStart.y += 0.5; // Start from slightly above player
+        const ray = new BABYLON.Ray(rayStart, new BABYLON.Vector3(0, -1, 0), 100);
+        
+        const hit = this.scene.pickWithRay(ray, (mesh) => {
+            return mesh.name === 'terrain' && mesh.isEnabled();
+        });
+        
+        if (hit && hit.hit) {
+            const groundY = hit.pickedPoint.y;
+            
+            // If below or very close to ground, snap to it
+            if (this.mesh.position.y <= groundY + 0.5) {
+                this.mesh.position.y = groundY + 0.5; // 0.5 units above ground
                 this.onGround = true;
+                this.verticalVelocity = 0;
+            } else {
+                this.onGround = false;
             }
+        } else {
+            // No ground detected - keep falling
+            this.onGround = false;
         }
         
-        // Ground check
-        const ray = new BABYLON.Ray(
-            this.mesh.position,
-            new BABYLON.Vector3(0, -1, 0),
-            1.5
-        );
-        const hit = this.scene.pickWithRay(ray, (mesh) => mesh.name === 'terrain');
-        this.onGround = hit && hit.hit;
-        
-        // Safety check - if falling below world, reset
-        if (this.mesh.position.y < -10) {
-            console.warn('[Player] Fell through world! Resetting to y=20...');
+        // Safety check - if way below world, reset
+        if (this.mesh.position.y < -50) {
+            console.warn('[Player] Fell out of world! Resetting to spawn...');
             this.mesh.position = new BABYLON.Vector3(0, 20, 0);
-            if (hasPhysics) {
-                try {
-                    this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-                } catch (e) {
-                    // Ignore
-                }
-            }
+            this.verticalVelocity = 0;
         }
     }
     
