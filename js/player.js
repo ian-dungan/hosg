@@ -82,13 +82,18 @@ class Player {
                 
                 if (hit && hit.hit) {
                     const groundY = hit.pickedPoint.y;
-                    const spawnY = groundY + 2.5; // Player height/2 + buffer
+                    
+                    // Get water level to ensure we spawn above it
+                    const waterLevel = (world?.options?.waterLevel || 0.2) * (world?.options?.maxHeight || 20);
+                    
+                    // Spawn at ground + 2.5, OR above water, whichever is higher
+                    const minSpawnY = Math.max(groundY + 2.5, waterLevel + 1.5);
                     
                     // TELEPORT to exact position
-                    this.mesh.position = new BABYLON.Vector3(spawnX, spawnY, spawnZ);
+                    this.mesh.position = new BABYLON.Vector3(spawnX, minSpawnY, spawnZ);
                     this.safeSpawnPosition.copyFrom(this.mesh.position);
                     
-                    console.log(`[Player] ✓ Spawned at y=${spawnY.toFixed(2)} (ground=${groundY.toFixed(2)})`);
+                    console.log(`[Player] ✓ Spawned at y=${minSpawnY.toFixed(2)} (ground=${groundY.toFixed(2)}, water=${waterLevel.toFixed(2)})`);
                     
                     // NOW create physics
                     this.createPhysicsImpostor();
@@ -99,12 +104,13 @@ class Player {
                 } else {
                     // Fallback - use world.getHeightAt
                     const groundY = world?.getHeightAt?.(spawnX, spawnZ) || 0;
-                    const spawnY = groundY + 2.5;
+                    const waterLevel = (world?.options?.waterLevel || 0.2) * (world?.options?.maxHeight || 20);
+                    const minSpawnY = Math.max(groundY + 2.5, waterLevel + 1.5);
                     
-                    this.mesh.position = new BABYLON.Vector3(spawnX, spawnY, spawnZ);
+                    this.mesh.position = new BABYLON.Vector3(spawnX, minSpawnY, spawnZ);
                     this.safeSpawnPosition.copyFrom(this.mesh.position);
                     
-                    console.log(`[Player] ✓ Spawned at y=${spawnY.toFixed(2)} (fallback method)`);
+                    console.log(`[Player] ✓ Spawned at y=${minSpawnY.toFixed(2)} (fallback, water=${waterLevel.toFixed(2)})`);
                     
                     this.createPhysicsImpostor();
                     this.spawnHeightSet = true;
@@ -155,9 +161,14 @@ class Player {
             body.angularDamping = 1.0;  // Max damping
             body.fixedRotation = true;   // Prevent tipping
             body.updateMassProperties();
+            
+            console.log('[Player] ✓ Physics impostor created');
+            console.log(`[Player]   - Mass: ${body.mass}`);
+            console.log(`[Player]   - Position: (${body.position.x.toFixed(1)}, ${body.position.y.toFixed(1)}, ${body.position.z.toFixed(1)})`);
+            console.log(`[Player]   - Fixed rotation: ${body.fixedRotation}`);
+        } else {
+            console.error('[Player] ❌ Physics body is NULL!');
         }
-        
-        console.log('[Player] ✓ Physics impostor created');
     }
     
     setProperSpawnHeight() {
@@ -414,10 +425,29 @@ class Player {
     }
 
     update(deltaTime) {
-        if (!this.mesh || !this.mesh.physicsImpostor) return;
+        if (!this.mesh) {
+            console.warn('[Player] Update called but mesh is null!');
+            return;
+        }
+        
+        if (!this.mesh.physicsImpostor) {
+            if (!this._loggedNoPhysics) {
+                console.warn('[Player] Update called but physics impostor not ready yet');
+                this._loggedNoPhysics = true;
+            }
+            return;
+        }
 
         // Poll gamepad if available
         this.updateGamepadInput();
+        
+        // DEBUG: Log input state once when movement is attempted
+        if (!this._loggedInput && (this.input.forward || this.input.backward || this.input.left || this.input.right)) {
+            console.log('[Player] Input detected:', this.input);
+            console.log('[Player] Physics ready:', !!this.mesh.physicsImpostor);
+            console.log('[Player] Position:', this.mesh.position.y.toFixed(2));
+            this._loggedInput = true;
+        }
 
         // Get movement direction from camera
         const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();

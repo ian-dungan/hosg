@@ -421,6 +421,9 @@ class World {
         
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
+        this.water.checkCollisions = false; // CRITICAL: Don't block player movement!
+        
+        console.log(`[World] ✓ Water created at y=${this.water.position.y.toFixed(2)} (non-solid)`);
         
         // Try to load water bump texture if available
         if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
