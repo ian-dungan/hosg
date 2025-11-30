@@ -362,22 +362,28 @@ class Player {
         const terrainY = world.getHeightAt(x, z);
 
         const halfHeight = 1.8 * 0.5;
-        const minCenterY = terrainY + halfHeight * 0.8; // allow a tiny bit of sink
+        const bottomY = this.mesh.position.y - halfHeight;
 
-        if (this.mesh.position.y < minCenterY) {
-            // Nudge the player up out of the ground
+        // Only rescue the player if they've fallen well below the terrain
+        // (e.g. due to a rare physics tunneling issue).
+        const rescueDepth = 2.0; // units below the terrain surface
+
+        if (bottomY < terrainY - rescueDepth) {
+            const targetY = terrainY + halfHeight + 0.1;
             const pos = this.mesh.position;
+
+            // Teleport the physics body back above the ground
             this.mesh.position = new BABYLON.Vector3(
                 pos.x,
-                minCenterY + 0.05,
+                targetY,
                 pos.z
             );
 
-            // Clear downward velocity so we don't immediately re-penetrate
+            // Clamp vertical velocity so we don't immediately dive back down
             const v = this.mesh.physicsImpostor.getLinearVelocity();
-            if (v && v.y < 0) {
+            if (v) {
                 this.mesh.physicsImpostor.setLinearVelocity(
-                    new BABYLON.Vector3(v.x, 0, v.z)
+                    new BABYLON.Vector3(v.x, Math.max(v.y, 0), v.z)
                 );
             }
         }
