@@ -51,7 +51,7 @@ class Player {
             this.mesh,
             BABYLON.PhysicsImpostor.BoxImpostor,
             { 
-                mass: 15,           // Heavier = more stable, less sliding
+                mass: 5,           // Heavier = more stable, less sliding
                 friction: 0.2,      // Ground friction
                 restitution: 0.0    // No bounce
             },
