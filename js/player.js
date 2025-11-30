@@ -5,7 +5,6 @@ class Player {
         this.camera = null;
         this.inventory = new Inventory(CONFIG.PLAYER.INVENTORY_SIZE);
         this.velocity = new BABYLON.Vector3();
-        this.lastSafePosition = null;
         this.isOnGround = false;
         this.health = CONFIG.PLAYER.HEALTH;
         this.maxHealth = CONFIG.PLAYER.HEALTH;
@@ -23,6 +22,11 @@ class Player {
         this.leftLeg = null;
         this.rightLeg = null;
         
+        // Safety system for falling through world
+        this.safeSpawnPosition = new BABYLON.Vector3(0, 5, 0);
+        this.fallThroughThreshold = -10; // If below this Y, reset position
+        this.spawnHeightSet = false;
+        
         this.init();
     }
 
@@ -32,104 +36,246 @@ class Player {
         this.setupInput();
     }
 
-        createPlayerMesh() {
+    createPlayerMesh() {
         // Physics body (invisible box)
         this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
             width: 0.7,
             height: 1.8,
             depth: 0.5
         }, this.scene);
-
-        const halfHeight = 1.8 * 0.5;
-
-        // Default spawn in case world/height lookup fails
-        const defaultSpawnY = (CONFIG && CONFIG.PLAYER && typeof CONFIG.PLAYER.SPAWN_HEIGHT === 'number')
-            ? CONFIG.PLAYER.SPAWN_HEIGHT
-            : 20;
-        let spawnX = 0;
-        let spawnZ = 0;
-        let spawnY = defaultSpawnY;
-
-        const world = this.scene && this.scene.world;
-        if (world && typeof world.getHeightAt === "function") {
-            try {
-                const opts = world.options || {};
-                const maxH = (typeof opts.maxHeight === "number") ? opts.maxHeight : 20;
-                const waterLevel = (typeof opts.waterLevel === "number") ? opts.waterLevel : 0.2;
-                const waterY = maxH * waterLevel;
-                const minDryHeight = waterY + 1.0;
-
-                // Try to find a nearby "dry" spawn point above water level.
-                let found = false;
-                const worldSize = (typeof opts.size === "number") ? opts.size : 1000;
-                const maxRadius = worldSize * 0.35;
-                const samples = 24;
-
-                for (let radiusFactor = 0.1; radiusFactor <= 1.0 && !found; radiusFactor += 0.15) {
-                    const radius = maxRadius * radiusFactor;
-                    for (let i = 0; i < samples; i++) {
-                        const angle = (Math.PI * 2 * i) / samples;
-                        const x = Math.cos(angle) * radius;
-                        const z = Math.sin(angle) * radius;
-
-                        let y;
-                        try {
-                            y = world.getHeightAt(x, z);
-                        } catch (e) {
-                            continue;
-                        }
-
-                        if (typeof y === "number" && isFinite(y) && y > minDryHeight) {
-                            spawnX = x;
-                            spawnZ = z;
-                            spawnY = y + halfHeight + 0.1;
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Fallback: use center of the world if no dry spot was found
-                if (!found) {
-                    const centerY = world.getHeightAt(0, 0);
-                    if (typeof centerY === "number" && isFinite(centerY)) {
-                        spawnX = 0;
-                        spawnZ = 0;
-                        spawnY = centerY + halfHeight + 0.1;
-                    }
-                }
-
-                // As an extra safeguard, make sure we start at least slightly above water level
-                if (spawnY < waterY + halfHeight + 0.5) {
-                    spawnY = waterY + halfHeight + 0.5;
-                }
-            } catch (e) {
-                console.warn('[Player] getHeightAt / spawn search failed, using default spawn height', e);
-            }
-        }
-
-        this.mesh.position.set(spawnX, spawnY, spawnZ);
-        this.lastSafePosition = this.mesh.position.clone();
+        
+        // Start EXTREMELY high with NO physics
+        this.mesh.position = new BABYLON.Vector3(0, 200, 0);
         this.mesh.visibility = 0;
-
+        
+        console.log('[Player] ⏳ Mesh created at y=200, NO PHYSICS yet');
+        
         // Create knight character as visual
         this.createKnightModel();
         
-        // Enhanced physics with better values for smooth movement
+        // WAIT for everything to be ready, then spawn safely
+        this.safeSpawnSequence();
+    }
+    
+    async safeSpawnSequence() {
+        console.log('[Player] 🔍 Starting safe spawn sequence...');
+        
+        // STEP 1: Wait for spawn platform to exist (it's created first!)
+        const platform = await this.waitForSpawnPlatform(300); // 30 second timeout
+        if (!platform) {
+            console.error('[Player] ❌ SPAWN PLATFORM NEVER LOADED! Emergency spawn at y=20');
+            this.mesh.position.y = 20;
+            this.enablePhysicsAfterDelay();
+            return;
+        }
+        
+        console.log('[Player] ✓ Spawn platform confirmed ready');
+        
+        // STEP 2: Wait additional 2 seconds for physics to stabilize
+        await this.delay(2000);
+        console.log('[Player] ✓ Physics engine stabilized');
+        
+        // STEP 3: Get spawn platform height (guaranteed solid surface!)
+        const spawnY = window.spawnPlatformY || 17; // Platform top or default 17
+        
+        console.log(`[Player] 📍 Spawning on platform at y=${spawnY.toFixed(2)}`);
+        
+        // STEP 4: TELEPORT to platform (still no physics)
+        this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
+        this.safeSpawnPosition.copyFrom(this.mesh.position);
+        
+        // STEP 5: Wait another second at spawn position
+        await this.delay(1000);
+        console.log('[Player] ✓ Position stabilized on platform');
+        
+        // STEP 6: NOW enable physics with gentle gravity
+        this.enablePhysicsWithGentleGravity();
+        
+        console.log('[Player] ✅ SPAWN COMPLETE - Standing on solid platform!');
+        console.log('[Player] 🎮 You can now move around!');
+        this.spawnHeightSet = true;
+    }
+    
+    async waitForSpawnPlatform(maxAttempts) {
+        for (let i = 0; i < maxAttempts; i++) {
+            // Check if spawn platform exists
+            const platform = this.scene.getMeshByName('spawnPlatform');
+            const platformY = window.spawnPlatformY;
+            
+            if (platform && platform.isEnabled() && platformY) {
+                console.log(`[Player] ✓ Spawn platform found after ${i + 1} attempts`);
+                return platform;
+            }
+            
+            if (i % 50 === 0 && i > 0) {
+                console.log(`[Player] ⏳ Still waiting for spawn platform... (${i}/${maxAttempts})`);
+            }
+            
+            await this.delay(100);
+        }
+        
+        return null;
+    }
+    
+    findGroundWithRaycast() {
+        const terrain = this.scene.getMeshByName('terrain');
+        if (!terrain) return 0;
+        
+        // Cast ray from very high to very low
+        const origin = new BABYLON.Vector3(0, 500, 0);
+        const direction = new BABYLON.Vector3(0, -1, 0);
+        const ray = new BABYLON.Ray(origin, direction, 1000);
+        
+        const hit = this.scene.pickWithRay(ray, (mesh) => mesh === terrain);
+        
+        if (hit && hit.hit && hit.pickedPoint) {
+            return hit.pickedPoint.y;
+        }
+        
+        // Fallback
+        const world = this.scene.game?.world || window.gameWorld;
+        if (world && world.getHeightAt) {
+            return world.getHeightAt(0, 0);
+        }
+        
+        return 0;
+    }
+    
+    enablePhysicsWithGentleGravity() {
+        if (this.mesh.physicsImpostor) {
+            console.warn('[Player] Physics already exists!');
+            return;
+        }
+        
+        console.log('[Player] 🎮 Enabling physics...');
+        
+        // Create physics impostor
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
             BABYLON.PhysicsImpostor.BoxImpostor,
             { 
-                mass: 15,           // Heavier = more stable, less sliding
-                friction: 0.2,      // Ground friction
+                mass: 25,           // Heavy = stable
+                friction: 0.8,      // High friction
                 restitution: 0.0    // No bounce
             },
             this.scene
         );
         
-        // Apply damping to prevent sliding
-        this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
-        this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+        const body = this.mesh.physicsImpostor.physicsBody;
+        if (body) {
+            // Prevent rotation
+            body.fixedRotation = true;
+            body.updateMassProperties();
+            
+            // Very high damping = slow, controlled fall
+            body.linearDamping = 0.5;  // Slow down vertical movement
+            body.angularDamping = 1.0;
+            
+            console.log('[Player] ✓ Physics enabled with gentle gravity');
+        }
+    }
+    
+    enablePhysicsAfterDelay() {
+        setTimeout(() => {
+            this.enablePhysicsWithGentleGravity();
+            this.spawnHeightSet = true;
+        }, 1000);
+    }
+    
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    // LEGACY METHOD - Remove
+    waitForTerrainAndSpawn() {
+        console.warn('[Player] Old spawn method called - using new safe sequence instead');
+        this.safeSpawnSequence();
+    }
+    
+    setProperSpawnHeight() {
+        // Legacy method - now handled by waitForTerrainAndSpawn()
+        let attempts = 0;
+        const maxAttempts = 100;
+        
+        const checkWorld = () => {
+            attempts++;
+            
+            const world = this.scene.game?.world;
+            
+            if (world && world.terrain && typeof world.getHeightAt === 'function') {
+                const groundHeight = world.getHeightAt(0, 0);
+                
+                // Place player just above ground (height 1.8 = player height, +0.5 = safety buffer)
+                const spawnY = groundHeight + 2.3;
+                
+                // Set position FIRST
+                this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
+                
+                // NOW create physics impostor at correct position
+                this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    this.mesh,
+                    BABYLON.PhysicsImpostor.BoxImpostor,
+                    { 
+                        mass: 15,           // Heavier = more stable, less sliding
+                        friction: 0.2,      // Ground friction
+                        restitution: 0.0    // No bounce
+                    },
+                    this.scene
+                );
+                
+                // Apply damping to prevent sliding
+                this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
+                this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+                
+                // Store as safe spawn position for fall-through recovery
+                this.safeSpawnPosition = new BABYLON.Vector3(0, spawnY, 0);
+                this.spawnHeightSet = true;
+                
+                console.log(`[Player] ✓ Spawned at y=${spawnY.toFixed(2)} (ground=${groundHeight.toFixed(2)}) after ${attempts} attempts`);
+            } else {
+                // World not ready yet
+                if (attempts < maxAttempts) {
+                    if (attempts % 10 === 0) {
+                        console.log(`[Player] Waiting for world... (attempt ${attempts}/${maxAttempts})`);
+                    }
+                    setTimeout(checkWorld, 100);
+                } else {
+                    // Fallback: spawn at safe default height
+                    console.warn('[Player] World load timeout! Using fallback spawn at y=5');
+                    this.mesh.position = new BABYLON.Vector3(0, 5, 0);
+                    
+                    // Create physics at fallback position
+                    this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                        this.mesh,
+                        BABYLON.PhysicsImpostor.BoxImpostor,
+                        { mass: 15, friction: 0.2, restitution: 0.0 },
+                        this.scene
+                    );
+                    this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
+                    this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+                    
+                    this.safeSpawnPosition = new BABYLON.Vector3(0, 5, 0);
+                    this.spawnHeightSet = true;
+                }
+            }
+        };
+        
+        checkWorld();
+    }
+    
+    resetToSafePosition() {
+        if (!this.mesh) return;
+        
+        // Reset position
+        this.mesh.position.copyFrom(this.safeSpawnPosition);
+        
+        // Stop all velocity if physics exists
+        if (this.mesh.physicsImpostor) {
+            this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+        }
+        
+        console.log(`[Player] ✓ Reset to safe position (${this.safeSpawnPosition.y.toFixed(2)})`);
     }
     
     createKnightModel() {
@@ -300,10 +446,29 @@ class Player {
     }
 
     update(deltaTime) {
-        if (!this.mesh || !this.mesh.physicsImpostor) return;
+        if (!this.mesh) {
+            console.warn('[Player] Update called but mesh is null!');
+            return;
+        }
+        
+        if (!this.mesh.physicsImpostor) {
+            if (!this._loggedNoPhysics) {
+                console.warn('[Player] Update called but physics impostor not ready yet');
+                this._loggedNoPhysics = true;
+            }
+            return;
+        }
 
         // Poll gamepad if available
         this.updateGamepadInput();
+        
+        // DEBUG: Log input state once when movement is attempted
+        if (!this._loggedInput && (this.input.forward || this.input.backward || this.input.left || this.input.right)) {
+            console.log('[Player] Input detected:', this.input);
+            console.log('[Player] Physics ready:', !!this.mesh.physicsImpostor);
+            console.log('[Player] Position:', this.mesh.position.y.toFixed(2));
+            this._loggedInput = true;
+        }
 
         // Get movement direction from camera
         const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();
@@ -378,9 +543,9 @@ class Player {
         
         // Ground detection
         this.checkGroundContact();
-
-        // Safety: prevent falling far below the terrain
-        this.ensureAboveGround();
+        
+        // Safety check: reset if fallen through world
+        this.checkFallThrough();
     }
     
     animateWalking(deltaTime, isRunning) {
@@ -411,23 +576,115 @@ class Player {
         const origin = this.mesh.position.clone();
         const direction = new BABYLON.Vector3(0, -1, 0);
         const length = 1.0; // Check 1 unit below
-
+        
         const ray = new BABYLON.Ray(origin, direction, length);
         const hit = this.scene.pickWithRay(ray, (mesh) => {
             return mesh.name === 'terrain' || mesh.checkCollisions;
         });
-
+        
         // Consider grounded if hit within threshold
         this.isOnGround = hit && hit.hit && hit.distance < 0.95;
-
-        // Track last safe grounded position for emergency recovery
-        if (this.isOnGround && this.mesh && this.mesh.position) {
-            if (!this.lastSafePosition) {
-                this.lastSafePosition = this.mesh.position.clone();
-            } else {
-                this.lastSafePosition.copyFrom(this.mesh.position);
+    }
+    
+    checkFallThrough() {
+        if (!this.mesh) return;
+        
+        const y = this.mesh.position.y;
+        
+        // Platform is at ~y=17, so falling below y=10 means something is very wrong
+        // AGGRESSIVE CHECK 1: Below safe threshold
+        if (y < 10.0) { // Well below platform
+            console.error(`[Player] 🚨 FELL OFF PLATFORM at y=${y.toFixed(2)}! EMERGENCY TELEPORT!`);
+            this.emergencyTeleport();
+            return;
+        }
+        
+        // AGGRESSIVE CHECK 2: Only allow checking after spawn is complete
+        if (!this.spawnHeightSet) {
+            return; // Don't check until we're properly spawned
+        }
+        
+        // AGGRESSIVE CHECK 3: Falling too fast
+        if (this.mesh.physicsImpostor) {
+            const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+            if (velocity.y < -20) { // Falling too fast
+                console.error(`[Player] 🚨 FALLING TOO FAST (${velocity.y.toFixed(1)})! EMERGENCY STOP!`);
+                this.emergencyTeleport();
+                return;
             }
         }
+        
+        // AGGRESSIVE CHECK 4: Stuck detection
+        if (!this.lastPosition) {
+            this.lastPosition = this.mesh.position.clone();
+            this.stuckFrames = 0;
+        } else {
+            const moved = BABYLON.Vector3.Distance(this.mesh.position, this.lastPosition);
+            
+            // Check if trying to move but not moving
+            const tryingToMove = this.velocity && this.velocity.length() > 0.05;
+            
+            if (moved < 0.01 && tryingToMove) {
+                this.stuckFrames = (this.stuckFrames || 0) + 1;
+                if (this.stuckFrames > 30) { // 0.5 seconds
+                    console.warn(`[Player] ⚠️ Player stuck for ${this.stuckFrames} frames! Teleporting...`);
+                    this.emergencyTeleport();
+                    this.stuckFrames = 0;
+                }
+            } else {
+                this.stuckFrames = 0;
+            }
+            this.lastPosition.copyFrom(this.mesh.position);
+        }
+        
+        // AGGRESSIVE CHECK 5: Below safe spawn position
+        if (this.safeSpawnPosition && y < this.safeSpawnPosition.y - 3.0) {
+            console.warn(`[Player] ⚠️ Fell below safe spawn! (${y.toFixed(2)} < ${this.safeSpawnPosition.y.toFixed(2)})`);
+            this.emergencyTeleport();
+            return;
+        }
+    }
+    
+    emergencyTeleport() {
+        if (!this.mesh) return;
+        
+        console.log('[Player] 🆘 EMERGENCY TELEPORT INITIATED');
+        
+        // Ensure safe spawn position is valid
+        if (!this.safeSpawnPosition || this.safeSpawnPosition.y < 5) {
+            this.safeSpawnPosition = new BABYLON.Vector3(0, 10, 0);
+            console.log('[Player] Using default safe position y=10');
+        }
+        
+        // IMMEDIATE position change
+        this.mesh.position.copyFrom(this.safeSpawnPosition);
+        
+        // STOP all physics movement
+        if (this.mesh.physicsImpostor) {
+            this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+            
+            // Reset physics body completely
+            const body = this.mesh.physicsImpostor.physicsBody;
+            if (body) {
+                body.position.set(
+                    this.safeSpawnPosition.x,
+                    this.safeSpawnPosition.y,
+                    this.safeSpawnPosition.z
+                );
+                body.velocity.set(0, 0, 0);
+                body.angularVelocity.set(0, 0, 0);
+                body.force.set(0, 0, 0);
+                body.torque.set(0, 0, 0);
+            }
+        }
+        
+        // Reset internal velocity
+        if (this.velocity) {
+            this.velocity.set(0, 0, 0);
+        }
+        
+        console.log(`[Player] ✓ Teleported to safe position y=${this.safeSpawnPosition.y.toFixed(2)}`);
     }
 
     jump() {
@@ -495,70 +752,6 @@ class Player {
         const runButton = (this.gamepad.buttons[7] && this.gamepad.buttons[7].pressed) ||
                          (this.gamepad.buttons[5] && this.gamepad.buttons[5].pressed);
         this.input.run = runButton;
-    }
-
-
-    ensureAboveGround() {
-        if (!this.mesh || !this.mesh.physicsImpostor) return;
-
-        const world = this.scene && this.scene.world;
-        if (!world || typeof world.getHeightAt !== "function") return;
-
-        const pos = this.mesh.position;
-        if (!pos) return;
-
-        const x = pos.x;
-        const z = pos.z;
-
-        let terrainY;
-        try {
-            terrainY = world.getHeightAt(x, z);
-        } catch (e) {
-            return;
-        }
-
-        if (typeof terrainY !== "number" || !isFinite(terrainY)) return;
-
-        const halfHeight = 1.8 * 0.5;
-        const bottomY = pos.y - halfHeight;
-
-        // Only consider it a fall-through if we're far below terrain
-        const rescueDepth = 8.0;
-        if (bottomY < terrainY - rescueDepth) {
-            let targetX = x;
-            let targetZ = z;
-            let targetY = terrainY + halfHeight + 0.1;
-
-            if (this.lastSafePosition) {
-                targetX = this.lastSafePosition.x;
-                targetZ = this.lastSafePosition.z;
-
-                try {
-                    const safeTerrainY = world.getHeightAt(targetX, targetZ);
-                    if (typeof safeTerrainY === "number" && isFinite(safeTerrainY)) {
-                        targetY = safeTerrainY + halfHeight + 0.1;
-                    }
-                } catch (e) {
-                    // Ignore and keep previous targetY
-                }
-            }
-
-            this.mesh.position.set(targetX, targetY, targetZ);
-
-            const v = this.mesh.physicsImpostor.getLinearVelocity();
-            if (v) {
-                this.mesh.physicsImpostor.setLinearVelocity(
-                    new BABYLON.Vector3(v.x, Math.max(v.y, 0), v.z)
-                );
-            }
-
-            console.warn('[Player] Corrected fall-through below terrain', {
-                x: targetX,
-                z: targetZ,
-                terrainY: terrainY,
-                newY: targetY
-            });
-        }
     }
 
     takeDamage(amount) {
