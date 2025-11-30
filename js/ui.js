@@ -12,12 +12,15 @@ class UIManager {
         this.manaBar = null;
         this.staminaBar = null;
         this.debugText = null;
+        this.minimap = null;
+        this.minimapDots = [];
 
         this._init();
     }
 
     _init() {
         this.createHUD();
+        this.createMinimap();
         if (CONFIG.DEBUG) {
             this.createDebugInfo();
         }
@@ -151,6 +154,124 @@ class UIManager {
         this.debugText.paddingRight = "10px";
         this.gui.addControl(this.debugText);
     }
+    
+    createMinimap() {
+        const size = 200; // Minimap size in pixels
+        const mapScale = 200; // World units to cover (200x200 world area)
+        
+        // Minimap container (bottom-right corner)
+        const minimapContainer = new BABYLON.GUI.Rectangle("minimapContainer");
+        minimapContainer.width = size + "px";
+        minimapContainer.height = size + "px";
+        minimapContainer.cornerRadius = 10;
+        minimapContainer.color = "#ffffff";
+        minimapContainer.thickness = 2;
+        minimapContainer.background = "#000000";
+        minimapContainer.alpha = 0.8;
+        minimapContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        minimapContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        minimapContainer.paddingRight = "10px";
+        minimapContainer.paddingBottom = "10px";
+        this.gui.addControl(minimapContainer);
+        
+        // Minimap title
+        const title = new BABYLON.GUI.TextBlock("minimapTitle", "MAP");
+        title.color = "#ffffff";
+        title.fontSize = 14;
+        title.fontWeight = "bold";
+        title.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        title.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        title.paddingTop = "5px";
+        minimapContainer.addControl(title);
+        
+        // Store minimap info
+        this.minimap = {
+            container: minimapContainer,
+            size: size,
+            mapScale: mapScale,
+            worldToMap: (worldX, worldZ) => {
+                // Convert world coordinates to minimap pixel coordinates
+                const pixelX = (worldX / mapScale) * (size * 0.8) + size / 2;
+                const pixelY = (worldZ / mapScale) * (size * 0.8) + size / 2;
+                return { x: pixelX, y: pixelY };
+            }
+        };
+        
+        // Add landmarks to minimap
+        this.updateMinimapLandmarks();
+        
+        console.log('[UI] Minimap created');
+    }
+    
+    updateMinimapLandmarks() {
+        if (!this.minimap || !this.game.world) return;
+        
+        // Clear old dots
+        for (const dot of this.minimapDots) {
+            this.minimap.container.removeControl(dot);
+        }
+        this.minimapDots = [];
+        
+        // Get landmarks from world
+        const landmarks = this.game.world.getLandmarks();
+        
+        // Add landmark dots
+        for (const landmark of landmarks) {
+            const { x, y } = this.minimap.worldToMap(landmark.position.x, landmark.position.z);
+            
+            // Create dot based on type
+            let color = "#ffffff";
+            let dotSize = 6;
+            
+            if (landmark.type === 'building') {
+                color = "#ffaa00"; // Orange for buildings
+                dotSize = 8;
+            } else if (landmark.type === 'tree_grove') {
+                color = "#00ff00"; // Green for forests
+                dotSize = 12;
+            } else if (landmark.type === 'rock_formation') {
+                color = "#888888"; // Gray for rocks
+                dotSize = 10;
+            }
+            
+            const dot = new BABYLON.GUI.Ellipse(`landmark_${landmark.name}`);
+            dot.width = dotSize + "px";
+            dot.height = dotSize + "px";
+            dot.color = color;
+            dot.thickness = 1;
+            dot.background = color;
+            dot.alpha = 0.7;
+            dot.left = (x - this.minimap.size / 2) + "px";
+            dot.top = (y - this.minimap.size / 2) + "px";
+            
+            // Tooltip on hover
+            dot.onPointerEnterObservable.add(() => {
+                dot.thickness = 2;
+                dot.alpha = 1;
+                // Could add label popup here
+            });
+            
+            dot.onPointerOutObservable.add(() => {
+                dot.thickness = 1;
+                dot.alpha = 0.7;
+            });
+            
+            this.minimap.container.addControl(dot);
+            this.minimapDots.push(dot);
+        }
+        
+        // Add player dot (last so it's on top)
+        const playerDot = new BABYLON.GUI.Ellipse("playerDot");
+        playerDot.width = "8px";
+        playerDot.height = "8px";
+        playerDot.color = "#ff0000";
+        playerDot.thickness = 2;
+        playerDot.background = "#ffffff";
+        this.minimap.container.addControl(playerDot);
+        this.minimap.playerDot = playerDot;
+        
+        console.log('[UI] Minimap updated with', landmarks.length, 'landmarks');
+    }
 
     update(deltaTime) {
         if (!this.player) {
@@ -184,6 +305,13 @@ class UIManager {
             const fps = this.game.engine.getFps().toFixed(0);
             const pos = p.mesh ? p.mesh.position : new BABYLON.Vector3(0, 0, 0);
             this.debugText.text = `FPS: ${fps}\nPos: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}\nGrounded: ${p.isOnGround ? 'Yes' : 'No'}`;
+        }
+        
+        // Update minimap player position
+        if (this.minimap && this.minimap.playerDot && p.mesh) {
+            const { x, y } = this.minimap.worldToMap(p.mesh.position.x, p.mesh.position.z);
+            this.minimap.playerDot.left = (x - this.minimap.size / 2) + "px";
+            this.minimap.playerDot.top = (y - this.minimap.size / 2) + "px";
         }
     }
 
