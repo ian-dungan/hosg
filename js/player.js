@@ -4,9 +4,12 @@ class Player {
         this.scene = scene;
         this.mesh = null;
         this.camera = null;
-        this.speed = 0.15;
-        this.runMultiplier = 2.0;
-        this.jumpForce = 0.3;
+        this.characterModel = null;
+        
+        // Movement speeds
+        this.speed = 8.0;              // Units per second (was 0.15 - too slow!)
+        this.runMultiplier = 2.0;      // Run = 16.0 units/sec
+        this.jumpForce = 8.0;          // Jump velocity (was 0.3 - barely jumped!)
         this.rotationSpeed = 0.1;
         
         // Input state
@@ -19,9 +22,30 @@ class Player {
             jump: false
         };
         
+        // Gamepad state
+        this.gamepad = {
+            connected: false,
+            moveX: 0,
+            moveY: 0,
+            lookX: 0,
+            lookY: 0
+        };
+        
+        // Animation state
+        this.animations = {
+            idle: null,
+            walk: null,
+            run: null,
+            jump: null
+        };
+        this.currentAnimation = null;
+        
         // Physics ready flag
         this.physicsReady = false;
         this.onGround = true;
+        
+        // Internal flags
+        this._waitingLogged = false;
         
         console.log('[Player] Player created');
     }
@@ -35,6 +59,10 @@ class Player {
         if (!terrain) {
             console.error('[Player] TERRAIN TIMEOUT - Creating player anyway at y=10');
             this.createPlayerMesh(10);
+            await this.loadCharacterModel();
+            this.setupCamera();
+            this.setupInput();
+            this.setupGamepad();
             return;
         }
         
@@ -53,11 +81,15 @@ class Player {
         // Create player mesh with physics
         this.createPlayerMesh(spawnY);
         
+        // Load character model
+        await this.loadCharacterModel();
+        
         // Setup camera
         this.setupCamera();
         
-        // Setup input
+        // Setup input (keyboard + gamepad)
         this.setupInput();
+        this.setupGamepad();
         
         console.log('[Player] ✓ Player initialized and ready');
     }
@@ -90,34 +122,120 @@ class Player {
         }, this.scene);
         
         this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
-        this.mesh.visibility = 0; // Invisible (will add character model later)
+        this.mesh.visibility = 0; // Invisible (character model will be visible)
         
         // CRITICAL: Enable collisions
         this.mesh.checkCollisions = true;
         
-        // Create physics impostor with SIMPLE settings
-        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.mesh,
-            BABYLON.PhysicsImpostor.CapsuleImpostor,
-            {
-                mass: 1,
-                friction: 0.5,
-                restitution: 0
-            },
-            this.scene
-        );
-        
-        // Lock rotation so player doesn't tip over
-        const body = this.mesh.physicsImpostor.physicsBody;
-        if (body) {
-            body.fixedRotation = true;
-            body.updateMassProperties();
-        }
-        
-        this.physicsReady = true;
+        // Create physics impostor with CAPSULE - wait a frame for mesh to be ready
+        setTimeout(() => {
+            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                this.mesh,
+                BABYLON.PhysicsImpostor.CapsuleImpostor,
+                {
+                    mass: 1,
+                    friction: 0.5,
+                    restitution: 0
+                },
+                this.scene
+            );
+            
+            // Lock rotation so player doesn't tip over
+            const body = this.mesh.physicsImpostor.physicsBody;
+            if (body) {
+                body.fixedRotation = true;
+                body.updateMassProperties();
+                this.physicsReady = true;
+                console.log(`[Player] ✓ Physics enabled: mass=1, friction=0.5, body ready`);
+            } else {
+                console.error('[Player] ✗ Physics body is NULL! Using fallback movement');
+                this.physicsReady = false;
+            }
+        }, 100);
         
         console.log(`[Player] ✓ Player mesh created at position (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z})`);
-        console.log(`[Player] ✓ Physics enabled: mass=1, friction=0.5`);
+    }
+    
+    async loadCharacterModel() {
+        if (!window.ASSET_MANIFEST || !window.ASSET_MANIFEST.CHARACTERS) {
+            console.warn('[Player] Asset manifest not found, skipping character model');
+            return;
+        }
+        
+        const characterConfig = window.ASSET_MANIFEST.CHARACTERS.PLAYER.knight;
+        if (!characterConfig) {
+            console.warn('[Player] Knight character config not found');
+            return;
+        }
+        
+        const modelPath = window.ASSET_MANIFEST.BASE_PATH + characterConfig.model;
+        console.log(`[Player] Loading character model: ${modelPath}`);
+        
+        try {
+            const result = await BABYLON.SceneLoader.ImportMeshAsync(
+                "",
+                modelPath.substring(0, modelPath.lastIndexOf('/') + 1),
+                modelPath.substring(modelPath.lastIndexOf('/') + 1),
+                this.scene
+            );
+            
+            console.log(`[Player] ✓ Character model loaded (${result.meshes.length} meshes)`);
+            
+            // Get root mesh
+            this.characterModel = result.meshes[0];
+            this.characterModel.parent = this.mesh;
+            
+            // Apply offset from config
+            const offset = characterConfig.offset || { x: 0, y: -0.9, z: 0 };
+            this.characterModel.position = new BABYLON.Vector3(offset.x, offset.y, offset.z);
+            
+            // Apply scale from config
+            const scale = characterConfig.scale || 1.0;
+            this.characterModel.scaling = new BABYLON.Vector3(scale, scale, scale);
+            
+            // Store animations
+            if (result.animationGroups && result.animationGroups.length > 0) {
+                console.log(`[Player] Found ${result.animationGroups.length} animations`);
+                
+                const animConfig = characterConfig.animations || {};
+                
+                // Map animations
+                result.animationGroups.forEach(anim => {
+                    const name = anim.name.toLowerCase();
+                    if (name.includes('idle') || name.includes(animConfig.idle?.toLowerCase())) {
+                        this.animations.idle = anim;
+                    } else if (name.includes('walk') || name.includes(animConfig.walk?.toLowerCase())) {
+                        this.animations.walk = anim;
+                    } else if (name.includes('run') || name.includes(animConfig.run?.toLowerCase())) {
+                        this.animations.run = anim;
+                    } else if (name.includes('jump') || name.includes(animConfig.jump?.toLowerCase())) {
+                        this.animations.jump = anim;
+                    }
+                });
+                
+                // Start idle animation
+                if (this.animations.idle) {
+                    this.animations.idle.start(true);
+                    this.currentAnimation = this.animations.idle;
+                    console.log('[Player] ✓ Playing idle animation');
+                }
+            }
+            
+        } catch (error) {
+            console.warn('[Player] Failed to load character model:', error.message);
+            console.log('[Player] Continuing with invisible capsule');
+        }
+    }
+    
+    playAnimation(animName) {
+        const anim = this.animations[animName];
+        if (anim && anim !== this.currentAnimation) {
+            if (this.currentAnimation) {
+                this.currentAnimation.stop();
+            }
+            anim.start(true);
+            this.currentAnimation = anim;
+        }
     }
     
     setupCamera() {
@@ -170,10 +288,72 @@ class Player {
         console.log('[Player] ✓ Input setup complete');
     }
     
-    update(deltaTime) {
-        if (!this.mesh || !this.physicsReady) return;
+    setupGamepad() {
+        // Gamepad connection events
+        window.addEventListener('gamepadconnected', (e) => {
+            console.log('[Player] Gamepad connected:', e.gamepad.id);
+            this.gamepad.connected = true;
+        });
         
-        const dt = deltaTime / 16.67; // Normalize to 60fps
+        window.addEventListener('gamepaddisconnected', (e) => {
+            console.log('[Player] Gamepad disconnected');
+            this.gamepad.connected = false;
+        });
+        
+        console.log('[Player] ✓ Gamepad support enabled');
+    }
+    
+    updateGamepad() {
+        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+        const gamepad = gamepads[0];
+        
+        if (!gamepad) {
+            this.gamepad.connected = false;
+            return;
+        }
+        
+        this.gamepad.connected = true;
+        
+        // Left stick - movement
+        const deadzone = 0.15;
+        this.gamepad.moveX = Math.abs(gamepad.axes[0]) > deadzone ? gamepad.axes[0] : 0;
+        this.gamepad.moveY = Math.abs(gamepad.axes[1]) > deadzone ? gamepad.axes[1] : 0;
+        
+        // Right stick - camera (optional, camera is mouse-controlled)
+        this.gamepad.lookX = Math.abs(gamepad.axes[2]) > deadzone ? gamepad.axes[2] : 0;
+        this.gamepad.lookY = Math.abs(gamepad.axes[3]) > deadzone ? gamepad.axes[3] : 0;
+        
+        // Buttons
+        // A button (0) - Jump
+        if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+            this.input.jump = true;
+        }
+        
+        // B button (1) or triggers - Run
+        const runPressed = (gamepad.buttons[1] && gamepad.buttons[1].pressed) ||
+                          (gamepad.buttons[6] && gamepad.buttons[6].pressed) ||
+                          (gamepad.buttons[7] && gamepad.buttons[7].pressed);
+        this.input.run = runPressed;
+    }
+    
+    update(deltaTime) {
+        if (!this.mesh) return;
+        
+        // CRITICAL: Don't run update until physics is initialized
+        // The createPlayerMesh setTimeout needs 100ms to complete
+        if (!this.physicsReady) {
+            // Still show "waiting" message occasionally
+            if (!this._waitingLogged) {
+                console.log('[Player] Waiting for physics to initialize...');
+                this._waitingLogged = true;
+            }
+            return;
+        }
+        
+        // Update gamepad state
+        this.updateGamepad();
+        
+        const dt = deltaTime * 60; // Scale to 60fps baseline
         
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
@@ -184,13 +364,25 @@ class Player {
         right.y = 0;
         right.normalize();
         
-        // Calculate movement direction
+        // Calculate movement direction from keyboard + gamepad
         let moveDir = BABYLON.Vector3.Zero();
         
+        // Keyboard input
         if (this.input.forward) moveDir.addInPlace(forward);
         if (this.input.backward) moveDir.subtractInPlace(forward);
         if (this.input.right) moveDir.addInPlace(right);
         if (this.input.left) moveDir.subtractInPlace(right);
+        
+        // Gamepad input
+        if (this.gamepad.connected) {
+            const gamepadMove = forward.scale(-this.gamepad.moveY).add(right.scale(this.gamepad.moveX));
+            moveDir.addInPlace(gamepadMove);
+        }
+        
+        // Check if physics is ready and body exists
+        const hasPhysics = this.physicsReady && 
+                          this.mesh.physicsImpostor && 
+                          this.mesh.physicsImpostor.physicsBody;
         
         // Apply movement
         if (moveDir.lengthSquared() > 0) {
@@ -199,33 +391,79 @@ class Player {
             const speed = this.input.run ? this.speed * this.runMultiplier : this.speed;
             const velocity = moveDir.scale(speed * dt);
             
-            // Apply velocity
-            this.mesh.physicsImpostor.setLinearVelocity(
-                new BABYLON.Vector3(
-                    velocity.x,
-                    this.mesh.physicsImpostor.getLinearVelocity().y, // Keep vertical velocity
-                    velocity.z
-                )
-            );
+            if (hasPhysics) {
+                // Use physics-based movement
+                try {
+                    const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
+                    this.mesh.physicsImpostor.setLinearVelocity(
+                        new BABYLON.Vector3(
+                            velocity.x,
+                            currentVel.y, // Keep vertical velocity
+                            velocity.z
+                        )
+                    );
+                } catch (e) {
+                    console.warn('[Player] Physics error, using direct movement:', e.message);
+                    this.mesh.position.addInPlace(velocity);
+                }
+            } else {
+                // Fallback: Direct position manipulation
+                this.mesh.position.addInPlace(velocity);
+                
+                // Apply gravity manually
+                if (this.mesh.position.y > 0) {
+                    this.mesh.position.y -= 0.5 * dt;
+                }
+                if (this.mesh.position.y < 0) {
+                    this.mesh.position.y = 0;
+                }
+            }
             
             // Rotate player to face movement direction
             const targetRotation = Math.atan2(moveDir.x, moveDir.z);
             this.mesh.rotation.y = targetRotation;
+            
+            // Play walk/run animation
+            if (this.input.run && this.animations.run) {
+                this.playAnimation('run');
+            } else if (this.animations.walk) {
+                this.playAnimation('walk');
+            }
         } else {
-            // Stop horizontal movement when no input
-            const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-            this.mesh.physicsImpostor.setLinearVelocity(
-                new BABYLON.Vector3(0, currentVel.y, 0)
-            );
+            // No movement - stop horizontal velocity
+            if (hasPhysics) {
+                try {
+                    const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
+                    this.mesh.physicsImpostor.setLinearVelocity(
+                        new BABYLON.Vector3(0, currentVel.y, 0)
+                    );
+                } catch (e) {
+                    // Ignore
+                }
+            }
+            
+            // Play idle animation
+            if (this.animations.idle) {
+                this.playAnimation('idle');
+            }
         }
         
         // Jump
         if (this.input.jump && this.onGround) {
-            const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
-            this.mesh.physicsImpostor.setLinearVelocity(
-                new BABYLON.Vector3(currentVel.x, this.jumpForce, currentVel.z)
-            );
+            if (hasPhysics) {
+                try {
+                    const currentVel = this.mesh.physicsImpostor.getLinearVelocity();
+                    this.mesh.physicsImpostor.setLinearVelocity(
+                        new BABYLON.Vector3(currentVel.x, this.jumpForce, currentVel.z)
+                    );
+                } catch (e) {
+                    this.mesh.position.y += 2;
+                }
+            } else {
+                this.mesh.position.y += 2;
+            }
             this.onGround = false;
+            this.input.jump = false; // Reset jump
         }
         
         // Ground check
@@ -241,7 +479,13 @@ class Player {
         if (this.mesh.position.y < -10) {
             console.warn('[Player] Fell through world! Resetting...');
             this.mesh.position = new BABYLON.Vector3(0, 10, 0);
-            this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            if (hasPhysics) {
+                try {
+                    this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+                } catch (e) {
+                    // Ignore
+                }
+            }
         }
     }
     

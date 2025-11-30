@@ -1,5 +1,5 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.7
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.8
 // Combined manifest + loader in one file
 // ============================================================
 
@@ -14,6 +14,49 @@ const ASSET_MANIFEST = {
         CACHE_ASSETS: true,
         TEXTURE_ANISOTROPY: 4,
         GENERATE_MIPMAPS: true
+    },
+    
+    // ==================== CHARACTER MODELS ====================
+    CHARACTERS: {
+        PLAYER: {
+            knight: {
+                model: 'player/character/knight.glb',
+                scale: 1.0,
+                offset: { x: 0, y: -0.9, z: 0 }, // Position relative to physics body
+                required: true,
+                animations: {
+                    idle: 'Idle',
+                    walk: 'Walk',
+                    run: 'Run',
+                    jump: 'Jump',
+                    attack: 'Attack'
+                }
+            }
+        },
+        NPCS: {
+            merchant: {
+                model: 'npcs/merchant.glb',
+                scale: 1.0,
+                required: false
+            },
+            guard: {
+                model: 'npcs/guard.glb',
+                scale: 1.0,
+                required: false
+            }
+        },
+        ENEMIES: {
+            wolf: {
+                model: 'enemies/wolf.glb',
+                scale: 0.02,
+                required: false
+            },
+            goblin: {
+                model: 'enemies/goblin.glb',
+                scale: 1.0,
+                required: false
+            }
+        }
     },
     
     TERRAIN: {
