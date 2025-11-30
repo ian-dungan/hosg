@@ -36,13 +36,146 @@ class Player {
         this.setupInput();
     }
 
-    createPlayerMesh() {
-        // Physics body (invisible box)
-        this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
-            width: 0.7,
-            height: 1.8,
-            depth: 0.5
-        }, this.scene);
+    // In the Player class, replace createPlayerMesh() with:
+async createPlayerMesh() {
+    // Physics body (invisible box)
+    this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
+        width: CONFIG.PLAYER.WIDTH || 0.7,
+        height: CONFIG.PLAYER.HEIGHT || 1.8,
+        depth: CONFIG.PLAYER.DEPTH || 0.5
+    }, this.scene);
+    
+    // Spawn at safe height (will drop to terrain)
+    this.mesh.position.y = CONFIG.PLAYER.SPAWN_HEIGHT || 20;
+    this.mesh.visibility = 0.3; // Make slightly visible for debugging
+    
+    // Try to load custom model, fall back to default if not found
+    try {
+        await this.loadCharacterModel();
+        console.log('[Player] Custom character model loaded');
+    } catch (error) {
+        console.warn('[Player] Failed to load custom model, using default', error);
+        this.createKnightModel();
+    }
+    
+    // Enhanced physics with better values for smooth movement
+    this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+        this.mesh,
+        BABYLON.PhysicsImpostor.BoxImpostor,
+        { 
+            mass: CONFIG.PLAYER.MASS || 15,
+            friction: CONFIG.PLAYER.FRICTION || 0.2,
+            restitution: 0.0
+        },
+        this.scene
+    );
+    
+    // Apply damping to prevent sliding
+    this.mesh.physicsImpostor.physicsBody.linearDamping = CONFIG.PLAYER.LINEAR_DAMPING || 0.3;
+    this.mesh.physicsImpostor.physicsBody.angularDamping = CONFIG.PLAYER.ANGULAR_DAMPING || 0.9;
+}
+
+// Add this new method to load the character model
+async loadCharacterModel() {
+    if (!window.AssetLoader || !ASSET_MANIFEST.PLAYER?.model) {
+        throw new Error('AssetLoader not available or player model not configured');
+    }
+
+    const loader = new AssetLoader(this.scene);
+    const playerConfig = ASSET_MANIFEST.PLAYER;
+    
+    // Load the model
+    const model = await loader.loadModel(playerConfig.model, {
+        scaling: new BABYLON.Vector3(
+            playerConfig.scale || 1,
+            playerConfig.scale || 1,
+            playerConfig.scale || 1
+        )
+    });
+
+    if (!model || !model.root) {
+        throw new Error('Failed to load player model');
+    }
+
+    // Set up the model
+    this.visualRoot = model.root;
+    this.visualRoot.parent = this.mesh;
+    this.visualRoot.position.y = -((playerConfig.height || 1.8) / 2); // Center vertically
+    
+    // Store animations if available
+    if (model.animationGroups && model.animationGroups.length > 0) {
+        this.animations = {};
+        model.animationGroups.forEach(animGroup => {
+            this.animations[animGroup.name.toLowerCase()] = animGroup;
+        });
+        console.log('[Player] Loaded animations:', Object.keys(this.animations));
+    }
+
+    // Set up animation properties
+    this.currentAnimation = null;
+    this.animationBlendSpeed = 0.1;
+    
+    // Play default idle animation if available
+    this.playAnimation('idle', true);
+}
+
+// Add this method to handle animations
+playAnimation(name, loop = true) {
+    const animName = name.toLowerCase();
+    
+    // Don't restart the same animation
+    if (this.currentAnimation === animName || !this.animations) return;
+    
+    // Stop current animation
+    if (this.currentAnimation && this.animations[this.currentAnimation]) {
+        this.animations[this.currentAnimation].stop();
+    }
+    
+    // Start new animation
+    if (this.animations[animName]) {
+        const anim = this.animations[animName];
+        anim.loopAnimation = loop;
+        anim.start(true);
+        this.currentAnimation = animName;
+    } else {
+        console.warn(`[Player] Animation not found: ${animName}`);
+    }
+}
+
+// Update the update method to handle animations
+update(deltaTime) {
+    if (!this.mesh || !this.mesh.physicsImpostor) return;
+
+    // Poll gamepad if available
+    this.updateGamepadInput();
+
+    // Get movement direction from camera
+    const forward = this.camera.getFrontPosition(1).subtract(this.camera.position).normalize();
+    const right = this.camera.getDirection(BABYLON.Vector3.Right());
+    forward.y = 0;
+    right.y = 0;
+    forward.normalize();
+    right.normalize();
+
+    // Calculate movement vector
+    const moveDirection = new BABYLON.Vector3();
+    if (this.input.forward) moveDirection.addInPlace(forward);
+    if (this.input.backward) moveDirection.subtractInPlace(forward);
+    if (this.input.left) moveDirection.subtractInPlace(right);
+    if (this.input.right) moveDirection.addInPlace(right);
+
+    // Handle animations based on movement
+    if (moveDirection.lengthSquared() > 0) {
+        moveDirection.normalize();
+        const isRunning = this.input.run && this.isOnGround;
+        this.playAnimation(isRunning ? 'run' : 'walk');
+    } else {
+        this.playAnimation('idle');
+    }
+
+    // Rest of your existing update code...
+    // ... (keep all the existing movement and physics code)
+}
         
         // Start at safe height
         this.mesh.position = new BABYLON.Vector3(0, 50, 0);
