@@ -16,6 +16,12 @@ class Player {
         this.gamepadIndex = -1;
         this.lastJumpButton = false;
         
+        // Animation
+        this.walkCycle = 0;
+        this.visualRoot = null;
+        this.leftLeg = null;
+        this.rightLeg = null;
+        
         this.init();
     }
 
@@ -26,33 +32,160 @@ class Player {
     }
 
     createPlayerMesh() {
-        // Capsule for visuals
-        const visualMesh = BABYLON.MeshBuilder.CreateCapsule('playerVisual', {
-            height: 1.8,
-            radius: 0.3
-        }, this.scene);
-        
-        // Box for physics (CapsuleImpostor not supported in Cannon.js)
+        // Physics body (invisible box)
         this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
-            width: 0.6,
+            width: 0.7,
             height: 1.8,
-            depth: 0.6
+            depth: 0.5
         }, this.scene);
         
-        this.mesh.position.y = 2;
-        this.mesh.visibility = 0; // Invisible physics body
+        // Spawn at safe height (will drop to terrain)
+        this.mesh.position.y = 20;
+        this.mesh.visibility = 0;
         
-        // Attach visual mesh as child
-        visualMesh.parent = this.mesh;
-        visualMesh.visibility = 1;
+        // Create knight character as visual
+        this.createKnightModel();
         
-        // Setup physics with BoxImpostor
+        // Enhanced physics with better values for smooth movement
         this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.mesh,
             BABYLON.PhysicsImpostor.BoxImpostor,
-            { mass: 1, friction: 0.2, restitution: 0.1 },
+            { 
+                mass: 15,           // Heavier = more stable, less sliding
+                friction: 0.2,      // Ground friction
+                restitution: 0.0    // No bounce
+            },
             this.scene
         );
+        
+        // Apply damping to prevent sliding
+        this.mesh.physicsImpostor.physicsBody.linearDamping = 0.3;
+        this.mesh.physicsImpostor.physicsBody.angularDamping = 0.9;
+    }
+    
+    createKnightModel() {
+        // Container for all visual parts
+        const visualRoot = new BABYLON.TransformNode('knightVisual', this.scene);
+        visualRoot.parent = this.mesh;
+        visualRoot.position.y = -0.9; // Adjust to align with physics box
+        this.visualRoot = visualRoot;
+        
+        // Materials
+        const armorMat = new BABYLON.StandardMaterial('armorMat', this.scene);
+        armorMat.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.65);
+        armorMat.specularColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+        armorMat.specularPower = 64;
+        
+        const clothMat = new BABYLON.StandardMaterial('clothMat', this.scene);
+        clothMat.diffuseColor = new BABYLON.Color3(0.5, 0.1, 0.1);
+        
+        const skinMat = new BABYLON.StandardMaterial('skinMat', this.scene);
+        skinMat.diffuseColor = new BABYLON.Color3(0.9, 0.75, 0.65);
+        
+        // Torso (armored chest)
+        const torso = BABYLON.MeshBuilder.CreateBox('torso', {
+            width: 0.6, height: 0.8, depth: 0.4
+        }, this.scene);
+        torso.parent = visualRoot;
+        torso.position.y = 1.0;
+        torso.material = armorMat;
+        
+        // Head (helmet)
+        const head = BABYLON.MeshBuilder.CreateSphere('head', {
+            diameter: 0.4, segments: 8
+        }, this.scene);
+        head.parent = visualRoot;
+        head.position.y = 1.6;
+        head.material = armorMat;
+        
+        // Visor (face guard)
+        const visor = BABYLON.MeshBuilder.CreateBox('visor', {
+            width: 0.35, height: 0.15, depth: 0.25
+        }, this.scene);
+        visor.parent = head;
+        visor.position = new BABYLON.Vector3(0, 0, 0.12);
+        visor.material = armorMat;
+        
+        // Shoulders (pauldrons)
+        const leftShoulder = BABYLON.MeshBuilder.CreateSphere('leftShoulder', {
+            diameter: 0.35, segments: 8
+        }, this.scene);
+        leftShoulder.parent = visualRoot;
+        leftShoulder.position = new BABYLON.Vector3(-0.4, 1.3, 0);
+        leftShoulder.scaling.y = 0.7;
+        leftShoulder.material = armorMat;
+        
+        const rightShoulder = leftShoulder.clone('rightShoulder');
+        rightShoulder.parent = visualRoot;
+        rightShoulder.position.x = 0.4;
+        
+        // Arms
+        const leftArm = BABYLON.MeshBuilder.CreateCylinder('leftArm', {
+            height: 0.7, diameter: 0.15
+        }, this.scene);
+        leftArm.parent = visualRoot;
+        leftArm.position = new BABYLON.Vector3(-0.4, 0.75, 0);
+        leftArm.material = clothMat;
+        
+        const rightArm = leftArm.clone('rightArm');
+        rightArm.parent = visualRoot;
+        rightArm.position.x = 0.4;
+        
+        // Hands (gauntlets)
+        const leftHand = BABYLON.MeshBuilder.CreateBox('leftHand', {
+            width: 0.15, height: 0.2, depth: 0.15
+        }, this.scene);
+        leftHand.parent = visualRoot;
+        leftHand.position = new BABYLON.Vector3(-0.4, 0.35, 0);
+        leftHand.material = armorMat;
+        
+        const rightHand = leftHand.clone('rightHand');
+        rightHand.parent = visualRoot;
+        rightHand.position.x = 0.4;
+        
+        // Belt
+        const belt = BABYLON.MeshBuilder.CreateCylinder('belt', {
+            height: 0.15, diameter: 0.65
+        }, this.scene);
+        belt.parent = visualRoot;
+        belt.position.y = 0.55;
+        belt.material = armorMat;
+        
+        // Legs (armored)
+        const leftLeg = BABYLON.MeshBuilder.CreateCylinder('leftLeg', {
+            height: 0.9, diameterTop: 0.18, diameterBottom: 0.15
+        }, this.scene);
+        leftLeg.parent = visualRoot;
+        leftLeg.position = new BABYLON.Vector3(-0.15, 0, 0);
+        leftLeg.material = armorMat;
+        this.leftLeg = leftLeg;
+        
+        const rightLeg = leftLeg.clone('rightLeg');
+        rightLeg.parent = visualRoot;
+        rightLeg.position.x = 0.15;
+        this.rightLeg = rightLeg;
+        
+        // Feet (armored boots)
+        const leftFoot = BABYLON.MeshBuilder.CreateBox('leftFoot', {
+            width: 0.2, height: 0.15, depth: 0.3
+        }, this.scene);
+        leftFoot.parent = visualRoot;
+        leftFoot.position = new BABYLON.Vector3(-0.15, -0.5, 0.05);
+        leftFoot.material = armorMat;
+        
+        const rightFoot = leftFoot.clone('rightFoot');
+        rightFoot.parent = visualRoot;
+        rightFoot.position.x = 0.15;
+        
+        // Cape
+        const cape = BABYLON.MeshBuilder.CreatePlane('cape', {
+            width: 0.5, height: 0.8
+        }, this.scene);
+        cape.parent = visualRoot;
+        cape.position = new BABYLON.Vector3(0, 0.8, -0.25);
+        cape.material = clothMat;
+        
+        console.log('[Player] Knight character model created');
     }
 
     setupCamera() {
@@ -118,15 +251,20 @@ class Player {
         if (this.input.left) moveDirection.subtractInPlace(right);
         if (this.input.right) moveDirection.addInPlace(right);
 
-        // Apply movement
+        // Apply movement with improved physics
         if (moveDirection.lengthSquared() > 0) {
             moveDirection.normalize();
+            
+            // Speed based on running state
             const speed = this.input.run ? 
                 this.moveSpeed * CONFIG.PLAYER.RUN_MULTIPLIER : 
                 this.moveSpeed;
             
+            // Smooth acceleration
             const velocity = moveDirection.scale(speed * deltaTime * 60);
             const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+            
+            // Apply velocity (preserve vertical component for gravity/jumping)
             this.mesh.physicsImpostor.setLinearVelocity(
                 new BABYLON.Vector3(
                     velocity.x,
@@ -134,21 +272,92 @@ class Player {
                     velocity.z
                 )
             );
+            
+            // Rotate character to face movement direction
+            const targetAngle = Math.atan2(moveDirection.x, moveDirection.z);
+            const currentAngle = this.mesh.rotation.y;
+            
+            // Smooth rotation interpolation
+            let angleDiff = targetAngle - currentAngle;
+            // Normalize angle difference to -PI to PI
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            
+            this.mesh.rotation.y += angleDiff * 0.15; // Smooth turn speed
+            
+            // Animate legs while moving
+            this.animateWalking(deltaTime, this.input.run);
+        } else {
+            // Stop movement smoothly when no input
+            const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+            this.mesh.physicsImpostor.setLinearVelocity(
+                new BABYLON.Vector3(
+                    currentVelocity.x * 0.85,  // Deceleration
+                    currentVelocity.y,
+                    currentVelocity.z * 0.85
+                )
+            );
+            
+            // Reset leg positions when standing still
+            this.resetLegPositions();
         }
 
-        // Handle jumping
+        // Handle jumping with improved physics
         if (this.input.jump && this.isOnGround) {
             this.jump();
         }
+        
+        // Ground detection
+        this.checkGroundContact();
+    }
+    
+    animateWalking(deltaTime, isRunning) {
+        if (!this.leftLeg || !this.rightLeg) return;
+        
+        // Walking animation speed
+        const animSpeed = isRunning ? 15 : 10;
+        this.walkCycle = (this.walkCycle || 0) + deltaTime * animSpeed;
+        
+        // Leg swing using sine wave
+        const swing = Math.sin(this.walkCycle);
+        const maxSwing = isRunning ? 0.3 : 0.2;
+        
+        this.leftLeg.rotation.x = swing * maxSwing;
+        this.rightLeg.rotation.x = -swing * maxSwing;
+    }
+    
+    resetLegPositions() {
+        if (!this.leftLeg || !this.rightLeg) return;
+        
+        // Smoothly return legs to neutral position
+        this.leftLeg.rotation.x *= 0.9;
+        this.rightLeg.rotation.x *= 0.9;
+    }
+    
+    checkGroundContact() {
+        // Raycast downward to detect ground
+        const origin = this.mesh.position.clone();
+        const direction = new BABYLON.Vector3(0, -1, 0);
+        const length = 1.0; // Check 1 unit below
+        
+        const ray = new BABYLON.Ray(origin, direction, length);
+        const hit = this.scene.pickWithRay(ray, (mesh) => {
+            return mesh.name === 'terrain' || mesh.checkCollisions;
+        });
+        
+        // Consider grounded if hit within threshold
+        this.isOnGround = hit && hit.hit && hit.distance < 0.95;
     }
 
     jump() {
         if (this.isOnGround && this.mesh?.physicsImpostor) {
             const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+            // Stronger, more responsive jump
             this.mesh.physicsImpostor.setLinearVelocity(
-                new BABYLON.Vector3(velocity.x, this.jumpForce * 10, velocity.z)
+                new BABYLON.Vector3(velocity.x, this.jumpForce * 12, velocity.z)
             );
             this.isOnGround = false;
+            console.log('[Player] Jump!');
         }
     }
 
