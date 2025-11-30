@@ -238,16 +238,29 @@ class World {
         // Assign material to terrain
         this.terrain.material = this.terrainMaterial;
         
+        // CRITICAL: Make terrain visible and enabled IMMEDIATELY
+        this.terrain.isVisible = true;
+        this.terrain.setEnabled(true);
+        
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add simple box physics (HeightmapImpostor causes issues with Cannon.js)
+        // Add VERY SOLID box physics
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
             BABYLON.PhysicsImpostor.BoxImpostor,
-            { mass: 0, friction: 0.9, restitution: 0.2 },
+            { 
+                mass: 0,              // Static (immovable)
+                friction: 0.9,        // High friction
+                restitution: 0.0      // No bounce
+            },
             this.scene
         );
+        
+        // Make terrain globally accessible for player spawn
+        window.gameWorld = this;
+        
+        console.log('[World] ✓ Terrain physics created and enabled');
     }
 
     generateHeightmap() {
