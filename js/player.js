@@ -40,6 +40,19 @@ class Player {
         };
         this.currentAnimation = null;
         
+        // Combat & targeting
+        this.currentTarget = null;
+        this.targetHighlight = null;
+        
+        // Player stats
+        this.health = CONFIG.PLAYER.HEALTH || 100;
+        this.maxHealth = CONFIG.PLAYER.HEALTH || 100;
+        this.stamina = CONFIG.PLAYER.STAMINA || 100;
+        this.maxStamina = CONFIG.PLAYER.STAMINA || 100;
+        this.mana = 100;
+        this.maxMana = 100;
+        this.isOnGround = true; // For UI
+        
         // Physics ready flag
         this.physicsReady = false;
         this.onGround = true;
@@ -288,10 +301,19 @@ class Player {
             const isDown = (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN);
             
             switch(key) {
+                // WASD keys
                 case 'w': this.input.forward = isDown; break;
                 case 's': this.input.backward = isDown; break;
                 case 'a': this.input.left = isDown; break;
                 case 'd': this.input.right = isDown; break;
+                
+                // Arrow keys (FIXED - not inverted)
+                case 'arrowup': this.input.forward = isDown; break;
+                case 'arrowdown': this.input.backward = isDown; break;
+                case 'arrowleft': this.input.left = isDown; break;
+                case 'arrowright': this.input.right = isDown; break;
+                
+                // Other controls
                 case 'shift': this.input.run = isDown; break;
                 case ' ': 
                     if (isDown && !this.input.jump) {
@@ -300,6 +322,21 @@ class Player {
                         this.input.jump = false;
                     }
                     break;
+                
+                // Tab key for targeting
+                case 'tab':
+                    if (isDown) {
+                        this.targetNext();
+                        kbInfo.event.preventDefault(); // Don't switch browser tabs
+                    }
+                    break;
+            }
+        });
+        
+        // Mouse/pointer targeting
+        this.scene.onPointerObservable.add((pointerInfo) => {
+            if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+                this.handlePointerDown(pointerInfo.pickInfo);
             }
         });
         
@@ -460,6 +497,16 @@ setupGamepad() {
                           (gamepad.buttons[6] && gamepad.buttons[6].pressed) ||
                           (gamepad.buttons[7] && gamepad.buttons[7].pressed);
         this.input.run = runPressed;
+        
+        // X button (2) - Target next enemy (with debounce)
+        if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
+            if (!this.gamepad.targetButtonWasPressed) {
+                this.targetNext();
+                this.gamepad.targetButtonWasPressed = true;
+            }
+        } else {
+            this.gamepad.targetButtonWasPressed = false;
+        }
     }
     
     update(deltaTime) {
@@ -509,9 +556,9 @@ const dt = deltaTime * targetFps;
             // Move directly
             this.mesh.position.addInPlace(velocity);
             
-            // Rotate to face movement
+            // Rotate to face movement direction (FIXED - removed +Math.PI that caused backward facing)
             const targetRotation = Math.atan2(moveDir.x, moveDir.z);
-            this.mesh.rotation.y = targetRotation + Math.PI;
+            this.mesh.rotation.y = targetRotation;
             
             // Play walk/run animation
             if (this.input.run && this.animations.run) {
@@ -540,6 +587,7 @@ const dt = deltaTime * targetFps;
         if (this.input.jump && this.onGround) {
             this.verticalVelocity = this.jumpForce;
             this.onGround = false;
+            this.isOnGround = false; // For UI
             this.input.jump = false;
         }
         
@@ -562,9 +610,11 @@ const dt = deltaTime * targetFps;
             if (this.mesh.position.y <= groundY + 0.5) {
                 this.mesh.position.y = groundY + 0.5; // 0.5 units above ground
                 this.onGround = true;
+                this.isOnGround = true; // For UI
                 this.verticalVelocity = 0;
             } else {
                 this.onGround = false;
+                this.isOnGround = false; // For UI
             }
         } else {
             // Fallback: assume flat ground at y=0
@@ -576,9 +626,11 @@ const dt = deltaTime * targetFps;
             if (this.mesh.position.y <= 0.5) {
                 this.mesh.position.y = 0.5;
                 this.onGround = true;
+                this.isOnGround = true; // For UI
                 this.verticalVelocity = 0;
             } else {
                 this.onGround = false;
+                this.isOnGround = false; // For UI
             }
         }
         
@@ -598,6 +650,8 @@ if (this.camera && this.gamepad.connected) {
         const maxBeta = Math.PI - 0.2;
         if (this.camera.beta < minBeta) this.camera.beta = minBeta;
         if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
+    }
+} // FIXED: Added missing closing brace
         
         // ============================================================
         // SAFETY CHECKS - Collision floor right below terrain surface
@@ -622,6 +676,7 @@ if (this.camera && this.gamepad.connected) {
             
             this.verticalVelocity = 0;
             this.onGround = true;
+            this.isOnGround = true; // For UI
         }
         
         // Layer 2: Emergency reset (y < -1)
@@ -631,6 +686,129 @@ if (this.camera && this.gamepad.connected) {
             this.mesh.position.y = 20;
             this.verticalVelocity = 0;
             this.onGround = false;
+            this.isOnGround = false; // For UI
+        }
+    }
+    
+    // ============================================================
+    // TARGETING SYSTEM
+    // ============================================================
+    
+    targetNext() {
+        // Get all targetable entities (enemies/NPCs) in the scene
+        const targetables = this.scene.meshes.filter(m => 
+            m.metadata && (m.metadata.isEnemy || m.metadata.isNPC) && 
+            m.metadata.health > 0
+        );
+        
+        if (targetables.length === 0) {
+            console.log('[Player] No targets available');
+            this.clearTarget();
+            return;
+        }
+        
+        // Find current target index
+        let currentIndex = -1;
+        if (this.currentTarget) {
+            currentIndex = targetables.findIndex(m => m === this.currentTarget);
+        }
+        
+        // Get next target (cycle through)
+        const nextIndex = (currentIndex + 1) % targetables.length;
+        this.setTarget(targetables[nextIndex]);
+    }
+    
+    setTarget(mesh) {
+        if (!mesh) {
+            this.clearTarget();
+            return;
+        }
+        
+        this.currentTarget = mesh;
+        console.log('[Player] Targeted:', mesh.name);
+        
+        // Create/update target highlight
+        this.updateTargetHighlight();
+        
+        // Show in UI if available
+        if (this.scene.ui && typeof this.scene.ui.showTargetInfo === 'function') {
+            const metadata = mesh.metadata || {};
+            this.scene.ui.showTargetInfo(
+                mesh.name,
+                metadata.health || 0,
+                metadata.maxHealth || 100
+            );
+        }
+    }
+    
+    clearTarget() {
+        this.currentTarget = null;
+        
+        // Remove highlight
+        if (this.targetHighlight) {
+            this.targetHighlight.dispose();
+            this.targetHighlight = null;
+        }
+        
+        // Hide UI
+        if (this.scene.ui && typeof this.scene.ui.hideTargetInfo === 'function') {
+            this.scene.ui.hideTargetInfo();
+        }
+        
+        console.log('[Player] Target cleared');
+    }
+    
+    updateTargetHighlight() {
+        // Remove old highlight
+        if (this.targetHighlight) {
+            this.targetHighlight.dispose();
+        }
+        
+        if (!this.currentTarget) return;
+        
+        // Create ring around target
+        this.targetHighlight = BABYLON.MeshBuilder.CreateTorus('targetHighlight', {
+            diameter: 3,
+            thickness: 0.1,
+            tessellation: 32
+        }, this.scene);
+        
+        this.targetHighlight.position = this.currentTarget.position.clone();
+        this.targetHighlight.position.y = 0.1; // Just above ground
+        this.targetHighlight.rotation.x = Math.PI / 2;
+        
+        // Red glow material
+        const mat = new BABYLON.StandardMaterial('targetMat', this.scene);
+        mat.emissiveColor = new BABYLON.Color3(1, 0, 0);
+        mat.disableLighting = true;
+        this.targetHighlight.material = mat;
+        
+        // Animate highlight
+        const startTime = Date.now();
+        this.scene.onBeforeRenderObservable.add(() => {
+            if (!this.targetHighlight || !this.currentTarget) return;
+            
+            const time = (Date.now() - startTime) / 1000;
+            
+            // Pulse scale
+            this.targetHighlight.scaling.setAll(1 + Math.sin(time * 3) * 0.1);
+            
+            // Follow target
+            this.targetHighlight.position.x = this.currentTarget.position.x;
+            this.targetHighlight.position.z = this.currentTarget.position.z;
+        });
+    }
+    
+    // Handle mouse click targeting
+    handlePointerDown(pickInfo) {
+        if (!pickInfo.hit) return;
+        
+        const mesh = pickInfo.pickedMesh;
+        if (!mesh || !mesh.metadata) return;
+        
+        // Check if clicked mesh is targetable
+        if (mesh.metadata.isEnemy || mesh.metadata.isNPC) {
+            this.setTarget(mesh);
         }
     }
     
