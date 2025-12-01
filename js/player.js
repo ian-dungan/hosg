@@ -113,8 +113,9 @@ class Player {
                 const groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
                 this.mesh.position.y = groundY + 0.5;
                 this.onGround = true;
+                this.isOnGround = true; // For UI
                 this.verticalVelocity = 0;
-                console.log(`[Player] ✓ Snapped to ground at y=${this.mesh.position.y.toFixed(2)}`);
+                console.log(`[Player] ✓ Snapped to ground at y=${this.mesh.position.y.toFixed(2)}, onGround=true`);
             }
         }, 100);
         
@@ -203,6 +204,9 @@ class Player {
             // Knight model needs to be centered and at the right height
             const offset = characterConfig.offset || { x: 0, y: -0.9, z: 0 };
             this.characterModel.position = new BABYLON.Vector3(offset.x, offset.y, offset.z);
+            
+            // NOTE: Don't rotate character model here - we rotate the parent mesh instead
+            // If your model faces backward by default, add Math.PI to mesh rotation in update()
             
             // Apply scale from config
             const scale = characterConfig.scale || 1.0;
@@ -300,6 +304,13 @@ class Player {
             const key = kbInfo.event.key.toLowerCase();
             const isDown = (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN);
             
+            // Debug logging (first 10 key presses)
+            if (!this._keyPressCount) this._keyPressCount = 0;
+            if (this._keyPressCount < 10 && isDown) {
+                console.log(`[Player] Key pressed: ${key}`);
+                this._keyPressCount++;
+            }
+            
             switch(key) {
                 // WASD keys
                 case 'w': this.input.forward = isDown; break;
@@ -318,6 +329,7 @@ class Player {
                 case ' ': 
                     if (isDown && !this.input.jump) {
                         this.input.jump = true;
+                        console.log('[Player] JUMP pressed! onGround=' + this.onGround);
                     } else if (!isDown) {
                         this.input.jump = false;
                     }
@@ -510,6 +522,13 @@ setupGamepad() {
     }
     
     update(deltaTime) {
+        // Debug logging (first 5 updates)
+        if (!this._updateLogCount) this._updateLogCount = 0;
+        if (this._updateLogCount < 5) {
+            console.log(`[Player] Update #${this._updateLogCount + 1}: mesh=${!!this.mesh}, physicsReady=${this.physicsReady}, deltaTime=${deltaTime.toFixed(3)}`);
+            this._updateLogCount++;
+        }
+        
         if (!this.mesh || !this.physicsReady) return;
         
         // Update gamepad state
@@ -540,6 +559,13 @@ const dt = deltaTime * targetFps;
         if (this.input.right) moveDir.addInPlace(right);
         if (this.input.left) moveDir.subtractInPlace(right);
         
+        // Debug logging (first 10 movements)
+        if (!this._moveLogCount) this._moveLogCount = 0;
+        if (this._moveLogCount < 10 && moveDir.lengthSquared() > 0) {
+            console.log(`[Player] Moving! forward=${this.input.forward}, back=${this.input.backward}, left=${this.input.left}, right=${this.input.right}`);
+            this._moveLogCount++;
+        }
+        
         // Gamepad input
         if (this.gamepad.connected) {
             const gamepadMove = forward.scale(-this.gamepad.moveY).add(right.scale(this.gamepad.moveX));
@@ -556,8 +582,9 @@ const dt = deltaTime * targetFps;
             // Move directly
             this.mesh.position.addInPlace(velocity);
             
-            // Rotate to face movement direction (FIXED - removed +Math.PI that caused backward facing)
-            const targetRotation = Math.atan2(moveDir.x, moveDir.z);
+            // Rotate to face movement direction
+            // Add Math.PI if your character model faces backward by default
+            const targetRotation = Math.atan2(moveDir.x, moveDir.z) + Math.PI;
             this.mesh.rotation.y = targetRotation;
             
             // Play walk/run animation
@@ -576,8 +603,16 @@ const dt = deltaTime * targetFps;
         // GRAVITY - Apply downward force
         if (!this.onGround) {
             this.verticalVelocity -= 0.8 * dt; // Gravity acceleration
+            
+            // Debug logging (first 10 frames in air)
+            if (!this._gravityLogCount) this._gravityLogCount = 0;
+            if (this._gravityLogCount < 10) {
+                console.log(`[Player] IN AIR: verticalVel=${this.verticalVelocity.toFixed(3)}, y=${this.mesh.position.y.toFixed(2)}`);
+                this._gravityLogCount++;
+            }
         } else {
             this.verticalVelocity = 0;
+            this._gravityLogCount = 0; // Reset counter when on ground
         }
         
         // Apply vertical velocity
@@ -589,6 +624,7 @@ const dt = deltaTime * targetFps;
             this.onGround = false;
             this.isOnGround = false; // For UI
             this.input.jump = false;
+            console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
         }
         
         // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
@@ -636,16 +672,16 @@ const dt = deltaTime * targetFps;
         
         
 
-// Gamepad camera control (right stick)
+// Gamepad camera control (right stick) - INVERTED
 if (this.camera && this.gamepad.connected) {
     const lookSpeed = 0.03;
     if (Math.abs(this.gamepad.lookX) > 0.001) {
-        // Horizontal orbit (left/right)
-        this.camera.alpha += this.gamepad.lookX * lookSpeed * dt;
+        // Horizontal orbit (left/right) - INVERTED
+        this.camera.alpha -= this.gamepad.lookX * lookSpeed * dt;
     }
     if (Math.abs(this.gamepad.lookY) > 0.001) {
-        // Vertical orbit (up/down). Up on the stick (negative axis) tilts camera upward.
-        this.camera.beta += this.gamepad.lookY * lookSpeed * dt;
+        // Vertical orbit (up/down) - INVERTED
+        this.camera.beta -= this.gamepad.lookY * lookSpeed * dt;
         const minBeta = 0.2;
         const maxBeta = Math.PI - 0.2;
         if (this.camera.beta < minBeta) this.camera.beta = minBeta;
