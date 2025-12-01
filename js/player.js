@@ -360,7 +360,11 @@ class Player {
         // Update gamepad state
         this.updateGamepad();
         
-        const dt = deltaTime / 16.67; // Normalize to 60fps
+        const targetFps =
+    (window.CONFIG && window.CONFIG.GAME && window.CONFIG.GAME.FPS)
+        ? window.CONFIG.GAME.FPS
+        : 60;
+const dt = deltaTime * targetFps;
         
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
