@@ -304,11 +304,121 @@ class Player {
         });
         
         console.log('[Player] ✓ Input setup complete');
+
+        // Mobile touch controls (iPhone/iPad/Android)
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            this.setupTouchControls(canvas);
+        }
     }
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-        this.setupTouchControls(canvas);
-          }
-}
+
+
+    setupTouchControls(canvas) {
+        console.log('[Player] ✓ Touch controls enabled (mobile)');
+
+        let joystickTouchId = null;
+        let joystickStartX = 0;
+        let joystickStartY = 0;
+
+        const DEADZONE = 20;  // px before we consider it a direction
+        const RUNZONE  = 80;  // px distance to toggle run
+
+        const resetDirections = () => {
+            this.input.forward  = false;
+            this.input.backward = false;
+            this.input.left     = false;
+            this.input.right    = false;
+            this.input.run      = false;
+        };
+
+        const updateFromTouch = (x, y) => {
+            const dx = x - joystickStartX;
+            const dy = y - joystickStartY;
+
+            resetDirections();
+
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
+
+            // Vertical: up = forward, down = backward (non-inverted)
+            if (absDy > DEADZONE) {
+                if (dy < 0) this.input.forward = true;   // finger up
+                else        this.input.backward = true;  // finger down
+            }
+
+            // Horizontal: left / right
+            if (absDx > DEADZONE) {
+                if (dx < 0) this.input.left = true;
+                else        this.input.right = true;
+            }
+
+            // Run when dragging far enough
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            this.input.run = dist > RUNZONE;
+        };
+
+        const onTouchStart = (evt) => {
+            if (!evt.changedTouches || evt.changedTouches.length === 0) return;
+
+            for (let i = 0; i < evt.changedTouches.length; i++) {
+                const t = evt.changedTouches[i];
+                const x = t.clientX;
+                const y = t.clientY;
+
+                if (x < window.innerWidth * 0.5) {
+                    // Left side => joystick
+                    if (joystickTouchId === null) {
+                        joystickTouchId = t.identifier;
+                        joystickStartX = x;
+                        joystickStartY = y;
+                        updateFromTouch(x, y);
+                    }
+                } else {
+                    // Right side tap => jump
+                    this.input.jump = true;
+                    // Small pulse so jump is consumed once
+                    setTimeout(() => { this.input.jump = false; }, 100);
+                }
+            }
+
+            evt.preventDefault();
+        };
+
+        const onTouchMove = (evt) => {
+            if (joystickTouchId === null) return;
+            if (!evt.changedTouches) return;
+
+            for (let i = 0; i < evt.changedTouches.length; i++) {
+                const t = evt.changedTouches[i];
+                if (t.identifier === joystickTouchId) {
+                    updateFromTouch(t.clientX, t.clientY);
+                    break;
+                }
+            }
+
+            evt.preventDefault();
+        };
+
+        const onTouchEnd = (evt) => {
+            if (!evt.changedTouches) return;
+
+            for (let i = 0; i < evt.changedTouches.length; i++) {
+                const t = evt.changedTouches[i];
+                if (t.identifier === joystickTouchId) {
+                    joystickTouchId = null;
+                    resetDirections();
+                    break;
+                }
+            }
+
+            evt.preventDefault();
+        };
+
+        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+        canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
+        canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
+        canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
+    }
+
     setupGamepad() {
         // Gamepad connection events
         window.addEventListener('gamepadconnected', (e) => {
@@ -323,112 +433,7 @@ class Player {
         
         console.log('[Player] ✓ Gamepad support enabled');
     }
-    setupTouchControls(canvas) {
-    console.log('[Player] ✓ Touch controls enabled (mobile)');
     
-    let joystickTouchId = null;
-    let joystickStartX = 0;
-    let joystickStartY = 0;
-
-    const DEADZONE = 20;  // px before we consider it a direction
-    const RUNZONE  = 80;  // px distance to toggle run
-
-    const resetDirections = () => {
-        this.input.forward  = false;
-        this.input.backward = false;
-        this.input.left     = false;
-        this.input.right    = false;
-        this.input.run      = false;
-    };
-
-    const updateFromTouch = (x, y) => {
-        const dx = x - joystickStartX;
-        const dy = y - joystickStartY;
-
-        resetDirections();
-
-        const absDx = Math.abs(dx);
-        const absDy = Math.abs(dy);
-
-        // Vertical: up = forward, down = backward (non-inverted)
-        if (absDy > DEADZONE) {
-            if (dy < 0) this.input.forward = true;   // finger up
-            else        this.input.backward = true;  // finger down
-        }
-
-        // Horizontal: left / right
-        if (absDx > DEADZONE) {
-            if (dx < 0) this.input.left = true;
-            else        this.input.right = true;
-        }
-
-        // Run when dragging far enough
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        this.input.run = dist > RUNZONE;
-    };
-
-    const onTouchStart = (evt) => {
-        if (!evt.changedTouches || evt.changedTouches.length === 0) return;
-
-        for (let i = 0; i < evt.changedTouches.length; i++) {
-            const t = evt.changedTouches[i];
-            const x = t.clientX;
-            const y = t.clientY;
-
-            if (x < window.innerWidth * 0.5) {
-                // Left side => joystick
-                if (joystickTouchId === null) {
-                    joystickTouchId = t.identifier;
-                    joystickStartX = x;
-                    joystickStartY = y;
-                    updateFromTouch(x, y);
-                }
-            } else {
-                // Right side tap => jump
-                this.input.jump = true;
-                // Small pulse so jump is consumed once
-                setTimeout(() => { this.input.jump = false; }, 100);
-            }
-        }
-
-        evt.preventDefault();
-    };
-
-    const onTouchMove = (evt) => {
-        if (joystickTouchId === null) return;
-        if (!evt.changedTouches) return;
-
-        for (let i = 0; i < evt.changedTouches.length; i++) {
-            const t = evt.changedTouches[i];
-            if (t.identifier === joystickTouchId) {
-                updateFromTouch(t.clientX, t.clientY);
-                break;
-            }
-        }
-
-        evt.preventDefault();
-    };
-
-    const onTouchEnd = (evt) => {
-        if (!evt.changedTouches) return;
-
-        for (let i = 0; i < evt.changedTouches.length; i++) {
-            const t = evt.changedTouches[i];
-            if (t.identifier === joystickTouchId) {
-                joystickTouchId = null;
-                resetDirections();
-                break;
-            }
-        }
-
-        evt.preventDefault();
-    };
-
-    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-    canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
-    canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
-    canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
-}
     updateGamepad() {
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
         const gamepad = gamepads[0];
@@ -468,11 +473,12 @@ class Player {
         // Update gamepad state
         this.updateGamepad();
         
+        // deltaTime comes in as SECONDS from game.js; convert to a 60fps-normalized dt
         const targetFps =
-    (window.CONFIG && window.CONFIG.GAME && window.CONFIG.GAME.FPS)
-        ? window.CONFIG.GAME.FPS
-        : 60;
-const dt = deltaTime * targetFps;
+            (window.CONFIG && window.CONFIG.GAME && window.CONFIG.GAME.FPS)
+                ? window.CONFIG.GAME.FPS
+                : 60;
+        const dt = deltaTime * targetFps;
         
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
