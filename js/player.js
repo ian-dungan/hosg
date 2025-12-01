@@ -7,7 +7,7 @@ class Player {
         this.characterModel = null;
         
         // Movement speeds (direct movement - no physics)
-        this.speed = 0.25;             // Base walk speed
+        this.speed = 0.4;              // Base walk speed (increased from 0.25)
         this.runMultiplier = 2.5;      // Run multiplier
         this.jumpForce = 0.5;          // Jump initial velocity
         this.rotationSpeed = 0.1;
@@ -69,19 +69,19 @@ class Player {
         
         console.log('[Player] ✓ Terrain ready, creating player...');
         
-        // Get spawn height from terrain with EXTRA clearance
+        // Get spawn height from terrain - spawn ON the ground!
         const world = this.scene.game?.world;
-        let spawnY = 10; // Safe high default
+        let spawnY = 1; // Fallback if world not ready
         
-        if (world && world.getHeightAt) {
-            const groundY = world.getHeightAt(0, 0);
-            spawnY = groundY + 10; // 10 units above ground for safety!
+        if (world && typeof world.getTerrainHeight === 'function') {
+            const groundY = world.getTerrainHeight(0, 0);
+            spawnY = groundY + 1; // Just 1 unit above ground
             console.log(`[Player] Ground at y=${groundY.toFixed(2)}, spawning at y=${spawnY.toFixed(2)}`);
         } else {
-            console.warn('[Player] Could not get terrain height, using default spawn y=10');
+            console.warn('[Player] Could not get terrain height, using fallback spawn y=1');
         }
         
-        // Create player mesh with physics (spawnY +5 added in createPlayerMesh)
+        // Create player mesh (spawns directly at spawnY, no extra offset)
         this.createPlayerMesh(spawnY);
         
         // Load character model
@@ -93,6 +93,17 @@ class Player {
         // Setup input (keyboard + gamepad)
         this.setupInput();
         this.setupGamepad();
+        
+        // FORCE initial ground snap
+        setTimeout(() => {
+            if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+                const groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+                this.mesh.position.y = groundY + 0.5;
+                this.onGround = true;
+                this.verticalVelocity = 0;
+                console.log(`[Player] ✓ Snapped to ground at y=${this.mesh.position.y.toFixed(2)}`);
+            }
+        }, 100);
         
         console.log('[Player] ✓ Player initialized and ready');
     }
@@ -131,8 +142,8 @@ class Player {
             depth: 0.01
         }, this.scene);
         
-        // Spawn HIGHER
-        this.mesh.position = new BABYLON.Vector3(0, spawnY + 5, 0);
+        // Spawn at exact position (no extra offset)
+        this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
         
         // MAKE COMPLETELY INVISIBLE - MULTIPLE METHODS
         this.mesh.visibility = 0;
@@ -427,6 +438,13 @@ class Player {
             // Get exact terrain height at player's x,z position
             groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
             
+            // Debug log first few frames
+            if (!this._groundCheckCount) this._groundCheckCount = 0;
+            this._groundCheckCount++;
+            if (this._groundCheckCount <= 5) {
+                console.log(`[Player] Ground check #${this._groundCheckCount}: pos.y=${this.mesh.position.y.toFixed(2)}, groundY=${groundY.toFixed(2)}, diff=${(this.mesh.position.y - groundY).toFixed(2)}`);
+            }
+            
             // If below or at ground level, snap to it
             if (this.mesh.position.y <= groundY + 0.5) {
                 this.mesh.position.y = groundY + 0.5; // 0.5 units above ground
@@ -437,6 +455,11 @@ class Player {
             }
         } else {
             // Fallback: assume flat ground at y=0
+            if (this._groundCheckCount === undefined) {
+                console.warn('[Player] World.getTerrainHeight not available, using y=0 fallback');
+                this._groundCheckCount = 0;
+            }
+            
             if (this.mesh.position.y <= 0.5) {
                 this.mesh.position.y = 0.5;
                 this.onGround = true;
