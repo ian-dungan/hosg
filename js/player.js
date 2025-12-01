@@ -97,6 +97,13 @@ class Player {
         console.log('[Player] ✓ Player initialized and ready');
     }
     
+    // Called by world when it's fully ready
+    // Hook for future physics implementation
+    startAfterWorldReady() {
+        console.log('[Player] ✓ World ready signal received');
+        // TODO: Re-enable physics here when reimplemented
+    }
+    
     async waitForTerrain(maxAttempts) {
         for (let i = 0; i < maxAttempts; i++) {
             const terrain = this.scene.getMeshByName('terrain');
@@ -412,19 +419,15 @@ class Player {
             this.input.jump = false;
         }
         
-        // GROUND CHECK - Raycast down to find terrain
-        const rayStart = this.mesh.position.clone();
-        rayStart.y += 0.5; // Start from slightly above player
-        const ray = new BABYLON.Ray(rayStart, new BABYLON.Vector3(0, -1, 0), 100);
+        // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
+        // This is how real games do it - query the heightmap directly
+        let groundY = 0;
         
-        const hit = this.scene.pickWithRay(ray, (mesh) => {
-            return mesh.name === 'terrain' && mesh.isEnabled();
-        });
-        
-        if (hit && hit.hit) {
-            const groundY = hit.pickedPoint.y;
+        if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+            // Get exact terrain height at player's x,z position
+            groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
             
-            // If below or very close to ground, snap to it
+            // If below or at ground level, snap to it
             if (this.mesh.position.y <= groundY + 0.5) {
                 this.mesh.position.y = groundY + 0.5; // 0.5 units above ground
                 this.onGround = true;
@@ -433,15 +436,22 @@ class Player {
                 this.onGround = false;
             }
         } else {
-            // No ground detected - keep falling
-            this.onGround = false;
+            // Fallback: assume flat ground at y=0
+            if (this.mesh.position.y <= 0.5) {
+                this.mesh.position.y = 0.5;
+                this.onGround = true;
+                this.verticalVelocity = 0;
+            } else {
+                this.onGround = false;
+            }
         }
         
-        // Safety check - if way below world, reset
-        if (this.mesh.position.y < -50) {
-            console.warn('[Player] Fell out of world! Resetting to spawn...');
-            this.mesh.position = new BABYLON.Vector3(0, 20, 0);
+        // Safety check - if somehow still falling, reset
+        if (this.mesh.position.y < -10) {
+            console.warn('[Player] Emergency reset!');
+            this.mesh.position.y = 20;
             this.verticalVelocity = 0;
+            this.onGround = false;
         }
     }
     

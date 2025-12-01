@@ -127,7 +127,7 @@ class World {
 
     createSkybox() {
         // Try to load custom HDRI skybox
-        const skyPath = 'assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg';
+        const skyPath = 'assets/sky/DaySkyHDRI059A_2K_TONEMAPPED.jpg';
         
         try {
             // Use PhotoDome for 360° panoramic skybox
@@ -326,6 +326,56 @@ class World {
             normals
         );
         this.terrain.updateVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
+    }
+    
+    // Get terrain height at world position (x, z)
+    // This is MUCH more reliable than raycasting!
+    getTerrainHeight(x, z) {
+        if (!this.terrain) return 0;
+        
+        // Get terrain bounds
+        const size = this.options.size;
+        const halfSize = size / 2;
+        
+        // Check if position is within terrain bounds
+        if (x < -halfSize || x > halfSize || z < -halfSize || z > halfSize) {
+            return 0; // Outside terrain
+        }
+        
+        // Get terrain vertex data
+        const positions = this.terrain.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+        const subdivisions = this.options.segments;
+        
+        // Convert world position to grid coordinates
+        const gridX = ((x + halfSize) / size) * subdivisions;
+        const gridZ = ((z + halfSize) / size) * subdivisions;
+        
+        // Get the four surrounding vertices
+        const x0 = Math.floor(gridX);
+        const z0 = Math.floor(gridZ);
+        const x1 = Math.min(x0 + 1, subdivisions);
+        const z1 = Math.min(z0 + 1, subdivisions);
+        
+        // Get heights at corners
+        const getHeight = (gx, gz) => {
+            const index = (gz * (subdivisions + 1) + gx) * 3;
+            return positions[index + 1];
+        };
+        
+        const h00 = getHeight(x0, z0);
+        const h10 = getHeight(x1, z0);
+        const h01 = getHeight(x0, z1);
+        const h11 = getHeight(x1, z1);
+        
+        // Bilinear interpolation
+        const fx = gridX - x0;
+        const fz = gridZ - z0;
+        
+        const h0 = h00 * (1 - fx) + h10 * fx;
+        const h1 = h01 * (1 - fx) + h11 * fx;
+        const height = h0 * (1 - fz) + h1 * fz;
+        
+        return height;
     }
 
     async loadTerrainAssets() {
