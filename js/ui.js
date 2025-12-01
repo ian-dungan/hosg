@@ -302,10 +302,13 @@ class UIManager {
 
         // Update debug info
         if (this.debugText && this.game.engine) {
-            const fps = this.game.engine.getFps().toFixed(0);
-            const pos = p.mesh ? p.mesh.position : new BABYLON.Vector3(0, 0, 0);
-            this.debugText.text = `FPS: ${fps}\nPos: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}\nGrounded: ${p.isOnGround ? 'Yes' : 'No'}`;
-        }
+    const fps = this.game.engine.getFps().toFixed(0);
+    const pos = p.mesh ? p.mesh.position : new BABYLON.Vector3(0, 0, 0);
+    this.debugText.text =
+        `FPS: ${fps}\n` +
+        `Pos: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}\n` +
+        `Grounded: ${p.onGround ? 'Yes' : 'No'}`;
+}
         
         // Update minimap player position
         if (this.minimap && this.minimap.playerDot && p.mesh) {
