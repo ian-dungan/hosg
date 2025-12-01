@@ -305,7 +305,10 @@ class Player {
         
         console.log('[Player] ✓ Input setup complete');
     }
-    
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        this.setupTouchControls(canvas);
+          }
+}
     setupGamepad() {
         // Gamepad connection events
         window.addEventListener('gamepadconnected', (e) => {
