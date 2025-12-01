@@ -273,6 +273,42 @@ class World {
         window.gameWorld = this;
         
         console.log('[World] ✓ Terrain physics created and enabled');
+        
+        // ============================================================
+        // COLLISION SAFETY NET - Paper-thin floor right below terrain
+        // Positioned just 0.1 units below lowest terrain point
+        // Player will never visibly clip through - instant stop
+        // ============================================================
+        this.collisionFloor = BABYLON.MeshBuilder.CreateBox('collisionFloor', {
+            width: this.options.size * 2,   // 2x terrain size for safety
+            height: 0.5,                    // Thin - just 0.5 units
+            depth: this.options.size * 2
+        }, this.scene);
+        
+        // Position: y = -0.3 (top at y=-0.1, bottom at y=-0.5)
+        // Just millimeters below terrain surface
+        this.collisionFloor.position.y = -0.3;
+        
+        // Make completely invisible but still solid
+        this.collisionFloor.isVisible = false;
+        this.collisionFloor.visibility = 0;
+        
+        // Enable collisions (critical!)
+        this.collisionFloor.checkCollisions = true;
+        
+        // Add physics - acts as impenetrable barrier
+        this.collisionFloor.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.collisionFloor,
+            BABYLON.PhysicsImpostor.BoxImpostor,
+            {
+                mass: 0,              // Static (immovable)
+                friction: 1.0,        // Maximum friction
+                restitution: 0.0      // No bounce
+            },
+            this.scene
+        );
+        
+        console.log('[World] ✓ Collision floor: 0.5u thick at y=-0.3 (top at y=-0.1)');
     }
 
     generateHeightmap() {

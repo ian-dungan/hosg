@@ -280,9 +280,9 @@ class Player {
     }
     
     setupInput() {
-        const canvas = this.scene.getEngine().getRenderingCanvas();
-        
-        // Keyboard input
+    const canvas = this.scene.getEngine().getRenderingCanvas();
+
+// Keyboard input
         this.scene.onKeyboardObservable.add((kbInfo) => {
             const key = kbInfo.event.key.toLowerCase();
             const isDown = (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN);
@@ -303,123 +303,118 @@ class Player {
             }
         });
         
-        console.log('[Player] ✓ Input setup complete');
+            console.log('[Player] ✓ Input setup complete');
 
-        // Mobile touch controls (iPhone/iPad/Android)
-        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-            this.setupTouchControls(canvas);
+    // Mobile touch controls (iPhone/iPad/Android)
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        this.setupTouchControls(canvas);
+    }
+}
+
+    
+    
+setupTouchControls(canvas) {
+    console.log('[Player] ✓ Touch controls enabled (mobile)');
+
+    let joystickTouchId = null;
+    let joystickStartX = 0;
+    let joystickStartY = 0;
+
+    const DEADZONE = 20;
+    const RUNZONE  = 80;
+
+    const resetDirections = () => {
+        this.input.forward  = false;
+        this.input.backward = false;
+        this.input.left     = false;
+        this.input.right    = false;
+        this.input.run      = false;
+    };
+
+    const updateFromTouch = (x, y) => {
+        const dx = x - joystickStartX;
+        const dy = y - joystickStartY;
+
+        resetDirections();
+
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+
+        if (absDy > DEADZONE) {
+            if (dy < 0) this.input.forward = true;
+            else        this.input.backward = true;
         }
-    }
 
+        if (absDx > DEADZONE) {
+            if (dx < 0) this.input.left = true;
+            else        this.input.right = true;
+        }
 
-    setupTouchControls(canvas) {
-        console.log('[Player] ✓ Touch controls enabled (mobile)');
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        this.input.run = dist > RUNZONE;
+    };
 
-        let joystickTouchId = null;
-        let joystickStartX = 0;
-        let joystickStartY = 0;
+    const onTouchStart = (evt) => {
+        if (!evt.changedTouches || evt.changedTouches.length === 0) return;
 
-        const DEADZONE = 20;  // px before we consider it a direction
-        const RUNZONE  = 80;  // px distance to toggle run
+        for (let i = 0; i < evt.changedTouches.length; i++) {
+            const t = evt.changedTouches[i];
+            const x = t.clientX;
+            const y = t.clientY;
 
-        const resetDirections = () => {
-            this.input.forward  = false;
-            this.input.backward = false;
-            this.input.left     = false;
-            this.input.right    = false;
-            this.input.run      = false;
-        };
-
-        const updateFromTouch = (x, y) => {
-            const dx = x - joystickStartX;
-            const dy = y - joystickStartY;
-
-            resetDirections();
-
-            const absDx = Math.abs(dx);
-            const absDy = Math.abs(dy);
-
-            // Vertical: up = forward, down = backward (non-inverted)
-            if (absDy > DEADZONE) {
-                if (dy < 0) this.input.forward = true;   // finger up
-                else        this.input.backward = true;  // finger down
-            }
-
-            // Horizontal: left / right
-            if (absDx > DEADZONE) {
-                if (dx < 0) this.input.left = true;
-                else        this.input.right = true;
-            }
-
-            // Run when dragging far enough
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            this.input.run = dist > RUNZONE;
-        };
-
-        const onTouchStart = (evt) => {
-            if (!evt.changedTouches || evt.changedTouches.length === 0) return;
-
-            for (let i = 0; i < evt.changedTouches.length; i++) {
-                const t = evt.changedTouches[i];
-                const x = t.clientX;
-                const y = t.clientY;
-
-                if (x < window.innerWidth * 0.5) {
-                    // Left side => joystick
-                    if (joystickTouchId === null) {
-                        joystickTouchId = t.identifier;
-                        joystickStartX = x;
-                        joystickStartY = y;
-                        updateFromTouch(x, y);
-                    }
-                } else {
-                    // Right side tap => jump
-                    this.input.jump = true;
-                    // Small pulse so jump is consumed once
-                    setTimeout(() => { this.input.jump = false; }, 100);
+            if (x < window.innerWidth * 0.5) {
+                if (joystickTouchId === null) {
+                    joystickTouchId = t.identifier;
+                    joystickStartX = x;
+                    joystickStartY = y;
+                    updateFromTouch(x, y);
                 }
+            } else {
+                this.input.jump = true;
+                setTimeout(() => { this.input.jump = false; }, 100);
             }
+        }
 
-            evt.preventDefault();
-        };
+        evt.preventDefault();
+    };
 
-        const onTouchMove = (evt) => {
-            if (joystickTouchId === null) return;
-            if (!evt.changedTouches) return;
+    const onTouchMove = (evt) => {
+        if (joystickTouchId === null) return;
+        if (!evt.changedTouches) return;
 
-            for (let i = 0; i < evt.changedTouches.length; i++) {
-                const t = evt.changedTouches[i];
-                if (t.identifier === joystickTouchId) {
-                    updateFromTouch(t.clientX, t.clientY);
-                    break;
-                }
+        for (let i = 0; i < evt.changedTouches.length; i++) {
+            const t = evt.changedTouches[i];
+            if (t.identifier === joystickTouchId) {
+                updateFromTouch(t.clientX, t.clientY);
+                break;
             }
+        }
 
-            evt.preventDefault();
-        };
+        evt.preventDefault();
+    };
 
-        const onTouchEnd = (evt) => {
-            if (!evt.changedTouches) return;
+    const onTouchEnd = (evt) => {
+        if (!evt.changedTouches) return;
 
-            for (let i = 0; i < evt.changedTouches.length; i++) {
-                const t = evt.changedTouches[i];
-                if (t.identifier === joystickTouchId) {
-                    joystickTouchId = null;
-                    resetDirections();
-                    break;
-                }
+        for (let i = 0; i < evt.changedTouches.length; i++) {
+            const t = evt.changedTouches[i];
+            if (t.identifier === joystickTouchId) {
+                joystickTouchId = null;
+                resetDirections();
+                break;
             }
+        }
 
-            evt.preventDefault();
-        };
+        evt.preventDefault();
+    };
 
-        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-        canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
-        canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
-        canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
-    }
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
+    canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
+}
 
-    setupGamepad() {
+setupGamepad() {
         // Gamepad connection events
         window.addEventListener('gamepadconnected', (e) => {
             console.log('[Player] Gamepad connected:', e.gamepad.id);
@@ -473,12 +468,12 @@ class Player {
         // Update gamepad state
         this.updateGamepad();
         
-        // deltaTime comes in as SECONDS from game.js; convert to a 60fps-normalized dt
-        const targetFps =
-            (window.CONFIG && window.CONFIG.GAME && window.CONFIG.GAME.FPS)
-                ? window.CONFIG.GAME.FPS
-                : 60;
-        const dt = deltaTime * targetFps;
+        // deltaTime comes in as SECONDS from game.js; convert to a frame-normalized value
+const targetFps =
+    (window.CONFIG && window.CONFIG.GAME && window.CONFIG.GAME.FPS)
+        ? window.CONFIG.GAME.FPS
+        : 60;
+const dt = deltaTime * targetFps;
         
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
@@ -516,7 +511,7 @@ class Player {
             
             // Rotate to face movement
             const targetRotation = Math.atan2(moveDir.x, moveDir.z);
-            this.mesh.rotation.y = targetRotation;
+            this.mesh.rotation.y = targetRotation + Math.PI;
             
             // Play walk/run animation
             if (this.input.run && this.animations.run) {
@@ -587,8 +582,51 @@ class Player {
             }
         }
         
-        // Safety check - if somehow still falling, reset
-        if (this.mesh.position.y < -10) {
+        
+
+// Gamepad camera control (right stick)
+if (this.camera && this.gamepad.connected) {
+    const lookSpeed = 0.03;
+    if (Math.abs(this.gamepad.lookX) > 0.001) {
+        // Horizontal orbit (left/right)
+        this.camera.alpha += this.gamepad.lookX * lookSpeed * dt;
+    }
+    if (Math.abs(this.gamepad.lookY) > 0.001) {
+        // Vertical orbit (up/down). Up on the stick (negative axis) tilts camera upward.
+        this.camera.beta += this.gamepad.lookY * lookSpeed * dt;
+        const minBeta = 0.2;
+        const maxBeta = Math.PI - 0.2;
+        if (this.camera.beta < minBeta) this.camera.beta = minBeta;
+        if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
+        
+        // ============================================================
+        // SAFETY CHECKS - Collision floor right below terrain surface
+        // ============================================================
+        
+        // Layer 1: Collision floor detection (y < -0.05)
+        // Floor is at y=-0.1, so this catches ANY clipping through terrain
+        if (this.mesh.position.y < -0.05) {
+            console.warn('[Player] Clipping detected! Snapping to terrain...');
+            
+            // Get accurate terrain height at current position
+            if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+                const groundY = this.scene.world.getTerrainHeight(
+                    this.mesh.position.x, 
+                    this.mesh.position.z
+                );
+                this.mesh.position.y = groundY + 0.5;
+            } else {
+                // Fallback to safe height
+                this.mesh.position.y = 1;
+            }
+            
+            this.verticalVelocity = 0;
+            this.onGround = true;
+        }
+        
+        // Layer 2: Emergency reset (y < -1)
+        // If somehow fell completely through everything
+        if (this.mesh.position.y < -1) {
             console.warn('[Player] Emergency reset!');
             this.mesh.position.y = 20;
             this.verticalVelocity = 0;
