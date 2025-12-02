@@ -257,10 +257,10 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID heightmap physics so the collider matches the terrain
+        // Add solid terrain physics using the full mesh (avoids heightfield face-normal warnings)
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            BABYLON.PhysicsImpostor.MeshImpostor,
             {
                 mass: 0,              // Static (immovable)
                 friction: 0.9,        // High friction
