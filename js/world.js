@@ -257,11 +257,11 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID box physics
+        // Add VERY SOLID heightmap physics so the collider matches the terrain
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
-            BABYLON.PhysicsImpostor.BoxImpostor,
-            { 
+            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            {
                 mass: 0,              // Static (immovable)
                 friction: 0.9,        // High friction
                 restitution: 0.0      // No bounce
