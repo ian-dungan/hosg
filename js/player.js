@@ -6,10 +6,11 @@ class Player {
         this.camera = null;
         this.characterModel = null;
         
-        // Movement speeds (normalized to target FPS for physics velocity)
-        this.speed = 0.4;              // Base walk speed (per-frame value @ target FPS)
-        this.runMultiplier = 2.5;      // Run multiplier
-        this.jumpForce = 0.16;         // Jump initial velocity (per-frame value @ target FPS, tuned to prevent moon jumps)
+        // Movement speeds (units per second)
+        this.speed = 5.5;              // Base walk speed
+        this.runMultiplier = 1.8;      // Run multiplier
+        this.jumpForce = 8.5;          // Jump initial velocity (units/second)
+        this.gravity = -24;            // Gravity acceleration (units/second^2)
         this.rotationSpeed = 0.1;
 
         // Collider dimensions (used for physics + ground detection)
@@ -571,31 +572,26 @@ setupGamepad() {
             console.log(`[Player] Update #${this._updateLogCount + 1}: mesh=${!!this.mesh}, physicsReady=${this.physicsReady}, deltaTime=${deltaTime.toFixed(3)}`);
             this._updateLogCount++;
         }
-        
+
         if (!this.mesh || !this.physicsReady) return;
-        
+
         // Update gamepad state
         this.updateGamepad();
-        
-        // deltaTime comes in as SECONDS from game.js; convert to a frame-normalized value
-        const targetFps =
-            (window.CONFIG && window.CONFIG.GAME && window.CONFIG.GAME.FPS)
-                ? window.CONFIG.GAME.FPS
-                : 60;
-        const dt = deltaTime * targetFps;
-        const baseSpeed = this.speed * targetFps;
-        const runSpeed = baseSpeed * this.runMultiplier;
-        const jumpVelocity = this.jumpForce * targetFps;
-        
+
+        const dt = deltaTime; // deltaTime already in seconds
+        const walkSpeed = this.speed;
+        const runSpeed = walkSpeed * this.runMultiplier;
+        const jumpSpeed = this.jumpForce;
+
         // Get camera forward/right directions
         const forward = this.camera.getDirection(BABYLON.Axis.Z);
         forward.y = 0;
         forward.normalize();
-        
+
         const right = this.camera.getDirection(BABYLON.Axis.X);
         right.y = 0;
         right.normalize();
-        
+
         // Calculate movement direction
         let moveDir = BABYLON.Vector3.Zero();
 
@@ -604,14 +600,14 @@ setupGamepad() {
         if (this.input.backward) moveDir.subtractInPlace(forward);
         if (this.input.right) moveDir.addInPlace(right);
         if (this.input.left) moveDir.subtractInPlace(right);
-        
+
         // Debug logging (first 10 movements)
         if (!this._moveLogCount) this._moveLogCount = 0;
         if (this._moveLogCount < 10 && moveDir.lengthSquared() > 0) {
             console.log(`[Player] Moving! forward=${this.input.forward}, back=${this.input.backward}, left=${this.input.left}, right=${this.input.right}`);
             this._moveLogCount++;
         }
-        
+
         // Gamepad input
         if (this.gamepad.connected) {
             const gamepadMove = forward.scale(-this.gamepad.moveY).add(right.scale(this.gamepad.moveX));
@@ -638,30 +634,7 @@ setupGamepad() {
 
         if (usingPhysics) {
             const impostor = this.mesh.physicsImpostor;
-            const currentVel = impostor.getLinearVelocity() || BABYLON.Vector3.Zero();
-            const horizontalVel = new BABYLON.Vector3(currentVel.x, 0, currentVel.z);
-
-            // Horizontal velocity target
-            let desiredVelocity = BABYLON.Vector3.Zero();
-            if (hasMovement) {
-                const speed = this.input.run ? runSpeed : baseSpeed;
-                desiredVelocity = moveDir.scale(speed);
-            }
-
-            const newVelocity = new BABYLON.Vector3(desiredVelocity.x, currentVel.y, desiredVelocity.z);
-            impostor.setLinearVelocity(newVelocity);
-
-            // Rotate visuals toward intended/actual horizontal movement
-            const rotationSource = hasMovement
-                ? moveDir
-                : (horizontalVel.lengthSquared() > 0.0001 ? horizontalVel.normalize() : null);
-            if (rotationSource && rotationSource.lengthSquared() > 0.0001) {
-                const targetRotation = Math.atan2(rotationSource.x, rotationSource.z);
-                if (this.characterModel) {
-                    this.characterModel.rotation.y = targetRotation;
-                }
-                this.mesh.rotation.y = targetRotation;
-            }
+            const velocity = impostor.getLinearVelocity() || BABYLON.Vector3.Zero();
 
             // Grounded check using terrain height
             let groundY = 0;
@@ -669,37 +642,64 @@ setupGamepad() {
                 groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
             }
             const feetY = this.mesh.position.y - this.groundOffset;
-            const nearGround = feetY <= groundY + 0.1;
-            const grounded = (nearGround && currentVel.y <= 0.5);
+            const nearGround = feetY <= groundY + 0.05;
+            const grounded = nearGround && velocity.y <= 0.5;
             this.onGround = grounded;
             this.isOnGround = grounded;
 
-            // Kill residual vertical bounce when grounded or near the floor
-            if ((grounded || nearGround) && Math.abs(currentVel.y) > 0.005 && !this.input.jump) {
-                const flattenedVelocity = new BABYLON.Vector3(newVelocity.x, 0, newVelocity.z);
-                impostor.setLinearVelocity(flattenedVelocity);
-                // Snap to the exact terrain height to prevent tiny penetrations causing pop-ups
-                if (nearGround) {
-                    this.mesh.position.y = groundY + this.groundOffset;
-                    if (impostor.physicsBody) {
-                        impostor.physicsBody.position.y = this.mesh.position.y;
-                    }
+            // Desired horizontal velocity
+            if (hasMovement) {
+                const speed = this.input.run ? runSpeed : walkSpeed;
+                const desired = moveDir.scale(speed);
+                velocity.x = desired.x;
+                velocity.z = desired.z;
+            } else {
+                // Light friction when idle to remove drifting
+                velocity.x *= grounded ? 0.75 : 0.95;
+                velocity.z *= grounded ? 0.75 : 0.95;
+            }
+
+            // Apply gravity and clamp tiny ground bounce
+            velocity.y += this.gravity * dt;
+            if (grounded && velocity.y < 0) {
+                velocity.y = 0;
+            }
+
+            // Jump (single press while grounded)
+            if (this.input.jump && grounded) {
+                velocity.y = jumpSpeed;
+                this.input.jump = false;
+                this.onGround = false;
+                this.isOnGround = false;
+                console.log('[Player] JUMP (physics) vY=' + jumpSpeed.toFixed(2));
+            }
+
+            impostor.setLinearVelocity(velocity);
+
+            // Snap fully to the terrain when grounded to prevent sinking or bounce
+            if (grounded) {
+                const snapHeight = groundY + this.groundOffset;
+                this.mesh.position.y = snapHeight;
+                if (impostor.physicsBody) {
+                    impostor.physicsBody.position.y = snapHeight;
                 }
             }
 
-            // Jump
-            if (this.input.jump && this.onGround) {
-                const jumpVel = new BABYLON.Vector3(newVelocity.x, jumpVelocity, newVelocity.z);
-                impostor.setLinearVelocity(jumpVel);
-                this.onGround = false;
-                this.isOnGround = false;
-                this.input.jump = false;
-                console.log('[Player] JUMP (physics) vY=' + jumpVelocity.toFixed(2));
+            // Rotate visuals toward the active movement direction
+            const rotationSource = hasMovement
+                ? moveDir
+                : new BABYLON.Vector3(velocity.x, 0, velocity.z);
+            if (rotationSource.lengthSquared() > 0.0001) {
+                const targetRotation = Math.atan2(rotationSource.x, rotationSource.z);
+                if (this.characterModel) {
+                    this.characterModel.rotation.y = targetRotation;
+                }
+                this.mesh.rotation.y = targetRotation;
             }
         } else {
             // Kinematic fallback (legacy behavior)
             if (hasMovement) {
-                const speed = this.input.run ? this.speed * this.runMultiplier : this.speed;
+                const speed = this.input.run ? runSpeed : walkSpeed;
                 const velocity = moveDir.scale(speed * dt);
                 this.mesh.position.addInPlace(velocity);
 
@@ -712,7 +712,7 @@ setupGamepad() {
 
             // GRAVITY - Apply downward force
             if (!this.onGround) {
-                this.verticalVelocity -= 0.8 * dt; // Gravity acceleration
+                this.verticalVelocity += this.gravity * dt;
 
                 // Debug logging (first 10 frames in air)
                 if (!this._gravityLogCount) this._gravityLogCount = 0;
@@ -730,7 +730,7 @@ setupGamepad() {
 
             // JUMP
             if (this.input.jump && this.onGround) {
-                this.verticalVelocity = this.jumpForce;
+                this.verticalVelocity = jumpSpeed;
                 this.onGround = false;
                 this.isOnGround = false; // For UI
                 this.input.jump = false;
@@ -738,19 +738,11 @@ setupGamepad() {
             }
 
             // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
-            // This is how real games do it - query the heightmap directly
             let groundY = 0;
 
             if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
                 // Get exact terrain height at player's x,z position
                 groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
-
-                // Debug log first few frames
-                if (!this._groundCheckCount) this._groundCheckCount = 0;
-                this._groundCheckCount++;
-                if (this._groundCheckCount <= 5) {
-                    console.log(`[Player] Ground check #${this._groundCheckCount}: pos.y=${this.mesh.position.y.toFixed(2)}, groundY=${groundY.toFixed(2)}, diff=${(this.mesh.position.y - groundY).toFixed(2)}`);
-                }
 
                 // If below or at ground level, snap to it
                 if (this.mesh.position.y <= groundY + this.groundOffset) {
@@ -764,11 +756,6 @@ setupGamepad() {
                 }
             } else {
                 // Fallback: assume flat ground at y=0
-                if (this._groundCheckCount === undefined) {
-                    console.warn('[Player] World.getTerrainHeight not available, using y=0 fallback');
-                    this._groundCheckCount = 0;
-                }
-
                 if (this.mesh.position.y <= this.groundOffset) {
                     this.mesh.position.y = this.groundOffset;
                     this.onGround = true;
@@ -780,7 +767,7 @@ setupGamepad() {
                 }
             }
         }
-        
+
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
             const lookSpeed = 0.03;
@@ -797,7 +784,7 @@ setupGamepad() {
                 if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
             }
         } // FIXED: Added missing closing brace
-        
+
         // ============================================================
         // SAFETY CHECKS - Collision floor right below terrain surface
         // ============================================================
