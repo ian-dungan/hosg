@@ -621,26 +621,17 @@ setupGamepad() {
         const hasMovement = moveDir.lengthSquared() > 0;
         if (hasMovement) {
             moveDir.normalize();
+        }
 
-            // Rotate visuals (not physics) to face movement direction
-            const targetRotation = Math.atan2(moveDir.x, moveDir.z) + Math.PI;
-            if (this.characterModel) {
-                this.characterModel.rotation.y = targetRotation;
-            } else {
-                this.mesh.rotation.y = targetRotation;
-            }
-
-            // Play walk/run animation
+        // Animation selection
+        if (hasMovement) {
             if (this.input.run && this.animations.run) {
                 this.playAnimation('run');
             } else if (this.animations.walk) {
                 this.playAnimation('walk');
             }
-        } else {
-            // Play idle animation
-            if (this.animations.idle) {
-                this.playAnimation('idle');
-            }
+        } else if (this.animations.idle) {
+            this.playAnimation('idle');
         }
 
         const usingPhysics = !!(this.mesh.physicsImpostor && this.scene.getPhysicsEngine());
@@ -648,6 +639,7 @@ setupGamepad() {
         if (usingPhysics) {
             const impostor = this.mesh.physicsImpostor;
             const currentVel = impostor.getLinearVelocity() || BABYLON.Vector3.Zero();
+            const horizontalVel = new BABYLON.Vector3(currentVel.x, 0, currentVel.z);
 
             // Horizontal velocity target
             let desiredVelocity = BABYLON.Vector3.Zero();
@@ -659,20 +651,36 @@ setupGamepad() {
             const newVelocity = new BABYLON.Vector3(desiredVelocity.x, currentVel.y, desiredVelocity.z);
             impostor.setLinearVelocity(newVelocity);
 
+            // Rotate visuals toward actual movement when sliding or running
+            const rotationSource = (horizontalVel.lengthSquared() > 0.0001 ? horizontalVel : desiredVelocity);
+            if (rotationSource.lengthSquared() > 0.0001) {
+                const targetRotation = Math.atan2(rotationSource.x, rotationSource.z) + Math.PI;
+                if (this.characterModel) {
+                    this.characterModel.rotation.y = targetRotation;
+                } else {
+                    this.mesh.rotation.y = targetRotation;
+                }
+            }
+
             // Grounded check using terrain height
             let groundY = 0;
             if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
                 groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
             }
             const feetY = this.mesh.position.y - this.groundOffset;
-            const grounded = (feetY <= groundY + 0.1) && currentVel.y <= 0.5;
+            const nearGround = feetY <= groundY + 0.05;
+            const grounded = (nearGround && currentVel.y <= 0.5);
             this.onGround = grounded;
             this.isOnGround = grounded;
 
-            // Kill residual vertical bounce when grounded
-            if (grounded && Math.abs(currentVel.y) > 0.01 && !this.input.jump) {
+            // Kill residual vertical bounce when grounded or near the floor
+            if ((grounded || nearGround) && Math.abs(currentVel.y) > 0.005 && !this.input.jump) {
                 const flattenedVelocity = new BABYLON.Vector3(newVelocity.x, 0, newVelocity.z);
                 impostor.setLinearVelocity(flattenedVelocity);
+                // Snap to the exact terrain height to prevent tiny penetrations causing pop-ups
+                if (nearGround) {
+                    this.mesh.position.y = groundY + this.groundOffset;
+                }
             }
 
             // Jump
@@ -690,6 +698,13 @@ setupGamepad() {
                 const speed = this.input.run ? this.speed * this.runMultiplier : this.speed;
                 const velocity = moveDir.scale(speed * dt);
                 this.mesh.position.addInPlace(velocity);
+
+                const targetRotation = Math.atan2(moveDir.x, moveDir.z) + Math.PI;
+                if (this.characterModel) {
+                    this.characterModel.rotation.y = targetRotation;
+                } else {
+                    this.mesh.rotation.y = targetRotation;
+                }
             }
 
             // GRAVITY - Apply downward force
