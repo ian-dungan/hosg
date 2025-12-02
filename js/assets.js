@@ -109,7 +109,7 @@ const ASSET_MANIFEST = {
     
     ENEMIES: {
         wolf: {
-            model: 'models/enemies/wolf.glb',
+            model: 'enemies/wolf.glb',
             texture: 'textures/enemies/wolf_diffuse.png',
             animations: ['idle', 'walk', 'run', 'attack', 'die'],
             scale: 1.0
