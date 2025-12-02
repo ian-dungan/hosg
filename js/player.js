@@ -622,9 +622,13 @@ setupGamepad() {
         if (hasMovement) {
             moveDir.normalize();
 
-            // Rotate to face movement direction
+            // Rotate visuals (not physics) to face movement direction
             const targetRotation = Math.atan2(moveDir.x, moveDir.z) + Math.PI;
-            this.mesh.rotation.y = targetRotation;
+            if (this.characterModel) {
+                this.characterModel.rotation.y = targetRotation;
+            } else {
+                this.mesh.rotation.y = targetRotation;
+            }
 
             // Play walk/run animation
             if (this.input.run && this.animations.run) {
@@ -664,6 +668,12 @@ setupGamepad() {
             const grounded = (feetY <= groundY + 0.1) && currentVel.y <= 0.5;
             this.onGround = grounded;
             this.isOnGround = grounded;
+
+            // Kill residual vertical bounce when grounded
+            if (grounded && Math.abs(currentVel.y) > 0.01 && !this.input.jump) {
+                const flattenedVelocity = new BABYLON.Vector3(newVelocity.x, 0, newVelocity.z);
+                impostor.setLinearVelocity(flattenedVelocity);
+            }
 
             // Jump
             if (this.input.jump && this.onGround) {
