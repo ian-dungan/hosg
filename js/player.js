@@ -184,11 +184,24 @@ class Player {
             );
 
             // Stabilize body (no unwanted tipping over)
-            this.mesh.physicsImpostor.setLinearDamping(0.15);
-            this.mesh.physicsImpostor.setAngularDamping(0.9);
-            if (this.mesh.physicsImpostor.physicsBody && this.mesh.physicsImpostor.physicsBody.fixedRotation !== undefined) {
-                this.mesh.physicsImpostor.physicsBody.fixedRotation = true;
-                this.mesh.physicsImpostor.physicsBody.updateMassProperties();
+            const impostor = this.mesh.physicsImpostor;
+
+            if (impostor.setLinearDamping) {
+                impostor.setLinearDamping(0.15);
+            } else if (impostor.physicsBody) {
+                // Cannon.js body
+                impostor.physicsBody.linearDamping = 0.15;
+            }
+
+            if (impostor.setAngularDamping) {
+                impostor.setAngularDamping(0.9);
+            } else if (impostor.physicsBody) {
+                impostor.physicsBody.angularDamping = 0.9;
+            }
+
+            if (impostor.physicsBody && impostor.physicsBody.fixedRotation !== undefined) {
+                impostor.physicsBody.fixedRotation = true;
+                impostor.physicsBody.updateMassProperties();
             }
 
             console.log('[Player] ✓ Physics body created for player');
