@@ -9,7 +9,7 @@ class Player {
         // Movement speeds (normalized to target FPS for physics velocity)
         this.speed = 0.4;              // Base walk speed (per-frame value @ target FPS)
         this.runMultiplier = 2.5;      // Run multiplier
-        this.jumpForce = 0.5;          // Jump initial velocity (per-frame value @ target FPS)
+        this.jumpForce = 0.16;         // Jump initial velocity (per-frame value @ target FPS, tuned to prevent moon jumps)
         this.rotationSpeed = 0.1;
 
         // Collider dimensions (used for physics + ground detection)
@@ -186,14 +186,14 @@ class Player {
             // Stabilize body (no unwanted tipping over)
             const impostor = this.mesh.physicsImpostor;
 
-            if (impostor.setLinearDamping) {
+            if (typeof impostor.setLinearDamping === 'function') {
                 impostor.setLinearDamping(0.15);
             } else if (impostor.physicsBody) {
                 // Cannon.js body
                 impostor.physicsBody.linearDamping = 0.15;
             }
 
-            if (impostor.setAngularDamping) {
+            if (typeof impostor.setAngularDamping === 'function') {
                 impostor.setAngularDamping(0.9);
             } else if (impostor.physicsBody) {
                 impostor.physicsBody.angularDamping = 0.9;
@@ -651,15 +651,16 @@ setupGamepad() {
             const newVelocity = new BABYLON.Vector3(desiredVelocity.x, currentVel.y, desiredVelocity.z);
             impostor.setLinearVelocity(newVelocity);
 
-            // Rotate visuals toward actual movement when sliding or running
-            const rotationSource = (horizontalVel.lengthSquared() > 0.0001 ? horizontalVel : desiredVelocity);
-            if (rotationSource.lengthSquared() > 0.0001) {
-                const targetRotation = Math.atan2(rotationSource.x, rotationSource.z) + Math.PI;
+            // Rotate visuals toward intended/actual horizontal movement
+            const rotationSource = hasMovement
+                ? moveDir
+                : (horizontalVel.lengthSquared() > 0.0001 ? horizontalVel.normalize() : null);
+            if (rotationSource && rotationSource.lengthSquared() > 0.0001) {
+                const targetRotation = Math.atan2(rotationSource.x, rotationSource.z);
                 if (this.characterModel) {
                     this.characterModel.rotation.y = targetRotation;
-                } else {
-                    this.mesh.rotation.y = targetRotation;
                 }
+                this.mesh.rotation.y = targetRotation;
             }
 
             // Grounded check using terrain height
@@ -668,7 +669,7 @@ setupGamepad() {
                 groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
             }
             const feetY = this.mesh.position.y - this.groundOffset;
-            const nearGround = feetY <= groundY + 0.05;
+            const nearGround = feetY <= groundY + 0.1;
             const grounded = (nearGround && currentVel.y <= 0.5);
             this.onGround = grounded;
             this.isOnGround = grounded;
@@ -680,6 +681,9 @@ setupGamepad() {
                 // Snap to the exact terrain height to prevent tiny penetrations causing pop-ups
                 if (nearGround) {
                     this.mesh.position.y = groundY + this.groundOffset;
+                    if (impostor.physicsBody) {
+                        impostor.physicsBody.position.y = this.mesh.position.y;
+                    }
                 }
             }
 
@@ -699,12 +703,11 @@ setupGamepad() {
                 const velocity = moveDir.scale(speed * dt);
                 this.mesh.position.addInPlace(velocity);
 
-                const targetRotation = Math.atan2(moveDir.x, moveDir.z) + Math.PI;
+                const targetRotation = Math.atan2(moveDir.x, moveDir.z);
                 if (this.characterModel) {
                     this.characterModel.rotation.y = targetRotation;
-                } else {
-                    this.mesh.rotation.y = targetRotation;
                 }
+                this.mesh.rotation.y = targetRotation;
             }
 
             // GRAVITY - Apply downward force
