@@ -1060,15 +1060,7 @@ class World {
     }
 
     getHeightAt(x, z) {
-        // Cast a ray downward to find the terrain height
-        const ray = new BABYLON.Ray(
-            new BABYLON.Vector3(x, this.options.maxHeight * 2, z),
-            new BABYLON.Vector3(0, -1, 0),
-            this.options.maxHeight * 3
-        );
-
-        const hit = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
-        return hit.pickedPoint ? hit.pickedPoint.y : 0;
+        return this.getTerrainHeight(x, z);
     }
 
     findDrySpot(x, z, attempts = 10, radius = 8, margin = 0.3) {
