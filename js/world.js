@@ -291,32 +291,35 @@ class World {
         console.log('[World] ✓ Terrain physics created and enabled');
         
         // ============================================================
-        // COLLISION SAFETY NET - full terrain clone just below surface
-        // Matches the heightmap so nothing can slip through seams
         // ============================================================
-        this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
-        this.collisionBarrier.material = null;
-        this.collisionBarrier.isVisible = false;
-        this.collisionBarrier.visibility = 0;
-        this.collisionBarrier.renderingGroupId = -1;
+// COLLISION SAFETY NET - full terrain clone just below surface
+// Matches the heightmap so nothing can slip through seams
+// ============================================================
+this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
+this.collisionBarrier.material = null;
+this.collisionBarrier.isVisible = false;
+this.collisionBarrier.visibility = 0;
+this.collisionBarrier.renderingGroupId = -1;
 
-        // Sit just beneath the visual terrain so feet rest on the real surface
-        this.collisionBarrier.position.y -= 0.02;
+// Sit just beneath the visual terrain so feet rest on the real surface.
+// 0.5" under (approx) so nothing falls through, but you still walk on the terrain.
+const BARRIER_OFFSET = -0.02;
+this.collisionBarrier.position.y = this.terrain.position.y + BARRIER_OFFSET;
 
-        // Enable collisions and physics so both kinematic and physics actors collide
-        this.collisionBarrier.checkCollisions = true;
-        this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.collisionBarrier,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
-            {
-                mass: 0,
-                friction: 1.0,
-                restitution: 0.0
-            },
-            this.scene
-        );
+// Enable collisions and physics so both kinematic and physics actors collide
+this.collisionBarrier.checkCollisions = true;
+this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
+    this.collisionBarrier,
+    BABYLON.PhysicsImpostor.HeightmapImpostor,
+    {
+        mass: 0,
+        friction: 1.0,
+        restitution: 0.0
+    },
+    this.scene
+);
 
-        console.log('[World] ✓ Collision barrier cloned from terrain and offset -0.25y');
+console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y`);
     }
 
     generateHeightmap() {
