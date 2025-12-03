@@ -735,19 +735,22 @@ setupGamepad() {
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
             const lookSpeed = 0.08;
+
             if (Math.abs(this.gamepad.lookX) > 0.001) {
                 // Horizontal orbit (left/right) - INVERTED
                 this.camera.alpha -= this.gamepad.lookX * lookSpeed * dt;
             }
+
             if (Math.abs(this.gamepad.lookY) > 0.001) {
                 // Vertical orbit (up/down) - INVERTED
                 this.camera.beta -= this.gamepad.lookY * lookSpeed * dt;
+
                 const minBeta = 0.2;
                 const maxBeta = Math.PI - 0.2;
                 if (this.camera.beta < minBeta) this.camera.beta = minBeta;
                 if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
             }
-        } // FIXED: Added missing closing brace
+        }
 
         // ============================================================
         // SAFETY CHECKS - Collision floor right below terrain surface
