@@ -65,11 +65,22 @@ class Player {
         this.onGround = true;
         this.verticalVelocity = 0; // For gravity simulation
         this.lastFacing = 0; // Preserve facing between frames
+        this.jumpQueued = false; // Requires release before next jump
+        this.jumpHeld = false;
         
         // Internal flags
         this._waitingLogged = false;
         
         console.log('[Player] Player created');
+    }
+
+    queueJump() {
+        if (this.jumpHeld) return;
+        this.jumpQueued = true;
+    }
+
+    releaseJump() {
+        this.jumpHeld = false;
     }
     
     // Wait for terrain physics to be ready, then create player
@@ -343,12 +354,15 @@ class Player {
                 
                 // Other controls
                 case 'shift': this.input.run = isDown; break;
-                case ' ': 
-                    if (isDown && !this.input.jump) {
-                        this.input.jump = true;
-                        console.log('[Player] JUMP pressed! onGround=' + this.onGround);
-                    } else if (!isDown) {
-                        this.input.jump = false;
+                case ' ':
+                    if (isDown) {
+                        if (!this.jumpHeld) {
+                            this.queueJump();
+                            console.log('[Player] JUMP pressed! onGround=' + this.onGround);
+                        }
+                        this.jumpHeld = true;
+                    } else {
+                        this.releaseJump();
                     }
                     break;
                 
@@ -436,8 +450,10 @@ setupTouchControls(canvas) {
                     updateFromTouch(x, y);
                 }
             } else {
-                this.input.jump = true;
-                setTimeout(() => { this.input.jump = false; }, 100);
+                if (!this.jumpHeld) {
+                    this.queueJump();
+                    this.jumpHeld = true;
+                }
             }
         }
 
@@ -470,6 +486,8 @@ setupTouchControls(canvas) {
                 break;
             }
         }
+
+        this.releaseJump();
 
         evt.preventDefault();
     };
@@ -526,6 +544,17 @@ setupGamepad() {
                           (gamepad.buttons[6] && gamepad.buttons[6].pressed) ||
                           (gamepad.buttons[7] && gamepad.buttons[7].pressed);
         this.input.run = runPressed;
+
+        // Track jump press/release so jump must be re-pressed after landing
+        const jumpPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
+        if (jumpPressed) {
+            if (!this.jumpHeld) {
+                this.queueJump();
+            }
+            this.jumpHeld = true;
+        } else {
+            this.releaseJump();
+        }
         
         // X button (2) - Target next enemy (with debounce)
         if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
@@ -611,12 +640,12 @@ setupGamepad() {
             this._gravityLogCount = 0; // Reset counter when on ground
         }
 
-        // JUMP (set vertical velocity immediately)
-        if (this.input.jump && this.onGround) {
+        // JUMP (must release and press again to queue another jump)
+        if (this.jumpQueued && this.onGround) {
             this.verticalVelocity = jumpSpeed;
             this.onGround = false;
             this.isOnGround = false; // For UI
-            this.input.jump = false;
+            this.jumpQueued = false;
             console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
         }
 
@@ -632,7 +661,7 @@ setupGamepad() {
         const moved = this.mesh.position.subtract(previousPosition);
         const flatMovement = new BABYLON.Vector3(moved.x, 0, moved.z);
         if (flatMovement.lengthSquared() > 0.0001) {
-            const targetRotation = Math.atan2(flatMovement.x, flatMovement.z);
+            const targetRotation = Math.atan2(flatMovement.x, flatMovement.z) + Math.PI;
             this.lastFacing = targetRotation;
             if (this.visualRoot) {
                 this.visualRoot.rotation.y = targetRotation;
@@ -669,6 +698,7 @@ setupGamepad() {
                 this.onGround = true;
                 this.isOnGround = true;
                 this.verticalVelocity = 0;
+                this.mesh.position.y = groundY + this.groundOffset;
             } else {
                 this.onGround = false;
                 this.isOnGround = false; // For UI
@@ -684,10 +714,15 @@ setupGamepad() {
                 this.onGround = true;
                 this.isOnGround = true;
                 this.verticalVelocity = 0;
+                this.mesh.position.y = this.groundOffset;
             } else {
                 this.onGround = false;
                 this.isOnGround = false; // For UI
             }
+        }
+
+        if (this.onGround && this.verticalVelocity > 0) {
+            this.verticalVelocity = 0; // prevent rebounds on landing
         }
 
         // Gamepad camera control (right stick) - INVERTED
