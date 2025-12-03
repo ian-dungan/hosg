@@ -11,7 +11,7 @@ class Player {
         this.speed = 5.5;              // Base walk speed
         this.runMultiplier = 1.8;      // Run multiplier
         this.jumpForce = 8.5;          // Jump initial velocity (units/second)
-        this.gravity = -24;            // Gravity acceleration (units/second^2)
+        this.gravity = -18;            // Gravity acceleration (units/second^2)
         this.rotationSpeed = 0.1;
 
         // Collider dimensions (used for physics + ground detection)
