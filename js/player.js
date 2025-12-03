@@ -710,7 +710,7 @@ setupGamepad() {
             if (this.mesh.position.y > desiredY + 0.05 && this.verticalVelocity <= 0.01) {
                 this.mesh.position.y = desiredY;
             }
-        } else {
+        }
             // Fallback: assume flat ground at y=0
             if (this.mesh.position.y <= this.groundOffset) {
                 this.mesh.position.y = this.groundOffset;
