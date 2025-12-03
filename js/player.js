@@ -733,7 +733,7 @@ setupGamepad() {
 
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
-            const lookSpeed = 0.08;
+            const lookSpeed = 0.25;
 
             if (Math.abs(this.gamepad.lookX) > 0.001) {
                 // Horizontal orbit (left/right) - INVERTED
