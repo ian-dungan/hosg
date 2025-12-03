@@ -3,6 +3,7 @@ class Player {
     constructor(scene) {
         this.scene = scene;
         this.mesh = null;
+        this.visualRoot = null; // Rotated visuals attached to collider
         this.camera = null;
         this.characterModel = null;
         
@@ -63,6 +64,7 @@ class Player {
         this.physicsReady = false;
         this.onGround = true;
         this.verticalVelocity = 0; // For gravity simulation
+        this.lastFacing = 0; // Preserve facing between frames
         
         // Internal flags
         this._waitingLogged = false;
@@ -171,6 +173,11 @@ class Player {
         this.mesh.isPickable = false;
         this.mesh.renderingGroupId = -1; // Don't render at all
 
+        // Visual root used for rotation without affecting physics body
+        this.visualRoot = new BABYLON.TransformNode('playerVisualRoot', this.scene);
+        this.visualRoot.parent = this.mesh;
+        this.visualRoot.position = BABYLON.Vector3.Zero();
+
         // Enable physics if available so we collide with the terrain
         if (this.scene.getPhysicsEngine()) {
             this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
@@ -240,9 +247,9 @@ class Player {
             
             console.log(`[Player] ✓ Character model loaded (${result.meshes.length} meshes)`);
             
-            // Get root mesh and parent it to invisible physics box
+            // Get root mesh and parent it to the visual root (keeps physics independent)
             this.characterModel = result.meshes[0];
-            this.characterModel.parent = this.mesh;
+            this.characterModel.parent = this.visualRoot || this.mesh;
             
             // CRITICAL: Position character model to align with physics box
             // Knight model needs to be centered and at the right height
@@ -691,10 +698,14 @@ setupGamepad() {
                 : new BABYLON.Vector3(velocity.x, 0, velocity.z);
             if (rotationSource.lengthSquared() > 0.0001) {
                 const targetRotation = Math.atan2(rotationSource.x, rotationSource.z);
-                if (this.characterModel) {
+                this.lastFacing = targetRotation;
+                if (this.visualRoot) {
+                    this.visualRoot.rotation.y = targetRotation;
+                } else if (this.characterModel) {
                     this.characterModel.rotation.y = targetRotation;
                 }
-                this.mesh.rotation.y = targetRotation;
+            } else if (this.visualRoot) {
+                this.visualRoot.rotation.y = this.lastFacing;
             }
         } else {
             // Kinematic fallback (legacy behavior)
@@ -704,10 +715,12 @@ setupGamepad() {
                 this.mesh.position.addInPlace(velocity);
 
                 const targetRotation = Math.atan2(moveDir.x, moveDir.z);
-                if (this.characterModel) {
+                this.lastFacing = targetRotation;
+                if (this.visualRoot) {
+                    this.visualRoot.rotation.y = targetRotation;
+                } else if (this.characterModel) {
                     this.characterModel.rotation.y = targetRotation;
                 }
-                this.mesh.rotation.y = targetRotation;
             }
 
             // GRAVITY - Apply downward force
