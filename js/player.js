@@ -679,7 +679,7 @@ setupGamepad() {
             this._gravityLogCount++;
         }
 
-        // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
+                // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
         let groundY = 0;
         const prevY = previousPosition.y;
 
@@ -703,14 +703,13 @@ setupGamepad() {
                 this.onGround = false;
                 this.isOnGround = false; // For UI
             }
-        }
 
             // If we're hovering just above the ground without upward velocity, lock down to the surface
             const desiredY = groundY + this.groundOffset;
             if (this.mesh.position.y > desiredY + 0.05 && this.verticalVelocity <= 0.01) {
                 this.mesh.position.y = desiredY;
             }
-        }
+        } else {
             // Fallback: assume flat ground at y=0
             if (this.mesh.position.y <= this.groundOffset) {
                 this.mesh.position.y = this.groundOffset;
