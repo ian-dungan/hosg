@@ -76,9 +76,24 @@ class World {
         this.sunLight = null;
         this.ambientLight = null;
         this.shadowGenerator = null;
-        
+
         // Physics
         this.gravity = new BABYLON.Vector3(0, -9.81, 0);
+
+        // Shared asset loader to cache models/textures across entities
+        this.assetLoader = (typeof AssetLoader !== 'undefined') ? new AssetLoader(this.scene) : null;
+        if (this.scene) {
+            this.scene.world = this;
+            if (this.scene.game) {
+                this.scene.game.world = this;
+            }
+
+            // Make available to anything with a reference to the scene
+            this.scene.assetLoader = this.assetLoader;
+            if (this.scene.game) {
+                this.scene.game.assetLoader = this.assetLoader;
+            }
+        }
         
         // Initialize
         this.init();
@@ -257,7 +272,8 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID heightmap physics so the collider matches the terrain
+        // Add solid terrain physics. Heightmap impostor is the most stable for a generated ground
+        // and avoids the tunneling we were seeing with the triangle-mesh impostor.
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
             BABYLON.PhysicsImpostor.HeightmapImpostor,
@@ -416,7 +432,7 @@ class World {
 
     async loadTerrainAssets() {
         try {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.assetLoader || new AssetLoader(this.scene);
             
             // Try to load grass textures
             const grassData = ASSET_MANIFEST.TERRAIN.GROUND.grass;
@@ -531,7 +547,7 @@ class World {
 
     async loadWaterAssets() {
         try {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.assetLoader || new AssetLoader(this.scene);
             const waterData = ASSET_MANIFEST.WATER;
             
             if (waterData && waterData.bump) {
@@ -948,16 +964,30 @@ class World {
     }
 
     createEnemies(count) {
+        // Keep enemies close to the playable spawn so they are easy to find
+        const spawnRadius = Math.min(80, this.options.size * 0.2);
+
         for (let i = 0; i < count; i++) {
+            // Bias positions toward the center of the map
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const position = new BABYLON.Vector3(
+                Math.sin(angle) * distance,
+                0,
+                Math.cos(angle) * distance
+            );
+
+            position.y = this.getHeightAt(position.x, position.z);
+
             // Create a simple enemy
             const enemy = new Enemy(this.scene, {
                 name: `Enemy ${i + 1}`,
-                position: this.getRandomPositionOnTerrain(),
+                position,
                 health: 50 + Math.floor(Math.random() * 50),
                 damage: 5 + Math.floor(Math.random() * 10),
                 speed: 0.05 + Math.random() * 0.1
             });
-            
+
             // Add to enemies array
             this.enemies.push(enemy);
         }
@@ -1683,7 +1713,7 @@ class NPC extends Entity {
 class Enemy extends Entity {
     constructor(scene, options = {}) {
         super(scene, options.position);
-        
+
         this.type = 'enemy';
         this.name = options.name || 'Enemy';
         this.health = options.health || 50;
@@ -1693,7 +1723,9 @@ class Enemy extends Entity {
         this.attackRange = options.attackRange || 1.5;
         this.detectionRange = options.detectionRange || 10;
         this.experience = options.experience || 20;
-        
+        this.assetKey = options.assetKey || options.asset || 'wolf';
+        this.footOffset = 0.05; // distance from mesh origin to ground contact point
+
         // AI
         this.state = 'idle'; // idle, chasing, attacking, dead
         this.target = null;
@@ -1710,32 +1742,98 @@ class Enemy extends Entity {
     }
 
     createMesh() {
-        // Create a simple enemy model
+        // Placeholder simple enemy mesh
         this.mesh = BABYLON.MeshBuilder.CreateCylinder(`enemy_${this.name}`, {
             height: 1.8,
             diameter: 0.8
         }, this.scene);
-        
-        // Create head
-        const head = BABYLON.MeshBuilder.CreateSphere('head', {
-            diameter: 0.7
-        }, this.scene);
+
+        const head = BABYLON.MeshBuilder.CreateSphere('head', { diameter: 0.7 }, this.scene);
         head.parent = this.mesh;
         head.position.y = 0.9;
-        
-        // Set material
+
         const material = new BABYLON.StandardMaterial('enemyMaterial', this.scene);
-        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2); // Red color
+        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2);
         this.mesh.material = material;
-        
-        // Enable shadows
+
         this.mesh.receiveShadows = true;
         if (this.scene.shadowGenerator) {
             this.scene.shadowGenerator.addShadowCaster(this.mesh);
         }
-        
-        // Set initial position
+
         this.mesh.position = this.position;
+
+        this.footOffset = this.computeFootOffset(this.mesh);
+        this.snapToGround();
+
+        // Attempt to load a real model (wolf.glb, etc.) using the asset manifest
+        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS?.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
+            || (ASSET_MANIFEST.ENEMIES && ASSET_MANIFEST.ENEMIES[this.assetKey]);
+
+        if (manifestEnemy && window.AssetLoader) {
+            const loader = this.scene.assetLoader || (this.scene.game && this.scene.game.assetLoader) || new AssetLoader(this.scene);
+            const requestedScale = manifestEnemy.scale || 1;
+            loader.loadModel(manifestEnemy.model, {
+                position: this.position.clone(),
+                scaling: new BABYLON.Vector3(requestedScale, requestedScale, requestedScale)
+            }).then(model => {
+                if (!model || !model.root) {
+                    console.warn(`[Enemy] Failed to load model for ${this.assetKey}`);
+                    return;
+                }
+
+                // Replace placeholder with loaded model
+                this.mesh.dispose();
+                this.mesh = model.root;
+                this.mesh.position = this.position.clone();
+
+                // Normalize the model to a usable on-screen size (target ~1.2m tall)
+                const bounds = this.mesh.getHierarchyBoundingVectors(true);
+                const currentHeight = Math.max(0.001, bounds.max.y - bounds.min.y);
+                const targetHeight = 1.2;
+                const scaleFactor = Math.max(0.2, targetHeight / currentHeight);
+                this.mesh.scaling.scaleInPlace(scaleFactor);
+
+                this.footOffset = this.computeFootOffset(this.mesh);
+                this.snapToGround();
+
+                // Attach children
+                model.instances.slice(1).forEach(m => {
+                    m.parent = this.mesh;
+                });
+
+                // Shadows
+                if (this.scene.shadowGenerator) {
+                    this.scene.shadowGenerator.addShadowCaster(this.mesh);
+                }
+
+                console.log(`[Enemy] ✓ Loaded asset model '${this.assetKey}' from manifest (scale ${scaleFactor.toFixed(2)})`);
+            }).catch(err => {
+                console.warn(`[Enemy] Error loading model '${this.assetKey}':`, err);
+            });
+        }
+    }
+
+    computeFootOffset(mesh) {
+        if (!mesh || typeof mesh.getHierarchyBoundingVectors !== 'function') {
+            return this.footOffset || 0.05;
+        }
+
+        const bounds = mesh.getHierarchyBoundingVectors(true);
+        return Math.max(0.02, -bounds.min.y + 0.02);
+    }
+
+    snapToGround() {
+        const world = this.scene.world || this.scene.game?.world;
+        if (!world || typeof world.getHeightAt !== 'function') return;
+
+        const groundY = world.getHeightAt(this.position.x, this.position.z);
+        const targetY = groundY + (this.footOffset || 0);
+
+        this.position.y = targetY;
+        if (this.mesh && this.mesh.position) {
+            this.mesh.position.y = targetY;
+        }
     }
 
     setupAnimations() {
@@ -1781,7 +1879,9 @@ class Enemy extends Entity {
 
     update(deltaTime) {
         if (!this.mesh || this.state === 'dead') return;
-        
+
+        this.snapToGround();
+
         // Update position to match physics
         this.mesh.position.copyFrom(this.position);
         
@@ -1851,7 +1951,9 @@ class Enemy extends Entity {
             
             // Move towards target
             this.position.addInPlace(direction);
-            
+
+            this.snapToGround();
+
             // Rotate to face movement direction
             const targetRotation = Math.atan2(direction.x, direction.z);
             this.mesh.rotation.y = BABYLON.Scalar.Lerp(
