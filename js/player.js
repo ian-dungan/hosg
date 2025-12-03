@@ -703,6 +703,7 @@ setupGamepad() {
                 this.onGround = false;
                 this.isOnGround = false; // For UI
             }
+        }
 
             // If we're hovering just above the ground without upward velocity, lock down to the surface
             const desiredY = groundY + this.groundOffset;
