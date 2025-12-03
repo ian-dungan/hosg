@@ -76,9 +76,19 @@ class World {
         this.sunLight = null;
         this.ambientLight = null;
         this.shadowGenerator = null;
-        
+
         // Physics
         this.gravity = new BABYLON.Vector3(0, -9.81, 0);
+
+        // Shared asset loader to cache models/textures across entities
+        this.assetLoader = (typeof AssetLoader !== 'undefined') ? new AssetLoader(this.scene) : null;
+        if (this.scene) {
+            // Make available to anything with a reference to the scene
+            this.scene.assetLoader = this.assetLoader;
+            if (this.scene.game) {
+                this.scene.game.assetLoader = this.assetLoader;
+            }
+        }
         
         // Initialize
         this.init();
@@ -417,7 +427,7 @@ class World {
 
     async loadTerrainAssets() {
         try {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.assetLoader || new AssetLoader(this.scene);
             
             // Try to load grass textures
             const grassData = ASSET_MANIFEST.TERRAIN.GROUND.grass;
@@ -532,7 +542,7 @@ class World {
 
     async loadWaterAssets() {
         try {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.assetLoader || new AssetLoader(this.scene);
             const waterData = ASSET_MANIFEST.WATER;
             
             if (waterData && waterData.bump) {
@@ -1738,7 +1748,7 @@ class Enemy extends Entity {
             || (ASSET_MANIFEST.ENEMIES && ASSET_MANIFEST.ENEMIES[this.assetKey]);
 
         if (manifestEnemy && window.AssetLoader) {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.scene.assetLoader || (this.scene.game && this.scene.game.assetLoader) || new AssetLoader(this.scene);
             const scale = manifestEnemy.scale || 1;
             loader.loadModel(manifestEnemy.model, {
                 position: this.position.clone(),
