@@ -257,7 +257,8 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID heightmap physics so the collider matches the terrain
+        // Add solid terrain physics. Heightmap impostor is the most stable for a generated ground
+        // and avoids the tunneling we were seeing with the triangle-mesh impostor.
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
             BABYLON.PhysicsImpostor.HeightmapImpostor,
@@ -1693,7 +1694,8 @@ class Enemy extends Entity {
         this.attackRange = options.attackRange || 1.5;
         this.detectionRange = options.detectionRange || 10;
         this.experience = options.experience || 20;
-        
+        this.assetKey = options.assetKey || options.asset || 'wolf';
+
         // AI
         this.state = 'idle'; // idle, chasing, attacking, dead
         this.target = null;
@@ -1710,32 +1712,63 @@ class Enemy extends Entity {
     }
 
     createMesh() {
-        // Create a simple enemy model
+        // Placeholder simple enemy mesh
         this.mesh = BABYLON.MeshBuilder.CreateCylinder(`enemy_${this.name}`, {
             height: 1.8,
             diameter: 0.8
         }, this.scene);
-        
-        // Create head
-        const head = BABYLON.MeshBuilder.CreateSphere('head', {
-            diameter: 0.7
-        }, this.scene);
+
+        const head = BABYLON.MeshBuilder.CreateSphere('head', { diameter: 0.7 }, this.scene);
         head.parent = this.mesh;
         head.position.y = 0.9;
-        
-        // Set material
+
         const material = new BABYLON.StandardMaterial('enemyMaterial', this.scene);
-        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2); // Red color
+        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2);
         this.mesh.material = material;
-        
-        // Enable shadows
+
         this.mesh.receiveShadows = true;
         if (this.scene.shadowGenerator) {
             this.scene.shadowGenerator.addShadowCaster(this.mesh);
         }
-        
-        // Set initial position
+
         this.mesh.position = this.position;
+
+        // Attempt to load a real model (wolf.glb, etc.) using the asset manifest
+        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS?.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
+            || (ASSET_MANIFEST.ENEMIES && ASSET_MANIFEST.ENEMIES[this.assetKey]);
+
+        if (manifestEnemy && window.AssetLoader) {
+            const loader = new AssetLoader(this.scene);
+            const scale = manifestEnemy.scale || 1;
+            loader.loadModel(manifestEnemy.model, {
+                position: this.position.clone(),
+                scaling: new BABYLON.Vector3(scale, scale, scale)
+            }).then(model => {
+                if (!model || !model.root) {
+                    console.warn(`[Enemy] Failed to load model for ${this.assetKey}`);
+                    return;
+                }
+
+                // Replace placeholder with loaded model
+                this.mesh.dispose();
+                this.mesh = model.root;
+                this.mesh.position = this.position.clone();
+
+                // Attach children
+                model.instances.slice(1).forEach(m => {
+                    m.parent = this.mesh;
+                });
+
+                // Shadows
+                if (this.scene.shadowGenerator) {
+                    this.scene.shadowGenerator.addShadowCaster(this.mesh);
+                }
+
+                console.log(`[Enemy] ✓ Loaded asset model '${this.assetKey}' from manifest`);
+            }).catch(err => {
+                console.warn(`[Enemy] Error loading model '${this.assetKey}':`, err);
+            });
+        }
     }
 
     setupAnimations() {
