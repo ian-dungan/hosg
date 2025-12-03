@@ -703,6 +703,13 @@ setupGamepad() {
                 this.onGround = false;
                 this.isOnGround = false; // For UI
             }
+        }
+
+            // If we're hovering just above the ground without upward velocity, lock down to the surface
+            const desiredY = groundY + this.groundOffset;
+            if (this.mesh.position.y > desiredY + 0.05 && this.verticalVelocity <= 0.01) {
+                this.mesh.position.y = desiredY;
+            }
         } else {
             // Fallback: assume flat ground at y=0
             if (this.mesh.position.y <= this.groundOffset) {
@@ -727,7 +734,7 @@ setupGamepad() {
 
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
-            const lookSpeed = 0.03;
+            const lookSpeed = 0.08;
             if (Math.abs(this.gamepad.lookX) > 0.001) {
                 // Horizontal orbit (left/right) - INVERTED
                 this.camera.alpha -= this.gamepad.lookX * lookSpeed * dt;

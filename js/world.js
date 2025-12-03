@@ -291,40 +291,32 @@ class World {
         console.log('[World] ✓ Terrain physics created and enabled');
         
         // ============================================================
-        // COLLISION SAFETY NET - Paper-thin floor right below terrain
-        // Positioned just 0.1 units below lowest terrain point
-        // Player will never visibly clip through - instant stop
+        // COLLISION SAFETY NET - full terrain clone just below surface
+        // Matches the heightmap so nothing can slip through seams
         // ============================================================
-        this.collisionFloor = BABYLON.MeshBuilder.CreateBox('collisionFloor', {
-            width: this.options.size * 2,   // 2x terrain size for safety
-            height: 0.5,                    // Thin - just 0.5 units
-            depth: this.options.size * 2
-        }, this.scene);
-        
-        // Position: y = -0.3 (top at y=-0.1, bottom at y=-0.5)
-        // Just millimeters below terrain surface
-        this.collisionFloor.position.y = -0.3;
-        
-        // Make completely invisible but still solid
-        this.collisionFloor.isVisible = false;
-        this.collisionFloor.visibility = 0;
-        
-        // Enable collisions (critical!)
-        this.collisionFloor.checkCollisions = true;
-        
-        // Add physics - acts as impenetrable barrier
-        this.collisionFloor.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.collisionFloor,
-            BABYLON.PhysicsImpostor.BoxImpostor,
+        this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
+        this.collisionBarrier.material = null;
+        this.collisionBarrier.isVisible = false;
+        this.collisionBarrier.visibility = 0;
+        this.collisionBarrier.renderingGroupId = -1;
+
+        // Sit just beneath the visual terrain so feet rest on the real surface
+        this.collisionBarrier.position.y -= 0.25;
+
+        // Enable collisions and physics so both kinematic and physics actors collide
+        this.collisionBarrier.checkCollisions = true;
+        this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.collisionBarrier,
+            BABYLON.PhysicsImpostor.HeightmapImpostor,
             {
-                mass: 0,              // Static (immovable)
-                friction: 1.0,        // Maximum friction
-                restitution: 0.0      // No bounce
+                mass: 0,
+                friction: 1.0,
+                restitution: 0.0
             },
             this.scene
         );
-        
-        console.log('[World] ✓ Collision floor: 0.5u thick at y=-0.3 (top at y=-0.1)');
+
+        console.log('[World] ✓ Collision barrier cloned from terrain and offset -0.25y');
     }
 
     generateHeightmap() {
@@ -508,19 +500,21 @@ class World {
         
         // Create water material
         this.waterMaterial = new BABYLON.StandardMaterial('waterMaterial', this.scene);
-        this.waterMaterial.alpha = 0.8;
-        this.waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.5);
-        this.waterMaterial.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-        this.waterMaterial.alpha = 0.8;
+        this.waterMaterial.alpha = 0.7;
+        this.waterMaterial.diffuseColor = new BABYLON.Color3(0.12, 0.28, 0.42);
+        this.waterMaterial.specularColor = new BABYLON.Color3(0.25, 0.25, 0.25);
+        this.waterMaterial.alpha = 0.7;
         
         // Add reflection and refraction
         this.waterMaterial.reflectionTexture = new BABYLON.MirrorTexture('waterReflection', 512, this.scene, true);
         this.waterMaterial.reflectionTexture.mirrorPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         this.waterMaterial.reflectionTexture.renderList = [this.terrain, ...this.trees, ...this.buildings];
+        this.waterMaterial.reflectionTexture.level = 0.35;
         
         this.waterMaterial.refractionTexture = new BABYLON.RefractionTexture('waterRefraction', 512, this.scene, true);
-        this.waterMaterial.refractionTexture.depth = 0.1;
+        this.waterMaterial.refractionTexture.depth = 0.05;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
+        this.waterMaterial.refractionTexture.level = 0.5;
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;
@@ -531,7 +525,7 @@ class World {
         this.waterMaterial.reflectionFresnelParameters = new BABYLON.FresnelParameters();
         this.waterMaterial.reflectionFresnelParameters.bias = 0.1;
         
-        this.waterMaterial.specularPower = 64;
+        this.waterMaterial.specularPower = 32;
         
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
@@ -558,9 +552,10 @@ class World {
                         uScale: 10,
                         vScale: 10
                     });
-                    
+
                     if (bumpTexture) {
                         this.waterMaterial.bumpTexture = bumpTexture;
+                        this.waterMaterial.bumpTexture.level = 0.1;
                         console.log('[World] ✓ Water bump texture loaded');
                     }
                 } catch (e) {
@@ -707,8 +702,8 @@ class World {
             tree.name = `tree_${name}_${i}`;
             tree.material = treeMaterial;
             
-            const treeY = this.getHeightAt(treeX, treeZ);
-            tree.position = new BABYLON.Vector3(treeX, treeY, treeZ);
+            const drySpot = this.findDrySpot(treeX, treeZ, 12, 10, 0.4);
+            tree.position = new BABYLON.Vector3(drySpot.x, drySpot.y, drySpot.z);
             tree.rotation.y = Math.random() * Math.PI * 2;
             
             const scale = 0.5 + Math.random() * 0.5;
@@ -748,8 +743,8 @@ class World {
             
             rock.material = rockMaterial;
             
-            const rockY = this.getHeightAt(rockX, rockZ);
-            rock.position = new BABYLON.Vector3(rockX, rockY, rockZ);
+            const drySpot = this.findDrySpot(rockX, rockZ, 8, 8, 0.4);
+            rock.position = new BABYLON.Vector3(drySpot.x, drySpot.y, drySpot.z);
             rock.rotation.y = Math.random() * Math.PI * 2;
             
             // Store landmark info on first rock
@@ -1051,12 +1046,12 @@ class World {
         // Position mesh on terrain with random rotation and scale
         const x = (Math.random() - 0.5) * this.options.size * 0.9;
         const z = (Math.random() - 0.5) * this.options.size * 0.9;
-        
-        // Get height at position
-        const y = this.getHeightAt(x, z);
-        
+
+        // Get a dry spot near the sampled position
+        const drySpot = this.findDrySpot(x, z, 10, 10, 0.4);
+
         // Set position
-        mesh.position.set(x, y, z);
+        mesh.position.set(drySpot.x, drySpot.y, drySpot.z);
         
         // Random rotation
         mesh.rotation.y = Math.random() * Math.PI * 2;
@@ -1071,9 +1066,41 @@ class World {
             new BABYLON.Vector3(0, -1, 0),
             this.options.maxHeight * 3
         );
-        
+
         const hit = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
         return hit.pickedPoint ? hit.pickedPoint.y : 0;
+    }
+
+    findDrySpot(x, z, attempts = 10, radius = 8, margin = 0.3) {
+        const waterY = this.water ? this.water.position.y : -Infinity;
+
+        // Fast path if we're already above the water line
+        const currentY = this.getHeightAt(x, z);
+        if (currentY > waterY + margin) {
+            return { x, z, y: currentY };
+        }
+
+        let best = { x, z, y: currentY };
+
+        for (let i = 0; i < attempts; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * radius;
+            const candX = x + Math.cos(angle) * dist;
+            const candZ = z + Math.sin(angle) * dist;
+            const candY = this.getHeightAt(candX, candZ);
+
+            if (candY > waterY + margin) {
+                return { x: candX, z: candZ, y: candY };
+            }
+
+            if (candY > best.y) {
+                best = { x: candX, z: candZ, y: candY };
+            }
+        }
+
+        // Fall back to highest candidate but lift above the water plane
+        best.y = Math.max(best.y, waterY + margin);
+        return best;
     }
 
     isAreaFlat(position, width, depth, maxSlope = 0.1) {
@@ -1121,12 +1148,13 @@ class World {
 
     updateWater() {
         if (!this.waterMaterial) return;
-        
+
         // Animate water bump texture if it exists
         if (this.waterMaterial.bumpTexture) {
             const time = Date.now() * 0.001;
-            this.waterMaterial.bumpTexture.uOffset += 0.001;
-            this.waterMaterial.bumpTexture.vOffset += 0.001;
+            const drift = 0.00025;
+            this.waterMaterial.bumpTexture.uOffset += drift;
+            this.waterMaterial.bumpTexture.vOffset += drift;
         }
     }
 
