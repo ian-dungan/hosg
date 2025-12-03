@@ -257,7 +257,8 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID heightmap physics so the collider matches the terrain
+        // Add solid terrain physics. Heightmap impostor is the most stable for a generated ground
+        // and avoids the tunneling we were seeing with the triangle-mesh impostor.
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
             BABYLON.PhysicsImpostor.HeightmapImpostor,
