@@ -261,7 +261,7 @@ class World {
         // and avoids the tunneling we were seeing with the triangle-mesh impostor.
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            BABYLON.PhysicsImpostor.MeshImpostor,
             {
                 mass: 0,              // Static (immovable)
                 friction: 0.9,        // High friction
