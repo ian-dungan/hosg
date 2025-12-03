@@ -603,13 +603,36 @@ setupGamepad() {
             this.playAnimation('idle');
         }
 
-        // Kinematic movement with collision detection
-        if (hasMovement) {
-            const speed = this.input.run ? runSpeed : walkSpeed;
-            const displacement = moveDir.scale(speed * dt);
-            this.mesh.moveWithCollisions(displacement);
+        // GRAVITY (apply before movement so vertical velocity is included in displacement)
+        if (!this.onGround) {
+            this.verticalVelocity += this.gravity * dt;
+        } else {
+            this.verticalVelocity = 0;
+            this._gravityLogCount = 0; // Reset counter when on ground
+        }
 
-            const targetRotation = Math.atan2(moveDir.x, moveDir.z);
+        // JUMP (set vertical velocity immediately)
+        if (this.input.jump && this.onGround) {
+            this.verticalVelocity = jumpSpeed;
+            this.onGround = false;
+            this.isOnGround = false; // For UI
+            this.input.jump = false;
+            console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
+        }
+
+        // Combine horizontal + vertical displacement into one collision move for stability
+        const speed = this.input.run ? runSpeed : walkSpeed;
+        const displacement = hasMovement ? moveDir.scale(speed * dt) : BABYLON.Vector3.Zero();
+        displacement.y = this.verticalVelocity * dt;
+
+        const previousPosition = this.mesh.position.clone();
+        this.mesh.moveWithCollisions(displacement);
+
+        // Update facing from ACTUAL movement to avoid stale rotation when sliding/blocked
+        const moved = this.mesh.position.subtract(previousPosition);
+        const flatMovement = new BABYLON.Vector3(moved.x, 0, moved.z);
+        if (flatMovement.lengthSquared() > 0.0001) {
+            const targetRotation = Math.atan2(flatMovement.x, flatMovement.z);
             this.lastFacing = targetRotation;
             if (this.visualRoot) {
                 this.visualRoot.rotation.y = targetRotation;
@@ -620,37 +643,16 @@ setupGamepad() {
             this.visualRoot.rotation.y = this.lastFacing;
         }
 
-        // GRAVITY - Apply downward force
-        if (!this.onGround) {
-            this.verticalVelocity += this.gravity * dt;
-
-            // Debug logging (first 10 frames in air)
+        // Debug logging (first 10 frames in air)
+        if (!this.onGround && (!this._gravityLogCount || this._gravityLogCount < 10)) {
             if (!this._gravityLogCount) this._gravityLogCount = 0;
-            if (this._gravityLogCount < 10) {
-                console.log(`[Player] IN AIR: verticalVel=${this.verticalVelocity.toFixed(3)}, y=${this.mesh.position.y.toFixed(2)}`);
-                this._gravityLogCount++;
-            }
-        } else {
-            this.verticalVelocity = 0;
-            this._gravityLogCount = 0; // Reset counter when on ground
-        }
-
-        // Apply vertical velocity via collisions
-        const verticalDisplacement = new BABYLON.Vector3(0, this.verticalVelocity * dt, 0);
-        const prevY = this.mesh.position.y;
-        this.mesh.moveWithCollisions(verticalDisplacement);
-
-        // JUMP
-        if (this.input.jump && this.onGround) {
-            this.verticalVelocity = jumpSpeed;
-            this.onGround = false;
-            this.isOnGround = false; // For UI
-            this.input.jump = false;
-            console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
+            console.log(`[Player] IN AIR: verticalVel=${this.verticalVelocity.toFixed(3)}, y=${this.mesh.position.y.toFixed(2)}`);
+            this._gravityLogCount++;
         }
 
         // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
         let groundY = 0;
+        const prevY = previousPosition.y;
 
         if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
             // Get exact terrain height at player's x,z position

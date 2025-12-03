@@ -336,14 +336,25 @@ class AssetLoader {
     }
     
     async _loadModelInternal(fullPath, options = {}) {
+        const lastSlash = fullPath.lastIndexOf('/') + 1;
+        const rootUrl = fullPath.substring(0, lastSlash);
+        const fileName = fullPath.substring(lastSlash);
+
         return new Promise((resolve) => {
-            BABYLON.SceneLoader.ImportMesh('', '', fullPath, this.scene,
+            BABYLON.SceneLoader.ImportMesh(
+                '',
+                rootUrl,
+                fileName,
+                this.scene,
                 (meshes, particleSystems, skeletons, animationGroups) => {
                     meshes.forEach(mesh => mesh.setEnabled(false));
                     resolve({ meshes, animationGroups, skeletons });
                 },
                 null,
-                () => resolve(null)
+                (scene, message) => {
+                    console.warn(`[Assets] ✗ ImportMesh failed for ${fullPath}: ${message}`);
+                    resolve(null);
+                }
             );
         });
     }
