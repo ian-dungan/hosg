@@ -301,7 +301,7 @@ class World {
         this.collisionBarrier.renderingGroupId = -1;
 
         // Sit just beneath the visual terrain so feet rest on the real surface
-        this.collisionBarrier.position.y -= 0.25;
+        this.collisionBarrier.position.y -= 0.02;
 
         // Enable collisions and physics so both kinematic and physics actors collide
         this.collisionBarrier.checkCollisions = true;
