@@ -683,54 +683,49 @@ setupGamepad() {
         let groundY = 0;
         const prevY = previousPosition.y;
 
+        // Determine terrain height under the player
         if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
-            // Get exact terrain height at player's x,z position
             groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
-
-            // If below or at ground level, snap to it
-            if (this.mesh.position.y <= groundY + this.groundOffset + 0.01) {
-                this.mesh.position.y = groundY + this.groundOffset;
-                this.onGround = true;
-                this.isOnGround = true; // For UI
-                this.verticalVelocity = 0;
-            } else if (this.mesh.position.y === prevY) {
-                // moveWithCollisions stopped us, assume ground contact
-                this.onGround = true;
-                this.isOnGround = true;
-                this.verticalVelocity = 0;
-                this.mesh.position.y = groundY + this.groundOffset;
-            } else {
-                this.onGround = false;
-                this.isOnGround = false; // For UI
-            }
-
-            // If we're hovering just above the ground without upward velocity, lock down to the surface
-            const desiredY = groundY + this.groundOffset;
-            if (this.mesh.position.y > desiredY + 0.05 && this.verticalVelocity <= 0.01) {
-                this.mesh.position.y = desiredY;
-            }
         } else {
             // Fallback: assume flat ground at y=0
-            if (this.mesh.position.y <= this.groundOffset) {
-                this.mesh.position.y = this.groundOffset;
-                this.onGround = true;
-                this.isOnGround = true; // For UI
-                this.verticalVelocity = 0;
-            } else if (this.mesh.position.y === prevY) {
-                this.onGround = true;
-                this.isOnGround = true;
-                this.verticalVelocity = 0;
-                this.mesh.position.y = this.groundOffset;
-            } else {
-                this.onGround = false;
-                this.isOnGround = false; // For UI
-            }
+            groundY = 0;
         }
 
+        const desiredY = groundY + this.groundOffset;
+        const distanceToGround = this.mesh.position.y - desiredY;
+
+        // Start by assuming we're in the air
+        let grounded = false;
+
+        // 1) Direct contact or slight penetration → snap to ground
+        if (distanceToGround <= 0.02) {
+            this.mesh.position.y = desiredY;
+            grounded = true;
+        }
+        // 2) moveWithCollisions blocked vertical motion while we were falling
+        else if (this.mesh.position.y === prevY && this.verticalVelocity <= 0) {
+            this.mesh.position.y = desiredY;
+            grounded = true;
+        }
+        // 3) Slope-hover correction: very close to the ground and almost not moving vertically
+        else if (distanceToGround > 0 && distanceToGround < 0.15 && this.verticalVelocity <= 0.1) {
+            this.mesh.position.y = desiredY;
+            grounded = true;
+        }
+
+        if (grounded) {
+            this.onGround = true;
+            this.isOnGround = true; // For UI
+            this.verticalVelocity = 0;
+        } else {
+            this.onGround = false;
+            this.isOnGround = false; // For UI
+        }
+
+        // Prevent upward velocity from persisting while grounded
         if (this.onGround && this.verticalVelocity > 0) {
-            this.verticalVelocity = 0; // prevent rebounds on landing
+            this.verticalVelocity = 0;
         }
-
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
             const lookSpeed = 0.75;
