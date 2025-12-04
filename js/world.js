@@ -1407,21 +1407,21 @@ console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARR
     }
 
     update() {
-        // Update all entities
-        const deltaTime = this.scene.getEngine().getDeltaTime() / 1000;
-        
-        // Update NPCs
-        for (const npc of this.npcs) {
-            if (npc.update) npc.update(deltaTime);
-        }
-        
-        // Update enemies
-        for (const enemy of this.enemies) {
-            if (enemy.update) enemy.update(deltaTime);
-        }
-        
-        // Update items
-        for (let i = this.items.length - 1; i >= 0; i--) {
+    // Update all entities
+    const deltaTime = this.scene.getEngine().getDeltaTime() / 1000;
+    
+    // Update NPCs
+    for (const npc of this.npcs) {
+        if (npc.update) npc.update(deltaTime);
+    }
+    
+    // Update enemies
+    for (const enemy of this.enemies) {
+        if (enemy.update) enemy.update(deltaTime);
+    }
+    
+    // Update items
+    for (let i = this.items.length - 1; i >= 0; i--) {
             const item = this.items[i];
             if (item.update) item.update(deltaTime);
             
@@ -1429,8 +1429,8 @@ console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARR
             if (item.collected) {
                 this.items.splice(i, 1);
             }
-        }
     }
+}
 
     dispose() {
         // Dispose of all resources
