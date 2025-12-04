@@ -1818,12 +1818,49 @@ class Enemy extends Entity {
                 this.mesh.scaling.scaleInPlace(scaleFactor);
 
                 this.footOffset = this.computeFootOffset(this.mesh);
-                this.snapToGround();
+this.snapToGround();
 
-                // Attach children
-                model.instances.slice(1).forEach(m => {
-                    m.parent = this.mesh;
-                });
+// Attach children
+model.instances.slice(1).forEach(m => {
+    m.parent = this.mesh;
+});
+
+// Try to hide baked-in shadow / ground planes that show up as big black squares
+const parts = this.mesh.getChildMeshes(); // all descendants
+parts.forEach(part => {
+    const name = (part.name || "").toLowerCase();
+    const mat = part.material;
+
+    // Check if material is very dark
+    let isDark = false;
+    if (mat && mat.diffuseColor instanceof BABYLON.Color3) {
+        const c = mat.diffuseColor;
+        isDark = (c.r < 0.1 && c.g < 0.1 && c.b < 0.1);
+    }
+
+    // Check geometry: very flat but wide => likely a shadow/ground plane
+    let isVeryFlatAndWide = false;
+    try {
+        const bounds = part.getHierarchyBoundingVectors(true);
+        const size = bounds.max.subtract(bounds.min);
+        const flatY = size.y < 0.05;               // almost no thickness
+        const wideXZ = size.x > 0.5 || size.z > 0.5;
+        isVeryFlatAndWide = flatY && wideXZ;
+    } catch (e) {
+        // ignore any weird meshes
+    }
+
+    const looksLikeShadowPlane =
+        name.includes("shadow") ||
+        name.includes("plane")  ||
+        (isDark && isVeryFlatAndWide);
+
+    if (looksLikeShadowPlane) {
+        part.isVisible = false;
+        part.visibility = 0;
+        part.setEnabled(false);
+    }
+});
 
                 // Shadows
                 if (this.scene.shadowGenerator) {
