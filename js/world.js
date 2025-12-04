@@ -1921,32 +1921,33 @@ class Enemy extends Entity {
     }
 
     updateAI(deltaTime) {
-        // Find the player if we don't have a target
-        if (!this.target) {
-            this.findTarget();
-        }
-        
-        if (this.target) {
-            const distance = BABYLON.Vector3.Distance(this.position, this.target.position);
-            
-            if (distance <= this.attackRange) {
-                // Attack if in range
-                this.state = 'attacking';
-                this.attack();
-            } else if (distance <= this.detectionRange) {
-                // Chase if player is detected
-                this.state = 'chasing';
-                this.chaseTarget(deltaTime);
-            } else {
-                // Lost sight of player
-                this.state = 'idle';
-                this.target = null;
-            }
-        } else {
-            // No target, wander or idle
-            this.state = 'idle';
-        }
+    // Find the player if we don't have a target
+    if (!this.target) {
+        this.findTarget();
     }
+    
+    // Make sure the target has a mesh and a position we can use
+    if (this.target && this.target.mesh && this.target.mesh.position) {
+        const targetPos = this.target.mesh.position;
+        const distance = BABYLON.Vector3.Distance(this.position, targetPos);
+        
+        if (distance <= this.attackRange) {
+            // Attack if in range
+            this.state = 'attacking';
+            this.attack();
+        } else if (distance <= this.detectionRange) {
+            // Chase target if within detection range
+            this.state = 'chasing';
+            this.chaseTarget(deltaTime);
+        } else {
+            // Target too far, go back to patrolling
+            this.state = 'patrolling';
+        }
+    } else {
+        // No valid target, patrol
+        this.state = 'patrolling';
+    }
+}
 
     findTarget() {
         // In a real game, you would use a spatial partitioning system
