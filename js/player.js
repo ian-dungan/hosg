@@ -679,52 +679,43 @@ setupGamepad() {
             this._gravityLogCount++;
         }
 
-                // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
+                // ======== HARD GROUND LOCK – NEVER BELOW TERRAIN ========
         let groundY = 0;
-        const prevY = previousPosition.y;
 
-        // Determine terrain height under the player
-        if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
-            groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+        if (this.scene.world && typeof this.scene.world.getTerrainHeight === "function") {
+            // Numeric terrain height from the actual ground mesh
+            groundY = this.scene.world.getTerrainHeight(
+                this.mesh.position.x,
+                this.mesh.position.z
+            );
         } else {
-            // Fallback: assume flat ground at y=0
+            // Fallback: flat world at y = 0
             groundY = 0;
         }
 
-        const desiredY = groundY + this.groundOffset;
-        const distanceToGround = this.mesh.position.y - desiredY;
+        const targetY = groundY + this.groundOffset;
+        const epsilon = 0.01; // how much we allow before we say "you're on the ground"
 
-        // Start by assuming we're in the air
-        let grounded = false;
-
-        // 1) Direct contact or slight penetration → snap to ground
-        if (distanceToGround <= 0.02) {
-            this.mesh.position.y = desiredY;
-            grounded = true;
-        }
-        // 2) moveWithCollisions blocked vertical motion while we were falling
-        else if (this.mesh.position.y === prevY && this.verticalVelocity <= 0) {
-            this.mesh.position.y = desiredY;
-            grounded = true;
-        }
-        // 3) Slope-hover correction: very close to the ground and almost not moving vertically
-        else if (distanceToGround > 0 && distanceToGround < 0.15 && this.verticalVelocity <= 0.1) {
-            this.mesh.position.y = desiredY;
-            grounded = true;
-        }
-
-        if (grounded) {
+        // If we somehow moved below the terrain surface, force snap up
+        if (this.mesh.position.y < targetY - epsilon) {
+            this.mesh.position.y = targetY;
+            // Kill any downward velocity so we don't "fight" the snap
+            if (this.verticalVelocity < 0) {
+                this.verticalVelocity = 0;
+            }
             this.onGround = true;
-            this.isOnGround = true; // For UI
-            this.verticalVelocity = 0;
-        } else {
-            this.onGround = false;
-            this.isOnGround = false; // For UI
+            this.isOnGround = true;
         }
-
-        // Prevent upward velocity from persisting while grounded
-        if (this.onGround && this.verticalVelocity > 0) {
+        // If we're basically on the ground and not going upward, treat as grounded
+        else if (this.mesh.position.y <= targetY + epsilon && this.verticalVelocity <= 0) {
+            this.mesh.position.y = targetY;
             this.verticalVelocity = 0;
+            this.onGround = true;
+            this.isOnGround = true;
+        } else {
+            // In the air
+            this.onGround = false;
+            this.isOnGround = false;
         }
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
