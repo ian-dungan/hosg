@@ -39,14 +39,22 @@ Entity.prototype.dispose = function () {
 class World {
     constructor(scene, options = {}) {
         this.scene = scene;
+
+        // Merge options without relying on object spread for broader runtime support
         this.options = {
             size: options.size || 1000,
             segments: options.segments || 100,
             maxHeight: options.maxHeight || 20,
             seed: options.seed || Math.random(),
-            waterLevel: options.waterLevel || 0.2,
-            ...options
+            waterLevel: options.waterLevel || 0.2
         };
+
+        // Apply any provided overrides explicitly
+        for (const key in options) {
+            if (Object.prototype.hasOwnProperty.call(options, key)) {
+                this.options[key] = options[key];
+            }
+        }
         
         // Terrain
         this.terrain = null;
@@ -76,9 +84,24 @@ class World {
         this.sunLight = null;
         this.ambientLight = null;
         this.shadowGenerator = null;
-        
+
         // Physics
         this.gravity = new BABYLON.Vector3(0, -9.81, 0);
+
+        // Shared asset loader to cache models/textures across entities
+        this.assetLoader = (typeof AssetLoader !== 'undefined') ? new AssetLoader(this.scene) : null;
+        if (this.scene) {
+            this.scene.world = this;
+            if (this.scene.game) {
+                this.scene.game.world = this;
+            }
+
+            // Make available to anything with a reference to the scene
+            this.scene.assetLoader = this.assetLoader;
+            if (this.scene.game) {
+                this.scene.game.assetLoader = this.assetLoader;
+            }
+        }
         
         // Initialize
         this.init();
@@ -96,7 +119,7 @@ class World {
         // Wait a bit to ensure physics is fully stabilized
         setTimeout(() => {
             console.log('[World] ✅ World fully initialized, signaling player...');
-            const player = this.scene.player || this.scene.game?.player;
+            const player = this.scene.player || (this.scene.game && this.scene.game.player);
             if (player && typeof player.startAfterWorldReady === 'function') {
                 player.startAfterWorldReady();
             } else {
@@ -257,7 +280,8 @@ class World {
         // Enable collisions
         this.terrain.checkCollisions = true;
         
-        // Add VERY SOLID heightmap physics so the collider matches the terrain
+        // Add solid terrain physics. Heightmap impostor is the most stable for a generated ground
+        // and avoids the tunneling we were seeing with the triangle-mesh impostor.
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
             BABYLON.PhysicsImpostor.HeightmapImpostor,
@@ -275,40 +299,32 @@ class World {
         console.log('[World] ✓ Terrain physics created and enabled');
         
         // ============================================================
-        // COLLISION SAFETY NET - Paper-thin floor right below terrain
-        // Positioned just 0.1 units below lowest terrain point
-        // Player will never visibly clip through - instant stop
+        // COLLISION SAFETY NET - full terrain clone just below surface
+        // Matches the heightmap so nothing can slip through seams
         // ============================================================
-        this.collisionFloor = BABYLON.MeshBuilder.CreateBox('collisionFloor', {
-            width: this.options.size * 2,   // 2x terrain size for safety
-            height: 0.5,                    // Thin - just 0.5 units
-            depth: this.options.size * 2
-        }, this.scene);
-        
-        // Position: y = -0.3 (top at y=-0.1, bottom at y=-0.5)
-        // Just millimeters below terrain surface
-        this.collisionFloor.position.y = -0.3;
-        
-        // Make completely invisible but still solid
-        this.collisionFloor.isVisible = false;
-        this.collisionFloor.visibility = 0;
-        
-        // Enable collisions (critical!)
-        this.collisionFloor.checkCollisions = true;
-        
-        // Add physics - acts as impenetrable barrier
-        this.collisionFloor.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.collisionFloor,
-            BABYLON.PhysicsImpostor.BoxImpostor,
+        this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
+        this.collisionBarrier.material = null;
+        this.collisionBarrier.isVisible = false;
+        this.collisionBarrier.visibility = 0;
+        this.collisionBarrier.renderingGroupId = -1;
+
+        // Sit just beneath the visual terrain so feet rest on the real surface
+        this.collisionBarrier.position.y -= 0.25;
+
+        // Enable collisions and physics so both kinematic and physics actors collide
+        this.collisionBarrier.checkCollisions = true;
+        this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.collisionBarrier,
+            BABYLON.PhysicsImpostor.HeightmapImpostor,
             {
-                mass: 0,              // Static (immovable)
-                friction: 1.0,        // Maximum friction
-                restitution: 0.0      // No bounce
+                mass: 0,
+                friction: 1.0,
+                restitution: 0.0
             },
             this.scene
         );
-        
-        console.log('[World] ✓ Collision floor: 0.5u thick at y=-0.3 (top at y=-0.1)');
+
+        console.log('[World] ✓ Collision barrier cloned from terrain and offset -0.25y');
     }
 
     generateHeightmap() {
@@ -416,7 +432,7 @@ class World {
 
     async loadTerrainAssets() {
         try {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.assetLoader || new AssetLoader(this.scene);
             
             // Try to load grass textures
             const grassData = ASSET_MANIFEST.TERRAIN.GROUND.grass;
@@ -492,19 +508,21 @@ class World {
         
         // Create water material
         this.waterMaterial = new BABYLON.StandardMaterial('waterMaterial', this.scene);
-        this.waterMaterial.alpha = 0.8;
-        this.waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.3, 0.5);
-        this.waterMaterial.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-        this.waterMaterial.alpha = 0.8;
+        this.waterMaterial.alpha = 0.7;
+        this.waterMaterial.diffuseColor = new BABYLON.Color3(0.12, 0.28, 0.42);
+        this.waterMaterial.specularColor = new BABYLON.Color3(0.25, 0.25, 0.25);
+        this.waterMaterial.alpha = 0.7;
         
         // Add reflection and refraction
         this.waterMaterial.reflectionTexture = new BABYLON.MirrorTexture('waterReflection', 512, this.scene, true);
         this.waterMaterial.reflectionTexture.mirrorPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
         this.waterMaterial.reflectionTexture.renderList = [this.terrain, ...this.trees, ...this.buildings];
+        this.waterMaterial.reflectionTexture.level = 0.35;
         
         this.waterMaterial.refractionTexture = new BABYLON.RefractionTexture('waterRefraction', 512, this.scene, true);
-        this.waterMaterial.refractionTexture.depth = 0.1;
+        this.waterMaterial.refractionTexture.depth = 0.05;
         this.waterMaterial.refractionTexture.refractionPlane = new BABYLON.Plane(0, -1, 0, -this.water.position.y);
+        this.waterMaterial.refractionTexture.level = 0.5;
         
         this.waterMaterial.useReflectionFresnelFromSpecular = true;
         this.waterMaterial.useReflectionFresnel = true;
@@ -515,7 +533,7 @@ class World {
         this.waterMaterial.reflectionFresnelParameters = new BABYLON.FresnelParameters();
         this.waterMaterial.reflectionFresnelParameters.bias = 0.1;
         
-        this.waterMaterial.specularPower = 64;
+        this.waterMaterial.specularPower = 32;
         
         this.water.material = this.waterMaterial;
         this.water.isPickable = false;
@@ -531,7 +549,7 @@ class World {
 
     async loadWaterAssets() {
         try {
-            const loader = new AssetLoader(this.scene);
+            const loader = this.assetLoader || new AssetLoader(this.scene);
             const waterData = ASSET_MANIFEST.WATER;
             
             if (waterData && waterData.bump) {
@@ -542,9 +560,10 @@ class World {
                         uScale: 10,
                         vScale: 10
                     });
-                    
+
                     if (bumpTexture) {
                         this.waterMaterial.bumpTexture = bumpTexture;
+                        this.waterMaterial.bumpTexture.level = 0.1;
                         console.log('[World] ✓ Water bump texture loaded');
                     }
                 } catch (e) {
@@ -691,8 +710,8 @@ class World {
             tree.name = `tree_${name}_${i}`;
             tree.material = treeMaterial;
             
-            const treeY = this.getHeightAt(treeX, treeZ);
-            tree.position = new BABYLON.Vector3(treeX, treeY, treeZ);
+            const drySpot = this.findDrySpot(treeX, treeZ, 12, 10, 0.4);
+            tree.position = new BABYLON.Vector3(drySpot.x, drySpot.y, drySpot.z);
             tree.rotation.y = Math.random() * Math.PI * 2;
             
             const scale = 0.5 + Math.random() * 0.5;
@@ -732,8 +751,8 @@ class World {
             
             rock.material = rockMaterial;
             
-            const rockY = this.getHeightAt(rockX, rockZ);
-            rock.position = new BABYLON.Vector3(rockX, rockY, rockZ);
+            const drySpot = this.findDrySpot(rockX, rockZ, 8, 8, 0.4);
+            rock.position = new BABYLON.Vector3(drySpot.x, drySpot.y, drySpot.z);
             rock.rotation.y = Math.random() * Math.PI * 2;
             
             // Store landmark info on first rock
@@ -948,16 +967,30 @@ class World {
     }
 
     createEnemies(count) {
+        // Keep enemies close to the playable spawn so they are easy to find
+        const spawnRadius = Math.min(80, this.options.size * 0.2);
+
         for (let i = 0; i < count; i++) {
+            // Bias positions toward the center of the map
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const position = new BABYLON.Vector3(
+                Math.sin(angle) * distance,
+                0,
+                Math.cos(angle) * distance
+            );
+
+            position.y = this.getHeightAt(position.x, position.z);
+
             // Create a simple enemy
             const enemy = new Enemy(this.scene, {
                 name: `Enemy ${i + 1}`,
-                position: this.getRandomPositionOnTerrain(),
+                position,
                 health: 50 + Math.floor(Math.random() * 50),
                 damage: 5 + Math.floor(Math.random() * 10),
                 speed: 0.05 + Math.random() * 0.1
             });
-            
+
             // Add to enemies array
             this.enemies.push(enemy);
         }
@@ -1021,12 +1054,12 @@ class World {
         // Position mesh on terrain with random rotation and scale
         const x = (Math.random() - 0.5) * this.options.size * 0.9;
         const z = (Math.random() - 0.5) * this.options.size * 0.9;
-        
-        // Get height at position
-        const y = this.getHeightAt(x, z);
-        
+
+        // Get a dry spot near the sampled position
+        const drySpot = this.findDrySpot(x, z, 10, 10, 0.4);
+
         // Set position
-        mesh.position.set(x, y, z);
+        mesh.position.set(drySpot.x, drySpot.y, drySpot.z);
         
         // Random rotation
         mesh.rotation.y = Math.random() * Math.PI * 2;
@@ -1041,9 +1074,41 @@ class World {
             new BABYLON.Vector3(0, -1, 0),
             this.options.maxHeight * 3
         );
-        
+
         const hit = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
         return hit.pickedPoint ? hit.pickedPoint.y : 0;
+    }
+
+    findDrySpot(x, z, attempts = 10, radius = 8, margin = 0.3) {
+        const waterY = this.water ? this.water.position.y : -Infinity;
+
+        // Fast path if we're already above the water line
+        const currentY = this.getHeightAt(x, z);
+        if (currentY > waterY + margin) {
+            return { x, z, y: currentY };
+        }
+
+        let best = { x, z, y: currentY };
+
+        for (let i = 0; i < attempts; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * radius;
+            const candX = x + Math.cos(angle) * dist;
+            const candZ = z + Math.sin(angle) * dist;
+            const candY = this.getHeightAt(candX, candZ);
+
+            if (candY > waterY + margin) {
+                return { x: candX, z: candZ, y: candY };
+            }
+
+            if (candY > best.y) {
+                best = { x: candX, z: candZ, y: candY };
+            }
+        }
+
+        // Fall back to highest candidate but lift above the water plane
+        best.y = Math.max(best.y, waterY + margin);
+        return best;
     }
 
     isAreaFlat(position, width, depth, maxSlope = 0.1) {
@@ -1091,12 +1156,13 @@ class World {
 
     updateWater() {
         if (!this.waterMaterial) return;
-        
+
         // Animate water bump texture if it exists
         if (this.waterMaterial.bumpTexture) {
             const time = Date.now() * 0.001;
-            this.waterMaterial.bumpTexture.uOffset += 0.001;
-            this.waterMaterial.bumpTexture.vOffset += 0.001;
+            const drift = 0.00025;
+            this.waterMaterial.bumpTexture.uOffset += drift;
+            this.waterMaterial.bumpTexture.vOffset += drift;
         }
     }
 
@@ -1683,7 +1749,7 @@ class NPC extends Entity {
 class Enemy extends Entity {
     constructor(scene, options = {}) {
         super(scene, options.position);
-        
+
         this.type = 'enemy';
         this.name = options.name || 'Enemy';
         this.health = options.health || 50;
@@ -1693,7 +1759,9 @@ class Enemy extends Entity {
         this.attackRange = options.attackRange || 1.5;
         this.detectionRange = options.detectionRange || 10;
         this.experience = options.experience || 20;
-        
+        this.assetKey = options.assetKey || options.asset || 'wolf';
+        this.footOffset = 0.05; // distance from mesh origin to ground contact point
+
         // AI
         this.state = 'idle'; // idle, chasing, attacking, dead
         this.target = null;
@@ -1710,32 +1778,98 @@ class Enemy extends Entity {
     }
 
     createMesh() {
-        // Create a simple enemy model
+        // Placeholder simple enemy mesh
         this.mesh = BABYLON.MeshBuilder.CreateCylinder(`enemy_${this.name}`, {
             height: 1.8,
             diameter: 0.8
         }, this.scene);
-        
-        // Create head
-        const head = BABYLON.MeshBuilder.CreateSphere('head', {
-            diameter: 0.7
-        }, this.scene);
+
+        const head = BABYLON.MeshBuilder.CreateSphere('head', { diameter: 0.7 }, this.scene);
         head.parent = this.mesh;
         head.position.y = 0.9;
-        
-        // Set material
+
         const material = new BABYLON.StandardMaterial('enemyMaterial', this.scene);
-        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2); // Red color
+        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2);
         this.mesh.material = material;
-        
-        // Enable shadows
+
         this.mesh.receiveShadows = true;
         if (this.scene.shadowGenerator) {
             this.scene.shadowGenerator.addShadowCaster(this.mesh);
         }
-        
-        // Set initial position
+
         this.mesh.position = this.position;
+
+        this.footOffset = this.computeFootOffset(this.mesh);
+        this.snapToGround();
+
+        // Attempt to load a real model (wolf.glb, etc.) using the asset manifest
+        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS && ASSET_MANIFEST.CHARACTERS.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
+            || (ASSET_MANIFEST.ENEMIES && ASSET_MANIFEST.ENEMIES[this.assetKey]);
+
+        if (manifestEnemy && window.AssetLoader) {
+            const loader = this.scene.assetLoader || (this.scene.game && this.scene.game.assetLoader) || new AssetLoader(this.scene);
+            const requestedScale = manifestEnemy.scale || 1;
+            loader.loadModel(manifestEnemy.model, {
+                position: this.position.clone(),
+                scaling: new BABYLON.Vector3(requestedScale, requestedScale, requestedScale)
+            }).then(model => {
+                if (!model || !model.root) {
+                    console.warn(`[Enemy] Failed to load model for ${this.assetKey}`);
+                    return;
+                }
+
+                // Replace placeholder with loaded model
+                this.mesh.dispose();
+                this.mesh = model.root;
+                this.mesh.position = this.position.clone();
+
+                // Normalize the model to a usable on-screen size (target ~1.2m tall)
+                const bounds = this.mesh.getHierarchyBoundingVectors(true);
+                const currentHeight = Math.max(0.001, bounds.max.y - bounds.min.y);
+                const targetHeight = 1.2;
+                const scaleFactor = Math.max(0.2, targetHeight / currentHeight);
+                this.mesh.scaling.scaleInPlace(scaleFactor);
+
+                this.footOffset = this.computeFootOffset(this.mesh);
+                this.snapToGround();
+
+                // Attach children
+                model.instances.slice(1).forEach(m => {
+                    m.parent = this.mesh;
+                });
+
+                // Shadows
+                if (this.scene.shadowGenerator) {
+                    this.scene.shadowGenerator.addShadowCaster(this.mesh);
+                }
+
+                console.log(`[Enemy] ✓ Loaded asset model '${this.assetKey}' from manifest (scale ${scaleFactor.toFixed(2)})`);
+            }).catch(err => {
+                console.warn(`[Enemy] Error loading model '${this.assetKey}':`, err);
+            });
+        }
+    }
+
+    computeFootOffset(mesh) {
+        if (!mesh || typeof mesh.getHierarchyBoundingVectors !== 'function') {
+            return this.footOffset || 0.05;
+        }
+
+        const bounds = mesh.getHierarchyBoundingVectors(true);
+        return Math.max(0.02, -bounds.min.y + 0.02);
+    }
+
+    snapToGround() {
+        const world = this.scene.world || (this.scene.game && this.scene.game.world);
+        if (!world || typeof world.getHeightAt !== 'function') return;
+
+        const groundY = world.getHeightAt(this.position.x, this.position.z);
+        const targetY = groundY + (this.footOffset || 0);
+
+        this.position.y = targetY;
+        if (this.mesh && this.mesh.position) {
+            this.mesh.position.y = targetY;
+        }
     }
 
     setupAnimations() {
@@ -1781,7 +1915,9 @@ class Enemy extends Entity {
 
     update(deltaTime) {
         if (!this.mesh || this.state === 'dead') return;
-        
+
+        this.snapToGround();
+
         // Update position to match physics
         this.mesh.position.copyFrom(this.position);
         
@@ -1851,7 +1987,9 @@ class Enemy extends Entity {
             
             // Move towards target
             this.position.addInPlace(direction);
-            
+
+            this.snapToGround();
+
             // Rotate to face movement direction
             const targetRotation = Math.atan2(direction.x, direction.z);
             this.mesh.rotation.y = BABYLON.Scalar.Lerp(
