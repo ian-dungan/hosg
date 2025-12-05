@@ -39,14 +39,22 @@ Entity.prototype.dispose = function () {
 class World {
     constructor(scene, options = {}) {
         this.scene = scene;
+
+        // Merge options without relying on object spread for broader runtime support
         this.options = {
             size: options.size || 1000,
             segments: options.segments || 100,
             maxHeight: options.maxHeight || 20,
             seed: options.seed || Math.random(),
-            waterLevel: options.waterLevel || 0.2,
-            ...options
+            waterLevel: options.waterLevel || 0.2
         };
+
+        // Apply any provided overrides explicitly
+        for (const key in options) {
+            if (Object.prototype.hasOwnProperty.call(options, key)) {
+                this.options[key] = options[key];
+            }
+        }
         
         // Terrain
         this.terrain = null;
@@ -111,7 +119,7 @@ class World {
         // Wait a bit to ensure physics is fully stabilized
         setTimeout(() => {
             console.log('[World] ✅ World fully initialized, signaling player...');
-            const player = this.scene.player || this.scene.game?.player;
+            const player = this.scene.player || (this.scene.game && this.scene.game.player);
             if (player && typeof player.startAfterWorldReady === 'function') {
                 player.startAfterWorldReady();
             } else {
@@ -291,30 +299,34 @@ class World {
         console.log('[World] ✓ Terrain physics created and enabled');
         
         // ============================================================
+        // COLLISION SAFETY NET - full terrain clone just below surface
+        // Matches the heightmap so nothing can slip through seams
         // ============================================================
-// COLLISION SAFETY NET - full terrain clone just below surface
-// Matches the heightmap so nothing can slip through seams
-// ============================================================
-this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
-this.collisionBarrier.material = null;
-this.collisionBarrier.isVisible = false;
-this.collisionBarrier.visibility = 0;
-this.collisionBarrier.renderingGroupId = -1;
+        this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
+        this.collisionBarrier.material = null;
+        this.collisionBarrier.isVisible = false;
+        this.collisionBarrier.visibility = 0;
+        this.collisionBarrier.renderingGroupId = -1;
 
-// Sit just beneath the visual terrain so feet rest on the real surface.
-// About ~0.5–1 inch below, in world units.
-const BARRIER_OFFSET = -0.02;
-this.collisionBarrier.position.y = this.terrain.position.y + BARRIER_OFFSET;
+        // Sit just beneath the visual terrain so feet rest on the real surface
+        this.collisionBarrier.position.y -= 0.25;
 
-// Collisions only — DO NOT give this a physics impostor.
-// The main terrain already has a MeshImpostor for physics.
-// This barrier is just an extra collision mesh for kinematic actors.
-this.collisionBarrier.checkCollisions = true;
-this.collisionBarrier.isPickable = false;
+        // Enable collisions and physics so both kinematic and physics actors collide
+        this.collisionBarrier.checkCollisions = true;
+        this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.collisionBarrier,
+            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            {
+                mass: 0,
+                friction: 1.0,
+                restitution: 0.0
+            },
+            this.scene
+        );
 
-console.log(
-    `[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y (collisions only)`
-);
+        console.log('[World] ✓ Collision barrier cloned from terrain and offset -0.25y');
+    }
+
     generateHeightmap() {
         const positions = this.terrain.getVerticesData(BABYLON.VertexBuffer.PositionKind);
         const normals = [];
@@ -1056,7 +1068,15 @@ console.log(
     }
 
     getHeightAt(x, z) {
-        return this.getTerrainHeight(x, z);
+        // Cast a ray downward to find the terrain height
+        const ray = new BABYLON.Ray(
+            new BABYLON.Vector3(x, this.options.maxHeight * 2, z),
+            new BABYLON.Vector3(0, -1, 0),
+            this.options.maxHeight * 3
+        );
+
+        const hit = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
+        return hit.pickedPoint ? hit.pickedPoint.y : 0;
     }
 
     findDrySpot(x, z, attempts = 10, radius = 8, margin = 0.3) {
@@ -1783,7 +1803,7 @@ class Enemy extends Entity {
         this.snapToGround();
 
         // Attempt to load a real model (wolf.glb, etc.) using the asset manifest
-        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS?.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
+        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS && ASSET_MANIFEST.CHARACTERS.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
             || (ASSET_MANIFEST.ENEMIES && ASSET_MANIFEST.ENEMIES[this.assetKey]);
 
         if (manifestEnemy && window.AssetLoader) {
@@ -1811,49 +1831,12 @@ class Enemy extends Entity {
                 this.mesh.scaling.scaleInPlace(scaleFactor);
 
                 this.footOffset = this.computeFootOffset(this.mesh);
-this.snapToGround();
+                this.snapToGround();
 
-// Attach children
-model.instances.slice(1).forEach(m => {
-    m.parent = this.mesh;
-});
-
-// Try to hide baked-in shadow / ground planes that show up as big black squares
-const parts = this.mesh.getChildMeshes(); // all descendants
-parts.forEach(part => {
-    const name = (part.name || "").toLowerCase();
-    const mat = part.material;
-
-    // Check if material is very dark
-    let isDark = false;
-    if (mat && mat.diffuseColor instanceof BABYLON.Color3) {
-        const c = mat.diffuseColor;
-        isDark = (c.r < 0.1 && c.g < 0.1 && c.b < 0.1);
-    }
-
-    // Check geometry: very flat but wide => likely a shadow/ground plane
-    let isVeryFlatAndWide = false;
-    try {
-        const bounds = part.getHierarchyBoundingVectors(true);
-        const size = bounds.max.subtract(bounds.min);
-        const flatY = size.y < 0.05;               // almost no thickness
-        const wideXZ = size.x > 0.5 || size.z > 0.5;
-        isVeryFlatAndWide = flatY && wideXZ;
-    } catch (e) {
-        // ignore any weird meshes
-    }
-
-    const looksLikeShadowPlane =
-        name.includes("shadow") ||
-        name.includes("plane")  ||
-        (isDark && isVeryFlatAndWide);
-
-    if (looksLikeShadowPlane) {
-        part.isVisible = false;
-        part.visibility = 0;
-        part.setEnabled(false);
-    }
-});
+                // Attach children
+                model.instances.slice(1).forEach(m => {
+                    m.parent = this.mesh;
+                });
 
                 // Shadows
                 if (this.scene.shadowGenerator) {
@@ -1877,7 +1860,7 @@ parts.forEach(part => {
     }
 
     snapToGround() {
-        const world = this.scene.world || this.scene.game?.world;
+        const world = this.scene.world || (this.scene.game && this.scene.game.world);
         if (!world || typeof world.getHeightAt !== 'function') return;
 
         const groundY = world.getHeightAt(this.position.x, this.position.z);

@@ -13,30 +13,12 @@ class Player {
         this.jumpForce = 8.5;          // Jump initial velocity (units/second)
         this.gravity = -24;            // Gravity acceleration (units/second^2)
         this.rotationSpeed = 0.1;
-        
-        // Movement state
-        this.verticalVelocity = 0;
-        this.onGround = false;
-        this.jumpQueued = false;
-        this.coyoteTime = 0.1;         // Allow jump shortly after leaving ground
-        this.coyoteTimer = 0;
-        this.jumpBufferTime = 0.15;    // Allow jump shortly before landing
-        this.jumpBufferTimer = 0;
-        
-        // Grounding
-        this.groundOffset = 0.9;       // Approximate half-height of capsule
-        this.onSlope = false;
-        this.maxSlopeAngle = 45 * Math.PI / 180;
-        
-        // Camera & targeting
-        this.gamepad = {
-            connected: false,
-            pad: null,
-            moveX: 0,
-            moveY: 0,
-            lookX: 0,
-            lookY: 0
-        };
+
+        // Collider dimensions (used for physics + ground detection)
+        this.colliderHeight = 1.8;
+        this.colliderRadius = 0.4;
+        this.groundOffset = this.colliderHeight / 2; // Distance from center to feet
+        this.footPadding = 0.05; // Small lift above the terrain when snapping
         
         // Input state
         this.input = {
@@ -74,9 +56,11 @@ class Player {
         
         // Physics ready flag
         this.physicsReady = false;
-       
-        // Last facing direction (radians)
-        this.lastFacing = 0;
+        this.onGround = true;
+        this.verticalVelocity = 0; // For gravity simulation
+        this.lastFacing = 0; // Preserve facing between frames
+        this.jumpQueued = false; // Requires release before next jump
+        this.jumpHeld = false;
         
         // Movement state for animation
         this.isMoving = false;
@@ -96,18 +80,44 @@ class Player {
         // Initialize
         this.init();
     }
+
+    queueJump() {
+        if (this.jumpHeld) return;
+        this.jumpQueued = true;
+    }
+
+    releaseJump() {
+        this.jumpHeld = false;
+    }
     
     async init() {
-        // Create base mesh (capsule collider)
-        const capsuleHeight = 1.8;
-        const capsuleRadius = 0.5;
+        console.log('[Player] Waiting for terrain to be ready...');
         
-        this.mesh = BABYLON.MeshBuilder.CreateCapsule("playerCollider", {
-            height: capsuleHeight,
-            radius: capsuleRadius,
-            tessellation: 8,
-            subdivisions: 1
-        }, this.scene);
+        // Wait for terrain with timeout
+        const terrain = await this.waitForTerrain(100); // 10 seconds
+        if (!terrain) {
+            console.error('[Player] TERRAIN TIMEOUT - Creating player anyway at y=10');
+            this.createPlayerMesh(10);
+            await this.loadCharacterModel();
+            this.setupCamera();
+            this.setupInput();
+            this.setupGamepad();
+            return;
+        }
+        
+        console.log('[Player] ✓ Terrain ready, creating player...');
+        
+        // Get spawn height from terrain - spawn ON the ground!
+        const world = this.scene.game && this.scene.game.world;
+        let spawnY = this.footPadding; // Fallback if world not ready (feet level)
+        
+        if (world && typeof world.getTerrainHeight === 'function') {
+            const groundY = world.getTerrainHeight(0, 0);
+            spawnY = groundY + this.footPadding; // Feet sit right on top of the grass
+            console.log(`[Player] Ground at y=${groundY.toFixed(2)}, spawning feet at y=${spawnY.toFixed(2)}`);
+        } else {
+            console.warn('[Player] Could not get terrain height, using fallback center spawn');
+        }
         
         this.mesh.isPickable = false;
         this.mesh.checkCollisions = true;
@@ -139,14 +149,77 @@ class Player {
         // Setup input
         this.setupInput();
         
-        // Register with scene
-        if (!this.scene.player) {
-            this.scene.player = this;
+        // FORCE initial ground snap
+        setTimeout(() => {
+            if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+                const groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+                this.mesh.position.y = groundY + this.footPadding;
+                this.onGround = true;
+                this.isOnGround = true; // For UI
+                this.verticalVelocity = 0;
+                console.log(`[Player] ✓ Snapped to ground at y=${this.mesh.position.y.toFixed(2)}, onGround=true`);
+            }
+        }, 100);
+        
+        console.log('[Player] ✓ Player initialized and ready');
+    }
+    
+    // Called by world when it's fully ready
+    // Hook for future physics implementation
+    startAfterWorldReady() {
+        console.log('[Player] ✓ World ready signal received');
+        // TODO: Re-enable physics here when reimplemented
+    }
+    
+    async waitForTerrain(maxAttempts) {
+        for (let i = 0; i < maxAttempts; i++) {
+            const terrain = this.scene.getMeshByName('terrain');
+            
+            if (terrain && terrain.isEnabled() && terrain.physicsImpostor) {
+                console.log(`[Player] Found terrain after ${i + 1} attempts`);
+                return terrain;
+            }
+            
+            if (i % 10 === 0 && i > 0) {
+                console.log(`[Player] Still waiting... (${i}/${maxAttempts})`);
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        this.physicsReady = true;
-        
-        console.log('[Player] Initialized');
+        return null;
+    }
+    
+    createPlayerMesh(spawnY) {
+        // Create an invisible capsule-like box collider for the player
+        this.mesh = BABYLON.MeshBuilder.CreateBox('player', {
+            width: this.colliderRadius * 2,
+            height: this.colliderHeight,
+            depth: this.colliderRadius * 2
+        }, this.scene);
+
+        // Spawn at feet position (small pad above terrain)
+        this.mesh.position = new BABYLON.Vector3(0, spawnY, 0);
+
+        // MAKE MOSTLY INVISIBLE
+        this.mesh.visibility = 0;
+        this.mesh.isVisible = false;
+        this.mesh.isPickable = false;
+        this.mesh.renderingGroupId = -1; // Don't render at all
+
+        // Visual root used for rotation without affecting physics body
+        this.visualRoot = new BABYLON.TransformNode('playerVisualRoot', this.scene);
+        this.visualRoot.parent = this.mesh;
+        this.visualRoot.position = BABYLON.Vector3.Zero();
+
+        // Use Babylon's built-in collision system instead of physics for stability
+        this.mesh.checkCollisions = true;
+        this.mesh.ellipsoid = new BABYLON.Vector3(this.colliderRadius, this.colliderHeight / 2, this.colliderRadius);
+        this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, this.colliderHeight / 2, 0);
+
+        this.physicsReady = true; // Allow update to run immediately
+
+        console.log(`[Player] ✓ Player collider created at (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z})`);
     }
     
     async loadCharacterModel() {
@@ -160,10 +233,19 @@ class Player {
                 this.scene
             );
             
-            if (result.meshes.length === 0) {
-                console.warn('[Player] No meshes found in character model');
-                return;
-            }
+            console.log(`[Player] ✓ Character model loaded (${result.meshes.length} meshes)`);
+            
+            // Get root mesh and parent it to the visual root (keeps physics independent)
+            this.characterModel = result.meshes[0];
+            this.characterModel.parent = this.visualRoot || this.mesh;
+            
+            // CRITICAL: Position character model to align with physics box
+            // Knight model needs to be centered and at the right height
+            const offset = characterConfig.offset || { x: 0, y: -0.9, z: 0 };
+            this.characterModel.position = new BABYLON.Vector3(offset.x, offset.y, offset.z);
+            
+            // NOTE: Don't rotate character model here - we rotate the parent mesh instead
+            // If your model faces backward by default, add Math.PI to mesh rotation in update()
             
             // Create a visual root that we can rotate around
             this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
@@ -177,11 +259,23 @@ class Player {
             this.characterModel.rotationQuaternion = null;
             this.characterModel.scaling = new BABYLON.Vector3(1.0, 1.0, 1.0);
             
-            // Enable shadows
-            if (SCENE_LIGHTS.shadowGenerator) {
-                result.meshes.forEach(mesh => {
-                    if (mesh !== this.characterModel) {
-                        SCENE_LIGHTS.shadowGenerator.addShadowCaster(mesh);
+            // Store animations
+            if (result.animationGroups && result.animationGroups.length > 0) {
+                console.log(`[Player] Found ${result.animationGroups.length} animations`);
+                
+                const animConfig = characterConfig.animations || {};
+                
+                // Map animations
+                result.animationGroups.forEach(anim => {
+                    const name = anim.name.toLowerCase();
+                    if (name.includes('idle') || (animConfig.idle && name.includes(animConfig.idle.toLowerCase()))) {
+                        this.animations.idle = anim;
+                    } else if (name.includes('walk') || (animConfig.walk && name.includes(animConfig.walk.toLowerCase()))) {
+                        this.animations.walk = anim;
+                    } else if (name.includes('run') || (animConfig.run && name.includes(animConfig.run.toLowerCase()))) {
+                        this.animations.run = anim;
+                    } else if (name.includes('jump') || (animConfig.jump && name.includes(animConfig.jump.toLowerCase()))) {
+                        this.animations.jump = anim;
                     }
                 });
             }
@@ -257,27 +351,56 @@ class Player {
     }
     
     setupInput() {
-        const canvas = this.scene.getEngine().getRenderingCanvas();
-        
-        this.scene.actionManager = this.scene.actionManager || new BABYLON.ActionManager(this.scene);
-        
-        this.scene.actionManager.registerAction(
-            new BABYLON.ExecuteCodeAction(
-                BABYLON.ActionManager.OnKeyDownTrigger,
-                (evt) => {
-                    this.handleKey(evt.sourceEvent, true);
-                }
-            )
-        );
-        
-        this.scene.actionManager.registerAction(
-            new BABYLON.ExecuteCodeAction(
-                BABYLON.ActionManager.OnKeyUpTrigger,
-                (evt) => {
-                    this.handleKey(evt.sourceEvent, false);
-                }
-            )
-        );
+    const canvas = this.scene.getEngine().getRenderingCanvas();
+
+// Keyboard input
+        this.scene.onKeyboardObservable.add((kbInfo) => {
+            const key = kbInfo.event.key.toLowerCase();
+            const isDown = (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN);
+            
+            // Debug logging (first 10 key presses)
+            if (!this._keyPressCount) this._keyPressCount = 0;
+            if (this._keyPressCount < 10 && isDown) {
+                console.log(`[Player] Key pressed: ${key}`);
+                this._keyPressCount++;
+            }
+            
+            switch(key) {
+                // WASD keys
+                case 'w': this.input.forward = isDown; break;
+                case 's': this.input.backward = isDown; break;
+                case 'a': this.input.left = isDown; break;
+                case 'd': this.input.right = isDown; break;
+                
+                // Arrow keys (FIXED - not inverted)
+                case 'arrowup': this.input.forward = isDown; break;
+                case 'arrowdown': this.input.backward = isDown; break;
+                case 'arrowleft': this.input.left = isDown; break;
+                case 'arrowright': this.input.right = isDown; break;
+                
+                // Other controls
+                case 'shift': this.input.run = isDown; break;
+                case ' ':
+                    if (isDown) {
+                        if (!this.jumpHeld) {
+                            this.queueJump();
+                            console.log('[Player] JUMP pressed! onGround=' + this.onGround);
+                        }
+                        this.jumpHeld = true;
+                    } else {
+                        this.releaseJump();
+                    }
+                    break;
+                
+                // Tab key for targeting
+                case 'tab':
+                    if (isDown) {
+                        this.targetNext();
+                        kbInfo.event.preventDefault(); // Don't switch browser tabs
+                    }
+                    break;
+            }
+        });
         
         this.scene.onPointerObservable.add((pointerInfo) => {
             if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
@@ -336,6 +459,25 @@ gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
                     this.jumpQueued = true;
                     this.jumpBufferTimer = this.jumpBufferTime;
                 }
+            } else {
+                if (!this.jumpHeld) {
+                    this.queueJump();
+                    this.jumpHeld = true;
+                }
+            }
+        }
+
+        evt.preventDefault();
+    };
+
+    const onTouchMove = (evt) => {
+        if (joystickTouchId === null) return;
+        if (!evt.changedTouches) return;
+
+        for (let i = 0; i < evt.changedTouches.length; i++) {
+            const t = evt.changedTouches[i];
+            if (t.identifier === joystickTouchId) {
+                updateFromTouch(t.clientX, t.clientY);
                 break;
             case "tab":
                 if (isDown) {
@@ -350,6 +492,31 @@ gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
                 }
                 break;
         }
+
+        this.releaseJump();
+
+        evt.preventDefault();
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
+    canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
+}
+
+setupGamepad() {
+        // Gamepad connection events
+        window.addEventListener('gamepadconnected', (e) => {
+            console.log('[Player] Gamepad connected:', e.gamepad.id);
+            this.gamepad.connected = true;
+        });
+        
+        window.addEventListener('gamepaddisconnected', (e) => {
+            console.log('[Player] Gamepad disconnected');
+            this.gamepad.connected = false;
+        });
+        
+        console.log('[Player] ✓ Gamepad support enabled');
     }
     
     updateGamepad() {
@@ -374,9 +541,31 @@ gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
         
         this.input.run = isRunPressed;
         
-        if (isJumpPressed && !this.gamepadButtons.jump) {
-            this.jumpQueued = true;
-            this.jumpBufferTimer = this.jumpBufferTime;
+        // B button (1) or triggers - Run
+        const runPressed = (gamepad.buttons[1] && gamepad.buttons[1].pressed) ||
+                          (gamepad.buttons[6] && gamepad.buttons[6].pressed) ||
+                          (gamepad.buttons[7] && gamepad.buttons[7].pressed);
+        this.input.run = runPressed;
+
+        // Track jump press/release so jump must be re-pressed after landing
+        const jumpPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
+        if (jumpPressed) {
+            if (!this.jumpHeld) {
+                this.queueJump();
+            }
+            this.jumpHeld = true;
+        } else {
+            this.releaseJump();
+        }
+        
+        // X button (2) - Target next enemy (with debounce)
+        if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
+            if (!this.gamepad.targetButtonWasPressed) {
+                this.targetNext();
+                this.gamepad.targetButtonWasPressed = true;
+            }
+        } else {
+            this.gamepad.targetButtonWasPressed = false;
         }
         
         this.gamepadButtons.jump = isJumpPressed;
@@ -397,28 +586,38 @@ gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
 
         const dt = deltaTime; // deltaTime already in seconds
         const walkSpeed = this.speed;
-        const runSpeed = this.speed * this.runMultiplier;
+        const runSpeed = walkSpeed * this.runMultiplier;
+        const jumpSpeed = this.jumpForce;
 
-        // Update jump buffer & coyote timer
-        this.coyoteTimer = this.onGround ? this.coyoteTime : Math.max(0, this.coyoteTimer - dt);
-        if (this.jumpBufferTimer > 0) {
-            this.jumpBufferTimer -= dt;
-            if (this.jumpBufferTimer <= 0) {
-                this.jumpQueued = false;
-            }
+        // Get camera forward/right directions
+        const forward = this.camera.getDirection(BABYLON.Axis.Z);
+        forward.y = 0;
+        forward.normalize();
+
+        const right = this.camera.getDirection(BABYLON.Axis.X);
+        right.y = 0;
+        right.normalize();
+
+        // Calculate movement direction
+        let moveDir = BABYLON.Vector3.Zero();
+
+        // Keyboard input
+        if (this.input.forward) moveDir.addInPlace(forward);
+        if (this.input.backward) moveDir.subtractInPlace(forward);
+        if (this.input.right) moveDir.addInPlace(right);
+        if (this.input.left) moveDir.subtractInPlace(right);
+
+        // Debug logging (first 10 movements)
+        if (!this._moveLogCount) this._moveLogCount = 0;
+        if (this._moveLogCount < 10 && moveDir.lengthSquared() > 0) {
+            console.log(`[Player] Moving! forward=${this.input.forward}, back=${this.input.backward}, left=${this.input.left}, right=${this.input.right}`);
+            this._moveLogCount++;
         }
 
-        // Handle jump
-        if (this.jumpQueued && (this.onGround || this.coyoteTimer > 0)) {
-            this.verticalVelocity = this.jumpForce;
-            this.onGround = false;
-            this.isOnGround = false;
-            this.isJumping = true;
-            this.isMoving = true;
-            this.jumpQueued = false;
-            this.coyoteTimer = 0;
-            
-            this.playAnimation("jump");
+        // Gamepad input
+        if (this.gamepad.connected) {
+            const gamepadMove = forward.scale(-this.gamepad.moveY).add(right.scale(this.gamepad.moveX));
+            moveDir.addInPlace(gamepadMove);
         }
 
         // Apply gravity
@@ -439,88 +638,106 @@ gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
             );
         }
 
-        const targetY = groundY + this.groundOffset;
-
-        // Basic ground detection based on position vs terrain
-        if (this.mesh.position.y <= targetY + 0.02) {
-            this.mesh.position.y = targetY;
-            this.onGround = true;
-            this.isOnGround = true;
-            this.verticalVelocity = 0;
-            this.isJumping = false;
+        // GRAVITY (apply before movement so vertical velocity is included in displacement)
+        if (!this.onGround) {
+            this.verticalVelocity += this.gravity * dt;
         } else {
+            this.verticalVelocity = 0;
+            this._gravityLogCount = 0; // Reset counter when on ground
+        }
+
+        // JUMP (must release and press again to queue another jump)
+        if (this.jumpQueued && this.onGround) {
+            this.verticalVelocity = jumpSpeed;
             this.onGround = false;
-            this.isOnGround = false;
+            this.isOnGround = false; // For UI
+            this.jumpQueued = false;
+            console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
         }
 
-        // Get camera forward and right vectors (flattened on Y)
-        const cameraForward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
-        const cameraRight = this.camera.getDirection(new BABYLON.Vector3(1, 0, 0));
-        
-        const forward = new BABYLON.Vector3(cameraForward.x, 0, cameraForward.z);
-        const right = new BABYLON.Vector3(cameraRight.x, 0, cameraRight.z);
-        
-        forward.normalize();
-        right.normalize();
-
-        let moveDir = BABYLON.Vector3.Zero();
-
-        // Keyboard movement
-        if (this.input.forward) moveDir.addInPlace(forward);
-        if (this.input.backward) moveDir.subtractInPlace(forward);
-        if (this.input.right) moveDir.addInPlace(right);
-        if (this.input.left) moveDir.subtractInPlace(right);
-
-        // Gamepad movement
-        if (this.gamepad.connected) {
-            if (Math.abs(this.gamepad.moveY) > 0.01) {
-                moveDir.addInPlace(forward.scale(-this.gamepad.moveY));
-            }
-            if (Math.abs(this.gamepad.moveX) > 0.01) {
-                moveDir.addInPlace(right.scale(this.gamepad.moveX));
-            }
-        }
-
-        const hasMovement = moveDir.lengthSquared() > 0.0001;
-        if (hasMovement) {
-            moveDir.normalize();
-        }
-
-        this.isMoving = hasMovement;
-        this.isRunning = this.input.run && hasMovement;
-
-        const speed = this.isRunning ? runSpeed : walkSpeed;
-
-        if (!this._moveLogCount) this._moveLogCount = 0;
-        if (this._moveLogCount < 10 && moveDir.lengthSquared() > 0.0001) {
-            console.log(`[Player] Movement dir: (${moveDir.x.toFixed(3)}, ${moveDir.y.toFixed(3)}, ${moveDir.z.toFixed(3)}) | speed=${speed.toFixed(3)}`);
-            this._moveLogCount++;
-        }
-
+        // Combine horizontal + vertical displacement into one collision move for stability
+        const speed = this.input.run ? runSpeed : walkSpeed;
         const displacement = hasMovement ? moveDir.scale(speed * dt) : BABYLON.Vector3.Zero();
         displacement.y = this.verticalVelocity * dt;
 
         const previousPosition = this.mesh.position.clone();
         this.mesh.moveWithCollisions(displacement);
 
+        // Update facing from ACTUAL movement to avoid stale rotation when sliding/blocked
         const moved = this.mesh.position.subtract(previousPosition);
         const flatMovement = new BABYLON.Vector3(moved.x, 0, moved.z);
         if (flatMovement.lengthSquared() > 0.0001) {
             const targetRotation = Math.atan2(flatMovement.x, flatMovement.z) + Math.PI;
             this.lastFacing = targetRotation;
             if (this.visualRoot) {
-                this.visualRoot.rotation = new BABYLON.Vector3(0, this.lastFacing, 0);
+                this.visualRoot.rotation.y = targetRotation;
+            } else if (this.characterModel) {
+                this.characterModel.rotation.y = targetRotation;
+            }
+        } else if (this.visualRoot) {
+            this.visualRoot.rotation.y = this.lastFacing;
+        }
+
+        // Debug logging (first 10 frames in air)
+        if (!this.onGround && (!this._gravityLogCount || this._gravityLogCount < 10)) {
+            if (!this._gravityLogCount) this._gravityLogCount = 0;
+            console.log(`[Player] IN AIR: verticalVel=${this.verticalVelocity.toFixed(3)}, y=${this.mesh.position.y.toFixed(2)}`);
+            this._gravityLogCount++;
+        }
+
+        // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
+        let groundY = 0;
+        const prevY = previousPosition.y;
+
+        if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+            // Get exact terrain height at player's x,z position
+            groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+
+            // If below or at ground level, snap to it
+            if (this.mesh.position.y <= groundY + this.footPadding + 0.01) {
+                this.mesh.position.y = groundY + this.footPadding;
+                this.onGround = true;
+                this.isOnGround = true; // For UI
+                this.verticalVelocity = 0;
+            } else if (this.mesh.position.y === prevY) {
+                // moveWithCollisions stopped us, assume ground contact
+                this.onGround = true;
+                this.isOnGround = true;
+                this.verticalVelocity = 0;
+                this.mesh.position.y = groundY + this.footPadding;
+            } else {
+                this.onGround = false;
+                this.isOnGround = false; // For UI
+            }
+
+            // If we're hovering just above the ground without upward velocity, lock down to the surface
+            const desiredY = groundY + this.footPadding;
+            if (this.mesh.position.y > desiredY + 0.05 && this.verticalVelocity <= 0.01) {
+                this.mesh.position.y = desiredY;
+            }
+        } else {
+            // Fallback: assume flat ground at y=0
+            if (this.mesh.position.y <= this.footPadding) {
+                this.mesh.position.y = this.footPadding;
+                this.onGround = true;
+                this.isOnGround = true; // For UI
+                this.verticalVelocity = 0;
+            } else if (this.mesh.position.y === prevY) {
+                this.onGround = true;
+                this.isOnGround = true;
+                this.verticalVelocity = 0;
+                this.mesh.position.y = this.footPadding;
+            } else {
+                this.onGround = false;
+                this.isOnGround = false; // For UI
             }
         }
 
-        // Update camera target
-        this.camera.target = new BABYLON.Vector3(
-            this.mesh.position.x,
-            this.mesh.position.y + 1.0,
-            this.mesh.position.z
-        );
+        if (this.onGround && this.verticalVelocity > 0) {
+            this.verticalVelocity = 0; // prevent rebounds on landing
+        }
 
-        // Gamepad camera control (right stick) - inverted
+        // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
             const lookSpeed = 0.08;
 
@@ -530,9 +747,33 @@ gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
 
             if (Math.abs(this.gamepad.lookY) > 0.001) {
                 this.camera.beta -= this.gamepad.lookY * lookSpeed * dt;
-                const minBeta = 0.3;
-                const maxBeta = 1.3;
-                this.camera.beta = BABYLON.Scalar.Clamp(this.camera.beta, minBeta, maxBeta);
+
+                const minBeta = 0.2;
+                const maxBeta = Math.PI - 0.2;
+                if (this.camera.beta < minBeta) this.camera.beta = minBeta;
+                if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
+            }
+        }
+
+        // ============================================================
+        // SAFETY CHECKS - Collision floor right below terrain surface
+        // ============================================================
+        
+        // Layer 1: Collision floor detection (y < -0.05)
+        // Floor is at y=-0.1, so this catches ANY clipping through terrain
+        if (this.mesh.position.y < -0.05) {
+            console.warn('[Player] Clipping detected! Snapping to terrain...');
+
+            // Get accurate terrain height at current position
+            if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+                const groundY = this.scene.world.getTerrainHeight(
+                    this.mesh.position.x,
+                    this.mesh.position.z
+                );
+                this.mesh.position.y = groundY + this.footPadding;
+            } else {
+                // Fallback to safe height
+                this.mesh.position.y = this.footPadding + 0.2;
             }
         }
 
