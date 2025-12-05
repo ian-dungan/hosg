@@ -288,21 +288,21 @@ class Player {
         });
         
         const gamepadManager = new BABYLON.GamepadManager();
-        gamepadManager.onGamepadConnectedObservable.add((gamepad) => {
-            if (gamepad instanceof BABYLON.XboxGamepad) {
-                this.gamepad.connected = true;
-                this.gamepad.pad = gamepad;
-                console.log('[Player] Xbox controller connected');
-            }
-        });
-        
-        gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
-            if (gamepad === this.gamepad.pad) {
-                this.gamepad.connected = false;
-                this.gamepad.pad = null;
-                console.log('[Player] Xbox controller disconnected');
-            }
-        });
+gamepadManager.onGamepadConnectedObservable.add((gamepad) => {
+    // Some Babylon builds don’t expose BABYLON.XboxGamepad as a constructor,
+    // so don’t use instanceof against it. Just accept any gamepad.
+    this.gamepad.connected = true;
+    this.gamepad.pad = gamepad;
+    console.log('[Player] Gamepad connected:', gamepad.id || gamepad.type || 'unknown');
+});
+
+gamepadManager.onGamepadDisconnectedObservable.add((gamepad) => {
+    if (this.gamepad.pad === gamepad) {
+        this.gamepad.connected = false;
+        this.gamepad.pad = null;
+        console.log('[Player] Gamepad disconnected');
+    }
+});
         
         console.log('[Player] Input setup complete');
     }
