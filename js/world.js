@@ -284,7 +284,7 @@ class World {
         // and avoids the tunneling we were seeing with the triangle-mesh impostor.
         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
             this.terrain,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
+            BABYLON.PhysicsImpostor.MeshImpostor,
             {
                 mass: 0,              // Static (immovable)
                 friction: 0.9,        // High friction
@@ -1420,21 +1420,21 @@ class World {
     }
 
     update() {
-        // Update all entities
-        const deltaTime = this.scene.getEngine().getDeltaTime() / 1000;
-        
-        // Update NPCs
-        for (const npc of this.npcs) {
-            if (npc.update) npc.update(deltaTime);
-        }
-        
-        // Update enemies
-        for (const enemy of this.enemies) {
-            if (enemy.update) enemy.update(deltaTime);
-        }
-        
-        // Update items
-        for (let i = this.items.length - 1; i >= 0; i--) {
+    // Update all entities
+    const deltaTime = this.scene.getEngine().getDeltaTime() / 1000;
+    
+    // Update NPCs
+    for (const npc of this.npcs) {
+        if (npc.update) npc.update(deltaTime);
+    }
+    
+    // Update enemies
+    for (const enemy of this.enemies) {
+        if (enemy.update) enemy.update(deltaTime);
+    }
+    
+    // Update items
+    for (let i = this.items.length - 1; i >= 0; i--) {
             const item = this.items[i];
             if (item.update) item.update(deltaTime);
             
@@ -1442,8 +1442,8 @@ class World {
             if (item.collected) {
                 this.items.splice(i, 1);
             }
-        }
     }
+}
 
     dispose() {
         // Dispose of all resources
@@ -1934,32 +1934,33 @@ class Enemy extends Entity {
     }
 
     updateAI(deltaTime) {
-        // Find the player if we don't have a target
-        if (!this.target) {
-            this.findTarget();
-        }
-        
-        if (this.target) {
-            const distance = BABYLON.Vector3.Distance(this.position, this.target.position);
-            
-            if (distance <= this.attackRange) {
-                // Attack if in range
-                this.state = 'attacking';
-                this.attack();
-            } else if (distance <= this.detectionRange) {
-                // Chase if player is detected
-                this.state = 'chasing';
-                this.chaseTarget(deltaTime);
-            } else {
-                // Lost sight of player
-                this.state = 'idle';
-                this.target = null;
-            }
-        } else {
-            // No target, wander or idle
-            this.state = 'idle';
-        }
+    // Find the player if we don't have a target
+    if (!this.target) {
+        this.findTarget();
     }
+    
+    // Make sure the target has a mesh and a position we can use
+    if (this.target && this.target.mesh && this.target.mesh.position) {
+        const targetPos = this.target.mesh.position;
+        const distance = BABYLON.Vector3.Distance(this.position, targetPos);
+        
+        if (distance <= this.attackRange) {
+            // Attack if in range
+            this.state = 'attacking';
+            this.attack();
+        } else if (distance <= this.detectionRange) {
+            // Chase target if within detection range
+            this.state = 'chasing';
+            this.chaseTarget(deltaTime);
+        } else {
+            // Target too far, go back to patrolling
+            this.state = 'patrolling';
+        }
+    } else {
+        // No valid target, patrol
+        this.state = 'patrolling';
+    }
+}
 
     findTarget() {
         // In a real game, you would use a spatial partitioning system
@@ -2001,86 +2002,37 @@ class Enemy extends Entity {
     }
 
     attack() {
-        if (this.attackCooldown > 0 || !this.target) return;
-        
-        // Play attack animation
-        this.playAnimation('attack');
-        
-        // Check if target is in range
-        const distance = BABYLON.Vector3.Distance(this.position, this.target.position);
-        if (distance <= this.attackRange) {
-            // Apply damage to target
-            if (this.target.takeDamage) {
-                this.target.takeDamage(this.damage, this);
-            }
-        }
-        
-        // Set attack cooldown
-        this.attackCooldown = 1.0 / this.attackRate;
-        
-        // Play attack sound
-        if (this.scene.audio) {
-            this.scene.audio.playSound('enemy_attack');
+    // Need a valid target with a mesh.position
+    if (
+        this.attackCooldown > 0 ||
+        !this.target ||
+        !this.target.mesh ||
+        !this.target.mesh.position
+    ) {
+        return;
+    }
+    
+    // Play attack animation
+    this.playAnimation('attack');
+    
+    // Check if target is in range
+    const targetPos = this.target.mesh.position;
+    const distance = BABYLON.Vector3.Distance(this.position, targetPos);
+    if (distance <= this.attackRange) {
+        // Apply damage to target
+        if (typeof this.target.takeDamage === "function") {
+            this.target.takeDamage(this.damage, this);
         }
     }
-
-    takeDamage(amount, source) {
-        this.health -= amount;
-        
-        // Show damage number
-        if (this.scene.ui) {
-            this.scene.ui.showDamageNumber(amount, this.position, false);
-        }
-        
-        // Play hurt sound
-        if (this.scene.audio) {
-            this.scene.audio.playSound('enemy_hurt');
-        }
-        
-        // Check for death
-        if (this.health <= 0) {
-            this.die(source);
-            return true; // Enemy was killed
-        }
-        
-        // Aggro on attacker
-        if (source) {
-            this.target = source;
-        }
-        
-        return false; // Enemy is still alive
+    
+    // Set attack cooldown
+    this.attackCooldown = 1.0 / this.attackRate;
+    
+    // Play attack sound
+    if (this.scene.audio) {
+        this.scene.audio.playEnemyAttack(this);
     }
-
-    die(killer) {
-        this.state = 'dead';
-        this.playAnimation('die');
-        
-        // Drop loot
-        this.dropLoot(killer);
-        
-        // Grant experience to killer
-        if (killer && killer.gainExperience) {
-            killer.gainExperience(this.experience);
-        }
-        
-        // Remove from scene after a delay
-        setTimeout(() => {
-            this.dispose();
-            
-            // Remove from enemies array if it exists
-            if (this.scene.world && this.scene.world.enemies) {
-                const index = this.scene.world.enemies.indexOf(this);
-                if (index !== -1) {
-                    this.scene.world.enemies.splice(index, 1);
-                }
-            }
-        }, 2000);
-        
-        // Play death sound
-        if (this.scene.audio) {
-            this.scene.audio.playSound('enemy_death');
-        }
-    }
+}
 
     dropLoot(killer) {
         // Determine what loot to drop
