@@ -302,26 +302,19 @@ this.collisionBarrier.visibility = 0;
 this.collisionBarrier.renderingGroupId = -1;
 
 // Sit just beneath the visual terrain so feet rest on the real surface.
-// 0.5" under (approx) so nothing falls through, but you still walk on the terrain.
+// About ~0.5–1 inch below, in world units.
 const BARRIER_OFFSET = -0.02;
 this.collisionBarrier.position.y = this.terrain.position.y + BARRIER_OFFSET;
 
-// Enable collisions and physics so both kinematic and physics actors collide
+// Collisions only — DO NOT give this a physics impostor.
+// The main terrain already has a MeshImpostor for physics.
+// This barrier is just an extra collision mesh for kinematic actors.
 this.collisionBarrier.checkCollisions = true;
-this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
-    this.collisionBarrier,
-    BABYLON.PhysicsImpostor.HeightmapImpostor,
-    {
-        mass: 0,
-        friction: 1.0,
-        restitution: 0.0
-    },
-    this.scene
+this.collisionBarrier.isPickable = false;
+
+console.log(
+    `[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y (collisions only)`
 );
-
-console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y`);
-    }
-
     generateHeightmap() {
         const positions = this.terrain.getVerticesData(BABYLON.VertexBuffer.PositionKind);
         const normals = [];
