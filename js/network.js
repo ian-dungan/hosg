@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.14 (PATCHED)
-// Fix: Added the 'templates' object to the return value of loadTemplates().
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.12 (PATCHED)
+// Fixes template table names (singular -> plural) and ensures template return.
 // ============================================================
 
 //
@@ -29,7 +29,7 @@ SupabaseService.prototype._init = function () {
         return;
     }
 
-    // Default configuration if not set globally (replace with your actual URL/Key)
+    // Use actual configuration from index.html (or defaults)
     if (!this.config.url) this.config.url = 'YOUR_SUPABASE_URL';
     if (!this.config.key) this.config.key = 'YOUR_SUPABASE_ANON_KEY';
 
@@ -89,12 +89,11 @@ SupabaseService.prototype.loadTemplates = async function () {
         if (result.error) throw new Error('Failed to fetch NPC templates: ' + result.error.message);
         const npcTemplates = result.data;
 
-        // Fetch Spawn Points (Table name corrected in last patch)
+        // FIX: Corrected table name to 'hosg_npc_spawns' based on error hint
         result = await this._fetch('hosg_npc_spawns', 'spawn points'); 
         if (result.error) throw new Error('Failed to fetch spawn points: ' + result.error.message);
         const spawnPoints = result.data;
 
-        // FIX: Capture templates and return them directly
         const templates = {
             itemTemplates: itemTemplates,
             skillTemplates: skillTemplates,
@@ -102,6 +101,7 @@ SupabaseService.prototype.loadTemplates = async function () {
             spawnPoints: spawnPoints
         };
 
+        // FIX: Return the templates object on success
         return { success: true, templates: templates };
 
     } catch (error) {
@@ -182,7 +182,7 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
 var supabaseService = new SupabaseService();
 
 //
-// Network Manager (WebSocket)
+// Network Manager (WebSocket) - kept for future use
 //
 function NetworkManager() {
     this.socket = null;
