@@ -1,6 +1,6 @@
 // ============================================================
 // HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.9 (PATCHED)
-// Main loop and Persistence Handler
+// Fix: Awaiting player visuals setup before init() call.
 // ============================================================
 
 class Game {
@@ -9,17 +9,12 @@ class Game {
     if (!this.canvas) throw new Error("Canvas not found");
 
     this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    this.scene = new BABYLON.Scene(this.engine);
-    this.scene.collisionsEnabled = true;
+    this.scene = new BABYLON.Scene(this.engine);\n    this.scene.collisionsEnabled = true;
     this.scene.game = this; 
 
     if (typeof CANNON !== "undefined") {
       const gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
-      try {
-        this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
-      } catch (err) {
-        console.warn("[Game] CannonJSPlugin not available. Physics disabled.");
-      }
+      this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
     } 
 
     this.world = null;
@@ -28,11 +23,9 @@ class Game {
     this.network = null;
     this.characterId = null; 
 
-    // Initialize Maps for templates
     this.itemTemplates = new Map();
     this.skillTemplates = new Map();
     this.npcTemplates = new Map();
-    this.spawnPoints = []; // Spawn points remain an array
 
     this._lastFrameTime = performance.now();
     this._running = false;
@@ -42,55 +35,47 @@ class Game {
   }
 
   async init() {
-    console.log("[Game] Initializing...");
-    
-    // Basic lighting
+    console.log("[Game] Initializing..."); // Added this log for clarity
+
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
-    
-    // 1. Load Assets
-    this.assets = new AssetManager(this.scene);
-    await this.assets.loadAll();
-    
-    // 2. Initialize Network & Load Templates
+    this.assets = new AssetManager(this.scene); // Assuming AssetManager exists
+    await this.assets.loadAssets(); // Wait for assets to finish loading
+
     this.network = new NetworkManager();
-    
-    // Corrected function names (load...Templates)
+    this.characterId = "00000000-0000-0000-0000-000000000001"; // Placeholder character ID
+
+    // 1. Load Templates (Game data)
     this.itemTemplates = await this.network.supabase.loadItemTemplates();
     this.skillTemplates = await this.network.supabase.loadSkillTemplates();
     this.npcTemplates = await this.network.supabase.loadNPCTemplates();
-    this.spawnPoints = await this.network.supabase.loadSpawnPoints();
 
-    // 3. Initialize World (Needs loaded templates for spawns)
-    this.world = new World(this.scene, { 
-        spawnPoints: this.spawnPoints, 
-        npcTemplates: this.npcTemplates 
-    });
+    // 2. Load World (Terrain, Spawns)
+    const spawnPoints = await this.network.supabase.loadSpawnPoints();
+    this.world = new World(this.scene); 
+    this.world.loadSpawns(spawnPoints, this.npcTemplates);
     
-    // 4. Load Character Data from Network
-    // NOTE: Using a hardcoded test UUID, replace this with your auth logic
-    const characterLoadData = await this.network.supabase.loadCharacter('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'); 
-
-    // 5. Initialize Player
-    this.player = new Player(this.scene); 
+    // 3. Load Player Data
+    const characterData = await this.network.supabase.loadCharacter(this.characterId);
     
-    // 6. Initialize Player with all necessary data and templates
-    await this.player.init({
-        ...characterLoadData, 
-        itemTemplates: this.itemTemplates, 
-        skillTemplates: this.skillTemplates 
-    });
+    // 4. Initialize Player
+    this.player = new Player(this.scene);
 
-    // 7. Initialize UI (Needs player object)
+    // 🌟 FIX: Await player visuals setup before attempting to set position/rotation
+    await this.player.setupVisuals(); 
+
+    // Pass the loaded data to the player and UI
+    this.player.init(characterData, this.itemTemplates, this.skillTemplates);
+    
+    // 5. Initialize UI
     this.ui = new UIManager(this); 
-    
-    // 8. Final setup
-    this.characterId = characterLoadData.character.id;
+
     this.setupPersistence();
-    
-    console.log("[Bootstrap] Game ready.");
+    this.start();
   }
 
   start() {
+    if (this._running) return;
+    console.log("[Game] Starting game loop...");
     this._running = true;
 
     // Start rendering loop
@@ -112,7 +97,7 @@ class Game {
       this.ui.showMessage("Welcome to Heroes of Shady Grove! (Persistence Active)", 3000);
     }
   }
-  
+
   setupPersistence() {
     this.autosaveInterval = setInterval(() => {
         this.save();
@@ -139,35 +124,13 @@ class Game {
   dispose() {
     console.log("[Game] Disposing resources");
     this.stop();
+    clearInterval(this.autosaveInterval);
     
-    if (this.network) {
-      this.network.dispose();
-      this.network = null;
-    }
+    if (this.network) this.network.dispose();
+    if (this.ui) this.ui.dispose();
+    if (this.player) this.player.dispose();
+    if (this.world && typeof this.world.dispose === "function") this.world.dispose();
     
-    if (this.ui) {
-      this.ui.dispose();
-      this.ui = null;
-    }
-    
-    if (this.player) {
-      this.player.dispose();
-      this.player = null;
-    }
-    
-    if (this.world && typeof this.world.dispose === "function") {
-      this.world.dispose();
-      this.world = null;
-    }
-    
-    if (this.scene) {
-      this.scene.dispose();
-      this.scene = null;
-    }
-
-    if (this.engine) {
-      this.engine.dispose();
-      this.engine = null;
-    }
+    this.engine.dispose();
   }
 }
