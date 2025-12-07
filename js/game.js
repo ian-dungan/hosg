@@ -1,5 +1,5 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.8 (PATCHED)
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.9 (PATCHED)
 // Main loop and Persistence Handler
 // ============================================================
 
@@ -53,6 +53,8 @@ class Game {
     
     // 2. Initialize Network & Load Templates
     this.network = new NetworkManager();
+    
+    // PATCH: Use the correct function names (load...Templates)
     this.itemTemplates = await this.network.supabase.loadItemTemplates();
     this.skillTemplates = await this.network.supabase.loadSkillTemplates();
     this.npcTemplates = await this.network.supabase.loadNPCTemplates();
@@ -88,9 +90,7 @@ class Game {
     console.log("[Bootstrap] Game ready.");
   }
 
-  // ... (start, setupPersistence, save, dispose methods are assumed correct)
   start() {
-    // ... (Your existing start logic)
     this._running = true;
 
     // Start rendering loop
@@ -113,7 +113,6 @@ class Game {
     }
   }
   
-  // ... (rest of the file)
   setupPersistence() {
     this.autosaveInterval = setInterval(() => {
         this.save();
@@ -171,5 +170,4 @@ class Game {
       this.engine = null;
     }
   }
-
 }
