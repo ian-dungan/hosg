@@ -150,9 +150,10 @@ class Player {
     
     async waitForTerrain(maxAttempts) {
         for (let i = 0; i < maxAttempts; i++) {
+            // PATCH: Checking for 'terrain' mesh specifically
             const terrain = this.scene.getMeshByName('terrain');
             
-            if (terrain && terrain.isEnabled() && terrain.physicsImpostor) {
+            if (terrain && terrain.isEnabled() && terrain.checkCollisions) {
                 console.log(`[Player] Found terrain after ${i + 1} attempts`);
                 return terrain;
             }
@@ -325,9 +326,14 @@ class Player {
     }
     
     setupInput() {
-    const canvas = this.scene.getEngine().getRenderingCanvas();
+        const canvas = this.scene.getEngine().getRenderingCanvas();
+        // PATCH: Prevent mobile scrolling
+        if (canvas) {
+            canvas.style.touchAction = "none";
+            canvas.style.outline = "none";
+        }
 
-// Keyboard input
+        // Keyboard input
         this.scene.onKeyboardObservable.add((kbInfo) => {
             const key = kbInfo.event.key.toLowerCase();
             const isDown = (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN);
@@ -383,122 +389,122 @@ class Player {
             }
         });
         
-            console.log('[Player] ✓ Input setup complete');
+        console.log('[Player] ✓ Input setup complete');
 
-    // Mobile touch controls (iPhone/iPad/Android)
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-        this.setupTouchControls(canvas);
+        // Mobile touch controls (iPhone/iPad/Android)
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            this.setupTouchControls(canvas);
+        }
     }
-}
 
     
     
-setupTouchControls(canvas) {
-    console.log('[Player] ✓ Touch controls enabled (mobile)');
+    setupTouchControls(canvas) {
+        console.log('[Player] ✓ Touch controls enabled (mobile)');
 
-    let joystickTouchId = null;
-    let joystickStartX = 0;
-    let joystickStartY = 0;
+        let joystickTouchId = null;
+        let joystickStartX = 0;
+        let joystickStartY = 0;
 
-    const DEADZONE = 20;
-    const RUNZONE  = 80;
+        const DEADZONE = 20;
+        const RUNZONE  = 80;
 
-    const resetDirections = () => {
-        this.input.forward  = false;
-        this.input.backward = false;
-        this.input.left     = false;
-        this.input.right    = false;
-        this.input.run      = false;
-    };
+        const resetDirections = () => {
+            this.input.forward  = false;
+            this.input.backward = false;
+            this.input.left     = false;
+            this.input.right    = false;
+            this.input.run      = false;
+        };
 
-    const updateFromTouch = (x, y) => {
-        const dx = x - joystickStartX;
-        const dy = y - joystickStartY;
+        const updateFromTouch = (x, y) => {
+            const dx = x - joystickStartX;
+            const dy = y - joystickStartY;
 
-        resetDirections();
+            resetDirections();
 
-        const absDx = Math.abs(dx);
-        const absDy = Math.abs(dy);
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
 
-        if (absDy > DEADZONE) {
-            if (dy < 0) this.input.forward = true;
-            else        this.input.backward = true;
-        }
+            if (absDy > DEADZONE) {
+                if (dy < 0) this.input.forward = true;
+                else        this.input.backward = true;
+            }
 
-        if (absDx > DEADZONE) {
-            if (dx < 0) this.input.left = true;
-            else        this.input.right = true;
-        }
+            if (absDx > DEADZONE) {
+                if (dx < 0) this.input.left = true;
+                else        this.input.right = true;
+            }
 
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        this.input.run = dist > RUNZONE;
-    };
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            this.input.run = dist > RUNZONE;
+        };
 
-    const onTouchStart = (evt) => {
-        if (!evt.changedTouches || evt.changedTouches.length === 0) return;
+        const onTouchStart = (evt) => {
+            if (!evt.changedTouches || evt.changedTouches.length === 0) return;
 
-        for (let i = 0; i < evt.changedTouches.length; i++) {
-            const t = evt.changedTouches[i];
-            const x = t.clientX;
-            const y = t.clientY;
+            for (let i = 0; i < evt.changedTouches.length; i++) {
+                const t = evt.changedTouches[i];
+                const x = t.clientX;
+                const y = t.clientY;
 
-            if (x < window.innerWidth * 0.5) {
-                if (joystickTouchId === null) {
-                    joystickTouchId = t.identifier;
-                    joystickStartX = x;
-                    joystickStartY = y;
-                    updateFromTouch(x, y);
+                if (x < window.innerWidth * 0.5) {
+                    if (joystickTouchId === null) {
+                        joystickTouchId = t.identifier;
+                        joystickStartX = x;
+                        joystickStartY = y;
+                        updateFromTouch(x, y);
+                    }
+                } else {
+                    if (!this.jumpHeld) {
+                        this.queueJump();
+                        this.jumpHeld = true;
+                    }
                 }
-            } else {
-                if (!this.jumpHeld) {
-                    this.queueJump();
-                    this.jumpHeld = true;
+            }
+
+            evt.preventDefault();
+        };
+
+        const onTouchMove = (evt) => {
+            if (joystickTouchId === null) return;
+            if (!evt.changedTouches) return;
+
+            for (let i = 0; i < evt.changedTouches.length; i++) {
+                const t = evt.changedTouches[i];
+                if (t.identifier === joystickTouchId) {
+                    updateFromTouch(t.clientX, t.clientY);
+                    break;
                 }
             }
-        }
 
-        evt.preventDefault();
-    };
+            evt.preventDefault();
+        };
 
-    const onTouchMove = (evt) => {
-        if (joystickTouchId === null) return;
-        if (!evt.changedTouches) return;
+        const onTouchEnd = (evt) => {
+            if (!evt.changedTouches) return;
 
-        for (let i = 0; i < evt.changedTouches.length; i++) {
-            const t = evt.changedTouches[i];
-            if (t.identifier === joystickTouchId) {
-                updateFromTouch(t.clientX, t.clientY);
-                break;
+            for (let i = 0; i < evt.changedTouches.length; i++) {
+                const t = evt.changedTouches[i];
+                if (t.identifier === joystickTouchId) {
+                    joystickTouchId = null;
+                    resetDirections();
+                    break;
+                }
             }
-        }
 
-        evt.preventDefault();
-    };
+            this.releaseJump();
 
-    const onTouchEnd = (evt) => {
-        if (!evt.changedTouches) return;
+            evt.preventDefault();
+        };
 
-        for (let i = 0; i < evt.changedTouches.length; i++) {
-            const t = evt.changedTouches[i];
-            if (t.identifier === joystickTouchId) {
-                joystickTouchId = null;
-                resetDirections();
-                break;
-            }
-        }
+        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+        canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
+        canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
+        canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
+    }
 
-        this.releaseJump();
-
-        evt.preventDefault();
-    };
-
-    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-    canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
-    canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
-    canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
-}
-
-setupGamepad() {
+    setupGamepad() {
         // Gamepad connection events
         window.addEventListener('gamepadconnected', (e) => {
             console.log('[Player] Gamepad connected:', e.gamepad.id);
@@ -679,11 +685,11 @@ setupGamepad() {
             this._gravityLogCount++;
         }
 
-                // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
+        // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
         let groundY = 0;
         const prevY = previousPosition.y;
 
-        // Determine terrain height under the player
+        // Determine terrain height under the player using fixed World method
         if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
             groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
         } else {
@@ -766,19 +772,7 @@ setupGamepad() {
                 // Fallback to safe height
                 this.mesh.position.y = this.groundOffset + 0.2;
             }
-
-            if (this.mesh.physicsImpostor) {
-                this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-                this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
-
-                if (this.mesh.physicsImpostor.physicsBody) {
-                    const body = this.mesh.physicsImpostor.physicsBody;
-                    body.position.set(this.mesh.position.x, this.mesh.position.y, this.mesh.position.z);
-                    body.velocity.set(0, 0, 0);
-                    body.angularVelocity.set(0, 0, 0);
-                }
-            }
-
+            
             this.verticalVelocity = 0;
             this.onGround = true;
             this.isOnGround = true; // For UI
@@ -789,18 +783,6 @@ setupGamepad() {
         if (this.mesh.position.y < -1) {
             console.warn('[Player] Emergency reset!');
             this.mesh.position.y = 20;
-
-            if (this.mesh.physicsImpostor) {
-                this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-                this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
-
-                if (this.mesh.physicsImpostor.physicsBody) {
-                    const body = this.mesh.physicsImpostor.physicsBody;
-                    body.position.set(this.mesh.position.x, this.mesh.position.y, this.mesh.position.z);
-                    body.velocity.set(0, 0, 0);
-                    body.angularVelocity.set(0, 0, 0);
-                }
-            }
 
             this.verticalVelocity = 0;
             this.onGround = false;
