@@ -1,6 +1,6 @@
 // ============================================================
 // HEROES OF SHADY GROVE - PLAYER CLASS v1.0.8
-// Requires Character (from world.js), Ability, Item
+// Requires Character (from world.js), Ability, Item (from item.js)
 // ============================================================
 
 class Player extends Character {
@@ -29,8 +29,8 @@ class Player extends Character {
             attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE
         };
         
-        this.inventory = new Inventory(this);
-        this.equipment = new Equipment(this);
+        this.inventory = new Inventory(this); // Now defined in item.js
+        this.equipment = new Equipment(this); // Now defined in item.js
         this.abilities = []; 
         
         this.input = {
