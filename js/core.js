@@ -1,10 +1,10 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.9 (PATCHED)
-// Fix: Added missing CONFIG.COMBAT block.
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.11
+// Core configuration constants (Patched with Mana/Combat/Supabase config)
 // ============================================================
 
 const CONFIG = {
-    VERSION: '1.0.9',
+    VERSION: '1.0.11',
     DEBUG: true,
     
     GAME: {
@@ -13,17 +13,12 @@ const CONFIG = {
         PHYSICS_ENGINE: 'cannon'
     },
     
-    COMBAT: { // <--- ADDED THIS BLOCK
-        BASE_ATTACK_RANGE: 3.0,
-        GLOBAL_COOLDOWN: 1.5,
-    },
-    
     PLAYER: {
         MOVE_SPEED: 0.15,
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 0.22,
         HEALTH: 100,
-        MANA: 50, 
+        MANA: 50, // Added Mana
         STAMINA: 100,
         INVENTORY_SIZE: 20,
         SPAWN_HEIGHT: 20,
@@ -50,10 +45,20 @@ const CONFIG = {
         MAX_PLAYERS: 100,
         TICK_RATE: 20
     },
-    
+
+    // === ADDED COMBAT BLOCK ===
+    COMBAT: {
+        BASE_ATTACK_RANGE: 3.0, // Default range for melee auto-attacks
+        GLOBAL_COOLDOWN_MS: 1000,
+        MIN_DAMAGE: 1,
+        MAX_DAMAGE: 5
+    },
+    // ==========================
+
+    // NOTE: Supabase config is pulled from window.SUPABASE_CONFIG in index.html,
+    // but a placeholder is kept here for safety.
     SUPABASE: {
-        // Will be overwritten by window.SUPABASE_CONFIG if defined in index.html
-        url: 'YOUR_SUPABASE_URL', 
+        url: 'YOUR_SUPABASE_URL',
         key: 'YOUR_SUPABASE_ANON_KEY'
     }
 };
