@@ -1,5 +1,5 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.9 (PATCHED)
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.10 (PATCHED)
 // Supabase wrapper for data persistence and template loading
 // ============================================================
 
@@ -61,13 +61,12 @@ SupabaseService.prototype.getClient = function () {
 SupabaseService.prototype.loadItemTemplates = async function () {
     try {
         const { data, error } = await this.client
-            .from('hosg_item_template')
+            .from('hosg_item_templates')
             .select('*');
 
         if (error) throw error;
 
         console.log(`[Supabase] Fetched ${data.length} item templates.`);
-        // Convert array to Map (ID -> Template)
         return new Map(data.map(template => [template.id, template]));
     } catch (error) {
         console.error('[Supabase] Failed to load item templates:', error.message);
@@ -81,13 +80,12 @@ SupabaseService.prototype.loadItemTemplates = async function () {
 SupabaseService.prototype.loadSkillTemplates = async function () {
     try {
         const { data, error } = await this.client
-            .from('hosg_skill_template')
+            .from('hosg_skill_templates')
             .select('*');
 
         if (error) throw error;
 
         console.log(`[Supabase] Fetched ${data.length} skill templates.`);
-        // Convert array to Map (ID -> Template)
         return new Map(data.map(template => [template.id, template]));
     } catch (error) {
         console.error('[Supabase] Failed to load skill templates:', error.message);
@@ -101,13 +99,12 @@ SupabaseService.prototype.loadSkillTemplates = async function () {
 SupabaseService.prototype.loadNPCTemplates = async function () {
     try {
         const { data, error } = await this.client
-            .from('hosg_npc_template')
+            .from('hosg_npc_templates')
             .select('*');
 
         if (error) throw error;
 
         console.log(`[Supabase] Fetched ${data.length} NPC templates.`);
-        // Convert array to Map (ID -> Template)
         return new Map(data.map(template => [template.id, template]));
     } catch (error) {
         console.error('[Supabase] Failed to load NPC templates:', error.message);
@@ -116,14 +113,14 @@ SupabaseService.prototype.loadNPCTemplates = async function () {
 };
 
 /**
- * Load all world spawn points
+ * Load all world spawn points (NPC Spawns)
  * @returns {Promise<Array>} Array of spawn point objects
  */
 SupabaseService.prototype.loadSpawnPoints = async function () {
     try {
-        // PATCH: Correcting the table name to hosg_spawnpoint (singular/no underscore)
+        // PATCH: Corrected table name based on schema (hosg_npc_spawns)
         const { data, error } = await this.client
-            .from('hosg_spawnpoint') // <-- Patched table name
+            .from('hosg_npc_spawns') // <--- CORRECTED TABLE NAME
             .select('*');
 
         if (error) throw error;
@@ -132,6 +129,7 @@ SupabaseService.prototype.loadSpawnPoints = async function () {
         return data || []; // This should remain an array for World initialization
     } catch (error) {
         console.error('[Supabase] Failed to load spawn points:', error.message);
+        // We throw here because the game cannot proceed without this data
         throw error;
     }
 };
@@ -146,7 +144,6 @@ SupabaseService.prototype.loadSpawnPoints = async function () {
  * @returns {Promise<Object>} An object containing character, inventory_items, equipped_items, player_skills
  */
 SupabaseService.prototype.loadCharacter = async function (characterId) {
-    // ... (rest of loadCharacter is unchanged)
     try {
         // 1. Load basic character stats
         const { data: charData, error: charError } = await this.client
@@ -192,7 +189,6 @@ SupabaseService.prototype.loadCharacter = async function (characterId) {
 
     } catch (error) {
         console.error('[Supabase] Failed to load character:', error.message);
-        // Throwing the error prevents Game from starting with bad data
         throw error;
     }
 };
@@ -214,7 +210,6 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
                 position_y: state.position.y,
                 position_z: state.position.z,
                 rotation_y: state.rotation_y,
-                // Simplified stats update (assuming stats object can be JSONB)
                 stats_json: state.stats,
                 health: state.health,
                 mana: state.mana,
@@ -225,7 +220,6 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
         if (updateCharError) throw updateCharError;
         
         // 2. Update Inventory
-        // Delete all old inventory items and insert new ones
         await this.client.from('hosg_character_items').delete().eq('character_id', characterId); 
         const newInventoryData = state.inventory.map(item => ({ ...item, character_id: characterId, id: undefined }));
         if (newInventoryData.length > 0) {
@@ -234,7 +228,6 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
         }
 
         // 3. Update Equipment
-        // Delete all old equipment and insert new ones
         await this.client.from('hosg_character_equipment').delete().eq('character_id', characterId); 
         const newEquipmentData = state.equipment.map(item => ({ ...item, character_id: characterId, id: undefined }));
         if (newEquipmentData.length > 0) {
@@ -254,7 +247,7 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
 var supabaseService = new SupabaseService();
 
 //
-// Network Manager (WebSocket) - kept for future use
+// Network Manager (WebSocket)
 //
 function NetworkManager() {
     this.socket = null;
