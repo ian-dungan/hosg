@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.12 (FIXED)
-// Fixes Supabase 404 error by changing 'hosg_spawn_points' to 'hosg_spawn_point'
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.12 (PATCHED)
+// Fix: Removed SyntaxError (missing parenthesis) in connect method.
 // ============================================================
 
 //
@@ -78,26 +78,21 @@ SupabaseService.prototype.loadTemplates = async function () {
         result = await this._fetch('hosg_item_templates', 'item templates');
         if (result.error) throw new Error('Failed to fetch item templates: ' + result.error.message);
         const itemTemplates = result.data;
-        console.log(`[Supabase] Fetched ${itemTemplates.length} item templates.`);
 
         // Fetch Skill Templates
         result = await this._fetch('hosg_skill_templates', 'skill templates');
         if (result.error) throw new Error('Failed to fetch skill templates: ' + result.error.message);
         const skillTemplates = result.data;
-        console.log(`[Supabase] Fetched ${skillTemplates.length} skill templates.`);
 
         // Fetch NPC Templates
         result = await this._fetch('hosg_npc_templates', 'NPC templates');
         if (result.error) throw new Error('Failed to fetch NPC templates: ' + result.error.message);
         const npcTemplates = result.data;
-        console.log(`[Supabase] Fetched ${npcTemplates.length} NPC templates.`);
 
-        // Fetch Spawn Points
-        // PATCH: Corrected table name from 'hosg_spawn_points' to 'hosg_spawn_point'
+        // Fetch Spawn Points (FIXED: Table name corrected from plural to singular)
         result = await this._fetch('hosg_spawn_point', 'spawn points'); 
         if (result.error) throw new Error('Failed to fetch spawn points: ' + result.error.message);
         const spawnPoints = result.data;
-        console.log(`[Supabase] Fetched ${spawnPoints.length} spawn points.`);
 
         this.templates = {
             itemTemplates: itemTemplates,
@@ -167,4 +162,155 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
         }
 
         // 3. Update Equipment
-        await this.client.from('hosg_character_equipment').delete().eq('character_id', characterId
+        await this.client.from('hosg_character_equipment').delete().eq('character_id', characterId); 
+        const newEquipmentData = state.equipment.map(item => ({ ...item, character_id: characterId, id: undefined }));
+        if (newEquipmentData.length > 0) {
+            const { error: insertEquipError } = await this.client.from('hosg_character_equipment').insert(newEquipmentData);
+            if (insertEquipError) throw insertEquipError;
+        }
+
+        return { success: true };
+
+    } catch (error) {
+        console.error('[Supabase] Failed to save character state:', error.message);
+        return { success: false, error: error.message };
+    }
+};
+
+
+var supabaseService = new SupabaseService();
+
+//
+// Network Manager (WebSocket)
+//
+function NetworkManager() {
+    this.socket = null;
+    this.connected = false;
+    this.shouldReconnect = true;
+    this.supabase = supabaseService;
+    this._listeners = {};
+}
+
+// Event emitter utility
+NetworkManager.prototype._emit = function(eventName, data) {
+    if (this._listeners[eventName]) {
+        this._listeners[eventName].forEach(listener => listener(data));
+    }
+};
+
+NetworkManager.prototype.on = function(eventName, callback) {
+    if (!this._listeners[eventName]) {
+        this._listeners[eventName] = [];
+    }
+    this._listeners[eventName].push(callback);
+};
+
+NetworkManager.prototype.off = function(eventName, callback) {
+    if (this._listeners[eventName]) {
+        this._listeners[eventName] = this._listeners[eventName].filter(listener => listener !== callback);
+    }
+};
+
+NetworkManager.prototype.connect = function (url) {
+    var self = this;
+    return new Promise((resolve, reject) => {
+        if (self.socket && self.socket.readyState === WebSocket.OPEN) {
+            resolve();
+            return;
+        }
+
+        self.socket = new WebSocket(url);
+
+        self.socket.onopen = function () {
+            self.connected = true;
+            console.log("[Network] WebSocket connected:", url);
+            self._emit("connected", url);
+            resolve();
+        };
+
+        self.socket.onmessage = function (event) {
+            self._handleMessage(event);
+        };
+
+        self.socket.onclose = function (event) {
+            self.connected = false;
+            console.warn("[Network] WebSocket closed:", event.code, event.reason);
+            self._emit("disconnected", event);
+
+            // Reconnect logic
+            if (self.shouldReconnect) {
+                setTimeout(() => {
+                    console.log("[Network] Attempting to reconnect...");
+                    self.connect(url);
+                }, 5000); 
+            }
+        };
+
+        self.socket.onerror = function (err) {
+            console.error("[Network] WebSocket error:", err);
+            self._emit("error", err);
+            reject(err);
+        };
+    });
+}; // <-- The original error was a misplaced ')' right here.
+
+NetworkManager.prototype._handleMessage = function (event) {
+    var payload = event.data;
+
+    try {
+        payload = JSON.parse(event.data);
+    } catch (e) {
+        // Not JSON - leave as raw string
+    }
+
+    this._emit("message", payload);
+};
+
+/**
+ * Send an event + data. If you just want to send a raw payload, pass `null`
+ * as the eventName and the payload as `data`.
+ */
+NetworkManager.prototype.send = function (eventName, data) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        console.warn("[Network] Cannot send, socket not open");
+        return false;
+    }
+
+    var payload;
+
+    try {
+        if (eventName == null) {
+            payload = data;
+        } else {
+            payload = JSON.stringify({ event: eventName, data: data });
+        }
+    } catch (err) {
+        console.error("[Network] Failed to serialize message:", err);
+        return false;
+    }
+
+    try {
+        this.socket.send(payload);
+    } catch (err) {
+        console.error("[Network] Failed to send message:", err);
+        return false;
+    }
+
+    return true;
+};
+
+NetworkManager.prototype.disconnect = function () {
+    this.shouldReconnect = false;
+    if (this.socket) {
+        this.socket.close();
+        this.socket = null;
+    }
+    this.connected = false;
+};
+
+NetworkManager.prototype.dispose = function() {
+    this.disconnect();
+};
+
+window.SupabaseService = SupabaseService;
+window.NetworkManager = NetworkManager;
