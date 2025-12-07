@@ -1,10 +1,10 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.8
-// Core configuration constants (Patched with Mana/Combat)
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.9 (PATCHED)
+// Fix: Added missing CONFIG.COMBAT block.
 // ============================================================
 
 const CONFIG = {
-    VERSION: '1.0.8',
+    VERSION: '1.0.9',
     DEBUG: true,
     
     GAME: {
@@ -13,12 +13,17 @@ const CONFIG = {
         PHYSICS_ENGINE: 'cannon'
     },
     
+    COMBAT: { // <--- ADDED THIS BLOCK
+        BASE_ATTACK_RANGE: 3.0,
+        GLOBAL_COOLDOWN: 1.5,
+    },
+    
     PLAYER: {
         MOVE_SPEED: 0.15,
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 0.22,
         HEALTH: 100,
-        MANA: 50, // Added Mana
+        MANA: 50, 
         STAMINA: 100,
         INVENTORY_SIZE: 20,
         SPAWN_HEIGHT: 20,
@@ -45,12 +50,10 @@ const CONFIG = {
         MAX_PLAYERS: 100,
         TICK_RATE: 20
     },
-
-    // ======== NEW COMBAT CONSTANTS ========
-    COMBAT: {
-        GLOBAL_COOLDOWN: 0.5, // 0.5 seconds GCD
-        BASE_MELEE_DAMAGE: 5,
-        BASE_ATTACK_RANGE: 2.5,
-        BASE_CAST_RANGE: 15
+    
+    SUPABASE: {
+        // Will be overwritten by window.SUPABASE_CONFIG if defined in index.html
+        url: 'YOUR_SUPABASE_URL', 
+        key: 'YOUR_SUPABASE_ANON_KEY'
     }
 };
