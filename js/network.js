@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.11 (PATCHED)
-// Fixes template table names (singular -> plural)
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.12 (PATCHED)
+// Fix: Changed loadCharacterState to use .maybeSingle() for graceful character loading.
 // ============================================================
 
 //
@@ -50,179 +50,119 @@ SupabaseService.prototype.getClient = function () {
     return this.client;
 };
 
+// Internal fetch helper
+SupabaseService.prototype._fetch = async function (table, type) {
+    console.log(`[Supabase] Fetching ${type}...`);
+    const { data, error, status } = await this.client.from(table).select('*');
 
-// ----------------------------------------------------------------
-// TEMPLATE LOADING FUNCTIONS
-// ----------------------------------------------------------------
-
-/**
- * Load all item templates (Maps: ID -> Template)
- */
-SupabaseService.prototype.loadItemTemplates = async function () {
-    try {
-        // PATCH: Corrected to use plural form 'hosg_item_templates'
-        const { data, error } = await this.client
-            .from('hosg_item_templates') // <--- CORRECTED
-            .select('*');
-
-        if (error) throw error;
-
-        console.log(`[Supabase] Fetched ${data.length} item templates.`);
-        return new Map(data.map(template => [template.id, template]));
-    } catch (error) {
-        console.error('[Supabase] Failed to load item templates:', error.message);
+    if (error && status !== 406) {
+        console.error(`[Supabase] Failed to fetch ${type}:`, error);
         throw error;
     }
+    console.log(`[Supabase] Fetched ${data ? data.length : 0} ${type}.`);
+    return data;
 };
 
 /**
- * Load all skill templates (Maps: ID -> Template)
+ * Loads all static templates (items, skills, npcs, spawns) into the game's Maps.
  */
-SupabaseService.prototype.loadSkillTemplates = async function () {
+SupabaseService.prototype.loadTemplates = async function () {
+    console.log("[Supabase] Loading all templates...");
+
     try {
-        // PATCH: Corrected to use plural form 'hosg_skill_templates'
-        const { data, error } = await this.client
-            .from('hosg_skill_templates') // <--- CORRECTED
-            .select('*');
+        // Fetch all four template types
+        const [items, skills, npcs, spawns] = await Promise.all([
+            this._fetch('hosg_item_templates', 'item templates'),
+            this._fetch('hosg_skill_templates', 'skill templates'),
+            this._fetch('hosg_npc_templates', 'NPC templates'),
+            this._fetch('hosg_spawn_points', 'spawn points') 
+        ]);
 
-        if (error) throw error;
+        // Map data to the Game instance's Maps (assuming this is called from Game.init)
+        // Note: The game instance maps are updated directly, as `this.game` is passed
+        // but since `loadTemplates` is called before `this.game` is fully initialized,
+        // the mapping is done back in `game.js`.
 
-        console.log(`[Supabase] Fetched ${data.length} skill templates.`);
-        return new Map(data.map(template => [template.id, template]));
-    } catch (error) {
-        console.error('[Supabase] Failed to load skill templates:', error.message);
-        throw error;
-    }
-};
-
-/**
- * Load all NPC/Enemy templates (Maps: ID -> Template)
- */
-SupabaseService.prototype.loadNPCTemplates = async function () {
-    try {
-        // PATCH: Corrected to use plural form 'hosg_npc_templates'
-        const { data, error } = await this.client
-            .from('hosg_npc_templates') // <--- CORRECTED
-            .select('*');
-
-        if (error) throw error;
-
-        console.log(`[Supabase] Fetched ${data.length} NPC templates.`);
-        return new Map(data.map(template => [template.id, template]));
-    } catch (error) {
-        console.error('[Supabase] Failed to load NPC templates:', error.message);
-        throw error;
-    }
-};
-
-/**
- * Load all world spawn points (NPC Spawns)
- * @returns {Promise<Array>} Array of spawn point objects
- */
-SupabaseService.prototype.loadSpawnPoints = async function () {
-    try {
-        // PATCH: Corrected table name to 'hosg_npc_spawns' based on schema
-        const { data, error } = await this.client
-            .from('hosg_npc_spawns') // <--- CORRECTED
-            .select('*');
-
-        if (error) throw error;
-
-        console.log(`[Supabase] Fetched ${data.length} spawn points.`);
-        return data || []; 
-    } catch (error) {
-        console.error('[Supabase] Failed to load spawn points:', error.message);
-        throw error;
-    }
-};
-
-// ----------------------------------------------------------------
-// PERSISTENCE FUNCTIONS
-// (These were already using the correct plural names and are unchanged)
-// ----------------------------------------------------------------
-
-/**
- * Load character data by UUID
- * @param {string} characterId - The UUID of the character to load
- * @returns {Promise<Object>} An object containing character, inventory_items, equipped_items, player_skills
- */
-SupabaseService.prototype.loadCharacter = async function (characterId) {
-    try {
-        // 1. Load basic character stats
-        const { data: charData, error: charError } = await this.client
-            .from('hosg_characters')
-            .select('*')
-            .eq('id', characterId)
-            .single();
-
-        if (charError) throw charError;
-
-        // 2. Load inventory items
-        const { data: inventoryData, error: invError } = await this.client
-            .from('hosg_character_items')
-            .select('*')
-            .eq('character_id', characterId);
-
-        if (invError) throw invError;
-        
-        // 3. Load equipped items
-        const { data: equipmentData, error: equipError } = await this.client
-            .from('hosg_character_equipment')
-            .select('*')
-            .eq('character_id', characterId);
-            
-        if (equipError) throw equipError;
-        
-        // 4. Load player skills
-        const { data: skillData, error: skillError } = await this.client
-            .from('hosg_character_skills')
-            .select('*')
-            .eq('character_id', characterId);
-
-        if (skillError) throw skillError;
-
-        console.log(`[Supabase] Loaded character ${charData.name}`);
-        
-        return {
-            character: charData,
-            inventory_items: inventoryData,
-            equipped_items: equipmentData,
-            player_skills: skillData 
+        console.log("[Supabase] All templates loaded.");
+        return { 
+            itemTemplates: items, 
+            skillTemplates: skills, 
+            npcTemplates: npcs,
+            spawnPoints: spawns 
         };
+    } catch (error) {
+        console.error("[Supabase] Failed to load templates:", error);
+        throw new Error("Failed to load game data from Supabase.");
+    }
+};
+
+/**
+ * Loads a character's state, inventory, and equipment.
+ * @param {string} characterId - The UUID of the character to load.
+ * @returns {Object|null} The character state object, or null if not found.
+ */
+SupabaseService.prototype.loadCharacterState = async function (characterId) {
+    if (!this.client) return null;
+
+    try {
+        // Fetch character state and nested items/equipment via a JOIN/FOREIGN KEY relationship
+        const { data: characterData, error: charError } = await this.client
+            .from('hosg_characters')
+            .select('*, items:hosg_character_items(*), equipment:hosg_character_equipment(*)')
+            .eq('id', characterId)
+            // === PATCH: Use maybeSingle() to return null instead of throwing error on 0 rows ===
+            .maybeSingle(); 
+
+        if (charError && charError.code !== 'PGRST116') { // PGRST116 is the error code for '0 rows'
+            console.error('[Supabase] Failed to load character:', charError);
+            throw charError;
+        }
+
+        if (!characterData) {
+            console.log('[Supabase] Character not found. Will create new.');
+            return null; // Character not found
+        }
+        
+        console.log(`[Supabase] Loaded character ${characterId}.`);
+        return characterData;
 
     } catch (error) {
         console.error('[Supabase] Failed to load character:', error.message);
-        throw error;
+        throw error; // Re-throw critical errors for Game.init to handle
     }
 };
 
-
 /**
- * Save character position, stats, inventory, and equipment.
- * @param {string} characterId - The UUID of the character
- * @param {Object} state - The state object from player.getSaveData()
- * @returns {Promise<Object>} { success: boolean, error: string? }
+ * Saves the player's current state, inventory, and equipment.
+ * @param {string} characterId - The UUID of the character to save.
+ * @param {Object} state - The data from player.getSaveData().
+ * @returns {Object} { success: boolean, error?: string }
  */
 SupabaseService.prototype.saveCharacterState = async function (characterId, state) {
+    if (!this.client) return { success: false, error: 'Supabase client not initialized.' };
+
     try {
-        // 1. Update character record
-        const { error: updateCharError } = await this.client
+        // 1. Update Character Table (Main Stats, Position, Rotation)
+        const charUpdate = {
+            name: state.name || 'Hero', // Assuming player has a name property now
+            position_x: state.position.x,
+            position_y: state.position.y,
+            position_z: state.position.z,
+            rotation_y: state.rotation_y,
+            health: state.health,
+            mana: state.mana,
+            stamina: state.stamina,
+            stats: state.stats // Saves the entire stats object as JSONB
+        };
+
+        const { error: updateError } = await this.client
             .from('hosg_characters')
-            .update({
-                position_x: state.position.x,
-                position_y: state.position.y,
-                position_z: state.position.z,
-                rotation_y: state.rotation_y,
-                stats_json: state.stats,
-                health: state.health,
-                mana: state.mana,
-                stamina: state.stamina
-            })
+            .update(charUpdate)
             .eq('id', characterId);
 
-        if (updateCharError) throw updateCharError;
-        
-        // 2. Update Inventory
+        if (updateError) throw updateError;
+
+        // 2. Update Inventory (Delete all then re-insert current items)
         await this.client.from('hosg_character_items').delete().eq('character_id', characterId); 
         const newInventoryData = state.inventory.map(item => ({ ...item, character_id: characterId, id: undefined }));
         if (newInventoryData.length > 0) {
@@ -230,7 +170,7 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
             if (insertInvError) throw insertInvError;
         }
 
-        // 3. Update Equipment
+        // 3. Update Equipment (Delete all then re-insert current equipment)
         await this.client.from('hosg_character_equipment').delete().eq('character_id', characterId); 
         const newEquipmentData = state.equipment.map(item => ({ ...item, character_id: characterId, id: undefined }));
         if (newEquipmentData.length > 0) {
@@ -252,11 +192,13 @@ var supabaseService = new SupabaseService();
 //
 // Network Manager (WebSocket)
 //
-function NetworkManager() {
+function NetworkManager(game) {
+    this.game = game; // Added for context access
     this.socket = null;
     this.connected = false;
     this.shouldReconnect = true;
     this.supabase = supabaseService;
+    this.supabase.game = game; // Give Supabase access to game instance (e.g. for maps)
     this._listeners = {};
 }
 // ... (rest of NetworkManager prototype methods)
@@ -266,4 +208,8 @@ NetworkManager.prototype.dispose = function() {
         this.socket.close();
         this.socket = null;
     }
+    this.connected = false;
 };
+// Expose the service globally
+window.SupabaseService = SupabaseService;
+window.NetworkManager = NetworkManager;
