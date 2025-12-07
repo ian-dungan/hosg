@@ -18,9 +18,10 @@ class AssetManager {
             loaded: 0
         };
         this.loader = new BABYLON.AssetsManager(scene);
+        
+        // PATCH: Bind methods used as callbacks to the instance
+        this.printStats = this.printStats.bind(this);
     }
-    
-    // ... (Your existing loadAll, loadModel, getMaterial, etc. methods) ...
 
     async loadAll() {
         console.log('[Assets] Starting asset load...');
@@ -40,7 +41,8 @@ class AssetManager {
         }
 
         return new Promise((resolve, reject) => {
-            this.loader.onFinish = (tasks) => {
+            // PATCH: Ensure arrow function is used for correct 'this' context
+            this.loader.onFinish = (tasks) => { 
                 this.printStats();
                 console.log(`[Assets] Asset system loaded (v${CONFIG.VERSION})`);
                 resolve(true);
@@ -82,10 +84,26 @@ class AssetManager {
     
     // ... (getAsset method) ...
 
-    // ... (createMaterial, createProceduralSkybox, getStats, printStats methods) ...
+    // ========== STATS ==========
+    getStats() {
+        const successRate = this.stats.requested > 0 ? 
+            ((this.stats.loaded / this.stats.requested) * 100).toFixed(1) : 0;
+        
+        return {
+            ...this.stats,
+            successRate: successRate + '%'
+        };
+    }
+    
+    printStats() {
+        const stats = this.getStats();
+        console.log('=== Asset Loading Statistics ===');
+        console.log(`Requested: ${stats.requested}`);
+        console.log(`Loaded: ${stats.loaded}`);
+        console.log(`Success Rate: ${stats.successRate}`);
+        console.log('================================');
+    }
 }
 
-// ============================================================
-// PATCH: Ensure the AssetManager class is globally accessible
-// ============================================================
+// Ensure the AssetManager class is globally accessible
 window.AssetManager = AssetManager;
