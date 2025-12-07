@@ -1,10 +1,10 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.11
-// Core configuration constants (Patched with Mana/Combat/Supabase config)
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.9 (PATCHED)
+// Fix: Added missing CONFIG.COMBAT block.
 // ============================================================
 
 const CONFIG = {
-    VERSION: '1.0.11',
+    VERSION: '1.0.9',
     DEBUG: true,
     
     GAME: {
@@ -18,7 +18,7 @@ const CONFIG = {
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 0.22,
         HEALTH: 100,
-        MANA: 50, // Added Mana
+        MANA: 50,
         STAMINA: 100,
         INVENTORY_SIZE: 20,
         SPAWN_HEIGHT: 20,
@@ -46,19 +46,9 @@ const CONFIG = {
         TICK_RATE: 20
     },
 
-    // === ADDED COMBAT BLOCK ===
+    // Proactive Fix: Added missing Combat configuration
     COMBAT: {
-        BASE_ATTACK_RANGE: 3.0, // Default range for melee auto-attacks
-        GLOBAL_COOLDOWN_MS: 1000,
-        MIN_DAMAGE: 1,
-        MAX_DAMAGE: 5
-    },
-    // ==========================
-
-    // NOTE: Supabase config is pulled from window.SUPABASE_CONFIG in index.html,
-    // but a placeholder is kept here for safety.
-    SUPABASE: {
-        url: 'YOUR_SUPABASE_URL',
-        key: 'YOUR_SUPABASE_ANON_KEY'
+        BASE_ATTACK_RANGE: 3.0, // Default range for auto-attacks in Babylon units
+        GLOBAL_COOLDOWN_MS: 500
     }
 };
