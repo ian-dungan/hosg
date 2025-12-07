@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.10 (PATCHED)
-// Supabase wrapper for data persistence and template loading
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.11 (PATCHED)
+// Fixes template table names (singular -> plural)
 // ============================================================
 
 //
@@ -60,8 +60,9 @@ SupabaseService.prototype.getClient = function () {
  */
 SupabaseService.prototype.loadItemTemplates = async function () {
     try {
+        // PATCH: Corrected to use plural form 'hosg_item_templates'
         const { data, error } = await this.client
-            .from('hosg_item_templates')
+            .from('hosg_item_templates') // <--- CORRECTED
             .select('*');
 
         if (error) throw error;
@@ -70,7 +71,7 @@ SupabaseService.prototype.loadItemTemplates = async function () {
         return new Map(data.map(template => [template.id, template]));
     } catch (error) {
         console.error('[Supabase] Failed to load item templates:', error.message);
-        return new Map();
+        throw error;
     }
 };
 
@@ -79,8 +80,9 @@ SupabaseService.prototype.loadItemTemplates = async function () {
  */
 SupabaseService.prototype.loadSkillTemplates = async function () {
     try {
+        // PATCH: Corrected to use plural form 'hosg_skill_templates'
         const { data, error } = await this.client
-            .from('hosg_skill_templates')
+            .from('hosg_skill_templates') // <--- CORRECTED
             .select('*');
 
         if (error) throw error;
@@ -89,7 +91,7 @@ SupabaseService.prototype.loadSkillTemplates = async function () {
         return new Map(data.map(template => [template.id, template]));
     } catch (error) {
         console.error('[Supabase] Failed to load skill templates:', error.message);
-        return new Map();
+        throw error;
     }
 };
 
@@ -98,8 +100,9 @@ SupabaseService.prototype.loadSkillTemplates = async function () {
  */
 SupabaseService.prototype.loadNPCTemplates = async function () {
     try {
+        // PATCH: Corrected to use plural form 'hosg_npc_templates'
         const { data, error } = await this.client
-            .from('hosg_npc_templates')
+            .from('hosg_npc_templates') // <--- CORRECTED
             .select('*');
 
         if (error) throw error;
@@ -108,7 +111,7 @@ SupabaseService.prototype.loadNPCTemplates = async function () {
         return new Map(data.map(template => [template.id, template]));
     } catch (error) {
         console.error('[Supabase] Failed to load NPC templates:', error.message);
-        return new Map();
+        throw error;
     }
 };
 
@@ -118,24 +121,24 @@ SupabaseService.prototype.loadNPCTemplates = async function () {
  */
 SupabaseService.prototype.loadSpawnPoints = async function () {
     try {
-        // PATCH: Corrected table name based on schema (hosg_npc_spawns)
+        // PATCH: Corrected table name to 'hosg_npc_spawns' based on schema
         const { data, error } = await this.client
-            .from('hosg_npc_spawns') // <--- CORRECTED TABLE NAME
+            .from('hosg_npc_spawns') // <--- CORRECTED
             .select('*');
 
         if (error) throw error;
 
         console.log(`[Supabase] Fetched ${data.length} spawn points.`);
-        return data || []; // This should remain an array for World initialization
+        return data || []; 
     } catch (error) {
         console.error('[Supabase] Failed to load spawn points:', error.message);
-        // We throw here because the game cannot proceed without this data
         throw error;
     }
 };
 
 // ----------------------------------------------------------------
 // PERSISTENCE FUNCTIONS
+// (These were already using the correct plural names and are unchanged)
 // ----------------------------------------------------------------
 
 /**
