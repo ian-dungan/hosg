@@ -1,10 +1,10 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.7
-// Core configuration constants
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.8
+// Core configuration constants (Patched with Mana/Combat)
 // ============================================================
 
 const CONFIG = {
-    VERSION: '1.0.7',
+    VERSION: '1.0.8',
     DEBUG: true,
     
     GAME: {
@@ -18,11 +18,12 @@ const CONFIG = {
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 0.22,
         HEALTH: 100,
+        MANA: 50, // Added Mana
         STAMINA: 100,
         INVENTORY_SIZE: 20,
         SPAWN_HEIGHT: 20,
         
-        // Physics settings (v1.0.7)
+        // Physics settings
         MASS: 15,
         FRICTION: 0.2,
         LINEAR_DAMPING: 0.3,
@@ -42,20 +43,14 @@ const CONFIG = {
     NETWORK: {
         WS_URL: 'wss://hosg.onrender.com',
         MAX_PLAYERS: 100,
-        TICK_RATE: 20,
-        TIMEOUT: 30000
+        TICK_RATE: 20
     },
-    
-    CONTROLS: {
-        GAMEPAD: {
-            ENABLED: true,
-            DEADZONE: 0.15,
-            SENSITIVITY: 1.0
-        }
+
+    // ======== NEW COMBAT CONSTANTS ========
+    COMBAT: {
+        GLOBAL_COOLDOWN: 0.5, // 0.5 seconds GCD
+        BASE_MELEE_DAMAGE: 5,
+        BASE_ATTACK_RANGE: 2.5,
+        BASE_CAST_RANGE: 15
     }
 };
-
-// Export to global scope
-window.CONFIG = CONFIG;
-
-console.log('[Config] Game configuration loaded (v' + CONFIG.VERSION + ')');
