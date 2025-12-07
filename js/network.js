@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.12 (PATCHED)
-// Fix: Removed SyntaxError (missing parenthesis) in connect method.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.13 (PATCHED)
+// Fix: Corrected Supabase table name for spawn points (hosg_npc_spawns).
 // ============================================================
 
 //
@@ -89,8 +89,8 @@ SupabaseService.prototype.loadTemplates = async function () {
         if (result.error) throw new Error('Failed to fetch NPC templates: ' + result.error.message);
         const npcTemplates = result.data;
 
-        // Fetch Spawn Points (FIXED: Table name corrected from plural to singular)
-        result = await this._fetch('hosg_spawn_point', 'spawn points'); 
+        // Fetch Spawn Points (FIXED: Table name corrected from database hint)
+        result = await this._fetch('hosg_npc_spawns', 'spawn points'); 
         if (result.error) throw new Error('Failed to fetch spawn points: ' + result.error.message);
         const spawnPoints = result.data;
 
@@ -252,7 +252,7 @@ NetworkManager.prototype.connect = function (url) {
             reject(err);
         };
     });
-}; // <-- The original error was a misplaced ')' right here.
+};
 
 NetworkManager.prototype._handleMessage = function (event) {
     var payload = event.data;
