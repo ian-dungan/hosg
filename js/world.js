@@ -39,22 +39,14 @@ Entity.prototype.dispose = function () {
 class World {
     constructor(scene, options = {}) {
         this.scene = scene;
-
-        // Merge options without relying on object spread for broader runtime support
         this.options = {
             size: options.size || 1000,
             segments: options.segments || 100,
             maxHeight: options.maxHeight || 20,
             seed: options.seed || Math.random(),
-            waterLevel: options.waterLevel || 0.2
+            waterLevel: options.waterLevel || 0.2,
+            ...options
         };
-
-        // Apply any provided overrides explicitly
-        for (const key in options) {
-            if (Object.prototype.hasOwnProperty.call(options, key)) {
-                this.options[key] = options[key];
-            }
-        }
         
         // Terrain
         this.terrain = null;
@@ -119,7 +111,7 @@ class World {
         // Wait a bit to ensure physics is fully stabilized
         setTimeout(() => {
             console.log('[World] ✅ World fully initialized, signaling player...');
-            const player = this.scene.player || (this.scene.game && this.scene.game.player);
+            const player = this.scene.player || this.scene.game?.player;
             if (player && typeof player.startAfterWorldReady === 'function') {
                 player.startAfterWorldReady();
             } else {
@@ -299,32 +291,35 @@ class World {
         console.log('[World] ✓ Terrain physics created and enabled');
         
         // ============================================================
-        // COLLISION SAFETY NET - full terrain clone just below surface
-        // Matches the heightmap so nothing can slip through seams
         // ============================================================
-        this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
-        this.collisionBarrier.material = null;
-        this.collisionBarrier.isVisible = false;
-        this.collisionBarrier.visibility = 0;
-        this.collisionBarrier.renderingGroupId = -1;
+// COLLISION SAFETY NET - full terrain clone just below surface
+// Matches the heightmap so nothing can slip through seams
+// ============================================================
+this.collisionBarrier = this.terrain.clone('terrainCollisionBarrier');
+this.collisionBarrier.material = null;
+this.collisionBarrier.isVisible = false;
+this.collisionBarrier.visibility = 0;
+this.collisionBarrier.renderingGroupId = -1;
 
-        // Sit just beneath the visual terrain so feet rest on the real surface
-        this.collisionBarrier.position.y -= 0.25;
+// Sit just beneath the visual terrain so feet rest on the real surface.
+// 0.5" under (approx) so nothing falls through, but you still walk on the terrain.
+const BARRIER_OFFSET = -0.02;
+this.collisionBarrier.position.y = this.terrain.position.y + BARRIER_OFFSET;
 
-        // Enable collisions and physics so both kinematic and physics actors collide
-        this.collisionBarrier.checkCollisions = true;
-        this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.collisionBarrier,
-            BABYLON.PhysicsImpostor.HeightmapImpostor,
-            {
-                mass: 0,
-                friction: 1.0,
-                restitution: 0.0
-            },
-            this.scene
-        );
+// Enable collisions and physics so both kinematic and physics actors collide
+this.collisionBarrier.checkCollisions = true;
+this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
+    this.collisionBarrier,
+    BABYLON.PhysicsImpostor.HeightmapImpostor,
+    {
+        mass: 0,
+        friction: 1.0,
+        restitution: 0.0
+    },
+    this.scene
+);
 
-        console.log('[World] ✓ Collision barrier cloned from terrain and offset -0.25y');
+console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y`);
     }
 
     generateHeightmap() {
@@ -1068,15 +1063,7 @@ class World {
     }
 
     getHeightAt(x, z) {
-        // Cast a ray downward to find the terrain height
-        const ray = new BABYLON.Ray(
-            new BABYLON.Vector3(x, this.options.maxHeight * 2, z),
-            new BABYLON.Vector3(0, -1, 0),
-            this.options.maxHeight * 3
-        );
-
-        const hit = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
-        return hit.pickedPoint ? hit.pickedPoint.y : 0;
+        return this.getTerrainHeight(x, z);
     }
 
     findDrySpot(x, z, attempts = 10, radius = 8, margin = 0.3) {
@@ -1420,21 +1407,21 @@ class World {
     }
 
     update() {
-    // Update all entities
-    const deltaTime = this.scene.getEngine().getDeltaTime() / 1000;
-    
-    // Update NPCs
-    for (const npc of this.npcs) {
-        if (npc.update) npc.update(deltaTime);
-    }
-    
-    // Update enemies
-    for (const enemy of this.enemies) {
-        if (enemy.update) enemy.update(deltaTime);
-    }
-    
-    // Update items
-    for (let i = this.items.length - 1; i >= 0; i--) {
+        // Update all entities
+        const deltaTime = this.scene.getEngine().getDeltaTime() / 1000;
+        
+        // Update NPCs
+        for (const npc of this.npcs) {
+            if (npc.update) npc.update(deltaTime);
+        }
+        
+        // Update enemies
+        for (const enemy of this.enemies) {
+            if (enemy.update) enemy.update(deltaTime);
+        }
+        
+        // Update items
+        for (let i = this.items.length - 1; i >= 0; i--) {
             const item = this.items[i];
             if (item.update) item.update(deltaTime);
             
@@ -1442,8 +1429,8 @@ class World {
             if (item.collected) {
                 this.items.splice(i, 1);
             }
+        }
     }
-}
 
     dispose() {
         // Dispose of all resources
@@ -1803,7 +1790,7 @@ class Enemy extends Entity {
         this.snapToGround();
 
         // Attempt to load a real model (wolf.glb, etc.) using the asset manifest
-        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS && ASSET_MANIFEST.CHARACTERS.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
+        const manifestEnemy = (ASSET_MANIFEST.CHARACTERS?.ENEMIES && ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey])
             || (ASSET_MANIFEST.ENEMIES && ASSET_MANIFEST.ENEMIES[this.assetKey]);
 
         if (manifestEnemy && window.AssetLoader) {
@@ -1860,7 +1847,7 @@ class Enemy extends Entity {
     }
 
     snapToGround() {
-        const world = this.scene.world || (this.scene.game && this.scene.game.world);
+        const world = this.scene.world || this.scene.game?.world;
         if (!world || typeof world.getHeightAt !== 'function') return;
 
         const groundY = world.getHeightAt(this.position.x, this.position.z);
@@ -1934,33 +1921,32 @@ class Enemy extends Entity {
     }
 
     updateAI(deltaTime) {
-    // Find the player if we don't have a target
-    if (!this.target) {
-        this.findTarget();
-    }
-    
-    // Make sure the target has a mesh and a position we can use
-    if (this.target && this.target.mesh && this.target.mesh.position) {
-        const targetPos = this.target.mesh.position;
-        const distance = BABYLON.Vector3.Distance(this.position, targetPos);
-        
-        if (distance <= this.attackRange) {
-            // Attack if in range
-            this.state = 'attacking';
-            this.attack();
-        } else if (distance <= this.detectionRange) {
-            // Chase target if within detection range
-            this.state = 'chasing';
-            this.chaseTarget(deltaTime);
-        } else {
-            // Target too far, go back to patrolling
-            this.state = 'patrolling';
+        // Find the player if we don't have a target
+        if (!this.target) {
+            this.findTarget();
         }
-    } else {
-        // No valid target, patrol
-        this.state = 'patrolling';
+        
+        if (this.target) {
+            const distance = BABYLON.Vector3.Distance(this.position, this.target.position);
+            
+            if (distance <= this.attackRange) {
+                // Attack if in range
+                this.state = 'attacking';
+                this.attack();
+            } else if (distance <= this.detectionRange) {
+                // Chase if player is detected
+                this.state = 'chasing';
+                this.chaseTarget(deltaTime);
+            } else {
+                // Lost sight of player
+                this.state = 'idle';
+                this.target = null;
+            }
+        } else {
+            // No target, wander or idle
+            this.state = 'idle';
+        }
     }
-}
 
     findTarget() {
         // In a real game, you would use a spatial partitioning system
@@ -2002,37 +1988,86 @@ class Enemy extends Entity {
     }
 
     attack() {
-    // Need a valid target with a mesh.position
-    if (
-        this.attackCooldown > 0 ||
-        !this.target ||
-        !this.target.mesh ||
-        !this.target.mesh.position
-    ) {
-        return;
-    }
-    
-    // Play attack animation
-    this.playAnimation('attack');
-    
-    // Check if target is in range
-    const targetPos = this.target.mesh.position;
-    const distance = BABYLON.Vector3.Distance(this.position, targetPos);
-    if (distance <= this.attackRange) {
-        // Apply damage to target
-        if (typeof this.target.takeDamage === "function") {
-            this.target.takeDamage(this.damage, this);
+        if (this.attackCooldown > 0 || !this.target) return;
+        
+        // Play attack animation
+        this.playAnimation('attack');
+        
+        // Check if target is in range
+        const distance = BABYLON.Vector3.Distance(this.position, this.target.position);
+        if (distance <= this.attackRange) {
+            // Apply damage to target
+            if (this.target.takeDamage) {
+                this.target.takeDamage(this.damage, this);
+            }
+        }
+        
+        // Set attack cooldown
+        this.attackCooldown = 1.0 / this.attackRate;
+        
+        // Play attack sound
+        if (this.scene.audio) {
+            this.scene.audio.playSound('enemy_attack');
         }
     }
-    
-    // Set attack cooldown
-    this.attackCooldown = 1.0 / this.attackRate;
-    
-    // Play attack sound
-    if (this.scene.audio) {
-        this.scene.audio.playEnemyAttack(this);
+
+    takeDamage(amount, source) {
+        this.health -= amount;
+        
+        // Show damage number
+        if (this.scene.ui) {
+            this.scene.ui.showDamageNumber(amount, this.position, false);
+        }
+        
+        // Play hurt sound
+        if (this.scene.audio) {
+            this.scene.audio.playSound('enemy_hurt');
+        }
+        
+        // Check for death
+        if (this.health <= 0) {
+            this.die(source);
+            return true; // Enemy was killed
+        }
+        
+        // Aggro on attacker
+        if (source) {
+            this.target = source;
+        }
+        
+        return false; // Enemy is still alive
     }
-}
+
+    die(killer) {
+        this.state = 'dead';
+        this.playAnimation('die');
+        
+        // Drop loot
+        this.dropLoot(killer);
+        
+        // Grant experience to killer
+        if (killer && killer.gainExperience) {
+            killer.gainExperience(this.experience);
+        }
+        
+        // Remove from scene after a delay
+        setTimeout(() => {
+            this.dispose();
+            
+            // Remove from enemies array if it exists
+            if (this.scene.world && this.scene.world.enemies) {
+                const index = this.scene.world.enemies.indexOf(this);
+                if (index !== -1) {
+                    this.scene.world.enemies.splice(index, 1);
+                }
+            }
+        }, 2000);
+        
+        // Play death sound
+        if (this.scene.audio) {
+            this.scene.audio.playSound('enemy_death');
+        }
+    }
 
     dropLoot(killer) {
         // Determine what loot to drop

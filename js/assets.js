@@ -48,7 +48,7 @@ const ASSET_MANIFEST = {
         ENEMIES: {
             wolf: {
                 model: 'enemies/wolf.glb',
-                scale: 10.0,
+                scale: 0.02,
                 required: false
             },
             goblin: {
@@ -112,7 +112,7 @@ const ASSET_MANIFEST = {
             model: 'enemies/wolf.glb',
             texture: 'textures/enemies/wolf_diffuse.png',
             animations: ['idle', 'walk', 'run', 'attack', 'die'],
-            scale: 10.0
+            scale: 1.0
         },
         goblin: {
             model: 'models/enemies/goblin.glb',
@@ -360,45 +360,29 @@ class AssetLoader {
     }
     
     _createModelInstance(modelData, options = {}) {
-    if (!modelData || !modelData.meshes || modelData.meshes.length === 0) {
-        return null;
+        if (!modelData || !modelData.meshes || modelData.meshes.length === 0) {
+            return null;
+        }
+        
+        const root = modelData.meshes[0].createInstance('instance_' + Date.now());
+        root.position = options.position || BABYLON.Vector3.Zero();
+        root.rotation = options.rotation || BABYLON.Vector3.Zero();
+        root.scaling = options.scaling || BABYLON.Vector3.One();
+        root.setEnabled(true);
+        
+        const instances = [root];
+        for (let i = 1; i < modelData.meshes.length; i++) {
+            const instance = modelData.meshes[i].clone();
+            instance.parent = root;
+            instance.setEnabled(true);
+            instances.push(instance);
+        }
+        
+        const animations = modelData.animationGroups ? 
+            modelData.animationGroups.map(ag => ag.clone()) : [];
+        
+        return { root, instances, animationGroups: animations };
     }
-
-    const source = modelData.meshes[0];
-
-    // Some GLBs use a transform / non-geometric mesh as root.
-    // If there is no geometry, fall back to clone instead of createInstance
-    // to avoid "Instances should only be created for meshes with geometry".
-    let root;
-    if (source && source.geometry) {
-        root = source.createInstance("instance_" + Date.now());
-    } else {
-        root = source.clone("instance_" + Date.now(), null);
-    }
-
-    root.position = options.position || BABYLON.Vector3.Zero();
-    root.rotation = options.rotation || BABYLON.Vector3.Zero();
-    root.scaling = options.scaling || BABYLON.Vector3.One();
-    root.setEnabled(true);
-
-    const instances = [root];
-
-    for (let i = 1; i < modelData.meshes.length; i++) {
-        const mesh = modelData.meshes[i];
-        if (!mesh) continue;
-
-        const instance = mesh.clone(mesh.name + "_instance_" + Date.now(), root);
-        instance.setEnabled(true);
-        instances.push(instance);
-    }
-
-    const animations = modelData.animationGroups
-        ? modelData.animationGroups.map(ag => ag.clone())
-        : [];
-
-    return { root, instances, animationGroups: animations };
-}
-
     
     // ========== PROCEDURAL FALLBACKS ==========
     createProceduralTerrain(typeName) {
