@@ -5,15 +5,12 @@
   <title>Heroes of Shady Grove</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Physics engine (Cannon.js) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 
-  <!-- Babylon.js core + loaders + GUI -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
 
-  <!-- Supabase JS SDK (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     // Make Supabase config available before our own scripts
@@ -41,13 +38,13 @@
 <body>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Load your game scripts in whatever order you were using -->
   <script src="js/core.js"></script>
   <script src="js/assets.js"></script>
-  <script src="js/world.js"></script>
-  <script src="js/player.js"></script>
-  <script src="js/ui.js"></script>
   <script src="js/network.js"></script>
+  <script src="js/world.js"></script>
+  
+  <script src="js/ability.js"></script>  <script src="js/item.js"></script>     <script src="js/player.js"></script>
+  <script src="js/ui.js"></script>
   <script src="js/game.js"></script>
 
   <script>
