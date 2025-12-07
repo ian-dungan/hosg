@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.12 (PATCHED)
-// Fix: Added physics impostor and implemented movement/rotation.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.13 (PATCHED)
+// Fix: Added physics impostor, movement, rotation, and camera initialization.
 // ============================================================
 
 class Player extends Character {
@@ -9,6 +9,8 @@ class Player extends Character {
         super(scene, new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT, 0), 'Player');
         
         this.isPlayer = true; 
+        this.colliderHeight = 1.8;
+        this.colliderRadius = 0.4;
 
         this.stats = {
             maxHealth: CONFIG.PLAYER.HEALTH,
@@ -27,12 +29,12 @@ class Player extends Character {
         this.combat = {
             globalCooldown: 0,
             target: null,
-            attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE // Now safely referenced
+            attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE 
         };
         
         this.inventory = new Inventory(this); 
         this.equipment = new Equipment(this); 
-        this.abilities = []; 
+        this.abilities = []; // Abilities will be loaded in game.js
         
         this.input = {
             forward: false,
@@ -51,12 +53,12 @@ class Player extends Character {
         this.uiManager = uiManager;
     }
 
-    // Proactive Fix: Implement physics impostor and placeholder mesh
+    // Fix: Implemented physics impostor and mesh
     async _initMesh() { 
         this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollider", { height: this.colliderHeight, diameter: this.colliderRadius * 2 }, this.scene);
         this.mesh.isVisible = false;
-        
-        // Ensure the mesh is initially positioned
+        this.mesh.checkCollisions = true;
+
         this.mesh.position.copyFrom(this.position);
 
         // Create the physics impostor
@@ -76,12 +78,26 @@ class Player extends Character {
         this.visualRoot.parent = this.mesh;
         
         // Placeholder visible mesh (Box for now)
-        const placeholderMesh = BABYLON.MeshBuilder.CreateBox("playerBox", { size: 1.0 }, this.scene);
+        const placeholderMesh = BABYLON.MeshBuilder.CreateBox("playerBox", { height: 1.8, width: 0.8, depth: 0.8 }, this.scene);
         placeholderMesh.parent = this.visualRoot;
         placeholderMesh.position.y = -0.9; // offset to stand on the ground
     }
 
-    // Proactive Fix: Implemented movement logic
+    // Fix: Implemented camera setup
+    _initCamera() {
+        const camera = new BABYLON.ArcRotateCamera("ArcRotateCamera", -Math.PI / 2, Math.PI / 3, 10, this.mesh.position, this.scene);
+        camera.attachControl(this.scene.getEngine().getCanvas(), true);
+        camera.upperRadiusLimit = 20;
+        camera.lowerRadiusLimit = 3;
+        camera.wheelPrecision = 50;
+        camera.target = this.mesh.position; 
+        this.scene.activeCamera = camera;
+    } 
+
+    // Stub: Input logic will be in UIManager, so this is just a placeholder
+    _initInput() {}
+    
+    // Fix: Implemented movement logic
     handleMovement(deltaTime) {
         if (!this.mesh || !this.mesh.physicsImpostor) return;
 
@@ -90,10 +106,10 @@ class Player extends Character {
         const speed = this.stats.moveSpeed * (this.input.run ? this.stats.runMultiplier : 1.0);
 
         let moveVector = BABYLON.Vector3.Zero();
-
-        // Calculate move direction relative to camera (simplified 3rd person control)
-        // Assumes a camera is attached to the scene, providing an 'alpha' (Yaw) value
-        const cameraYaw = this.scene.activeCamera.alpha;
+        const camera = this.scene.activeCamera;
+        if (!camera) return;
+        
+        const cameraYaw = camera.alpha || 0; 
         const cameraRotationMatrix = BABYLON.Matrix.RotationY(cameraYaw);
         
         if (this.input.forward) moveVector.addInPlace(new BABYLON.Vector3(0, 0, 1));
@@ -103,79 +119,83 @@ class Player extends Character {
 
         if (moveVector.lengthSquared() > 0) {
             moveVector = moveVector.normalize();
-            
-            // Transform movement from local input space to world space based on camera angle
             moveVector = BABYLON.Vector3.TransformCoordinates(moveVector, cameraRotationMatrix);
             
-            // Set horizontal velocity directly for responsive movement
-            let newVelocity = moveVector.scale(speed * CONFIG.PLAYER.IMPULSE_STRENGTH); // Scale speed by a large value to overcome friction/damping
+            let newVelocity = moveVector.scale(speed * CONFIG.PLAYER.IMPULSE_STRENGTH); 
             
-            // Keep the vertical velocity
             newVelocity.y = currentVelocity.y; 
             
             body.setLinearVelocity(newVelocity);
 
         } else {
-            // Smoothly slow down (damping) when no input is provided
-            const dampedX = currentVelocity.x * (1 - CONFIG.PLAYER.LINEAR_DAMPING);
-            const dampedZ = currentVelocity.z * (1 - CONFIG.PLAYER.LINEAR_DAMPING);
+            // Apply damping when no input
+            const dampingFactor = 1 - (CONFIG.PLAYER.LINEAR_DAMPING * deltaTime * 60); 
+            const dampedX = currentVelocity.x * dampingFactor;
+            const dampedZ = currentVelocity.z * dampingFactor;
             body.setLinearVelocity(new BABYLON.Vector3(dampedX, currentVelocity.y, dampedZ));
         }
         
         // Handle Jump
         if (this.input.jump) {
-             // Simple ground check: check if vertical velocity is near zero
              if (Math.abs(currentVelocity.y) < 0.1) {
-                 // Apply an impulse to jump
                  body.applyImpulse(new BABYLON.Vector3(0, CONFIG.PLAYER.IMPULSE_STRENGTH * CONFIG.PLAYER.JUMP_FORCE, 0), this.mesh.getAbsolutePosition());
              }
              this.input.jump = false; 
         }
 
-        // Update the position property after physics step
         this.position.copyFrom(this.mesh.position);
     }
     
-    // Proactive Fix: Implemented rotation logic
+    // Fix: Implemented rotation logic
     handleRotation() {
         if (!this.mesh || !this.visualRoot || !this.mesh.physicsImpostor) return;
 
         const body = this.mesh.physicsImpostor;
         const linearVelocity = body.getLinearVelocity();
         
-        // Check for significant horizontal movement before rotating
         const horizontalVelocity = Math.sqrt(linearVelocity.x * linearVelocity.x + linearVelocity.z * linearVelocity.z);
         
         if (horizontalVelocity > 0.1) {
-            // Calculate the angle of the current horizontal velocity
             const targetRotation = Math.atan2(linearVelocity.x, linearVelocity.z);
-
-            // Smooth rotation (Lerp)
             const currentRotation = this.visualRoot.rotation.y;
             
             let diff = targetRotation - currentRotation;
-            // Handle angle wrap-around
             if (diff > Math.PI) diff -= 2 * Math.PI;
             if (diff < -Math.PI) diff += 2 * Math.PI;
 
             const lerpedRotation = currentRotation + diff * CONFIG.PLAYER.ROTATION_LERP;
             
             this.visualRoot.rotation.y = lerpedRotation;
-            this.visualRoot.rotation.x = 0; // Prevent tilting
-            this.visualRoot.rotation.z = 0; // Prevent tilting
         }
     }
     
-    // Placeholder methods (re-added for completeness, though movement is now implemented)
-    _initCamera() {} 
-    _initInput() {} 
-    setTarget(mesh) {} 
-    takeDamage(damage) {}
-    useAbility(ability, target) {}
-    _initTargetHighlight() {}
-    // ... (rest of the class)
+    // ... (rest of methods)
     
-    // ... (rest of the class)
+    // Stub implementation
+    handleTargeting(mesh) {
+        if (!mesh || !mesh.metadata) return;
+        
+        if (mesh.metadata.isEnemy || mesh.metadata.isNPC) {
+            this.setTarget(mesh.metadata.entity); // Assume Entity class stores itself in metadata
+        }
+    }
+    
+    // Simple setter for now
+    setTarget(entity) {
+        this.combat.target = entity;
+        // Logic to update highlight/UI would go here
+    }
+
+    takeDamage(damage) {
+        this.health -= damage;
+        if (this.health <= 0) {
+            this.health = 0;
+            this.isDead = true;
+            this.uiManager.showMessage("You died!", 5000, 'error');
+            // Dispose mesh and potentially respawn logic here
+            this.dispose(); 
+        }
+    }
 
     getSaveData() {
         return {
@@ -215,7 +235,7 @@ class Player extends Character {
         const target = this.combat.target;
         if (target && !target.isDead && BABYLON.Vector3.Distance(this.mesh.position, target.mesh.position) < this.combat.attackRange) {
             if (this.combat.globalCooldown <= 0) {
-                // Simplified auto-attack: find the first available attack ability
+                // Find the first available attack ability
                 const autoAttackAbility = this.abilities.find(a => a.type === 'attack');
                 if (autoAttackAbility && autoAttackAbility.isReady()) {
                     autoAttackAbility.execute(this, target);
@@ -224,6 +244,4 @@ class Player extends Character {
             }
         }
     }
-    
-    // ... (rest of methods)
 }
