@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.10 (PATCHED)
-// Fix: Removed unexpected invisible character in Game constructor.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.11 (PATCHED)
+// Fix: Corrected disposal of window.beforeunload listener.
 // ============================================================
 
 class Game {
@@ -31,6 +31,7 @@ class Game {
     this._lastFrameTime = performance.now();
     this._running = false;
     this.autosaveInterval = null;
+    this._boundSaveOnUnload = null; // New property to store the bound function
 
     window.addEventListener("resize", () => { this.engine.resize(); });
   }
@@ -152,9 +153,9 @@ class Game {
         this.save();
     }, 60000); 
 
-    window.addEventListener('beforeunload', () => {
-        this.save(true);
-    });
+    // Fix: Store the bound function reference to allow proper cleanup
+    this._boundSaveOnUnload = this.save.bind(this, true); 
+    window.addEventListener('beforeunload', this._boundSaveOnUnload);
   }
   
   async save(isCritical = false) {
@@ -174,7 +175,11 @@ class Game {
     console.log("[Game] Disposing resources");
     this.stop();
     clearInterval(this.autosaveInterval);
-    window.removeEventListener('beforeunload', this.save);
+    
+    // Fix: Use the stored reference to remove the listener
+    if (this._boundSaveOnUnload) {
+        window.removeEventListener('beforeunload', this._boundSaveOnUnload);
+    }
     
     if (this.network) {
       this.network.dispose();
