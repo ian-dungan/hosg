@@ -1,5 +1,5 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.8
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.8 (PATCHED)
 // Main loop and Persistence Handler
 // ============================================================
 
@@ -15,7 +15,11 @@ class Game {
 
     if (typeof CANNON !== "undefined") {
       const gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
-      this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
+      try {
+        this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
+      } catch (err) {
+        console.warn("[Game] CannonJSPlugin not available. Physics disabled.");
+      }
     } 
 
     this.world = null;
@@ -24,9 +28,11 @@ class Game {
     this.network = null;
     this.characterId = null; 
 
+    // Initialize Maps for templates
     this.itemTemplates = new Map();
     this.skillTemplates = new Map();
     this.npcTemplates = new Map();
+    this.spawnPoints = []; // Spawn points remain an array
 
     this._lastFrameTime = performance.now();
     this._running = false;
@@ -36,43 +42,55 @@ class Game {
   }
 
   async init() {
+    console.log("[Game] Initializing...");
+    
+    // Basic lighting
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
+    
+    // 1. Load Assets
+    this.assets = new AssetManager(this.scene);
+    await this.assets.loadAll();
+    
+    // 2. Initialize Network & Load Templates
     this.network = new NetworkManager();
-    
-    // 1. Load Templates & Spawns
-    this.itemTemplates = await this.network.supabase.fetchItemTemplates();
-    this.skillTemplates = await this.network.supabase.fetchSkillTemplates();
-    this.npcTemplates = await this.network.supabase.fetchNpcTemplates();
-    const npcSpawns = await this.network.supabase.fetchNpcSpawns(1); 
-    
-    // 2. Create World
+    this.itemTemplates = await this.network.supabase.loadItemTemplates();
+    this.skillTemplates = await this.network.supabase.loadSkillTemplates();
+    this.npcTemplates = await this.network.supabase.loadNPCTemplates();
+    this.spawnPoints = await this.network.supabase.loadSpawnPoints();
+
+    // 3. Initialize World (Needs loaded templates for spawns)
     this.world = new World(this.scene, { 
-        npcSpawns: npcSpawns, 
+        spawnPoints: this.spawnPoints, 
         npcTemplates: this.npcTemplates 
     });
-    await this.world.init();
+    
+    // 4. Load Character Data from Network
+    // NOTE: Using a hardcoded test UUID, replace this with your auth logic
+    const characterLoadData = await this.network.supabase.loadCharacter('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'); 
 
-    // 3. Load Character Data
-    // Use a test UUID from the SQL data
-    this.characterId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'; 
-    const characterLoadData = await this.network.supabase.loadCharacter(this.characterId);
-
-    // 4. Create Player
-    this.player = new Player(this.scene);
+    // 5. Initialize Player
+    this.player = new Player(this.scene); 
+    
+    // 6. Initialize Player with all necessary data and templates
     await this.player.init({
-        ...characterLoadData.character,
-        inventory_items: characterLoadData.inventory,
-        equipped_items: characterLoadData.equipment,
-        player_skills: characterLoadData.skills,
-        itemTemplates: this.itemTemplates,
-        skillTemplates: this.skillTemplates
+        ...characterLoadData, // character, inventory_items, equipped_items, player_skills
+        itemTemplates: this.itemTemplates, // Pass the Map
+        skillTemplates: this.skillTemplates // Pass the Map
     });
 
-    // 5. Initialize UI
-    this.ui = new UIManager(this);
+    // 7. Initialize UI (Needs player object)
+    this.ui = new UIManager(this); 
     
-    // 6. Persistence Logic
+    // 8. Final setup
+    this.characterId = characterLoadData.character.id;
     this.setupPersistence();
+    
+    console.log("[Bootstrap] Game ready.");
+  }
+
+  // ... (start, setupPersistence, save, dispose methods are assumed correct)
+  start() {
+    // ... (Your existing start logic)
     this._running = true;
 
     // Start rendering loop
@@ -94,7 +112,8 @@ class Game {
       this.ui.showMessage("Welcome to Heroes of Shady Grove! (Persistence Active)", 3000);
     }
   }
-
+  
+  // ... (rest of the file)
   setupPersistence() {
     this.autosaveInterval = setInterval(() => {
         this.save();
@@ -119,16 +138,38 @@ class Game {
   }
 
   dispose() {
+    console.log("[Game] Disposing resources");
     this.stop();
     
-    if (this.autosaveInterval) clearInterval(this.autosaveInterval);
+    if (this.network) {
+      this.network.dispose();
+      this.network = null;
+    }
     
-    if (this.player && this.characterId) this.save(true);
+    if (this.ui) {
+      this.ui.dispose();
+      this.ui = null;
+    }
     
-    if (this.engine) this.engine.dispose();
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
+    
+    if (this.world && typeof this.world.dispose === "function") {
+      this.world.dispose();
+      this.world = null;
+    }
+    
+    if (this.scene) {
+      this.scene.dispose();
+      this.scene = null;
+    }
+
+    if (this.engine) {
+      this.engine.dispose();
+      this.engine = null;
+    }
   }
 
-  stop() {
-    this._running = false;
-  }
 }
