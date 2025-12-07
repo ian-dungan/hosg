@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.10 (PATCHED)
-// Fix: Removed unexpected '\n' character in Game constructor.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.12 (PATCHED)
+// Fix: Corrected asset loading method name (loadAssets -> loadAll).
 // ============================================================
 
 class Game {
@@ -37,8 +37,10 @@ class Game {
 
   async init() {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
-    this.assets = new AssetManager(this.scene); // Assuming AssetManager exists
-    await this.assets.loadAssets(); // Wait for assets to finish loading
+    this.assets = new AssetManager(this.scene); 
+    
+    // FIX: Changed method name from loadAssets() to loadAll()
+    await this.assets.loadAll(); 
 
     this.network = new NetworkManager();
     this.characterId = "00000000-0000-0000-0000-000000000001"; // Placeholder character ID
@@ -59,7 +61,7 @@ class Game {
     // 4. Initialize Player
     this.player = new Player(this.scene);
 
-    // FIX: Await player visuals setup before attempting to set position/rotation
+    // FIX: Ensure player has this method defined to call the internal _initMesh
     await this.player.setupVisuals(); 
 
     // Pass the loaded data to the player and UI
