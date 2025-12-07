@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.12 (PATCHED)
-// Fix: Corrected disposal of window.beforeunload listener and template Map population.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.13 (PATCHED)
+// Fix: Removed unnecessary and crashing call to this.player.setUIManager() from init().
 // ============================================================
 
 class Game {
@@ -10,7 +10,7 @@ class Game {
 
     this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
     this.scene = new BABYLON.Scene(this.engine);
-    this.scene.collisionsEnabled = true; 
+    this.scene.collisionsEnabled = true; // Cleaned up line
     this.scene.game = this; 
 
     if (typeof CANNON !== "undefined") {
@@ -31,133 +31,70 @@ class Game {
     this._lastFrameTime = performance.now();
     this._running = false;
     this.autosaveInterval = null;
-    this._boundSaveOnUnload = null; // New property to store the bound function
 
     window.addEventListener("resize", () => { this.engine.resize(); });
   }
 
   async init() {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
-    this.scene.createDefaultCamera(true, true, true);
-    this.scene.activeCamera.attachControl(this.canvas, true);
-
-    // 1. Load Data Templates
-    this.network = new NetworkManager();
-    const loadResult = await this.network.supabase.loadTemplates();
-
-    if (!loadResult.success) {
-      throw new Error("Failed to load game data from Supabase.");
-    }
-    
-    // Fix: Store templates on Maps for quick lookup
-    loadResult.templates.itemTemplates.forEach(t => this.itemTemplates.set(t.id, t));
-    loadResult.templates.skillTemplates.forEach(t => this.skillTemplates.set(t.id, t));
-    loadResult.templates.npcTemplates.forEach(t => this.npcTemplates.set(t.id, t));
-    this.spawnPoints = loadResult.templates.spawnPoints;
-
-    console.log("[Bootstrap] Templates loaded successfully.");
-
-    // 2. Load Assets
-    this.assetManager = new AssetManager(this.scene);
-    await this.assetManager.loadAll();
-    console.log("[Bootstrap] Assets loaded successfully.");
-
-    // 3. Initialize World, Player, and UI
     this.world = new World(this.scene);
-    this.world.createGround();
-    this.world.createWater();
-    this.world.createSky();
-    this.world.createSpawnPoints(this.spawnPoints, this.npcTemplates); // Uses Maps now
-
-    this.player = new Player(this.scene);
-    // Player mesh/camera/input setup must be awaited before starting game
-    await this.player._initMesh(); 
-    this.player._initCamera();
-    this.player._initInput();
-    this.player.mesh.position.y = CONFIG.PLAYER.SPAWN_HEIGHT;
-
-    this.ui = new UIManager(this); 
-    this.player.setUIManager(this.ui); // Link player back to UI for messages
-
-    // 4. Persistence setup (Temporary hardcoded ID for demo)
+    
+    await this.network.loadTemplates(this.itemTemplates, this.skillTemplates, this.npcTemplates);
+    
+    // Hardcoded Character ID for persistence for now (will be replaced by login)
     this.characterId = 1; 
-    await this.loadCharacter(this.characterId);
-    this.setupPersistence();
 
-    console.log("[Bootstrap] Game initialized.");
-    this.start();
-  }
-  
-  async loadCharacter(characterId) {
-    if (!this.network.supabase) return;
-    
-    const result = await this.network.supabase.getCharacterData(characterId);
-    
-    if (result.success && result.data) {
-        const data = result.data;
-        
-        // 1. Load Position
-        this.player.mesh.position.set(data.position_x, data.position_y, data.position_z);
-        if (this.player.visualRoot) {
-            this.player.visualRoot.rotation.y = data.rotation_y;
-        }
+    // Player must be initialized AFTER templates are loaded and before UI
+    this.player = new Player(this.scene); 
+    await this.player.init(); // This is an async call now
 
-        // 2. Load Stats/Health/Resources
-        this.player.stats = { ...this.player.stats, ...data.stats };
-        this.player.health = data.health;
-        this.player.mana = data.mana;
-        this.player.stamina = data.stamina;
-
-        // 3. Load Inventory and Equipment (using Maps created from templates)
-        // Passes the Map correctly
-        this.player.inventory.load(data.hosg_character_items, this.itemTemplates);
-        this.player.equipment.load(data.hosg_character_equipment, this.itemTemplates);
-        
-        // 4. Load Abilities (assuming abilities are not stored per character yet)
-        // Stub: Add a default attack ability
-        const attackTemplate = this.skillTemplates.get(1); // Assuming ID 1 is the default attack
-        if (attackTemplate) {
-            this.player.abilities.push(new Ability(attackTemplate));
-        }
-
-        this.ui.showMessage(`Character ID ${characterId} loaded.`, 2000, 'success');
+    // Load state onto the player
+    const loadResult = await this.network.loadCharacterState(this.characterId);
+    if (loadResult.success) {
+        // Player's inventory and equipment loading is now handled inside player.js/item.js
+        this.player.loadState(loadResult.state); 
     } else {
-         this.ui.showMessage(`Character ID ${characterId} not found. Starting new game.`, 3000, 'info');
-         // Initialize player resources to max if load fails
-         this.player.health = this.player.stats.maxHealth;
-         this.player.mana = this.player.stats.maxMana;
-         this.player.stamina = this.player.stats.maxStamina;
-         
-         // Stub: Add a default attack ability if load fails
-         const attackTemplate = this.skillTemplates.get(1);
-         if (attackTemplate) {
-            this.player.abilities.push(new Ability(attackTemplate));
-         }
+        console.warn(`[Game] Failed to load character state: ${loadResult.error}. Using default state.`);
     }
+
+    // Initialize UI
+    this.ui = new UIManager(this);
+    // REMOVED: if (this.player) this.player.setUIManager(this.ui); // Crash was here
+    
+    this.setupPersistence();
+    this.start();
   }
 
   start() {
-    this._lastFrameTime = performance.now();
-    this._running = true;
+    this.scene.executeWhenReady(() => {
+        // Ensure player is available before starting game loop
+        if (!this.player) {
+            console.error("[Bootstrap] Game failed to start: Player not initialized.");
+            return;
+        }
 
-    // Start rendering loop
-    this.engine.runRenderLoop(() => {
-      const currentTime = performance.now();
-      const deltaTime = (currentTime - this._lastFrameTime) / 1000;
-      this._lastFrameTime = currentTime;
+        console.log("[Bootstrap] Game started.");
+        this._running = true;
 
-      if (!this._running) return;
+        // Start rendering loop
+        this.engine.runRenderLoop(() => {
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - this._lastFrameTime) / 1000;
+            this._lastFrameTime = currentTime;
 
-      if (this.player) this.player.update(deltaTime);
-      if (this.world) this.world.update(deltaTime);
-      if (this.ui) this.ui.update(deltaTime);
+            if (!this._running) return;
 
-      this.scene.render();
+            if (this.player) this.player.update(deltaTime);
+            if (this.world) this.world.update(deltaTime);
+            if (this.ui) this.ui.update(deltaTime);
+
+            this.scene.render();
+        });
+
+        if (this.ui) {
+            this.ui.showMessage("Welcome to Heroes of Shady Grove! (Persistence Active)", 3000);
+        }
     });
-
-    if (this.ui) {
-      this.ui.showMessage("Welcome to Heroes of Shady Grove! (Persistence Active)", 3000);
-    }
   }
 
   setupPersistence() {
@@ -165,9 +102,9 @@ class Game {
         this.save();
     }, 60000); 
 
-    // Fix: Store the bound function reference to allow proper cleanup
-    this._boundSaveOnUnload = this.save.bind(this, true); 
-    window.addEventListener('beforeunload', this._boundSaveOnUnload);
+    window.addEventListener('beforeunload', () => {
+        this.save(true);
+    });
   }
   
   async save(isCritical = false) {
@@ -187,34 +124,10 @@ class Game {
     console.log("[Game] Disposing resources");
     this.stop();
     clearInterval(this.autosaveInterval);
-    
-    // Fix: Use the stored reference to remove the listener
-    if (this._boundSaveOnUnload) {
-        window.removeEventListener('beforeunload', this._boundSaveOnLoad);
-    }
-    
-    if (this.network) {
-      this.network.dispose();
-      this.network = null;
-    }
-    
-    if (this.ui) {
-      this.ui.dispose();
-      this.ui = null;
-    }
-    
-    if (this.player) {
-      this.player.dispose();
-      this.player = null;
-    }
-    
-    if (this.world && typeof this.world.dispose === "function") {
-      this.world.dispose();
-      this.world = null;
-    }
-
-    if (this.engine) {
-      this.engine.dispose();
-    }
+    if (this.player) this.player.dispose();
+    if (this.world) this.world.dispose();
+    if (this.ui) this.ui.dispose();
+    this.scene.dispose();
+    this.engine.dispose();
   }
 }
