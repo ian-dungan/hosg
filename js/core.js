@@ -1,6 +1,6 @@
 // ============================================================
 // HEROES OF SHADY GROVE - CONFIGURATION v1.0.9 (PATCHED)
-// Fix: Added missing CONFIG.COMBAT block to prevent TypeError in player.js
+// Core configuration constants (Added CONFIG.COMBAT)
 // ============================================================
 
 const CONFIG = {
@@ -18,7 +18,7 @@ const CONFIG = {
         RUN_MULTIPLIER: 1.8,
         JUMP_FORCE: 0.22,
         HEALTH: 100,
-        MANA: 50, 
+        MANA: 50,
         STAMINA: 100,
         INVENTORY_SIZE: 20,
         SPAWN_HEIGHT: 20,
@@ -33,13 +33,6 @@ const CONFIG = {
         ROTATION_LERP: 0.2
     },
     
-    // --- NEW COMBAT CONFIGURATION ---
-    COMBAT: {
-        BASE_ATTACK_RANGE: 3.5, // Standard attack range in Babylon units (meters)
-        GLOBAL_COOLDOWN_MS: 500, // 0.5 seconds global cooldown after ability use
-        AUTO_ATTACK_INTERVAL_MS: 1500 // Time between automatic attacks
-    },
-    
     WORLD: {
         SIZE: 1000,
         CHUNK_SIZE: 32,
@@ -50,5 +43,12 @@ const CONFIG = {
     NETWORK: {
         WS_URL: 'wss://hosg.onrender.com',
         MAX_PLAYERS: 1
+    },
+    
+    // === FIX: ADDED COMBAT CONFIGURATION ===
+    COMBAT: { 
+        BASE_ATTACK_RANGE: 3, // Default melee attack range in world units
+        GLOBAL_COOLDOWN_SECONDS: 1.0, 
+        DEATH_DELAY_SECONDS: 5
     }
 };
