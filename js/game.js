@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.11 (PATCHED)
-// Fix: Corrected disposal of window.beforeunload listener.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.12 (PATCHED)
+// Fix: Corrected disposal of window.beforeunload listener and template Map population.
 // ============================================================
 
 class Game {
@@ -49,7 +49,7 @@ class Game {
       throw new Error("Failed to load game data from Supabase.");
     }
     
-    // Store templates on Maps for quick lookup
+    // Fix: Store templates on Maps for quick lookup
     loadResult.templates.itemTemplates.forEach(t => this.itemTemplates.set(t.id, t));
     loadResult.templates.skillTemplates.forEach(t => this.skillTemplates.set(t.id, t));
     loadResult.templates.npcTemplates.forEach(t => this.npcTemplates.set(t.id, t));
@@ -67,7 +67,7 @@ class Game {
     this.world.createGround();
     this.world.createWater();
     this.world.createSky();
-    this.world.createSpawnPoints(this.spawnPoints, this.npcTemplates);
+    this.world.createSpawnPoints(this.spawnPoints, this.npcTemplates); // Uses Maps now
 
     this.player = new Player(this.scene);
     // Player mesh/camera/input setup must be awaited before starting game
@@ -109,11 +109,17 @@ class Game {
         this.player.stamina = data.stamina;
 
         // 3. Load Inventory and Equipment (using Maps created from templates)
+        // Passes the Map correctly
         this.player.inventory.load(data.hosg_character_items, this.itemTemplates);
         this.player.equipment.load(data.hosg_character_equipment, this.itemTemplates);
         
         // 4. Load Abilities (assuming abilities are not stored per character yet)
-        
+        // Stub: Add a default attack ability
+        const attackTemplate = this.skillTemplates.get(1); // Assuming ID 1 is the default attack
+        if (attackTemplate) {
+            this.player.abilities.push(new Ability(attackTemplate));
+        }
+
         this.ui.showMessage(`Character ID ${characterId} loaded.`, 2000, 'success');
     } else {
          this.ui.showMessage(`Character ID ${characterId} not found. Starting new game.`, 3000, 'info');
@@ -121,6 +127,12 @@ class Game {
          this.player.health = this.player.stats.maxHealth;
          this.player.mana = this.player.stats.maxMana;
          this.player.stamina = this.player.stats.maxStamina;
+         
+         // Stub: Add a default attack ability if load fails
+         const attackTemplate = this.skillTemplates.get(1);
+         if (attackTemplate) {
+            this.player.abilities.push(new Ability(attackTemplate));
+         }
     }
   }
 
@@ -178,7 +190,7 @@ class Game {
     
     // Fix: Use the stored reference to remove the listener
     if (this._boundSaveOnUnload) {
-        window.removeEventListener('beforeunload', this._boundSaveOnUnload);
+        window.removeEventListener('beforeunload', this._boundSaveOnLoad);
     }
     
     if (this.network) {
