@@ -48,7 +48,7 @@ class Game {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     
     // 1. Load Assets
-    this.assets = new AssetManager(this.scene); // AssetManager is now globally available
+    this.assets = new AssetManager(this.scene);
     await this.assets.loadAll();
     
     // 2. Initialize Network & Load Templates
@@ -67,6 +67,7 @@ class Game {
     });
     
     // 4. Load Character Data from Network
+    // NOTE: Using a hardcoded test UUID, replace this with your auth logic
     const characterLoadData = await this.network.supabase.loadCharacter('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'); 
 
     // 5. Initialize Player
@@ -89,7 +90,6 @@ class Game {
     console.log("[Bootstrap] Game ready.");
   }
 
-  // ... (rest of the file)
   start() {
     this._running = true;
 
@@ -130,7 +130,7 @@ class Game {
     const result = await this.network.supabase.saveCharacterState(this.characterId, state);
     
     if (result.success) {
-        if (!isCritical) this.ui.showMessage("Game Saved! (v1.0.9)", 1500, 'success');
+        if (!isCritical) this.ui.showMessage("Game Saved!", 1500, 'success');
     } else {
         this.ui.showMessage(`SAVE FAILED: ${result.error}`, 3000, 'error');
     }
