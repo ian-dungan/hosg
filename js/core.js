@@ -1,10 +1,10 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.9 (PATCHED)
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.10 (PATCHED)
 // Fix: Added missing CONFIG.COMBAT block.
 // ============================================================
 
 const CONFIG = {
-    VERSION: '1.0.9',
+    VERSION: '1.0.10',
     DEBUG: true,
     
     GAME: {
