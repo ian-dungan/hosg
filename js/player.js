@@ -1,11 +1,10 @@
 // ============================================================
 // HEROES OF SHADY GROVE - PLAYER CLASS v1.0.12 (PATCHED)
-// Fix: Added missing setupVisuals() public method.
+// Fix: Implemented basic takeDamage logic.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
-        // Character constructor needs to be called first
         super(scene, new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT, 0), 'Player');
         
         this.isPlayer = true; 
@@ -27,7 +26,7 @@ class Player extends Character {
         this.combat = {
             globalCooldown: 0,
             target: null,
-            attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE // Assuming CONFIG.COMBAT exists
+            attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE 
         };
         
         this.inventory = new Inventory(this); 
@@ -43,35 +42,87 @@ class Player extends Character {
             jump: false,
             isUIOpen: false 
         };
-        
+
         this._initInput();
         this._initCamera();
-        this._initCollision();
         this._initTargetHighlight();
+        this._initCollision();
+        this._initMesh(); // This now calls an async implementation (see below)
     }
 
-    /**
-     * Public method used by Game.init() to ensure visuals are set up.
-     * @returns {Promise<void>}
-     */
-    async setupVisuals() {
-        return this._initMesh();
-    }
-    
-    // ... (rest of Player class methods: init, handleMovement, etc.)
+    // New load method to handle persistence
+    async load(characterState, itemTemplates, skillTemplates) {
+        if (characterState) {
+            console.log("[Player] Loading state from persistence...");
+            this.name = characterState.name || this.name;
+            
+            // Stats
+            this.stats = characterState.stats || this.stats;
+            this.health = characterState.health || this.stats.maxHealth;
+            this.mana = characterState.mana || this.stats.maxMana;
+            this.stamina = characterState.stamina || this.stats.maxStamina;
 
-    // Placeholder methods (now must be implemented to set this.mesh and this.visualRoot)
+            // Position and Rotation
+            this.position.x = characterState.position_x || 0;
+            this.position.y = characterState.position_y || CONFIG.PLAYER.SPAWN_HEIGHT;
+            this.position.z = characterState.position_z || 0;
+            if (this.visualRoot) {
+                this.visualRoot.rotation.y = characterState.rotation_y || 0;
+            }
+
+            // Inventory and Equipment
+            this.inventory.load(characterState.items, itemTemplates);
+            this.equipment.load(characterState.equipment, itemTemplates);
+            
+            // Abilities (TODO: Add skill loading logic here)
+
+        } else {
+            console.log("[Player] No save data found. Initializing new character.");
+            // On new character, ensure the character is created in the database
+            // NOTE: The game.js init currently relies on a hardcoded ID, so we skip DB insertion here
+            // but the player starts with base stats.
+        }
+        
+        // Finalize player setup after loading
+        await this._initMesh(); // Load the 3D model after basic setup
+    }
+
+    // === PATCH: Implemented core damage logic ===
+    takeDamage(damage, source) {
+        if (this.health <= 0) return;
+        
+        const finalDamage = Math.max(0, damage); 
+        this.health -= finalDamage;
+
+        if (this.scene.game.ui && this.mesh) {
+            this.scene.game.ui.createFloatingText(
+                this.mesh, 
+                finalDamage.toFixed(0), 
+                'playerDamage'
+            );
+        }
+
+        if (this.health <= 0) {
+            this.health = 0;
+            this.isDead = true;
+            this.scene.game.ui.showMessage("You have fallen!", 5000, 'error');
+            // TODO: Implement death and respawn logic
+        }
+    }
+    // ===============================================
+
+    // Placeholder methods for completeness
     handleMovement(deltaTime) {}
     handleRotation() {}
     setTarget(mesh) {}
-    takeDamage(damage) {}
     useAbility(ability, target) {}
     _initCamera() {}
     _initCollision() {}
+    _initInput() {}
+    _initTargetHighlight() {}
     
     async _initMesh() { 
         // Dummy implementation to ensure visualRoot and mesh are defined. 
-        // A real implementation would load a model like 'knight03.glb' here.
         this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollider", { height: 1.8, diameter: 0.8 }, this.scene);
         this.mesh.isVisible = false;
         this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
@@ -82,19 +133,32 @@ class Player extends Character {
         placeholderMesh.parent = this.visualRoot;
         placeholderMesh.position.y = -0.9; // offset to stand on the ground
     }
-    
-    _initTargetHighlight() {}
-    _initInput() {}
+
+    // ... (rest of methods)
+    // ...
+    getSaveData() {
+        return {
+            name: this.name,
+            position: this.position,
+            rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
+            stats: this.stats, 
+            health: this.health,
+            mana: this.mana,
+            stamina: this.stamina,
+            inventory: this.inventory.getSaveData(),
+            equipment: this.equipment.getSaveData() 
+        };
+    }
+
+    update(deltaTime) {
+        super.update(deltaTime); 
+        
+        // ... (update logic) ...
+    }
 
     dispose() {
-        if (this.mesh) {
-            this.mesh.dispose();
-        }
-        if (this.camera) {
-            this.camera.dispose();
-        }
-        // ... (rest of dispose)
+        // ... (dispose logic) ...
     }
-    
-    // ... (rest of the file)
 }
+
+window.Player = Player;
