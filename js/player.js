@@ -1,5 +1,5 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.8
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.8 (PATCHED)
 // Requires Character (from world.js), Ability, Item (from item.js)
 // ============================================================
 
@@ -29,8 +29,8 @@ class Player extends Character {
             attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE
         };
         
-        this.inventory = new Inventory(this); // Now defined in item.js
-        this.equipment = new Equipment(this); // Now defined in item.js
+        this.inventory = new Inventory(this); 
+        this.equipment = new Equipment(this); 
         this.abilities = []; 
         
         this.input = {
@@ -50,7 +50,7 @@ class Player extends Character {
         this.setupMesh = () => { 
             // Minimal placeholder mesh for testing
             this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerMesh", { height: 1.8, diameter: 0.8 }, this.scene);
-            this.visualRoot = this.mesh; // For simple rotation
+            this.visualRoot = this.mesh; 
             this.mesh.material = new BABYLON.StandardMaterial('pMat', this.scene);
             this.mesh.material.diffuseColor = BABYLON.Color3.Blue();
             this.mesh.position.y = this.position.y;
@@ -87,6 +87,7 @@ class Player extends Character {
         this.inventory.load(characterLoadData.inventory_items || [], characterLoadData.itemTemplates);
         this.equipment.load(characterLoadData.equipped_items || [], characterLoadData.itemTemplates);
         
+        // Load abilities, relying on the passed skillTemplates Map
         this.loadAbilities(characterLoadData.player_skills || [], characterLoadData.skillTemplates);
 
         // Placeholder for setting up targeting from click (must be integrated with scene/mesh)
@@ -98,7 +99,7 @@ class Player extends Character {
                 } else if (metadata.isLoot) {
                     this.handleLoot(metadata.owner);
                 } else {
-                    this.combat.target = null; // Clear target on ground click
+                    this.combat.target = null; 
                 }
             }
         };
@@ -108,8 +109,12 @@ class Player extends Character {
         this.abilities = [];
         skills.forEach(skillInstance => {
             const template = skillTemplates.get(skillInstance.skill_id);
+            
             if (template) {
                 this.abilities.push(new Ability(template));
+            } else {
+                 // PATCH: Graceful handling for missing templates
+                 console.warn(`[Player] Missing skill template for ID: ${skillInstance.skill_id}. Skipping ability load.`);
             }
         });
         
@@ -124,6 +129,7 @@ class Player extends Character {
         }
     }
     
+    // ... (rest of the file)
     castAbility(abilityCode) {
         if (this.isDead || this.combat.globalCooldown > 0) {
             this.scene.game.ui.showMessage('Global Cooldown in effect.', 1000, 'warning');
@@ -160,7 +166,7 @@ class Player extends Character {
         return ability.execute(this, target);
     }
     
-    // Quick-access attack
+    // ... (rest of the file)
     autoAttack() {
         return this.castAbility('auto_attack');
     }
@@ -177,7 +183,6 @@ class Player extends Character {
             this.inventory.removeItem(slotIndex, 1); 
             if (unequippedItem) {
                 if (!this.inventory.addItem(unequippedItem)) {
-                    // Fallback on full inventory: unequip the new item and put the old one back
                     this.equipment.equip(unequippedItem);
                     this.scene.game.ui.showMessage("Inventory full! Cannot swap gear.", 2000, 'error');
                 }
@@ -249,7 +254,7 @@ class Player extends Character {
             this.combat.globalCooldown -= deltaTime;
         }
         
-        // Auto Attack logic (simple: if target is in range and GCD is down, auto-attack)
+        // Auto Attack logic
         const target = this.combat.target;
         if (target && !target.isDead && BABYLON.Vector3.Distance(this.mesh.position, target.mesh.position) <= this.combat.attackRange) {
             this.autoAttack();
