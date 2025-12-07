@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.13 (PATCHED)
-// Fix: Removed unnecessary and crashing call to this.player.setUIManager() from init().
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.14 (PATCHED)
+// Fix: Instantiated NetworkManager in the constructor to resolve null reference.
 // ============================================================
 
 class Game {
@@ -21,7 +21,7 @@ class Game {
     this.world = null;
     this.player = null;
     this.ui = null;
-    this.network = null;
+    this.network = new NetworkManager(); // <--- FIX: NetworkManager instantiated here
     this.characterId = null; 
 
     this.itemTemplates = new Map();
@@ -39,6 +39,7 @@ class Game {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     this.world = new World(this.scene);
     
+    // This line will now succeed as this.network is an object
     await this.network.loadTemplates(this.itemTemplates, this.skillTemplates, this.npcTemplates);
     
     // Hardcoded Character ID for persistence for now (will be replaced by login)
@@ -46,12 +47,11 @@ class Game {
 
     // Player must be initialized AFTER templates are loaded and before UI
     this.player = new Player(this.scene); 
-    await this.player.init(); // This is an async call now
+    await this.player.init(); 
 
     // Load state onto the player
-    const loadResult = await this.network.loadCharacterState(this.characterId);
+    const loadResult = await this.network.supabase.loadCharacterState(this.characterId);
     if (loadResult.success) {
-        // Player's inventory and equipment loading is now handled inside player.js/item.js
         this.player.loadState(loadResult.state); 
     } else {
         console.warn(`[Game] Failed to load character state: ${loadResult.error}. Using default state.`);
@@ -59,7 +59,6 @@ class Game {
 
     // Initialize UI
     this.ui = new UIManager(this);
-    // REMOVED: if (this.player) this.player.setUIManager(this.ui); // Crash was here
     
     this.setupPersistence();
     this.start();
