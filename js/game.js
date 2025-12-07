@@ -48,13 +48,13 @@ class Game {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     
     // 1. Load Assets
-    this.assets = new AssetManager(this.scene);
+    this.assets = new AssetManager(this.scene); // AssetManager is now globally available
     await this.assets.loadAll();
     
     // 2. Initialize Network & Load Templates
     this.network = new NetworkManager();
     
-    // PATCH: Use the correct function names (load...Templates)
+    // Corrected function names (load...Templates)
     this.itemTemplates = await this.network.supabase.loadItemTemplates();
     this.skillTemplates = await this.network.supabase.loadSkillTemplates();
     this.npcTemplates = await this.network.supabase.loadNPCTemplates();
@@ -67,7 +67,6 @@ class Game {
     });
     
     // 4. Load Character Data from Network
-    // NOTE: Using a hardcoded test UUID, replace this with your auth logic
     const characterLoadData = await this.network.supabase.loadCharacter('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'); 
 
     // 5. Initialize Player
@@ -75,9 +74,9 @@ class Game {
     
     // 6. Initialize Player with all necessary data and templates
     await this.player.init({
-        ...characterLoadData, // character, inventory_items, equipped_items, player_skills
-        itemTemplates: this.itemTemplates, // Pass the Map
-        skillTemplates: this.skillTemplates // Pass the Map
+        ...characterLoadData, 
+        itemTemplates: this.itemTemplates, 
+        skillTemplates: this.skillTemplates 
     });
 
     // 7. Initialize UI (Needs player object)
@@ -90,6 +89,7 @@ class Game {
     console.log("[Bootstrap] Game ready.");
   }
 
+  // ... (rest of the file)
   start() {
     this._running = true;
 
@@ -130,7 +130,7 @@ class Game {
     const result = await this.network.supabase.saveCharacterState(this.characterId, state);
     
     if (result.success) {
-        if (!isCritical) this.ui.showMessage("Game Saved!", 1500, 'success');
+        if (!isCritical) this.ui.showMessage("Game Saved! (v1.0.9)", 1500, 'success');
     } else {
         this.ui.showMessage(`SAVE FAILED: ${result.error}`, 3000, 'error');
     }
