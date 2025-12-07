@@ -1,10 +1,11 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.9 (PATCHED)
-// Fix: Added init/loadAbilities methods with null check for skill templates.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.10 (PATCHED)
+// Fix: Added null checks for visualRoot in init() to prevent crash.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
+        // Assuming Character constructor handles mesh/visualRoot creation or is the base
         super(scene, new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT, 0), 'Player');
         
         this.isPlayer = true; 
@@ -60,10 +61,18 @@ class Player extends Character {
      */
     init(data, itemTemplates, skillTemplates) {
         // Load position/rotation
-        this.position.x = data.character.position_x;
-        this.position.y = data.character.position_y;
-        this.position.z = data.character.position_z;
-        this.visualRoot.rotation.y = data.character.rotation_y;
+        // 🌟 FIX 1: Safely set position on this.mesh (which holds the physics position)
+        if (this.mesh && this.mesh.position) {
+            this.mesh.position.x = data.character.position_x;
+            this.mesh.position.y = data.character.position_y;
+            this.mesh.position.z = data.character.position_z;
+        }
+
+        // 🌟 FIX 2: Safely set rotation on this.visualRoot
+        if (this.visualRoot && this.visualRoot.rotation) {
+            this.visualRoot.rotation.y = data.character.rotation_y; // <--- FIX TARGETED HERE
+        }
+
 
         // Load resources
         this.health = data.character.health;
@@ -78,7 +87,7 @@ class Player extends Character {
         // Load Abilities
         this.loadAbilities(data.player_skills, skillTemplates);
         
-        console.log(`[Player] Loaded position (${this.position.x.toFixed(2)}, ${this.position.y.toFixed(2)}, ${this.position.z.toFixed(2)}) and state.`);
+        console.log(`[Player] Loaded position (${this.mesh.position.x.toFixed(2)}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z.toFixed(2)}) and state.`);
     }
 
     /**
@@ -92,7 +101,7 @@ class Player extends Character {
             // Find the full skill template using the skill_id from the character record
             const template = skillTemplates.get(record.skill_id);
 
-            // 🌟 FIX: Prevent calling new Ability() with a missing template (The cause of the error)
+            // FIX: Prevent calling new Ability() with a missing template (The cause of the previous error)
             if (!template) {
                 console.warn(`[Player] Missing skill template for ID ${record.skill_id}. Skipping ability.`);
                 return null; 
@@ -112,7 +121,7 @@ class Player extends Character {
 
     getSaveData() {
         return {
-            position: this.position,
+            position: this.mesh.position, // Using mesh.position for physics position
             rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
             stats: this.stats, 
             health: this.health,
@@ -169,7 +178,7 @@ class Player extends Character {
     useAbility(ability, target) {}
     _initCamera() {}
     _initCollision() {}
-    _initMesh() {}
+    _initMesh() {} // This is the function that must create this.mesh and this.visualRoot
     _initTargetHighlight() {}
     _initInput() {}
 
