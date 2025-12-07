@@ -1,11 +1,11 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.10 (PATCHED)
-// Fix: Added null checks for visualRoot in init() to prevent crash.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.11 (PATCHED)
+// Fix: Moved mesh/visual initialization to an awaitable method.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
-        // Assuming Character constructor handles mesh/visualRoot creation or is the base
+        // Character constructor needs to be called first
         super(scene, new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT, 0), 'Player');
         
         this.isPlayer = true; 
@@ -44,12 +44,22 @@ class Player extends Character {
             isUIOpen: false 
         };
         
-        // These methods are assumed to exist based on the constructor calls
+        // Removed: this._initCamera(), this._initCollision(), this._initMesh(), etc.
+        // These will now be called by setupVisuals()
+        this._initInput(); // Input can be initialized immediately
+    }
+    
+    /**
+     * Called from Game.init(). Loads all visual elements (Mesh, Camera, etc.)
+     * This must be awaited before setting mesh position/rotation.
+     */
+    async setupVisuals() {
+        // Assuming these methods load assets or create Babylon objects
+        await this._initMesh(); 
         this._initCamera();
         this._initCollision();
-        this._initMesh();
         this._initTargetHighlight();
-        this._initInput(); 
+        console.log("[Player] Visuals and camera initialized.");
     }
     
     /**
@@ -60,19 +70,19 @@ class Player extends Character {
      * @param {Map} skillTemplates - Map of skill templates
      */
     init(data, itemTemplates, skillTemplates) {
+        // **this.mesh and this.visualRoot are now guaranteed to be defined**
+        // because Game.init() will await setupVisuals() before calling this.
+
         // Load position/rotation
-        // 🌟 FIX 1: Safely set position on this.mesh (which holds the physics position)
         if (this.mesh && this.mesh.position) {
             this.mesh.position.x = data.character.position_x;
             this.mesh.position.y = data.character.position_y;
             this.mesh.position.z = data.character.position_z;
         }
 
-        // 🌟 FIX 2: Safely set rotation on this.visualRoot
         if (this.visualRoot && this.visualRoot.rotation) {
-            this.visualRoot.rotation.y = data.character.rotation_y; // <--- FIX TARGETED HERE
+            this.visualRoot.rotation.y = data.character.rotation_y; 
         }
-
 
         // Load resources
         this.health = data.character.health;
@@ -80,7 +90,6 @@ class Player extends Character {
         this.stamina = data.character.stamina;
 
         // Load Inventory & Equipment
-        // Assumes Inventory.load and Equipment.load are defined elsewhere (e.g., item.js)
         this.inventory.load(data.inventory_items, itemTemplates);
         this.equipment.load(data.equipped_items, itemTemplates);
         
@@ -92,36 +101,32 @@ class Player extends Character {
 
     /**
      * Creates Ability objects from character skill records and template data.
-     * (Corresponds to line 128 in the trace)
      */
     loadAbilities(skillRecords, skillTemplates) {
         if (!skillRecords) return;
         
         this.abilities = skillRecords.map(record => {
-            // Find the full skill template using the skill_id from the character record
             const template = skillTemplates.get(record.skill_id);
 
-            // FIX: Prevent calling new Ability() with a missing template (The cause of the previous error)
             if (!template) {
                 console.warn(`[Player] Missing skill template for ID ${record.skill_id}. Skipping ability.`);
                 return null; 
             }
 
-            // The Ability constructor will now receive a valid template
             return new Ability(template); 
-        }).filter(a => a !== null); // Filter out any failed ability creations
+        }).filter(a => a !== null); 
         
         console.log(`[Player] Loaded ${this.abilities.length} abilities.`);
     }
     
     
     // ==================================================
-    // Existing Methods (Included for file context)
+    // Existing Methods 
     // ==================================================
 
     getSaveData() {
         return {
-            position: this.mesh.position, // Using mesh.position for physics position
+            position: this.mesh.position, 
             rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
             stats: this.stats, 
             health: this.health,
@@ -170,7 +175,7 @@ class Player extends Character {
         }
     }
     
-    // Placeholder for other essential methods
+    // Placeholder methods (now must be implemented to set this.mesh and this.visualRoot)
     handleMovement(deltaTime) {}
     handleRotation() {}
     setTarget(mesh) {}
@@ -178,7 +183,19 @@ class Player extends Character {
     useAbility(ability, target) {}
     _initCamera() {}
     _initCollision() {}
-    _initMesh() {} // This is the function that must create this.mesh and this.visualRoot
+    async _initMesh() { 
+        // Dummy implementation to ensure visualRoot and mesh are defined. 
+        // A real implementation would load a model like 'knight03.glb' here.
+        this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollider", { height: 1.8, diameter: 0.8 }, this.scene);
+        this.mesh.isVisible = false;
+        this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
+        this.visualRoot.parent = this.mesh;
+        
+        // Placeholder visible mesh (Box for now)
+        const placeholderMesh = BABYLON.MeshBuilder.CreateBox("playerBox", { size: 1.0 }, this.scene);
+        placeholderMesh.parent = this.visualRoot;
+        placeholderMesh.position.y = -0.9; // offset to stand on the ground
+    }
     _initTargetHighlight() {}
     _initInput() {}
 
