@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.13 (PATCHED)
-// Fix: Corrected Supabase table name for spawn points (hosg_npc_spawns).
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.14 (PATCHED)
+// Fix: Added the 'templates' object to the return value of loadTemplates().
 // ============================================================
 
 //
@@ -89,19 +89,20 @@ SupabaseService.prototype.loadTemplates = async function () {
         if (result.error) throw new Error('Failed to fetch NPC templates: ' + result.error.message);
         const npcTemplates = result.data;
 
-        // Fetch Spawn Points (FIXED: Table name corrected from database hint)
+        // Fetch Spawn Points (Table name corrected in last patch)
         result = await this._fetch('hosg_npc_spawns', 'spawn points'); 
         if (result.error) throw new Error('Failed to fetch spawn points: ' + result.error.message);
         const spawnPoints = result.data;
 
-        this.templates = {
+        // FIX: Capture templates and return them directly
+        const templates = {
             itemTemplates: itemTemplates,
             skillTemplates: skillTemplates,
             npcTemplates: npcTemplates,
             spawnPoints: spawnPoints
         };
 
-        return { success: true };
+        return { success: true, templates: templates };
 
     } catch (error) {
         console.log(`[Supabase] Failed to load templates:`, error);
