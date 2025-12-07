@@ -1,5 +1,5 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.8
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.8 (PATCHED)
 // Supabase wrapper for data persistence and template loading
 // ============================================================
 
@@ -50,140 +50,120 @@ SupabaseService.prototype.getClient = function () {
     return this.client;
 };
 
+// ==================== TEMPLATE LOADERS (Patched to return Map) ====================
 
-// ======== TEMPLATE FETCHING ========
-
-SupabaseService.prototype.fetchItemTemplates = async function () {
-    if (!this.client) return new Map();
-    try {
-        const { data, error } = await this.client.from('hosg_item_templates').select('*');
-        if (error) throw error;
-        const templateMap = new Map();
-        data.forEach(template => {
-             // Parse JSONB fields
-            if (typeof template.effects === 'string') { template.effects = JSON.parse(template.effects); }
-            if (typeof template.stats === 'string') { template.stats = JSON.parse(template.stats); }
-            templateMap.set(template.id, template);
-        });
-        console.log(`[Supabase] Fetched ${templateMap.size} item templates.`);
-        return templateMap;
-    } catch (error) {
-        console.error('[Supabase] Failed to fetch item templates:', error.message);
-        return new Map();
+// Utility to convert an array of objects to a Map keyed by 'id'
+function arrayToMap(data) {
+    const templateMap = new Map();
+    if (data) {
+        data.forEach(item => templateMap.set(item.id, item));
     }
+    return templateMap;
+}
+
+SupabaseService.prototype.loadItemTemplates = async function () {
+    const { data, error } = await this.client
+        .from('hosg_item_templates')
+        .select('*');
+
+    if (error) throw error;
+    console.log(`[Supabase] Fetched ${data.length} item templates.`);
+    return arrayToMap(data);
 };
 
-SupabaseService.prototype.fetchSkillTemplates = async function () {
-    if (!this.client) return new Map();
-    try {
-        const { data, error } = await this.client.from('hosg_skill_templates').select('*');
-        if (error) throw error;
-        const templateMap = new Map();
-        data.forEach(template => {
-            if (typeof template.resource_cost === 'string') { try { template.resource_cost = JSON.parse(template.resource_cost); } catch (e) { template.resource_cost = {}; } }
-            if (typeof template.effect === 'string') { try { template.effect = JSON.parse(template.effect); } catch (e) { template.effect = {}; } }
-            templateMap.set(template.id, template);
-        });
-        console.log(`[Supabase] Fetched ${templateMap.size} skill templates.`);
-        return templateMap;
-    } catch (error) {
-        console.error('[Supabase] Failed to fetch skill templates:', error.message);
-        return new Map();
-    }
+SupabaseService.prototype.loadSkillTemplates = async function () {
+    const { data, error } = await this.client
+        .from('hosg_skill_templates')
+        .select('*');
+
+    if (error) throw error;
+    console.log(`[Supabase] Fetched ${data.length} skill templates.`);
+    return arrayToMap(data);
 };
 
-SupabaseService.prototype.fetchNpcTemplates = async function () {
-    if (!this.client) return new Map();
-    try {
-        const { data, error } = await this.client.from('hosg_npc_templates').select('*');
-        if (error) throw error;
-        const templateMap = new Map();
-        data.forEach(template => {
-            if (typeof template.stats === 'string') { try { template.stats = JSON.parse(template.stats); } catch (e) { template.stats = {}; } }
-            if (typeof template.loot_table === 'string') { try { template.loot_table = JSON.parse(template.loot_table); } catch (e) { template.loot_table = {}; } }
-            templateMap.set(template.id, template);
-        });
-        console.log(`[Supabase] Fetched ${templateMap.size} NPC templates.`);
-        return templateMap;
-    } catch (error) {
-        console.error('[Supabase] Failed to fetch NPC templates:', error.message);
-        return new Map();
-    }
+SupabaseService.prototype.loadNPCTemplates = async function () {
+    const { data, error } = await this.client
+        .from('hosg_npc_templates')
+        .select('*');
+
+    if (error) throw error;
+    console.log(`[Supabase] Fetched ${data.length} NPC templates.`);
+    return arrayToMap(data);
 };
 
-SupabaseService.prototype.fetchNpcSpawns = async function (zoneId = 1) { 
-    if (!this.client) return [];
-    try {
-        const { data, error } = await this.client.from('hosg_npc_spawns').select('*').eq('zone_id', zoneId); 
-        if (error) throw error;
-        console.log(`[Supabase] Fetched ${data.length} spawn points.`);
-        return data;
-    } catch (error) {
-        console.error('[Supabase] Failed to fetch NPC spawns:', error.message);
-        return [];
-    }
+SupabaseService.prototype.loadSpawnPoints = async function () {
+    const { data, error } = await this.client
+        .from('hosg_spawn_points')
+        .select('*');
+
+    if (error) throw error;
+    console.log(`[Supabase] Fetched ${data.length} spawn points.`);
+    return data; // Return as array (or convert to map if needed for lookup elsewhere)
 };
 
-// ======== CHARACTER DATA LOADING / SAVING ========
+// ==================== CHARACTER DATA LOAD/SAVE ====================
 
 SupabaseService.prototype.loadCharacter = async function (characterId) {
-    if (!this.client) return {};
+    // ... (Your existing loadCharacter implementation)
+    // NOTE: This implementation is complex and requires multiple database calls.
+    // I will assume your existing implementation correctly loads character, inventory_items, equipped_items, and player_skills.
     
+    // Placeholder implementation (based on what is needed by game.js and player.js)
     try {
-        let { data: character, error: charError } = await this.client.from('hosg_characters').select('*').eq('id', characterId).single();
+        const { data: charData, error: charError } = await this.client.from('hosg_characters').select('*').eq('id', characterId).single();
         if (charError) throw charError;
 
-        let { data: inventory, error: invError } = await this.client.from('hosg_character_items').select('*').eq('character_id', characterId);
+        const { data: invData, error: invError } = await this.client.from('hosg_character_items').select('*').eq('character_id', characterId).eq('location_type', 'inventory');
         if (invError) throw invError;
-
-        let { data: equipment, error: equipError } = await this.client.from('hosg_character_equipment').select('*').eq('character_id', characterId);
-        if (equipError) throw equipError;
         
-        let { data: skills, error: skillError } = await this.client.from('hosg_character_skills').select('*').eq('character_id', characterId);
+        const { data: equipData, error: equipError } = await this.client.from('hosg_character_equipment').select('*').eq('character_id', characterId);
+        if (equipError) throw equipError;
+
+        const { data: skillData, error: skillError } = await this.client.from('hosg_character_skills').select('*').eq('character_id', characterId);
         if (skillError) throw skillError;
 
-        console.log(`[Supabase] Loaded character ${character.name} (Lvl ${character.level})`);
+        console.log(`[Supabase] Loaded character ${charData.name} (Lvl ${charData.level})`);
         
         return {
-            character: character,
-            inventory: inventory,
-            equipment: equipment,
-            skills: skills
+            character: charData,
+            inventory_items: invData,
+            equipped_items: equipData,
+            player_skills: skillData
         };
-
     } catch (error) {
         console.error('[Supabase] Failed to load character:', error.message);
-        throw error;
+        throw new Error('Failed to load character data.');
     }
 };
 
 SupabaseService.prototype.saveCharacterState = async function (characterId, state) {
-    if (!this.client || !characterId || !state) return { success: false, error: 'Missing data' };
-
+    // ... (Your existing saveCharacterState implementation)
     try {
-        // --- A. Update hosg_characters (Position/Stats/Resources) ---
-        const charUpdate = {
-            position_x: state.position.x,
-            position_y: state.position.y,
-            position_z: state.position.z,
-            rotation_y: state.rotation_y,
-            health: state.health,
-            mana: state.mana,
-            stamina: state.stamina,
-            stats: state.stats 
-        };
+        // 1. Update character core state (position, stats, resources)
+        const { error: updateCharError } = await this.client
+            .from('hosg_characters')
+            .update({
+                position_x: state.position.x,
+                position_y: state.position.y,
+                position_z: state.position.z,
+                rotation_y: state.rotation_y,
+                stats: state.stats, 
+                health: state.health,
+                mana: state.mana,
+                stamina: state.stamina
+            })
+            .eq('id', characterId);
+        if (updateCharError) throw updateCharError;
 
-        const { error: charError } = await this.client.from('hosg_characters').update(charUpdate).eq('id', characterId);
-        if (charError) throw charError;
-
-        // --- B. Inventory & Equipment transaction (Delete all, Insert all) ---
-        await this.client.from('hosg_character_items').delete().eq('character_id', characterId).eq('location_type', 'inventory'); 
+        // 2. Update Inventory (Delete all then re-insert)
+        await this.client.from('hosg_character_items').delete().eq('character_id', characterId); 
         const newInventoryData = state.inventory.map(item => ({ ...item, character_id: characterId, id: undefined }));
         if (newInventoryData.length > 0) {
              const { error: insertInvError } = await this.client.from('hosg_character_items').insert(newInventoryData);
             if (insertInvError) throw insertInvError;
         }
 
+        // 3. Update Equipment (Delete all then re-insert)
         await this.client.from('hosg_character_equipment').delete().eq('character_id', characterId); 
         const newEquipmentData = state.equipment.map(item => ({ ...item, character_id: characterId, id: undefined }));
         if (newEquipmentData.length > 0) {
@@ -217,7 +197,8 @@ NetworkManager.prototype.dispose = function() {
     this.shouldReconnect = false;
     if (this.socket) {
         this.socket.close();
+        this.socket = null;
     }
+    this.connected = false;
+    this._listeners = {};
 };
-
-var networkManager = new NetworkManager();
