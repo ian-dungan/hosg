@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.9 (PATCHED)
-// Fix: Awaiting player visuals setup before init() call.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.10 (PATCHED)
+// Fix: Removed unexpected '\n' character in Game constructor.
 // ============================================================
 
 class Game {
@@ -9,7 +9,8 @@ class Game {
     if (!this.canvas) throw new Error("Canvas not found");
 
     this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    this.scene = new BABYLON.Scene(this.engine);\n    this.scene.collisionsEnabled = true;
+    this.scene = new BABYLON.Scene(this.engine);
+    this.scene.collisionsEnabled = true; // Cleaned up line
     this.scene.game = this; 
 
     if (typeof CANNON !== "undefined") {
@@ -35,8 +36,6 @@ class Game {
   }
 
   async init() {
-    console.log("[Game] Initializing..."); // Added this log for clarity
-
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     this.assets = new AssetManager(this.scene); // Assuming AssetManager exists
     await this.assets.loadAssets(); // Wait for assets to finish loading
@@ -60,7 +59,7 @@ class Game {
     // 4. Initialize Player
     this.player = new Player(this.scene);
 
-    // 🌟 FIX: Await player visuals setup before attempting to set position/rotation
+    // FIX: Await player visuals setup before attempting to set position/rotation
     await this.player.setupVisuals(); 
 
     // Pass the loaded data to the player and UI
