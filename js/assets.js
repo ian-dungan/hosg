@@ -48,7 +48,7 @@ const ASSET_MANIFEST = {
         ENEMIES: {
             wolf: {
                 model: 'enemies/wolf.glb',
-                scale: 0.02,
+                scale: 1.0, // <-- FIX: Changed from 0.02 to 1.0
                 required: false
             },
             goblin: {
