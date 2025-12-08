@@ -1,15 +1,21 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.12 (CRITICAL LOGIC FIX)
-// Fix: Corrected MANIFEST_DATA initialization and loadAll iteration to match CONFIG.ASSETS structure.
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.13 (FINAL ASSET LOADING FIX)
+// Fix: Ensured CONFIG is fully loaded before accessing its properties, and moved task count calculation.
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
-// Use the CONFIG.ASSETS block, falling back to a minimal default if CONFIG is not available
-const MANIFEST_DATA = (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) ? CONFIG.ASSETS : {
-    BASE_PATH: "/hosg/assets/models/", 
-    CHARACTERS: {},
-    ENVIRONMENT: {}
+// Safely use CONFIG.ASSETS, falling back to an empty structure if CONFIG isn't ready.
+const getManifestData = () => {
+    if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
+        return CONFIG.ASSETS;
+    }
+    return {
+        BASE_PATH: "/hosg/assets/", 
+        CHARACTERS: {},
+        ENVIRONMENT: {}
+    };
 };
+const MANIFEST_DATA = getManifestData();
 
 // ==================== ASSET MANAGER CLASS ====================
 class AssetManager {
@@ -20,6 +26,7 @@ class AssetManager {
             requested: 0,
             loaded: 0
         };
+        // Initialize the loader here. This must succeed for task loading to work.
         this.loader = new BABYLON.AssetsManager(scene);
         
         this.printStats = this.printStats.bind(this);
@@ -28,20 +35,25 @@ class AssetManager {
     async loadAll() {
         console.log('[Assets] Starting asset load...');
 
-        // Load Character Models - Iterate directly over MANIFEST_DATA.CHARACTERS keys
+        // Load Character Models
         for (const key in MANIFEST_DATA.CHARACTERS) {
             const assetData = MANIFEST_DATA.CHARACTERS[key];
             this.loadModel(assetData, key, 'CHARACTERS');
         }
         
-        // Load Environment Assets - Iterate directly over MANIFEST_DATA.ENVIRONMENT keys
+        // Load Environment Assets
         for (const key in MANIFEST_DATA.ENVIRONMENT) {
             const assetData = MANIFEST_DATA.ENVIRONMENT[key];
             this.loadModel(assetData, key, 'ENVIRONMENT');
         }
         
-        // This is the total count of assets we've added to the loader
+        // CRITICAL FIX: Ensure we calculate this only AFTER all tasks have been added
         this.stats.requested = this.loader.tasks.length;
+
+        if (this.stats.requested === 0) {
+            console.warn('[Assets] No assets defined to load.');
+            return Promise.resolve(this.assets);
+        }
 
         return new Promise((resolve, reject) => {
             
@@ -61,22 +73,22 @@ class AssetManager {
                 resolve(this.assets); 
             };
             
-            if (this.loader.tasks.length > 0) {
-                this.loader.load();
-            } else {
-                console.warn('[Assets] No assets defined to load.');
-                resolve(this.assets);
-            }
+            this.loader.load();
         });
     }
 
     loadModel(assetData, key, category) {
+        // Double-check: Make sure model is defined before adding a task
+        if (!assetData || !assetData.model) {
+            console.error(`[Assets] Asset data for ${key} in ${category} is incomplete. Skipping.`);
+            return;
+        }
+
         const taskName = `${category}_${key}`;
         
         // Use the assetData.path if provided, otherwise use the global BASE_PATH
         const basePath = assetData.path || MANIFEST_DATA.BASE_PATH;
         
-        // Note: Babylon.js requires a root URL (basePath), and the filename (assetData.model)
         const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
         task.required = assetData.required || false; 
 
