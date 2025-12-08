@@ -1,13 +1,13 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.20 (ASSET PATHS)
-// Fix: Added CONFIG.ASSETS to allow custom model paths.
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.21 (ASSET PATHS FIX)
+// Fix: Updated BASE_PATH per request and made other paths explicit to prevent 404s.
 // ============================================================
 
 const CONFIG = {
     // === PATCH START: ADDING MISSING BLOCKS ===
     PLAYER: {
         INVENTORY_SIZE: 30, // Default value to fix the critical crash in item.js
-        // Placeholder values matching fallbacks in player.js (for robust initialization):
+        // Placeholder values matching fallbacks in player.js (for robust initialization):\
         HEALTH: 100,
         MANA: 50,
         STAMINA: 100,
@@ -18,24 +18,37 @@ const CONFIG = {
     },
     // NEW BLOCK: Custom Asset Paths
     ASSETS: {
-        // This path is used for any asset that doesn't define its own custom 'path'
-        BASE_PATH: "/hosg/assets/models/", 
+        // UPDATED: Now points to the top-level assets folder as requested
+        BASE_PATH: "/hosg/assets/", 
         
         CHARACTERS: {
             knight: { 
                 model: 'Knight03.glb',
-                // CUSTOM PATH: This will override BASE_PATH for the knight model
+                // CUSTOM PATH
                 path: '/hosg/assets/player/character/' 
             },
             wolf: {
-                model: 'Wolf.glb'
-                // Uses BASE_PATH
+                model: 'Wolf.glb',
+                // EXPLICIT PATH: Overrides BASE_PATH to point to /models/
+                path: '/hosg/assets/models/'
             }
         },
         ENVIRONMENT: {
-            terrain_base: { model: 'TerrainBase.glb' },
-            tree_pine: { model: 'TreePine.glb' },
-            grass_tuft: { model: 'GrassTuft.glb' }
+            terrain_base: { 
+                model: 'TerrainBase.glb',
+                // EXPLICIT PATH: Overrides BASE_PATH
+                path: '/hosg/assets/models/'
+            },
+            tree_pine: { 
+                model: 'TreePine.glb',
+                // EXPLICIT PATH: Overrides BASE_PATH
+                path: '/hosg/assets/models/'
+            },
+            grass_tuft: { 
+                model: 'GrassTuft.glb',
+                // EXPLICIT PATH: Overrides BASE_PATH
+                path: '/hosg/assets/models/'
+            }
         }
     },
     // === PATCH END ===
@@ -81,7 +94,7 @@ const CONFIG = {
             defaultAbility: 'Fireball' 
         },
         Cleric: { 
-            model: 'knight',
+            model: 'knight',\
             stats: { 
                 maxHealth: 100, maxMana: 100, maxStamina: 90, 
                 attackPower: 10, magicPower: 12, moveSpeed: 0.15 
