@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - UI MANAGER v1.1.0 (CRITICAL MESSAGE AND NULL FIX)
-// Fix: Added showMessage() method. Added null check for this.hud in update().
+// HEROES OF SHADY GROVE - UI MANAGER v1.1.1 (CRITICAL GUI BUTTON FIX)
+// Fix: Added full, correct implementation of _createActionBar to resolve 'not a constructor' error.
 // ============================================================
 
 class UIManager {
@@ -36,138 +36,120 @@ class UIManager {
         this.hud.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
         this.hud.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
         this.hud.paddingLeft = "20px";
-        this.hud.paddingTop = "20px";
         this.advancedTexture.addControl(this.hud);
 
-        const healthBar = new BABYLON.GUI.TextBlock("healthText", "HP: 100/100");
-        healthBar.color = "red";
-        healthBar.height = "20px";
-        this.hud.addControl(healthBar);
+        const healthText = new BABYLON.GUI.TextBlock("healthText");
+        healthText.color = "red";
+        healthText.text = "HP: 100/100";
+        healthText.height = "30px";
+        this.hud.addControl(healthText);
 
+        // Add Mana/Stamina placeholders here
+        
         console.log('[UI] HUD created.'); 
     }
 
     _createTargetFrame() {
-        this.targetFrame = new BABYLON.GUI.StackPanel("targetPanel");
+        this.targetFrame = new BABYLON.GUI.StackPanel("targetFrame");
         this.targetFrame.width = "200px";
         this.targetFrame.height = "50px";
         this.targetFrame.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
         this.targetFrame.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
         this.targetFrame.paddingRight = "20px";
-        this.targetFrame.paddingTop = "20px";
         this.targetFrame.isVisible = false;
         this.advancedTexture.addControl(this.targetFrame);
-
-        const targetName = new BABYLON.GUI.TextBlock("targetName", "Target Name");
-        targetName.color = "yellow";
-        targetName.height = "20px";
-        this.targetFrame.addControl(targetName);
-
         console.log('[UI] Target frame created.'); 
-    }
-    
-    _createMessageSystem() {
-        // Container for game messages (e.g., "Game Saved!")
-        this.messageContainer = new BABYLON.GUI.StackPanel("messageContainer");
-        this.messageContainer.width = "400px";
-        this.messageContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        this.messageContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        this.advancedTexture.addControl(this.messageContainer);
     }
 
     _createActionBar() {
+        // Defensive check against missing BABYLON.GUI
+        if (!BABYLON.GUI || !BABYLON.GUI.Button || !BABYLON.GUI.StackPanel) {
+            console.error("[UI] BABYLON.GUI components are undefined. Check if babylon.gui.min.js is loaded correctly.");
+            return;
+        }
+
         this.actionBar = new BABYLON.GUI.StackPanel("actionBarPanel");
-        this.actionBar.isHorizontal = true;
-        this.actionBar.width = "400px";
-        this.actionBar.height = "50px";
+        this.actionBar.width = "500px";
+        this.actionBar.height = "70px";
+        this.actionBar.isVertical = false;
         this.actionBar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        this.actionBar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        this.actionBar.paddingBottom = "10px";
         this.advancedTexture.addControl(this.actionBar);
 
-        for (let i = 0; i < 6; i++) {
-            const slot = new BABYLON.GUI.Button.CreateSimpleButton(`actionSlot${i}`, (i + 1).toString());
-            slot.width = "50px";
-            slot.height = "50px";
-            slot.color = "white";
-            slot.background = "#333333aa";
-            slot.paddingLeft = "5px";
-            slot.paddingRight = "5px";
+        for (let i = 0; i < 5; i++) {
+            const slotId = "actionSlot" + i;
+            // The method is static, so it should be called on the class, not an instance
+            const button = BABYLON.GUI.Button.CreateSimpleButton(slotId, (i + 1).toString());
+            button.width = "60px";
+            button.height = "60px";
+            button.color = "white";
+            button.background = "black";
+            button.alpha = 0.7;
+            button.thickness = 2;
+            button.paddingLeft = "5px";
+            button.paddingRight = "5px";
             
-            slot.textBlock = slot.children[0];
-            
-            this.actionBar.addControl(slot);
-            this.actionBarSlots.push(slot);
+            // Add reference to the slot for later updating
+            this.actionBarSlots.push({ 
+                button: button, 
+                ability: null, 
+                cooldownOverlay: null 
+            });
+
+            this.actionBar.addControl(button);
         }
 
         console.log('[UI] Action bar created.'); 
     }
 
-    // --- Message System Method (Fixes TypeError in game.js) ---
-    /**
-     * Shows a temporary game message in the center of the screen.
-     * @param {string} message 
-     * @param {number} durationMs 
-     * @param {string} type - 'info', 'success', 'error', 'playerDamage', etc.
-     */
-    showMessage(message, durationMs = 3000, type = 'info') {
-        if (!this.messageContainer) return;
+    _createMessageSystem() {
+        this.messageContainer = new BABYLON.GUI.StackPanel("messageContainer");
+        this.messageContainer.width = "40%";
+        this.messageContainer.height = "200px";
+        this.messageContainer.isVertical = true;
+        this.messageContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        this.messageContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.advancedTexture.addControl(this.messageContainer);
+        console.log('[UI] Message system created.');
+    }
 
+    showMessage(text, duration = 2000, type = 'info') {
         const textBlock = new BABYLON.GUI.TextBlock();
-        textBlock.text = message;
-        textBlock.color = this._getMessageColor(type);
-        textBlock.fontSize = 20;
-        textBlock.height = "30px";
-        textBlock.paddingTop = "5px";
+        textBlock.text = text;
+        textBlock.color = type === 'error' ? 'red' : 
+                          type === 'heal' ? 'lightgreen' :
+                          type === 'enemyDamage' ? 'yellow' :
+                          type === 'playerDamage' ? 'orange' : 'white';
+        textBlock.fontSize = 18;
+        textBlock.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        textBlock.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        textBlock.height = "25px"; 
         
-        // Add the message to the container
-        this.messageContainer.addControl(textBlock);
+        this.messageContainer.insertAt(0, textBlock); 
 
-        // Remove the message after durationMs
+        while (this.messageContainer.children.length > 8) {
+            this.messageContainer.children[this.messageContainer.children.length - 1].dispose();
+        }
+
         setTimeout(() => {
-            this.messageContainer.removeControl(textBlock);
             textBlock.dispose();
-        }, durationMs);
+        }, duration);
     }
     
-    _getMessageColor(type) {
-        switch (type) {
-            case 'success': return 'lightgreen';
-            case 'error': return 'red';
-            case 'playerDamage': return 'red';
-            case 'enemyDamage': return 'yellow';
-            case 'heal': return 'lightskyblue';
-            default: return 'white';
-        }
-    }
-    // -----------------------------------------------------------------
-
-    updateActionBar(player) {
-        const abilities = player.abilities || []; 
-
-        abilities.forEach((ability, index) => {
-            const slot = this.actionBarSlots[index];
-            if (slot) {
-                const abilityName = ability ? ability.name.substring(0, 8) : (index + 1).toString();
-                slot.textBlock.text = abilityName;
-                slot.textBlock.color = ability ? "yellow" : "gray";
-            }
-        });
-    }
-
     _createInventoryWindow() {
         this.inventoryWindow = new BABYLON.GUI.Rectangle("inventoryWindow");
         this.inventoryWindow.width = "300px";
         this.inventoryWindow.height = "400px";
-        this.inventoryWindow.background = "#000000cc";
+        this.inventoryWindow.background = "rgba(0,0,0,0.8)";
         this.inventoryWindow.color = "white";
+        this.inventoryWindow.thickness = 2;
         this.inventoryWindow.isVisible = false;
         this.advancedTexture.addControl(this.inventoryWindow);
-
-        const title = new BABYLON.GUI.TextBlock("inventoryTitle", "Inventory (I)");
+        
+        const title = new BABYLON.GUI.TextBlock("invTitle");
+        title.text = "Inventory";
         title.fontSize = 24;
-        title.paddingTop = "10px";
-        title.height = "40px";
+        title.color = "white";
+        title.height = "30px";
         title.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
         this.inventoryWindow.addControl(title);
 
@@ -192,10 +174,9 @@ class UIManager {
         console.log('[UI] Input bindings created.'); 
     }
 
-    // --- Update Loop (Fixes the Null Error) ---
+    // --- Update Loop ---
     
     update(player) {
-        // CRITICAL FIX: Check if this.hud is initialized (fixes the null error)
         if (!this.hud) return; 
         
         // Update HUD elements (Health, Mana, Stamina)
@@ -206,11 +187,50 @@ class UIManager {
             healthText.text = `HP: ${currentHealth.toFixed(0)}/${maxHealth}`;
         }
         
-        // Update action bar state
         this.updateActionBar(player); 
+    }
+    
+    updateActionBar(player) {
+        if (!this.actionBarSlots || this.actionBarSlots.length === 0) return;
         
-        // Target frame logic 
-        // ... (remaining logic)
+        // Bind the player's abilities to the first few slots
+        for (let i = 0; i < this.actionBarSlots.length; i++) {
+            const slot = this.actionBarSlots[i];
+            const ability = player.abilities[i];
+            
+            if (ability) {
+                // Update button text to ability name or initial
+                slot.button.textBlock.text = ability.name.substring(0, 1);
+                
+                if (ability.isReady()) {
+                    slot.button.background = "green";
+                    slot.button.alpha = 1.0;
+                } else {
+                    const ratio = ability.getCooldownRatio();
+                    slot.button.background = "black";
+                    slot.button.alpha = 0.5 + (0.5 * ratio); 
+                    // Show remaining cooldown time
+                    slot.button.textBlock.text = Math.ceil(ability.currentCooldown).toString();
+                }
+                
+                // Add click behavior (only for player)
+                if (player.isPlayer && !slot.button.actionRegistered) {
+                    slot.button.onPointerClickObservable.add(() => {
+                        if (ability.isReady()) {
+                            ability.execute(player, player.target);
+                        } else {
+                            this.showMessage(`[${ability.name}] is on cooldown!`, 1000, 'error');
+                        }
+                    });
+                    slot.button.actionRegistered = true;
+                }
+            } else {
+                // Empty slot
+                slot.button.textBlock.text = (i + 1).toString();
+                slot.button.background = "black";
+                slot.button.alpha = 0.7;
+            }
+        }
     }
 }
 
