@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - WORLD CORE v1.0.11 (FINAL PATCH)
-// Fix: Updated createSky to load the user's specific HDRI asset path for the skybox.
-// Fix: Added NPC Spawning logic and fixed NPC template lookup error.
+// HEROES OF SHADY GROVE - WORLD CORE v1.0.14 (FINAL CONSOLIDATED PATCH)
+// Fix: Updated createSky to load the HDRI with the correct .hdr extension.
+// Fix: Robust class structure and World initialization logic retained.
 // ============================================================
 
 // Base Entity class
@@ -219,7 +219,6 @@ class World {
         this.activeSpawns = new Map(); // Map<SpawnId, Array<Enemy>>
         this.npcTemplates = new Map(); // Map<TemplateId, TemplateObject>
 
-        // Patch: Bind update loop for spawning
         this.spawnUpdateInterval = 5000; // 5 seconds
         this.lastSpawnUpdateTime = 0;
     }
@@ -267,25 +266,25 @@ class World {
             );
         }
         
-        // Set ground to be non-pickable by default to avoid interfering with target picking
         ground.isPickable = false; 
     }
 
     createWater() {
         // Placeholder for water mesh/material
+        console.log("[World] Water created (Placeholder).");
     }
 
     createSky() {
-        // PATCH: Use the user-provided HDRI texture path
+        // PATCH: Use the user-provided HDRI texture path and correct .hdr extension
         const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
         const skyboxMaterial = new BABYLON.PBRMaterial("skyBox", this.scene);
         skyboxMaterial.backFaceCulling = false;
         
-        // Load the HDRI texture from the user's specified path
+        // Load the HDRI texture from the user's specified path with the corrected .hdr extension
         const hdrTexture = new BABYLON.HDRCubeTexture(
-            "/assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg", // User's specified path
+            "/assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.hdr", // <-- CORRECTED EXTENSION
             this.scene, 
-            512 // Size of the texture (optional)
+            512 
         );
         
         skyboxMaterial.reflectionTexture = hdrTexture;
@@ -293,13 +292,13 @@ class World {
         skyboxMaterial.reflectionTexture.level = 0.5; // Controls brightness/intensity
 
         // Material settings for PBR Skybox
-        skyboxMaterial.disableLighting = true; // Skybox shouldn't be affected by scene lights
+        skyboxMaterial.disableLighting = true; 
         skyboxMaterial.microSurface = 1.0;
         skyboxMaterial.cameraExposure = 0.6;
         skyboxMaterial.cameraContrast = 1.2;
         
         skybox.material = skyboxMaterial;
-        skybox.isPickable = false; // Cannot be clicked
+        skybox.isPickable = false; 
         
         // Set scene environment texture (for reflections on other materials)
         this.scene.environmentTexture = hdrTexture;
@@ -323,8 +322,7 @@ class World {
     trySpawnEnemy(spawnData) {
         const template = this.npcTemplates.get(spawnData.npc_template_id);
         if (!template) {
-            // FIX: Added template not found error logging for debugging
-            console.warn(`[World] NPC template ${spawnData.npc_template_id} not found for spawn ${spawnData.id}.`);
+            console.warn(`[World] NPC template ${spawnData.npc_template_id} not found for spawn ${spawnData.id}. Skipping spawn.`);
             return null;
         }
 
