@@ -99,8 +99,8 @@ class Player extends Character {
         this._initPhysics(); 
 
         // CRITICAL: applyClass calls _initMesh immediately.
-        // The fix is to ensure the assetManager is assigned BEFORE new Player(scene) runs.
-        this.applyClass('Warrior'); 
+        // It must be safe even if the class config fails to load.
+        this.applyClass('Warrior');
     }
     
     _initCamera() {
@@ -271,9 +271,9 @@ class Player extends Character {
     // --- Class & Stats ---
 
     applyClass(className) {
-        const classConfig = CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
+        const classConfig = (CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
             ? CONFIG.ASSETS.CLASSES[className]
-            : null;
+            : null) || this._getFallbackClassConfig(className);
 
         if (classConfig) {
             this.className = className;
@@ -303,6 +303,25 @@ class Player extends Character {
         } else {
             console.warn(`[Player] Class config not found for: ${className}`);
         }
+    }
+
+    // Provide a minimal on-file fallback so the player can still spawn even when
+    // CONFIG.ASSETS.CLASSES is unavailable (e.g., if a previous script failed).
+    _getFallbackClassConfig(className) {
+        if (className !== 'Warrior') return null;
+
+        return {
+            model: 'knight',
+            stats: {
+                maxHealth: 100,
+                maxMana: 50,
+                maxStamina: 100,
+                attackPower: 10,
+                magicPower: 5,
+                moveSpeed: 0.15
+            },
+            defaultAbility: null
+        };
     }
 
     // --- Cleanup/Utility ---

@@ -240,7 +240,7 @@ World.prototype.spawnUpdate = function(deltaTime) {
     
     createSkybox() {
         const skyboxConfig = CONFIG.WORLD.SKYBOX;
-        
+
         // 1. Optional classic skybox (if PATH is provided in config)
         if (skyboxConfig.PATH) {
             const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: skyboxConfig.SIZE }, this.scene);
@@ -252,24 +252,27 @@ World.prototype.spawnUpdate = function(deltaTime) {
             skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(skyboxConfig.PATH, this.scene);
             skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
         }
-        
+
         // 2. Setup PBR Environment using pre-filtered data (.env)
         // Prefer a prefiltered environment map if available. Use a reliable CDN fallback
         // to avoid 404s when the local file is missing.
-        const envTexturePath = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
-        const environmentSource = envTexturePath;
+        const environmentSource = `${CONFIG.ASSETS.BASE_PATH}textures/environment/ibl/room.env`;
 
-        let hdrTexture;
+        // Rebuild the block to rule out any hidden characters that were causing
+        // syntax errors in some browsers. Keep the logic equivalent.
+        let hdrTexture = null;
+        const createTexture = source => BABYLON.CubeTexture.CreateFromPrefilteredData(source, this.scene);
+
         try {
-            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
+            hdrTexture = createTexture(environmentSource);
         } catch (err) {
-            console.warn(`[World] Failed to load environment map from ${environmentSource}. Using Babylon fallback.`, err);
-            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
-                "https://assets.babylonjs.com/environments/environmentSpecular.env",
-                this.scene
+            console.warn(
+                `[World] Failed to load environment map from ${environmentSource}. Using Babylon fallback.`,
+                err
             );
+            hdrTexture = createTexture("https://assets.babylonjs.com/environments/environmentSpecular.env");
         }
-        
+
         this.scene.environmentTexture = hdrTexture;
         this.scene.imageProcessingConfiguration.exposure = skyboxConfig.EXPOSURE;
         this.scene.imageProcessingConfiguration.contrast = skyboxConfig.CONTRAST;
