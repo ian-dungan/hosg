@@ -37,7 +37,8 @@ const CONFIG = {
             terrain_base: { 
                 model: 'TerrainBase.glb',
                 // EXPLICIT PATH: Overrides BASE_PATH
-                path: '/hosg/assets/models/'
+                path: 'hosg/assets/textures/ground/grass
+/Grass004_2K-JPG_AmbientOcclusion.jpg'
             },
             tree_pine: { 
                 model: 'TreePine.glb',
