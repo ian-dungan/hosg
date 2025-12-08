@@ -9,12 +9,27 @@
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
+    // Line 12: This call now works because _init is defined below
     this._init();
 }
 
+// *** PATCH START: Defining the missing _init function ***
+SupabaseService.prototype._init = function() {
+    // 1. DEFINE YOUR CONNECTION VARIABLES (MUST BE UPDATED BY YOU)
+    const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
+    const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
+    
+    // Ensure the global 'supabase' object is available (loaded via CDN or bundle)
+    if (typeof supabase !== 'undefined') {
+        this.client = supabase.createClient(supabaseUrl, supabaseKey);
+        console.log("[Network] Supabase client initialized.");
+    } else {
+        console.error("[Network] Supabase client library not found. Check your HTML imports.");
+    }
+};
+// *** PATCH END ***
+
 // ... (other SupabaseService methods remain the same) ...
-// The following methods from network.js were skipped to save space, but remain unchanged in the full file.
-// SupabaseService.prototype._init
 // SupabaseService.prototype.authenticate
 // SupabaseService.prototype.fetchCharacterId
 // SupabaseService.prototype.fetchCharacterState
