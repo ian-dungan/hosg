@@ -17,7 +17,7 @@ const ASSET_MANIFEST = {
     CHARACTERS: {
         // Models for Player and NPCs
         'knight': { 
-            model: 'Knight.glb', 
+            model: 'Knight03.glb', 
             required: true, 
             scale: 0.5,
             animations: {}
