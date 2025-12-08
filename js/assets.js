@@ -1,11 +1,53 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.9 (PATCHED)
-// Combined manifest + loader in one file
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.10 (PATCHED)
+// Fix: Ensured BASE_PATH is correct for GitHub Pages (/hosg/).
+// Update: Defined models for Player, Enemy (Wolf), and Environment (Tree, Grass).
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
 const ASSET_MANIFEST = {
-    // ... (Your existing ASSET_MANIFEST) ...
+    // CRITICAL FIX: Base path must include the /hosg/ subfolder for GitHub Pages
+    BASE_PATH: "/hosg/assets/",
+    
+    CONFIG: {
+        // Fallback or setup configurations
+        FALLBACK_TO_PROCEDURAL: false,
+    },
+    
+    CHARACTERS: {
+        // Models for Player and NPCs
+        'knight': { 
+            model: 'Knight.glb', 
+            required: true, 
+            scale: 0.5,
+            animations: {}
+        },
+        'wolf': { 
+            model: 'Wolf.glb', 
+            required: true, 
+            scale: 0.5,
+            animations: {}
+        },
+    },
+    
+    ENVIRONMENT: {
+        // Models for world building
+        'grass_tuft': { 
+            model: 'GrassTuft.glb', 
+            required: false, 
+            scale: 1 
+        },
+        'tree_pine': { 
+            model: 'TreePine.glb', 
+            required: false, 
+            scale: 0.5 
+        },
+        'terrain_base': { 
+            model: 'TerrainBase.glb', 
+            required: true, 
+            scale: 1 // Assuming this is your main terrain mesh
+        }
+    }
 };
 
 // ==================== ASSET MANAGER CLASS ====================
@@ -19,7 +61,6 @@ class AssetManager {
         };
         this.loader = new BABYLON.AssetsManager(scene);
         
-        // PATCH: Bind methods used as callbacks to the instance
         this.printStats = this.printStats.bind(this);
     }
 
@@ -27,11 +68,9 @@ class AssetManager {
         console.log('[Assets] Starting asset load...');
 
         // Load Character Models
-        for (const type in ASSET_MANIFEST.CHARACTERS) {
-            for (const key in ASSET_MANIFEST.CHARACTERS[type]) {
-                const assetData = ASSET_MANIFEST.CHARACTERS[type][key];
-                this.loadModel(assetData, key, type);
-            }
+        for (const key in ASSET_MANIFEST.CHARACTERS) {
+            const assetData = ASSET_MANIFEST.CHARACTERS[key];
+            this.loadModel(assetData, key, 'CHARACTERS');
         }
         
         // Load Environment Assets
@@ -41,48 +80,45 @@ class AssetManager {
         }
 
         return new Promise((resolve, reject) => {
-            // PATCH: Ensure arrow function is used for correct 'this' context
-            this.loader.onFinish = (tasks) => { 
+            this.loader.onFinish = (tasks) => {
                 this.printStats();
-                console.log(`[Assets] Asset system loaded (v${CONFIG.VERSION})`);
-                resolve(true);
+                resolve(this.assets);
             };
-            
+
             this.loader.onError = (task, message, exception) => {
-                console.error(`[Assets] Asset loading error for ${task.name}: ${message}`, exception);
-                if (task.required) {
-                    reject(new Error(`Required asset failed to load: ${task.name}`));
-                }
+                console.error(`[Assets] Critical Load Error: ${task.name}`, message);
+                // We resolve even on error to allow the game to start if possible
+                resolve(this.assets); 
             };
-            
+
             this.loader.load();
         });
     }
 
     loadModel(assetData, key, category) {
-        if (!assetData.model) return;
-        
         this.stats.requested++;
         const taskName = `${category}_${key}`;
         
-        const task = this.loader.addMeshTask(taskName, "", ASSET_MANIFEST.BASE_PATH, assetData.model);
+        // Path construction: BASE_PATH + subfolder (e.g., 'models/') + model filename
+        const modelPath = `${ASSET_MANIFEST.BASE_PATH}models/`; 
+        
+        const task = this.loader.addMeshTask(taskName, "", modelPath, assetData.model);
         task.required = assetData.required || false;
         
         task.onSuccess = (task) => {
             this.stats.loaded++;
-            this.assets[taskName] = task.loadedMeshes;
-            // Additional processing (scaling, positioning, animation setup) should happen here
+            // The result is an array of meshes. We clone the root mesh later for instances.
+            this.assets[taskName] = task.loadedMeshes; 
         };
         
         task.onError = (task, message, exception) => {
-            console.warn(`[Assets] Failed to load ${taskName}.`);
-            if (ASSET_MANIFEST.CONFIG.FALLBACK_TO_PROCEDURAL && !task.required) {
-                // Handle fallback if necessary
-            }
+            console.warn(`[Assets] Failed to load ${taskName}. Check the path: ${modelPath}${assetData.model}`);
         };
     }
     
-    // ... (getAsset method) ...
+    getAsset(name) {
+        return this.assets[name];
+    }
 
     // ========== STATS ==========
     getStats() {
@@ -107,3 +143,4 @@ class AssetManager {
 
 // Ensure the AssetManager class is globally accessible
 window.AssetManager = AssetManager;
+window.ASSET_MANIFEST = ASSET_MANIFEST;
