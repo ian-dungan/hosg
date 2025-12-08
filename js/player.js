@@ -1,18 +1,16 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.25 (FINAL PATCH)
-// Fix: Corrected Uncaught SyntaxError (Unexpected end of input) by restoring missing code structure.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.26 (FIXED)
+// Fix: Removed direct assignment to UI in constructor to prevent 'Cannot set properties of null' crash.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
         // Safe access to CONFIG properties using logical OR for fallbacks.
-        // It is critical that CONFIG is defined in core.js before this script loads.
         const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
         const playerConfig = C.PLAYER || {};
         const combatConfig = C.COMBAT || {};
         
         // 1. Character constructor
-        // Defaults to 5 if CONFIG.PLAYER.SPAWN_HEIGHT is not available.
         const spawnHeight = playerConfig.SPAWN_HEIGHT || 5; 
         
         super(scene, new BABYLON.Vector3(0, spawnHeight, 0), 'Player');
@@ -22,7 +20,6 @@ class Player extends Character {
         
         // 2. Safely initialize stats object using fallbacks
         this.stats = {
-            // Defaults to 100, 50, 100 if CONFIG is missing
             maxHealth: playerConfig.HEALTH || 100,
             maxMana: playerConfig.MANA || 50, 
             maxStamina: playerConfig.STAMINA || 100,
@@ -30,7 +27,6 @@ class Player extends Character {
             attackPower: 10,
             magicPower: 5,
             
-            // Defaults to 0.15 if CONFIG is missing
             moveSpeed: playerConfig.MOVE_SPEED || 0.15, 
 
             // Combat stats
@@ -63,7 +59,7 @@ class Player extends Character {
             actionSlots: new Array(5).fill(null) // Holds ability objects
         };
         
-        this.scene.game.ui.player = this; // Give UI manager a reference
+        // REMOVED: this.scene.game.ui.player = this; // THIS LINE WAS CAUSING THE CRASH
         
         // Bind event handlers
         this.handleKeyDown = this._handleKeyDown.bind(this);
@@ -445,7 +441,6 @@ class Player extends Character {
 
     }
 
-    // CRITICAL FIX: The next method was cut off in the previous paste, causing SyntaxError.
     _initCamera() {
         // Use a standard FollowCamera
         this.camera = new BABYLON.FollowCamera("PlayerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
@@ -517,10 +512,8 @@ class Player extends Character {
         if(this.camera) this.camera.detachControl(this.scene.getEngine().get)
     }
 
-    // Placeholder for handleCamera which may have been in the original file
     _handleCamera(deltaTime) {
         // Camera rotation to match player visual direction
-        // The FollowCamera usually handles position, but rotation needs to be updated
         if(this.visualRoot) {
             // Simple rotation logic to face movement direction
             if(this.isMoving) {
