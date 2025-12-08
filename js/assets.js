@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.16 (DEFINITIVE TYPERROR FIX)
-// Fix: Added explicit check for this.loader.tasks existence before reading its length.
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.17 (CRITICAL LOADING FIX)
+// Fix: Corrected loadAll to count requested assets and correctly start the AssetsManager.
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
@@ -35,57 +35,46 @@ class AssetManager {
     async loadAll() {
         console.log('[Assets] Starting asset load...');
 
-        // Defensive checks on the iteration object.
         const characters = MANIFEST_DATA.CHARACTERS || {}; 
         const environment = MANIFEST_DATA.ENVIRONMENT || {}; 
 
         // Load Character Models
         for (const key in characters) {
             const assetData = characters[key];
-            this.loadModel(assetData, key, 'CHARACTERS');
+            // CRITICAL FIX: Increment count
+            this.stats.requested++; 
+            this.loadModel(key, assetData, 'characters');
         }
-        
-        // Load Environment Assets
+
+        // Load Environment Models
         for (const key in environment) {
             const assetData = environment[key];
-            this.loadModel(assetData, key, 'ENVIRONMENT');
+            // CRITICAL FIX: Increment count
+            this.stats.requested++; 
+            this.loadModel(key, assetData, 'environment');
         }
-        
-        // CRITICAL FIX: Ensure this.loader.tasks is defined before accessing length.
-        this.stats.requested = (this.loader.tasks && this.loader.tasks.length) ? this.loader.tasks.length : 0;
 
         if (this.stats.requested === 0) {
-            console.warn('[Assets] No assets defined to load.');
-            return Promise.resolve(this.assets);
+            console.log('[Assets] No assets defined to load.');
+            return; 
         }
-
+        
+        // CRITICAL FIX: Start the asset loader and wait for completion
         return new Promise((resolve, reject) => {
-            
             this.loader.onFinish = (tasks) => {
-                this.printStats();
-                resolve(this.assets);
+                console.log(`[Assets] Finished loading ${tasks.length} tasks.`);
+                resolve(tasks);
             };
-            
-            this.loader.onProgress = (remainingCount, totalCount, lastTask) => {
-                // ... loading progress logic ...
-            };
-
             this.loader.onError = (task, message, exception) => {
-                console.error(`[Assets] A task failed: ${task.name}. Message: ${message}`, exception);
-                this.printStats(); 
-                resolve(this.assets); 
+                console.error(`[Assets] Critical error during load of task ${task.name}: ${message}`, exception);
+                reject(new Error(message));
             };
-            
-            this.loader.load();
+            // Start the loading process
+            this.loader.load(); 
         });
     }
 
-    loadModel(assetData, key, category) {
-        if (!assetData || !assetData.model) {
-            console.error(`[Assets] Asset data for ${key} in ${category} is incomplete. Skipping.`);
-            return;
-        }
-
+    loadModel(key, assetData, category) {
         const taskName = `${category}_${key}`;
         
         // Use the assetData.path if provided, otherwise use the global BASE_PATH
@@ -97,6 +86,8 @@ class AssetManager {
         task.onSuccess = (task) => {
             this.stats.loaded++;
             this.assets[taskName] = task.loadedMeshes;
+            // Also store the loaded meshes under the base name without category prefix for easy access
+            this.assets[key] = task.loadedMeshes; 
         };
         
         task.onError = (task, message, exception) => {
@@ -129,5 +120,4 @@ class AssetManager {
     }
 }
 
-// Ensure the AssetManager class is globally accessible
 window.AssetManager = AssetManager;
