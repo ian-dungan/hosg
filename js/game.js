@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.12 (FIXED)
-// Fix: Reordered Game.init() to ensure UIManager is created and assigned before Player initialization.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.13 (FIXED)
+// Fix: Passing loaded NPC templates to World.init() to resolve TypeError.
 // ============================================================
 
 class Game {
@@ -107,7 +107,8 @@ class Game {
           this.player.applyClass(className);
       }
       
-      this.world.init();
+      // PATCH: Pass loaded templates to the world initialization
+      this.world.init({ npcTemplates: this.npcTemplates });
   }
 
   run() {
