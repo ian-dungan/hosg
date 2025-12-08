@@ -297,7 +297,9 @@ World.prototype.spawnUpdate = function(deltaTime) {
             );
         } else {
             if (terrainConfig) {
-                console.warn(`[World] Failed to load TerrainBase mesh '${terrainConfig.model}'. Using simple plane as fallback.`);
+                console.warn(
+                    `[World] Failed to load TerrainBase mesh '${terrainConfig.model}'. Using simple plane as fallback.`
+                );
             }
             const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, this.scene);
             ground.physicsImpostor = new BABYLON.PhysicsImpostor(

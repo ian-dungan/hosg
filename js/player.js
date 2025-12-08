@@ -3,6 +3,22 @@
 // Fix: Added null-check in _initMesh to ensure assetManager is available before use.
 // ============================================================
 
+// Safety guard: if Character failed to load (e.g., due to script order issues),
+// provide a minimal fallback to avoid a ReferenceError and allow the game to
+// continue using basic Entity behavior until assets load correctly.
+if (typeof Character === 'undefined' && typeof Entity !== 'undefined') {
+    console.warn('[Player] Character base class missing. Using minimal fallback.');
+    class Character extends Entity {
+        constructor(scene, position, name = 'Character') {
+            super(scene, position, name);
+            this.name = name;
+            this.health = 100;
+            this.target = null;
+        }
+    }
+    window.Character = Character;
+}
+
 class Player extends Character {
     constructor(scene) {
         const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
