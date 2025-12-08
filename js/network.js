@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.25 (FINAL FIX)
-// Fix: Updated createAccount to accept a password and use a simulated hash
-//      to satisfy the database's 'password_hash' NOT NULL constraint.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.26 (USERNAME ONLY)
+// Fix: Modified createAccount to only accept 'username' and automatically
+//      generate placeholders for the required 'email' and 'password_hash' columns.
 // ============================================================
 
 //
@@ -50,13 +50,12 @@ SupabaseService.prototype._init = function () {
 // UTILITY FUNCTIONS (Placeholder Hashing)
 // ============================================================
 
-function simpleHash(password) {
-    if (!password) return 'NO_PASSWORD_SUPPLIED';
-    // NOTE: In a real application, you must use a strong, asynchronous hashing library 
-    // like bcrypt or Argon2 on the server side or a secure client-side implementation 
-    // if using Supabase's built-in Auth system (supabase.auth.signUp).
-    // This simple method is only to demonstrate data flow and satisfy the NOT NULL constraint.
-    return `HASHED_TEST_${password}_${password.length}chars`;
+function simpleHash(input) {
+    if (!input) return 'NO_INPUT_SUPPLIED';
+    // Use the username to generate a simulated hash.
+    // NOTE: This is a PLACEHOLDER for satisfying the database constraint. 
+    // Do not use this method in production for real authentication!
+    return `HASHED_TEST_${input}_${input.length}chars`;
 }
 
 // ============================================================
@@ -83,15 +82,15 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
     }
 };
 
-SupabaseService.prototype.createAccount = async function (accountName, password) { // <-- Added password
+SupabaseService.prototype.createAccount = async function (accountName) { // <-- Only accepts username
     const existingAccountResult = await this.getAccountByName(accountName);
     if (!existingAccountResult.success || existingAccountResult.account) {
         return { success: false, error: existingAccountResult.error || `Account with name '${accountName}' already exists.` };
     }
 
-    // Since game.js currently doesn't pass a password, we must use a placeholder to avoid crash
-    const accountPassword = password || "default_password"; 
-    const hashedPassword = simpleHash(accountPassword); 
+    // Generate placeholder values to satisfy database constraints
+    const placeholderEmail = `${accountName}@placeholder.com`; // <-- Placeholder email
+    const hashedPassword = simpleHash(accountName); // <-- Placeholder hash based on username
 
     try {
         const { data, error } = await this.client
@@ -99,8 +98,8 @@ SupabaseService.prototype.createAccount = async function (accountName, password)
             .insert([
                 { 
                     username: accountName, 
-                    email: `${accountName}@placeholder.com`,
-                    password_hash: hashedPassword // <-- Use the generated hash
+                    email: placeholderEmail, // <-- Insert placeholder email
+                    password_hash: hashedPassword // <-- Insert placeholder hash
                 }
             ])
             .select()
