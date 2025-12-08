@@ -11,13 +11,6 @@
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
-    // Make Supabase config available before our own scripts
-    window.SUPABASE_CONFIG = {
-      url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
-      key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-    };
-  </script>
 
   <style>
     html, body {
@@ -71,18 +64,24 @@
     scene.enablePhysics(scene.gravity, new BABYLON.CannonJSPlugin());
 
     // 2. Instantiate Manager Classes
+    // Player and World must be instantiated BEFORE Game
     const uiManager = new UIManager(scene);
     const player = new Player(scene);
     const world = new World(scene, player);
-    const networkManager = new NetworkManager(); // Instantiated but not used heavily yet
+    const networkManager = new NetworkManager(); 
     const game = new Game(engine, scene, world, player, uiManager);
     
-    // Attach game instance for cross-module reference (e.g., in UI or Player)
+    // Make game object globally accessible via the scene
     scene.game = game; 
     
     // 3. Asset and Template Loading Sequence
+    // ASSET MANAGER MUST BE CREATED BEFORE PLAYER MESH INITIALIZATION
     const assetManager = new AssetManager(scene);
     
+    // ATTACH ASSET MANAGER TO PLAYER/WORLD FOR EASY ACCESS TO MODELS
+    player.assetManager = assetManager; // <--- PATCH 1: MAKE ASSET MANAGER AVAILABLE
+    world.assetManager = assetManager; // <--- PATCH 2: MAKE ASSET MANAGER AVAILABLE
+
     // Load Templates first (needed for Player, Abilities, etc.)
     game.itemTemplates = new Map();
     game.skillTemplates = new Map();
@@ -103,11 +102,13 @@
     console.log("[Bootstrap] All assets loaded.");
     
     // 4. Final Setup and Initialization
-    game.init(); // Now safe to call since templates are loaded (game.js:23)
-    uiManager.init(); // Initialize UI now that the scene and game are ready
+    // CRITICAL FIX: Initialize Player's VISUAL MESH *AFTER* assets are loaded
+    player._initMesh(); // <--- PATCH 3: CALL INIT MESH HERE
+
+    game.init(); 
+    uiManager.init(); 
 
     // 5. Build the World using the loaded assets
-    // CRITICAL: Call the function that creates the ground, skybox, etc.
     world.createEnvironment(assetManager); 
     
     // 6. Start the Game
