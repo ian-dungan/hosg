@@ -1,15 +1,12 @@
 {
-  "name": "hosg-server",
-  "version": "1.0.3",
-  "description": "Heroes of Shady Grove Multiplayer Server",
+  "name": "heroes-of-shady-grove",
+  "version": "1.0.0",
+  "description": "A Babylon.js RPG game project hosted on Render.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "ws": "^8.17.0"
+    "start": "node server.js" 
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.x"
   }
 }
