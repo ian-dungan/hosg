@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.21 (PATCHED)
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.22 (PATCHED)
+// Fix: Corrected SyntaxError in _initCamera() method.
 // Refactored to use a class-based stat system.
-// Fix: Updated getSaveData to include base class stats for persistence.
 // ============================================================
 
 class Player extends Character {
@@ -10,7 +10,7 @@ class Player extends Character {
         super(scene, new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT, 0), 'Player');
         
         this.isPlayer = true; 
-        this.className = null; // NEW: Store class name
+        this.className = null; // Store class name
         
         // Stats are now set by applyClass or loadState
         this.stats = {}; 
@@ -24,8 +24,9 @@ class Player extends Character {
             attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE // Assuming CONFIG.COMBAT exists
         };
         
-        this.inventory = new Inventory(this); // Now defined in item.js
-        this.equipment = new Equipment(this); // Now defined in item.js
+        // Assuming Inventory/Equipment are correctly imported from item.js
+        this.inventory = new Inventory(this); 
+        this.equipment = new Equipment(this); 
         this.abilities = []; 
         
         this.input = {
@@ -53,6 +54,7 @@ class Player extends Character {
      * @param {string} className - The name of the class (e.g., 'Fighter').
      */
     applyClass(className) {
+        // NOTE: CONFIG.CLASSES must be defined in core.js for this to work
         const classConfig = CONFIG.CLASSES[className] || CONFIG.CLASSES.Fighter; // Default to Fighter
         const stats = classConfig.stats;
         this.className = className;
@@ -147,6 +149,7 @@ class Player extends Character {
      * @returns {Object} The save data object.
      */
     getSaveData() {
+        // Ensure you save the new base class stats for persistence!
         return {
             position: this.mesh ? this.mesh.position : this.position,
             rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
@@ -155,7 +158,7 @@ class Player extends Character {
             mana: this.mana,
             stamina: this.stamina,
             
-            // NEW: Explicitly save the current base stats
+            // Explicitly save the current base stats
             base_attack_power: this.stats.attackPower,
             base_magic_power: this.stats.magicPower,
             base_move_speed: this.stats.moveSpeed,
@@ -165,7 +168,7 @@ class Player extends Character {
         };
     }
     
-    // --- Input Handling Methods (implementation moved from constructor) ---
+    // --- Input Handling Methods ---
     _initInput() {
         window.addEventListener('keydown', this.handleKeyDown);
         window.addEventListener('keyup', this.handleKeyUp);
@@ -213,7 +216,7 @@ class Player extends Character {
         }
     }
 
-    // --- Core Gameplay Methods (placeholders for movement, combat, etc.) ---
+    // --- Core Gameplay Methods ---
 
     canJump() {
         // Simple check: In a real physics system, you'd check if the player is grounded.
@@ -411,11 +414,12 @@ class Player extends Character {
         this.stamina = Math.min(this.stats.maxStamina, this.stamina + this.stats.maxStamina * CONFIG.PLAYER.STAMINA_REGEN_RATE * deltaTime);
     }
     
-    // --- Babylon.js Specific Initializers (Placeholders) ---
+    // --- Babylon.js Specific Initializers ---
     _initCamera() {
          const camera = new BABYLON.UniversalCamera("playerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
          camera.setTarget(BABYLON.Vector3.Zero());
-         camera.attachControl(this.scene.getEngine().get<ctrl62>
+         // FIX: Corrected Syntax Error here. Attach control to the rendering canvas.
+         camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true); 
          camera.rotation.x = 0.4;
          this.scene.activeCamera = camera;
     }
@@ -429,7 +433,7 @@ class Player extends Character {
         if (typeof CANNON !== "undefined" && this.scene.getPhysicsEngine()) {
             this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                 this.mesh, 
-                BABYLON.PhysicsImpostor.SphereImpostor, // Sphere is often more stable for character physics
+                BABYLON.PhysicsImpostor.SphereImpostor, 
                 { 
                     mass: CONFIG.PLAYER.MASS, 
                     friction: CONFIG.PLAYER.FRICTION, 
@@ -470,6 +474,8 @@ class Player extends Character {
         window.removeEventListener('keydown', this.handleKeyDown);
         window.removeEventListener('keyup', this.handleKeyUp);
         this.scene.onPointerDown = null;
-        this.scene.game.ui.dispose(); // Also dispose UI when player is disposed
+        if (this.scene.game.ui) {
+            this.scene.game.ui.dispose(); // Also dispose UI when player is disposed
+        }
     }
 }
