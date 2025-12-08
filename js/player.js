@@ -3,6 +3,50 @@
 // Fix: Added null-check in _initMesh to ensure assetManager is available before use.
 // ============================================================
 
+// Safety guards: ensure Entity/Character exist even if previous scripts failed to load.
+if (typeof Entity === 'undefined') {
+    console.warn('[Player] Entity base class missing. Installing minimal fallback.');
+    class Entity {
+        constructor(scene, position) {
+            this.scene = scene;
+            this.position = position || new BABYLON.Vector3(0, 0, 0);
+            this.mesh = null;
+            this.isDead = false;
+        }
+
+        update() {
+            if (this.mesh && this.mesh.position && this.position && typeof this.mesh.position.copyFrom === 'function') {
+                this.mesh.position.copyFrom(this.position);
+            }
+        }
+
+        dispose() {
+            this.isDead = true;
+            if (this.mesh && typeof this.mesh.dispose === 'function') {
+                this.mesh.dispose();
+                this.mesh = null;
+            }
+        }
+    }
+    window.Entity = Entity;
+}
+
+// Safety guard: if Character failed to load (e.g., due to script order issues),
+// provide a minimal fallback to avoid a ReferenceError and allow the game to
+// continue using basic Entity behavior until assets load correctly.
+if (typeof Character === 'undefined' && typeof Entity !== 'undefined') {
+    console.warn('[Player] Character base class missing. Using minimal fallback.');
+    class Character extends Entity {
+        constructor(scene, position, name = 'Character') {
+            super(scene, position, name);
+            this.name = name;
+            this.health = 100;
+            this.target = null;
+        }
+    }
+    window.Character = Character;
+}
+
 class Player extends Character {
     constructor(scene) {
         const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
@@ -55,8 +99,8 @@ class Player extends Character {
         this._initPhysics(); 
 
         // CRITICAL: applyClass calls _initMesh immediately.
-        // The fix is to ensure the assetManager is assigned BEFORE new Player(scene) runs.
-        this.applyClass('Warrior'); 
+        // It must be safe even if the class config fails to load.
+        this.applyClass('Warrior');
     }
     
     _initCamera() {
@@ -227,7 +271,9 @@ class Player extends Character {
     // --- Class & Stats ---
 
     applyClass(className) {
-        const classConfig = CONFIG.ASSETS.CLASSES[className];
+        const classConfig = (CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
+            ? CONFIG.ASSETS.CLASSES[className]
+            : null) || this._getFallbackClassConfig(className);
 
         if (classConfig) {
             this.className = className;
@@ -257,6 +303,25 @@ class Player extends Character {
         } else {
             console.warn(`[Player] Class config not found for: ${className}`);
         }
+    }
+
+    // Provide a minimal on-file fallback so the player can still spawn even when
+    // CONFIG.ASSETS.CLASSES is unavailable (e.g., if a previous script failed).
+    _getFallbackClassConfig(className) {
+        if (className !== 'Warrior') return null;
+
+        return {
+            model: 'knight',
+            stats: {
+                maxHealth: 100,
+                maxMana: 50,
+                maxStamina: 100,
+                attackPower: 10,
+                magicPower: 5,
+                moveSpeed: 0.15
+            },
+            defaultAbility: null
+        };
     }
 
     // --- Cleanup/Utility ---
