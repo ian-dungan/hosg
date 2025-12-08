@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.17 (CRITICAL LOADING FIX)
-// Fix: Corrected loadAll to count requested assets and correctly start the AssetsManager.
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.18 (ASSET KEY FIX)
+// Fix: Explicitly stores loaded assets under their simple config key name.
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
@@ -11,7 +11,7 @@ const getManifestData = () => {
     }
     // Safe fallback structure
     return {
-        BASE_PATH: "assets/", 
+        BASE_PATH: "assets/", // Changed fallback to relative
         CHARACTERS: {},
         ENVIRONMENT: {}
     };
@@ -41,7 +41,6 @@ class AssetManager {
         // Load Character Models
         for (const key in characters) {
             const assetData = characters[key];
-            // CRITICAL FIX: Increment count
             this.stats.requested++; 
             this.loadModel(key, assetData, 'characters');
         }
@@ -49,7 +48,6 @@ class AssetManager {
         // Load Environment Models
         for (const key in environment) {
             const assetData = environment[key];
-            // CRITICAL FIX: Increment count
             this.stats.requested++; 
             this.loadModel(key, assetData, 'environment');
         }
@@ -59,17 +57,13 @@ class AssetManager {
             return; 
         }
         
-        // CRITICAL FIX: Start the asset loader and wait for completion
         return new Promise((resolve, reject) => {
             this.loader.onFinish = (tasks) => {
                 console.log(`[Assets] Finished loading ${tasks.length} tasks.`);
                 resolve(tasks);
             };
             this.loader.onError = (task, message, exception) => {
-                // Asset path fix applied in core.js, this will now fire on real error
                 console.warn(`[Assets] Failed to load ${task.name}. Check the path: ${task.url}`);
-                // Don't reject the whole load on a single non-required asset failure
-                // Only resolve/reject once all load tasks finish
             };
             
             // Start the loading process
@@ -82,7 +76,6 @@ class AssetManager {
     loadModel(key, assetData, category) {
         const taskName = `${category}_${key}`;
         
-        // Use the assetData.path if provided, otherwise use the global BASE_PATH
         const basePath = assetData.path || MANIFEST_DATA.BASE_PATH;
         
         const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
@@ -90,14 +83,18 @@ class AssetManager {
 
         task.onSuccess = (task) => {
             this.stats.loaded++;
+            // Store by task name
             this.assets[taskName] = task.loadedMeshes;
-            // Also store the loaded meshes under the base name without category prefix for easy access
+            // Store by simple config key (e.g., 'knight') for easy Player/World lookup
             this.assets[key] = task.loadedMeshes; 
+            // Also store by the exact model filename (e.g., 'Knight03.glb') for more explicit lookups
+            this.assets[assetData.model] = task.loadedMeshes; 
         };
         
         task.onError = (task, message, exception) => {
-            // Error is handled in the promise resolve/reject above, but we log here too
-            this.assets[key] = null; // Mark as failed
+            this.assets[taskName] = null; 
+            this.assets[key] = null; 
+            this.assets[assetData.model] = null;
         };
     }
     
