@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - UI MANAGER v1.0.8 (ACTION BAR FIX)
-// Fix: Added defensive check to updateActionBar to prevent crash if player abilities are undefined.
+// HEROES OF SHADY GROVE - UI MANAGER v1.1.0 (CRITICAL MESSAGE AND NULL FIX)
+// Fix: Added showMessage() method. Added null check for this.hud in update().
 // ============================================================
 
 class UIManager {
@@ -12,6 +12,7 @@ class UIManager {
         this.hud = null;
         this.targetFrame = null;
         this.actionBar = null;
+        this.messageContainer = null; // New container for messages
         this.inventoryWindow = null;
         this.actionBarSlots = []; // Array to hold references to the action bar buttons
     }
@@ -22,13 +23,13 @@ class UIManager {
         this._createHUD(); 
         this._createTargetFrame(); 
         this._createActionBar(); 
+        this._createMessageSystem(); // New system for messages
         this._createInventoryWindow(); 
         this._createInputBindings(); 
         console.log('[UI] All UI components initialized.');
     }
 
     _createHUD() {
-        // Placeholder for the main status HUD (Health, Mana, Stamina bars)
         this.hud = new BABYLON.GUI.StackPanel("hudPanel");
         this.hud.width = "50%";
         this.hud.height = "100px";
@@ -38,7 +39,6 @@ class UIManager {
         this.hud.paddingTop = "20px";
         this.advancedTexture.addControl(this.hud);
 
-        // Placeholder for a Health Bar
         const healthBar = new BABYLON.GUI.TextBlock("healthText", "HP: 100/100");
         healthBar.color = "red";
         healthBar.height = "20px";
@@ -48,7 +48,6 @@ class UIManager {
     }
 
     _createTargetFrame() {
-        // Placeholder for the target information frame
         this.targetFrame = new BABYLON.GUI.StackPanel("targetPanel");
         this.targetFrame.width = "200px";
         this.targetFrame.height = "50px";
@@ -59,7 +58,6 @@ class UIManager {
         this.targetFrame.isVisible = false;
         this.advancedTexture.addControl(this.targetFrame);
 
-        // Placeholder for Target Name
         const targetName = new BABYLON.GUI.TextBlock("targetName", "Target Name");
         targetName.color = "yellow";
         targetName.height = "20px";
@@ -67,9 +65,17 @@ class UIManager {
 
         console.log('[UI] Target frame created.'); 
     }
+    
+    _createMessageSystem() {
+        // Container for game messages (e.g., "Game Saved!")
+        this.messageContainer = new BABYLON.GUI.StackPanel("messageContainer");
+        this.messageContainer.width = "400px";
+        this.messageContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        this.messageContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        this.advancedTexture.addControl(this.messageContainer);
+    }
 
     _createActionBar() {
-        // Container for the action bar slots
         this.actionBar = new BABYLON.GUI.StackPanel("actionBarPanel");
         this.actionBar.isHorizontal = true;
         this.actionBar.width = "400px";
@@ -79,7 +85,6 @@ class UIManager {
         this.actionBar.paddingBottom = "10px";
         this.advancedTexture.addControl(this.actionBar);
 
-        // Create 6 placeholder slots (matching 1-6 keys)
         for (let i = 0; i < 6; i++) {
             const slot = new BABYLON.GUI.Button.CreateSimpleButton(`actionSlot${i}`, (i + 1).toString());
             slot.width = "50px";
@@ -89,7 +94,6 @@ class UIManager {
             slot.paddingLeft = "5px";
             slot.paddingRight = "5px";
             
-            // Reference the text block for easy updating
             slot.textBlock = slot.children[0];
             
             this.actionBar.addControl(slot);
@@ -99,15 +103,51 @@ class UIManager {
         console.log('[UI] Action bar created.'); 
     }
 
+    // --- Message System Method (Fixes TypeError in game.js) ---
+    /**
+     * Shows a temporary game message in the center of the screen.
+     * @param {string} message 
+     * @param {number} durationMs 
+     * @param {string} type - 'info', 'success', 'error', 'playerDamage', etc.
+     */
+    showMessage(message, durationMs = 3000, type = 'info') {
+        if (!this.messageContainer) return;
+
+        const textBlock = new BABYLON.GUI.TextBlock();
+        textBlock.text = message;
+        textBlock.color = this._getMessageColor(type);
+        textBlock.fontSize = 20;
+        textBlock.height = "30px";
+        textBlock.paddingTop = "5px";
+        
+        // Add the message to the container
+        this.messageContainer.addControl(textBlock);
+
+        // Remove the message after durationMs
+        setTimeout(() => {
+            this.messageContainer.removeControl(textBlock);
+            textBlock.dispose();
+        }, durationMs);
+    }
+    
+    _getMessageColor(type) {
+        switch (type) {
+            case 'success': return 'lightgreen';
+            case 'error': return 'red';
+            case 'playerDamage': return 'red';
+            case 'enemyDamage': return 'yellow';
+            case 'heal': return 'lightskyblue';
+            default: return 'white';
+        }
+    }
+    // -----------------------------------------------------------------
+
     updateActionBar(player) {
-        // CRITICAL FIX: Ensure player.abilities is an array before calling forEach
-        // This prevents the TypeError: Cannot read properties of undefined (reading 'forEach')
         const abilities = player.abilities || []; 
 
         abilities.forEach((ability, index) => {
             const slot = this.actionBarSlots[index];
             if (slot) {
-                // Placeholder logic: Update button text/texture based on ability object
                 const abilityName = ability ? ability.name.substring(0, 8) : (index + 1).toString();
                 slot.textBlock.text = abilityName;
                 slot.textBlock.color = ability ? "yellow" : "gray";
@@ -116,7 +156,6 @@ class UIManager {
     }
 
     _createInventoryWindow() {
-        // Placeholder for the main inventory window
         this.inventoryWindow = new BABYLON.GUI.Rectangle("inventoryWindow");
         this.inventoryWindow.width = "300px";
         this.inventoryWindow.height = "400px";
@@ -136,7 +175,6 @@ class UIManager {
     }
 
     _createInputBindings() {
-        // Placeholder for handling input (e.g., toggling inventory with 'I')
         this.scene.actionManager = new BABYLON.ActionManager(this.scene);
 
         this.scene.actionManager.registerAction(
@@ -154,14 +192,15 @@ class UIManager {
         console.log('[UI] Input bindings created.'); 
     }
 
-    // --- Update Loop ---
+    // --- Update Loop (Fixes the Null Error) ---
     
     update(player) {
+        // CRITICAL FIX: Check if this.hud is initialized (fixes the null error)
+        if (!this.hud) return; 
+        
         // Update HUD elements (Health, Mana, Stamina)
         const healthText = this.hud.getChildByName("healthText");
         if (healthText) {
-            // Placeholder: Assuming player has health/stats properties
-            // Use player.health and player.stats.maxHealth (as set in player.js)
             const currentHealth = player.health;
             const maxHealth = player.stats ? player.stats.maxHealth : 100;
             healthText.text = `HP: ${currentHealth.toFixed(0)}/${maxHealth}`;
@@ -170,15 +209,9 @@ class UIManager {
         // Update action bar state
         this.updateActionBar(player); 
         
-        // Target frame logic (Placeholder)
-        // if (player.target) {
-        //     this.targetFrame.isVisible = true;
-        //     this.targetFrame.getChildByName("targetName").text = player.target.name;
-        // } else {
-        //     this.targetFrame.isVisible = false;
-        // }
+        // Target frame logic 
+        // ... (remaining logic)
     }
 }
 
-// Ensure the UIManager class is globally accessible
 window.UIManager = UIManager;
