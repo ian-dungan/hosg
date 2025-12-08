@@ -1,6 +1,6 @@
 // ============================================================
 // HEROES OF SHADY GROVE - CONFIGURATION v1.0.20 (PATCHED)
-// Update: Added SKYBOX configuration to CONFIG.WORLD.
+// Update: Added WORLD and SKYBOX configuration.
 // ============================================================
 
 const CONFIG = {
@@ -20,24 +20,23 @@ const CONFIG = {
     
     // ... (existing NETWORK, COMBAT blocks remain the same)
 
+    // === NEW: WORLD CONFIGURATION (READ BY world.js) ===
     WORLD: {
-        // === NEW: SKYBOX CONFIGURATION (READ BY world.js) ===
         SKYBOX: {
-            // NOTE: Ensure your file is named DaySkyHDRI023B_4K_TONEMAPPED.hdr in your /assets/sky/ folder
+            // CRITICAL: Must be named this file in /assets/sky/ for the 404 to resolve
             PATH: "/assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.hdr",
-            SIZE: 512, // Texture resolution for HDRCubeTexture
+            SIZE: 512,       // Texture resolution for HDRCubeTexture
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
-            LEVEL: 0.5 // reflection level (hdrTexture.level)
+            LEVEL: 0.5       // reflection level (hdrTexture.level)
         },
         
-        // --- SPAWN AREAS (Kept for completeness) ---
         SPAWN_AREAS: [
             // Your existing spawn area definitions will go here
         ]
     },
 
-    // === NEW: CHARACTER CLASSES AND BASE STATS ===
+    // === CHARACTER CLASSES AND BASE STATS ===
     CLASSES: {
         Fighter: { 
             model: 'knight', 
@@ -45,18 +44,17 @@ const CONFIG = {
                 maxHealth: 120, maxMana: 30, maxStamina: 100, 
                 attackPower: 15, magicPower: 5, moveSpeed: 0.15 
             }, 
-            defaultAbility: 'Basic Attack'
+            defaultAbility: 'Basic Attack' 
         },
         Rogue: { 
             model: 'knight', 
             stats: { 
                 maxHealth: 80, maxMana: 0, maxStamina: 120, 
-                attackPower: 12, magicPower: 0, moveSpeed: 0.18 
-            },
-            defaultAbility: 'Stab'
+                attackPower: 18, magicPower: 0, moveSpeed: 0.18 
+            }, 
+            defaultAbility: 'Backstab'
         },
-        // ... (rest of classes)
-        Mage: { 
+        Wizard: { 
             model: 'knight',
             stats: { 
                 maxHealth: 70, maxMana: 150, maxStamina: 80, 
@@ -92,9 +90,17 @@ const CONFIG = {
             model: 'knight',
             stats: { 
                 maxHealth: 110, maxMana: 50, maxStamina: 130, 
-                attackPower: 12, magicPower: 10, moveSpeed: 0.16 
-            },
+                attackPower: 12, magicPower: 5, moveSpeed: 0.17 
+            }, 
             defaultAbility: 'Fists of Fury'
+        },
+        Bard: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 95, maxMana: 90, maxStamina: 95, 
+                attackPower: 10, magicPower: 10, moveSpeed: 0.15 
+            }, 
+            defaultAbility: 'Inspire'
         }
     }
 };
