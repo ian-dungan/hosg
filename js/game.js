@@ -1,107 +1,184 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.20 (PATCHED)
-// Refactored loginTest for proper character creation flow.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.12 (PATCHED)
+// Fix: Ensured safe physics plugin initialization and light creation
+// to resolve "Cannot read properties of null (reading 'getUniqueId')" error.
 // ============================================================
 
 class Game {
-  // ... (constructor remains the same)
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    if (!this.canvas) throw new Error("Canvas not found");
+
+    this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    this.scene = new BABYLON.Scene(this.engine);
+    this.scene.collisionsEnabled = true; 
+    this.scene.game = this; 
+
+    // Physics setup is moved to a separate method/later step for safety
+    this.initPhysics(); 
+
+    this.world = null;
+    this.player = null;
+    this.ui = null;
+    this.network = null;
+    this.characterId = null; 
+
+    this.itemTemplates = new Map();
+    this.skillTemplates = new Map();
+    this.npcTemplates = new Map();
+
+    this._lastFrameTime = performance.now();
+    this._running = false;
+    this.autosaveInterval = null;
+
+    window.addEventListener("resize", () => { this.engine.resize(); });
+  }
+
+  /**
+   * Initializes the physics engine and plugin safely.
+   */
+  initPhysics() {
+      // Check if CANNON (or the equivalent physics library) is loaded globally
+      if (typeof CANNON !== "undefined") {
+        try {
+            const gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
+            // This is the line that sometimes fails if the plugin is not registered
+            this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
+            console.log('[Game] Physics enabled with CannonJSPlugin.');
+        } catch (e) {
+            console.warn('[Game] Failed to enable CannonJSPlugin. Falling back to no physics.', e.message);
+        }
+      } else {
+          console.warn('[Game] Cannon.js not found. Physics disabled.');
+      }
+  }
 
   async init() {
+    // This is the line that was crashing (light is a BABYLON.Node)
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
-    this.world = new World(this.scene);
     
-    // 1. Load Templates (always required)
-    await this.network.loadTemplates(this.itemTemplates, this.skillTemplates, this.npcTemplates);
+    // Create the World and Player *before* setting up the UI 
+    this.world = new World(this.scene); 
+    this.player = new Player(this.scene);
     
-    // 2. Start the new login/creation flow
-    // NOTE: You must replace this with your actual UI/Menu logic later.
-    await this.loginTest();
+    await this.player.init(); // Player initialization must complete before UI can reference its mesh
+
+    // UI depends on the player being defined
+    this.ui = new UIManager(this); 
+    
+    // Network initialization (including template loading and login logic)
+    // This is a placeholder for your login/load flow
+    await this.loadGameData();
+    
+    // Start game loop
+    this.run(); 
+
+    // Setup persistence
+    this.setupPersistence();
   }
   
-  /**
-   * Simulated character creation screen flow.
-   * In a real game, this would be a UI where the user inputs a name and clicks a class button.
-   * @param {string} accountId - The UUID of the account creating the character.
-   * @returns {{characterName: string, className: string}|null}
-   */
-  characterCreationSimulation(accountId) {
-      // NOTE: In a real application, you'd use a UI here.
-      // We randomize the name to avoid constant 'already taken' errors during testing.
-      const CHARACTER_NAME = 'SirPlaysalot' + Math.floor(Math.random() * 900 + 100); 
-      const CLASS_NAMES = Object.keys(CONFIG.CLASSES);
-      const SELECTED_CLASS = CLASS_NAMES[Math.floor(Math.random() * CLASS_NAMES.length)]; // Select a random class
+  async loadGameData() {
+      // This is where you would handle login/character selection
+      const accountName = "TestUser"; // Hardcode for testing
+      const characterName = "TestChar";
+      const className = "Fighter"; // Or load from form input
       
-      console.log(`[Creation] Simulating creation: Name='${CHARACTER_NAME}', Class='${SELECTED_CLASS}'`);
+      const networkManager = new NetworkManager();
+      this.network = networkManager;
       
-      return { 
-          characterName: CHARACTER_NAME, 
-          className: SELECTED_CLASS 
-      };
+      // 1. Get/Create Account
+      let accountResult = await this.network.supabase.getAccountByName(accountName);
+      if (!accountResult.account) {
+          accountResult = await this.network.supabase.createAccount(accountName);
+      }
+      if (!accountResult.success) throw new Error(`Account error: ${accountResult.error}`);
+      const accountId = accountResult.account.id;
+      
+      // 2. Get/Create Character
+      let charResult = await this.network.supabase.getCharacterByName(characterName);
+      if (!charResult.character) {
+          charResult = await this.network.supabase.createCharacter(accountId, characterName, className);
+      }
+      if (!charResult.success) throw new Error(`Character error: ${charResult.error}`);
+      this.characterId = charResult.character.id;
+      
+      // 3. Load Templates (needed for inventory/abilities)
+      const templateResult = await this.network.loadTemplates(
+          this.itemTemplates, 
+          this.skillTemplates, 
+          this.npcTemplates
+      );
+      if (!templateResult) throw new Error("Failed to load game templates.");
+
+      // 4. Load Character State
+      const stateResult = await this.network.supabase.loadCharacterState(this.characterId);
+      if (stateResult.success) {
+          this.player.loadState(stateResult.state);
+          console.log(`[Game] Character state loaded for ID: ${this.characterId}`);
+      } else {
+          console.warn(`[Game] Failed to load character state. Applying default class: ${className}`);
+          this.player.applyClass(className);
+      }
+      
+      // 5. Initialize World (Spawns, map, etc.)
+      this.world.init();
   }
 
-  /**
-   * Placeholder test function for login/account/character creation flow.
-   */
-  async loginTest() {
-      const ACCOUNT_NAME = 'test_player@hosg.com'; // Use a test email or name
-      let accountId;
-      let characterToLoadId;
+  run() {
+    console.log("[Game] Starting render loop...");
+    this._lastFrameTime = performance.now();
+    this._running = true;
 
-      // --- 1. Get/Create Account ---
-      let accResult = await this.network.supabase.getAccountByName(ACCOUNT_NAME);
+    // Start rendering loop
+    this.engine.runRenderLoop(() => {
+      const currentTime = performance.now();
+      const deltaTime = (currentTime - this._lastFrameTime) / 1000;
+      this._lastFrameTime = currentTime;
 
-      if (accResult.success && accResult.account) {
-          accountId = accResult.account.id;
-          console.log(`[Login] Account found: ${ACCOUNT_NAME} (ID: ${accountId})`);
-      } else {
-          console.log(`[Login] Account not found. Creating new account: ${ACCOUNT_NAME}`);
-          const createResult = await this.network.supabase.createAccount(ACCOUNT_NAME);
-          if (!createResult.success) {
-              console.error(`[Login] Failed to create account: ${createResult.error}`);
-              return;
-          }
-          accountId = createResult.account.id;
-      }
+      if (!this._running) return;
 
-      // --- 2. Check for Characters ---
-      const { data: chars, error: charError } = await this.network.supabase.client
-          .from('hosg_characters')
-          .select('id')
-          .eq('account_id', accountId);
+      if (this.player) this.player.update(deltaTime);
+      if (this.world) this.world.update(deltaTime);
+      if (this.ui) this.ui.update(deltaTime);
 
-      if (charError) {
-           console.error(`[Login] Failed to fetch characters for account: ${charError.message}`);
-           return;
-      }
+      this.scene.render();
+    });
 
-      if (chars && chars.length > 0) {
-          // Load the first character found
-          characterToLoadId = chars[0].id;
-          console.log(`[Login] Found existing character. Loading ID: ${characterToLoadId}`);
-      } else {
-          // --- 3. Run Character Creation ---
-          console.log(`[Creation] No characters found. Starting character creation.`);
-          const creationData = this.characterCreationSimulation(accountId);
-          
-          if (!creationData) return; // Exit if simulation failed or was cancelled
+    if (this.ui) {
+      this.ui.showMessage("Welcome to Heroes of Shady Grove! (Persistence Active)", 3000);
+    }
+  }
 
-          const createCharResult = await this.network.supabase.createCharacter(
-              accountId, 
-              creationData.characterName, 
-              creationData.className
-          );
-          
-          if (!createCharResult.success) {
-              console.error(`[Creation] Failed to create character: ${createCharResult.error}`);
-              return;
-          }
-          characterToLoadId = createCharResult.characterId;
-          console.log(`[Creation] New character created successfully! ID: ${characterToLoadId}`);
-      }
+  setupPersistence() {
+    this.autosaveInterval = setInterval(() => {
+        this.save();
+    }, 60000); 
 
-      // --- 4. Start Game Session ---
-      await this.startNewGameSession(characterToLoadId);
+    window.addEventListener('beforeunload', () => {
+        this.save(true);
+    });
   }
   
-  // ... (startNewGameSession, start, setupPersistence, save, dispose remain the same) ...
+  async save(isCritical = false) {
+    if (!this.player || !this.characterId || !this.network) return;
+    
+    const state = this.player.getSaveData();
+    const result = await this.network.supabase.saveCharacterState(this.characterId, state);
+    
+    if (result.success) {
+        if (!isCritical) this.ui.showMessage("Game Saved!", 1500, 'success');
+    } else {
+        this.ui.showMessage(`SAVE FAILED: ${result.error}`, 3000, 'error');
+    }
+  }
+
+  dispose() {
+    console.log("[Game] Disposing resources");
+    this.stop();
+    clearInterval(this.autosaveInterval);
+    this.player.dispose();
+    this.world.dispose();
+    this.scene.dispose();
+    this.engine.dispose();
+  }
 }
