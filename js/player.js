@@ -1,7 +1,8 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.26 (FIXED)
-// Fix: Removed direct assignment to UI in constructor to prevent 'Cannot set properties of null' crash.
-// PATCH: Added loadState() and updated getSaveData() to fix TypeError and align with DB structure.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.27 (FINAL PATCH)
+// Fix: Renamed loadSaveData to loadState to fix Game.js error.
+// Fix: Updated getSaveData() for flattened position/stats.
+// Fix: Added template safety checks in loadState() to prevent itemTemplates crash.
 // ============================================================
 
 class Player extends Character {
@@ -19,7 +20,7 @@ class Player extends Character {
         this.isPlayer = true; 
         this.className = null; 
         this.level = 1; // Explicitly initialize level
-
+        
         // 2. Safely initialize stats object using fallbacks
         this.stats = {
             maxHealth: playerConfig.HEALTH || 100,
@@ -60,8 +61,6 @@ class Player extends Character {
             abilities: new Map(), // Map<AbilityName, Ability Instance>
             actionSlots: new Array(5).fill(null) // Holds ability objects
         };
-        
-        // REMOVED: this.scene.game.ui.player = this; // THIS LINE WAS CAUSING THE CRASH
         
         // Bind event handlers
         this.handleKeyDown = this._handleKeyDown.bind(this);
@@ -274,13 +273,18 @@ class Player extends Character {
         if (this.combat.target === target) return;
         
         if (this.combat.target) {
-            this.combat.target._toggleHighlight(false);
+            // Need to implement _toggleHighlight in the base Character/Enemy classes if they don't have it
+            if (typeof this.combat.target._toggleHighlight === 'function') {
+                this.combat.target._toggleHighlight(false);
+            }
         }
         
         this.combat.target = target;
         
         if (target) {
-            target._toggleHighlight(true);
+            if (typeof target._toggleHighlight === 'function') {
+                target._toggleHighlight(true);
+            }
             this.scene.game.ui.updateTargetInfo(target);
         } else {
             this.scene.game.ui.updateTargetInfo(null);
@@ -293,6 +297,11 @@ class Player extends Character {
     
     loadAbility(abilityTemplate) {
         if (!abilityTemplate) return;
+        // Requires the Ability class to be loaded from ability.js
+        if (typeof Ability === 'undefined') {
+             console.error("[Player] Ability class is undefined. Check ability.js script order.");
+             return null;
+        }
         const ability = new Ability(abilityTemplate);
         this.combat.abilities.set(ability.name, ability);
         return ability;
@@ -302,7 +311,8 @@ class Player extends Character {
         const ability = this.combat.abilities.get(abilityName);
         if (ability && slotIndex >= 0 && slotIndex < this.combat.actionSlots.length) {
             this.combat.actionSlots[slotIndex] = ability;
-            this.scene.game.ui.updateActionBar();
+            // The UI manager will check this when it updates
+            // this.scene.game.ui.updateActionBar();
         }
     }
     
@@ -310,8 +320,6 @@ class Player extends Character {
         const ability = this.combat.actionSlots[slotIndex];
         if (!ability || !ability.isReady()) return;
         
-        // If ability requires a target, and we have one, use it.
-        // Or if it's a self-cast/AoE, use it with 'this' as target/caster.
         const target = this.combat.target;
         
         if (ability.execute(this, target)) {
@@ -352,7 +360,8 @@ class Player extends Character {
         const nestedData = {
             inventory: this.inventory.getSaveData(),
             equipment: this.equipment.getSaveData(),
-            action_slots: this.combat.actionSlots.map(a => a ? a.name : null)
+            // Only store the names of abilities in the slots
+            action_slots: this.combat.actionSlots.map(a => a ? a.name : null) 
         };
         
         // Combine them for network.js to process
@@ -369,6 +378,10 @@ class Player extends Character {
     async loadState(data, templates) {
         if (!data) return;
         
+        // FIX: ADD SAFETY CHECKS FOR TEMPLATES
+        const itemTemplates = templates && templates.itemTemplates ? templates.itemTemplates : new Map();
+        const skillTemplates = templates && templates.skillTemplates ? templates.skillTemplates : new Map();
+
         // Load basic character state from the hosg_characters record
         const spawnHeight = CONFIG.PLAYER.SPAWN_HEIGHT || 5;
 
@@ -389,16 +402,23 @@ class Player extends Character {
 
         // Load Abilities from Templates
         this.combat.abilities.clear();
-        if (templates && templates.skillTemplates) {
-            for (const template of templates.skillTemplates.values()) {
-                this.loadAbility(template);
-            }
+        for (const template of skillTemplates.values()) {
+            this.loadAbility(template);
         }
 
         // Load Inventory and Equipment
-        // Data.inventory and data.equipment must be arrays of records from the database
-        if (data.inventory) this.inventory.load(data.inventory, templates.itemTemplates);
-        if (data.equipment) this.equipment.load(data.equipment, templates.itemTemplates);
+        if (typeof this.inventory.load === 'function') {
+            if (data.inventory) this.inventory.load(data.inventory, itemTemplates); 
+        } else {
+             console.warn("[Player] Inventory.load is missing. Check item.js script order.");
+        }
+        
+        if (typeof this.equipment.load === 'function') {
+            if (data.equipment) this.equipment.load(data.equipment, itemTemplates);
+        } else {
+             console.warn("[Player] Equipment.load is missing. Check item.js script order.");
+        }
+        
         
         // Load Action Bar Slots
         if (data.action_slots) {
@@ -485,7 +505,7 @@ class Player extends Character {
         };
         
         // Disable default browser context menu on right-click
-        this.scene.getEngine().get
+        document.getElementById(this.scene.getEngine().getRenderingCanvasId()).addEventListener('contextmenu', (e) => e.preventDefault());
 
     }
 
@@ -497,9 +517,7 @@ class Player extends Character {
         this.camera.rotationOffset = 180; // Angle around the target
         this.camera.cameraAcceleration = 0.05;
         this.camera.maxSpeed = 10;
-        this.camera.attachControl(this.scene.getEngine().get
-            // Placeholder for future camera control logic
-        );
+        this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
     }
 
     _initCollision(mass, friction) { 
@@ -557,7 +575,7 @@ class Player extends Character {
         this.scene.onPointerDown = null; 
         
         // Dispose camera control
-        if(this.camera) this.camera.detachControl(this.scene.getEngine().get)
+        if(this.camera) this.camera.detachControl(this.scene.getEngine().getRenderingCanvas())
     }
 
     _handleCamera(deltaTime) {
