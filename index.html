@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
@@ -51,27 +50,79 @@
 
 <script src="js/game.js"></script>
   
-  
+<script>
+  // This asynchronous function orchestrates the entire game startup.
+  async function initializeGame() {
+    console.log("[Bootstrap] Starting game initialization sequence...");
     
-  
-  
+    // 1. Setup Babylon.js Engine and Scene
+    const canvas = document.getElementById("renderCanvas");
+    if (!canvas) {
+        console.error("[Bootstrap] Canvas element 'renderCanvas' not found.");
+        return;
+    }
 
-  <script>
-    window.addEventListener("DOMContentLoaded", async () => {
-      try {
-        console.log("[Bootstrap] Creating game...");
-        const game = new Game("renderCanvas");
-        window.hosgGame = game;
+    const engine = new BABYLON.Engine(canvas, true);
+    const scene = new BABYLON.Scene(engine);
+    
+    // Apply Gravity and Physics
+    scene.collisionsEnabled = true;
+    scene.gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
+    scene.enablePhysics(scene.gravity, new BABYLON.CannonJSPlugin());
 
-        console.log("[Bootstrap] Initializing game...");
-        await game.init();
+    // 2. Instantiate Manager Classes
+    const uiManager = new UIManager(scene);
+    const player = new Player(scene);
+    const world = new World(scene, player);
+    const networkManager = new NetworkManager(); // Instantiated but not used heavily yet
+    const game = new Game(engine, scene, world, player, uiManager);
+    
+    // Attach game instance for cross-module reference (e.g., in UI or Player)
+    scene.game = game; 
+    
+    // 3. Asset and Template Loading Sequence
+    const assetManager = new AssetManager(scene);
+    
+    // Load Templates first (needed for Player, Abilities, etc.)
+    game.itemTemplates = new Map();
+    game.skillTemplates = new Map();
+    game.npcTemplates = new Map();
+    
+    console.log("[Bootstrap] Loading templates from Network...");
+    const templatesLoaded = await networkManager.loadTemplates(game.itemTemplates, game.skillTemplates, game.npcTemplates);
+    
+    if (!templatesLoaded) {
+        console.error("[Bootstrap] Failed to load essential game templates. Halting.");
+        return;
+    }
+    
+    // Load all visual assets (models, textures)
+    console.log("[Bootstrap] Loading all game assets (models, textures)...");
+    await assetManager.loadAll(); 
+    assetManager.printStats();
+    console.log("[Bootstrap] All assets loaded.");
+    
+    // 4. Final Setup and Initialization
+    game.init(); // Now safe to call since templates are loaded (game.js:23)
+    uiManager.init(); // Initialize UI now that the scene and game are ready
 
-        console.log("[Bootstrap] Starting game...");
-       
-      } catch (err) {
-        console.error("[Bootstrap] Game failed to start:", err);
-      }
+    // 5. Build the World using the loaded assets
+    // CRITICAL: Call the function that creates the ground, skybox, etc.
+    world.createEnvironment(assetManager); 
+    
+    // 6. Start the Game
+    game.run(); 
+    console.log("[Bootstrap] Game started successfully.");
+
+    // Handle window resize events
+    window.addEventListener("resize", () => {
+      engine.resize();
     });
-  </script>
+  }
+
+  // Start the entire process
+  initializeGame();
+</script>
+
 </body>
 </html>
