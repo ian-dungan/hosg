@@ -213,10 +213,21 @@ class World {
         }
         
         // 2. Setup PBR Environment using pre-filtered data (.env)
+        // Prefer a prefiltered environment map if available. Use a reliable CDN fallback
+        // to avoid 404s when the local file is missing.
         const envTexturePath = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
-        
-        // CRITICAL FIX: Use the correct method for loading .env files
-        const hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(envTexturePath, this.scene);
+        const environmentSource = envTexturePath;
+
+        let hdrTexture;
+        try {
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
+        } catch (err) {
+            console.warn(`[World] Failed to load environment map from ${environmentSource}. Using Babylon fallback.`, err);
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+                "https://assets.babylonjs.com/environments/environmentSpecular.env",
+                this.scene
+            );
+        }
         
         this.scene.environmentTexture = hdrTexture;
         this.scene.imageProcessingConfiguration.exposure = skyboxConfig.EXPOSURE;
@@ -224,31 +235,38 @@ class World {
     }
     
     createGround() {
-        const terrainAsset = this.scene.game.assetManager.getAsset(CONFIG.ASSETS.ENVIRONMENT.terrain_base.model);
+        const envConfig = CONFIG && CONFIG.ASSETS ? CONFIG.ASSETS.ENVIRONMENT : null;
+        const terrainConfig = envConfig ? envConfig.terrain_base : null;
+        const terrainAsset = terrainConfig
+            ? this.scene.game.assetManager.getAsset(terrainConfig.model)
+            : null;
+
         if (terrainAsset && terrainAsset.length > 0) {
             const terrain = terrainAsset[0];
             terrain.name = "TerrainBase";
             terrain.isPickable = true;
-            terrain.receiveShadows = true; 
-            
+            terrain.receiveShadows = true;
+
             // Set the model to be static collision ground
             terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                terrain, 
+                terrain,
                 BABYLON.PhysicsImpostor.MeshImpostor, // MeshImpostor for complex shapes
                 { mass: 0, restitution: 0.9 }, // Mass 0 for static object
                 this.scene
             );
         } else {
-            console.warn("[World] Failed to load TerrainBase mesh. Using simple plane as fallback.");
+            if (terrainConfig) {
+                console.warn(`[World] Failed to load TerrainBase mesh '${terrainConfig.model}'. Using simple plane as fallback.`);
+            }
             const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, this.scene);
             ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-                ground, 
-                BABYLON.PhysicsImpostor.BoxImpostor, 
-                { mass: 0, restitution: 0.9 }, 
+                ground,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                { mass: 0, restitution: 0.9 },
                 this.scene
             );
             ground.receiveShadows = true;
-            
+
             const groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
             groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
             ground.material = groundMaterial;
