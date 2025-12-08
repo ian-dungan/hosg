@@ -213,10 +213,21 @@ class World {
         }
         
         // 2. Setup PBR Environment using pre-filtered data (.env)
+        // Prefer a prefiltered environment map if available. Use a reliable CDN fallback
+        // to avoid 404s when the local file is missing.
         const envTexturePath = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
-        
-        // CRITICAL FIX: Use the correct method for loading .env files
-        const hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(envTexturePath, this.scene);
+        const environmentSource = envTexturePath;
+
+        let hdrTexture;
+        try {
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
+        } catch (err) {
+            console.warn(`[World] Failed to load environment map from ${environmentSource}. Using Babylon fallback.`, err);
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+                "https://assets.babylonjs.com/environments/environmentSpecular.env",
+                this.scene
+            );
+        }
         
         this.scene.environmentTexture = hdrTexture;
         this.scene.imageProcessingConfiguration.exposure = skyboxConfig.EXPOSURE;

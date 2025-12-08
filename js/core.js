@@ -33,15 +33,15 @@ const CONFIG = {
         BASE_PATH: "assets/", 
         
         CHARACTERS: {
-            knight: { 
-                model: 'Knight03.glb',
-                // Use relative path 'assets/player/character/'
-                path: '/hosg/assets/player/character/' 
+            knight: {
+                model: 'knight03.glb',
+                // Use relative path to the repository root
+                path: 'assets/player/character/'
             },
             wolf: {
-                model: 'Wolf.glb',
-                // Use relative path 'assets/models/'
-                path: '/hosg/assets/models/'
+                model: 'wolf.glb',
+                // Use relative path to the repository root
+                path: 'assets/enemies/'
             }
         },
         ENVIRONMENT: {
