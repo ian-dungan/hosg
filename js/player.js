@@ -1,7 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.28 (SYNTAX FIX + ASSET RECOVERY)
-// Fix: Completed the truncated _initCamera method and closed the class definition.
-// Update: Player now initializes using the loaded 'knight' model.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.29 (ROTATION FIX)
+// Fix: Moved visual rotation to processInput for smoother movement tracking.
 // ============================================================
 
 class Player extends Character {
@@ -72,7 +71,7 @@ class Player extends Character {
     // --- ASSET RECOVERY: Use the loaded 'knight' model ---
     async _initMesh() {
         const assets = this.scene.game.assetManager ? this.scene.game.assetManager.assets : null;
-        const modelAsset = assets ? assets['CHARACTERS_knight'] : null;
+        const modelAsset = assets ? assets['CHARACTERS_knight'] : null; // Key is CHARACTERS_knight
 
         if (modelAsset && modelAsset[0]) {
             // Create an instance of the loaded mesh and set it as the visual root
@@ -137,8 +136,7 @@ class Player extends Character {
         this.camera.upperRadiusLimit = 25;
         this.camera.upperBetaLimit = Math.PI / 2.2;
         this.camera.setTarget(this.mesh.position); 
-        // FIX: The line below was truncated in the previous patch
-        this.camera.attachControl(this.scene.getEngine().get  ? this.scene.getEngine().getRenderingCanvas() : null, true); 
+        this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true); 
         
         console.log('[Player] Camera initialized.');
     }
@@ -240,18 +238,14 @@ class Player extends Character {
         this.processInput(deltaTime);
         this.processAbilities(deltaTime);
         this.processCombat(deltaTime);
-        this._handleCamera(deltaTime);
+        this._updateCameraPosition();
         super.update(deltaTime);
-        
-        // Sync the camera to the player's position
-        if (this.camera) {
-            this.camera.target.copyFrom(this.mesh.position);
-        }
     }
     
     processInput(deltaTime) {
         let impulse = new BABYLON.Vector3(0, 0, 0);
         const speed = this.stats.moveSpeed;
+        const mass = 60; // Hardcoded from _initCollision, should be a constant
         
         this.isMoving = this.input.forward || this.input.backward || this.input.left || this.input.right;
 
@@ -270,21 +264,37 @@ class Player extends Character {
         if (this.input.right) impulse.addInPlace(right);
         
         if (impulse.length() > 0) {
+            // Apply Movement
             impulse.normalize().scaleInPlace(speed * mass);
             if (this.mesh.physicsImpostor) {
-                // Apply impulse relative to current velocity to prevent slow movement
-                // We use setLinearVelocity for simple top-down movement control
-                const targetVelocity = impulse.scale(1 / mass * 300); // Scale to a high speed
+                const targetVelocity = impulse.scale(1 / mass * 300); 
                 this.mesh.physicsImpostor.setLinearVelocity(targetVelocity);
             }
+            
+            // --- NEW: VISUAL ROTATION (Face the direction of movement) ---
+            const targetRotation = Math.atan2(impulse.x, impulse.z);
+            
+            if(this.visualRoot) {
+                const currentRotation = this.visualRoot.rotation.y;
+                let delta = targetRotation - currentRotation;
+                // Normalize delta to ensure shortest rotation path
+                while (delta > Math.PI) delta -= 2 * Math.PI;
+                while (delta < -Math.PI) delta += 2 * Math.PI;
+
+                // Smoothly rotate the visual root (0.2 is the smoothing factor)
+                this.visualRoot.rotation.y += delta * 0.2; 
+            }
+            // -----------------------------------------------------------
+
         } else {
             // Stop movement if no input is detected
             if (this.mesh.physicsImpostor) {
+                // Keep the character from sliding by setting velocity to zero
                 this.mesh.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, 0, 0));
             }
         }
         
-        // Fix camera rotation issues by locking physics rotation
+        // Ensure angular factor is zero every frame (should prevent the warning from being an issue)
         if (this.mesh.physicsImpostor && typeof this.mesh.physicsImpostor.setAngularFactor === 'function') {
             this.mesh.physicsImpostor.setAngularFactor(0);
         }
@@ -347,9 +357,24 @@ class Player extends Character {
         // Inventory/Equipment loading requires item templates which are loaded separately
         // These will be loaded via Game.loadGameData() after this.
         
-        console.log(`[Player] State loaded. Character: ${this.className}, Level: ${data.level || 1}`);
+        console.log(`[Player] State loaded. Character: ${this.className}, Health: ${this.health.toFixed(0)}`);
     }
 
+    // Placeholder: This is called by Game.loadGameData when no save state is found
+    applyClass(className) {
+        this.className = className;
+        const classConfig = CONFIG.CLASSES[className];
+        if (classConfig) {
+            // Update base stats from the config
+            Object.assign(this.stats, classConfig.stats);
+            this.health = this.stats.maxHealth;
+            this.mana = this.stats.maxMana;
+            this.stamina = this.stats.maxStamina;
+            console.log(`[Player] Applied default class: ${className}`);
+        } else {
+            console.warn(`[Player] Class config not found for: ${className}`);
+        }
+    }
 
     // --- Cleanup/Utility ---
     _initTargetHighlight() {
@@ -369,27 +394,10 @@ class Player extends Character {
         if(this.camera) this.camera.detachControl(this.scene.getEngine().getRenderingCanvas());
     }
 
-    _handleCamera(deltaTime) {
-        // Camera rotation to match player visual direction
-        if(this.visualRoot) {
-            if(this.isMoving) {
-                // Get the horizontal direction of the current velocity
-                const velocity = this.mesh.physicsImpostor.getLinearVelocity();
-                
-                // Only update rotation if there's actual horizontal movement
-                if (Math.abs(velocity.x) > 0.01 || Math.abs(velocity.z) > 0.01) {
-                    const targetRotation = Math.atan2(velocity.x, velocity.z);
-                    
-                    // Smoothly interpolate current rotation to target rotation
-                    const currentRotation = this.visualRoot.rotation.y;
-                    let delta = targetRotation - currentRotation;
-                    // Normalize delta to ensure shortest rotation path
-                    while (delta > Math.PI) delta -= 2 * Math.PI;
-                    while (delta < -Math.PI) delta += 2 * Math.PI;
-
-                    this.visualRoot.rotation.y += delta * 0.2; // 0.2 is the smoothing factor
-                }
-            }
+    _updateCameraPosition() {
+        // Sync the camera target to the player's collision mesh position
+        if (this.camera) {
+            this.camera.target.copyFrom(this.mesh.position);
         }
     }
 }
