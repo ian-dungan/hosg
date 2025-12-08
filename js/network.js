@@ -1,96 +1,115 @@
-// ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.33 (NPC TEMPLATE ADDED)
-// Fix: Moved _init logic directly into the constructor to resolve a TypeError
-//      where the prototype method was not fully registered before being called.
-// New: Added Wolf NPC template for World spawning.
-// ============================================================
+// ===========================================================
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.1.0 (OFFLINE SAFE MODE)
+// Fix: Handles "Tracking Prevention" blocking by falling back to offline data.
+// ===========================================================
 
-//
-// Supabase wrapper
-//
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
+    this.isOffline = false;
     
     // 1. DEFINE YOUR CONNECTION VARIABLES
     const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
     const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
     
-    // 2. Initialize the Supabase Client
+    // 2. Initialize the Supabase Client safely
     if (typeof supabase !== 'undefined') {
-        this.client = supabase.createClient(supabaseUrl, supabaseKey);
-        console.log("[Network] Supabase client initialized.");
+        try {
+            this.client = supabase.createClient(supabaseUrl, supabaseKey);
+            console.log("[Network] Supabase client initialized.");
+        } catch (err) {
+            console.warn("[Network] Supabase initialization blocked (Tracking Prevention). Switching to Offline Mode.");
+            this.client = null;
+            this.isOffline = true;
+        }
     } else {
-        console.error("[Network] Supabase client library not found. Check your HTML imports.");
+        console.warn("[Network] Supabase library not found. Switching to Offline Mode.");
+        this.isOffline = true;
     }
 }
 
-// NOTE: Placeholder implementations for Supabase methods
-SupabaseService.prototype.authenticate = async function (email, password) { /* ... implementation ... */ return { session: { access_token: 'fake_token' }, user: { id: 'fake_id' } }; };
-SupabaseService.prototype.fetchCharacterId = async function (userId) { /* ... implementation ... */ return 1; };
-SupabaseService.prototype.fetchCharacterState = async function (characterId) { /* ... implementation ... */ return { position: { x: 0, y: 5, z: 0 }, health: 100, mana: 50, stamina: 100, inventory: [], equipment: [] }; };
-SupabaseService.prototype.createCharacterState = async function (userId, data) { /* ... implementation ... */ return { id: 1, ...data }; };
-SupabaseService.prototype.saveCharacterState = async function (characterId, data) { /* ... implementation ... */ return true; };
+// Load templates (Skills/NPCs) from DB or Fallback
+SupabaseService.prototype.loadTemplates = async function(skillMap, npcMap) {
+    console.log("[Network] Loading game templates...");
 
-
-var supabaseService = new SupabaseService();
-
-//
-// Network Manager (WebSocket) - kept for future use
-//
-function NetworkManager() {
-    this.socket = null;
-    this.connected = false;
-    this.shouldReconnect = true;
-    this.supabase = supabaseService; // Uses the instantiated service
-    this._listeners = {};
-}
-
-// CRITICAL FIX: Implement template loading with simulated data
-NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcMap) {
-    // --- Simulated Skill Templates ---
-    const SKILL_TEMPLATES = [
+    // --- 1. Define Offline Fallbacks (Used if DB fails) ---
+    const OFFLINE_SKILLS = [
         {
-            id: 'Cleave', // The ID the player.js file is looking for
+            id: 'Cleave',
             code: 'CLEAVE',
             name: 'Cleave',
             skill_type: 'Attack',
             resource_cost: { mana: 0, stamina: 10 },
             cooldown_ms: 5000,
-            effect: {
-                type: 'damage',
-                base_value: 10,
-                magic_scaling: 0,
-                physical_scaling: 0.5 // Cleave scales with attack power
-            }
+            effect: { type: 'damage', base_value: 10, physical_scaling: 0.5 }
         },
-        // Placeholder for other abilities (Fireball, Heal, etc.)
-    ];
-
-    // --- Simulated NPC Templates (NEW) ---
-    const NPC_TEMPLATES = [
         {
-            id: 'Wolf', 
-            name: 'Wolf',
-            model: 'wolf', // Asset key name from CONFIG.ASSETS.CHARACTERS
-            level: 1,
-            stats: {
-                maxHealth: 30,
-                attackPower: 5,
-                moveSpeed: 0.18,
-            },
-            defaultAbility: 'Bite', // Placeholder for a default ability
-            loot: [ /* ... loot table data ... */ ],
+            id: 'Fireball',
+            code: 'FIREBALL',
+            name: 'Fireball',
+            skill_type: 'Magic',
+            resource_cost: { mana: 20, stamina: 0 },
+            cooldown_ms: 3000,
+            effect: { type: 'damage', base_value: 15, magic_scaling: 0.8 }
+        },
+        {
+            id: 'Heal',
+            code: 'HEAL',
+            name: 'Heal',
+            skill_type: 'Magic',
+            resource_cost: { mana: 30, stamina: 0 },
+            cooldown_ms: 8000,
+            effect: { type: 'heal', base_value: 25 }
         }
     ];
 
-    // --- Populate Maps ---
-    SKILL_TEMPLATES.forEach(t => skillMap.set(t.id, t));
-    NPC_TEMPLATES.forEach(t => npcMap.set(t.id, t)); // CRITICAL: Populate the NPC map
+    const OFFLINE_NPCS = [
+        {
+            id: 'Wolf',
+            name: 'Wolf',
+            model: 'wolf', 
+            level: 1,
+            stats: { maxHealth: 30, attackPower: 5, moveSpeed: 0.18 },
+            defaultAbility: 'Bite' 
+        }
+    ];
 
-    console.log('[Network] Templates loaded (Simulated/Supabase).');
-    return true; 
+    // --- 2. Attempt Fetch from Supabase ---
+    if (!this.isOffline && this.client) {
+        try {
+            // Fetch Skills
+            const { data: skills, error: skillError } = await this.client.from('hosg_skills').select('*');
+            if (!skillError && skills) {
+                skills.forEach(t => skillMap.set(t.id, t));
+                console.log(`[Network] Loaded ${skills.length} skills from database.`);
+            } else {
+                throw new Error("Skill fetch failed");
+            }
+
+            // Fetch NPCs
+            const { data: npcs, error: npcError } = await this.client.from('hosg_npc_templates').select('*');
+            if (!npcError && npcs) {
+                npcs.forEach(t => npcMap.set(t.id, t));
+                console.log(`[Network] Loaded ${npcs.length} NPCs from database.`);
+            } else {
+                throw new Error("NPC fetch failed");
+            }
+            
+            return; // Success! Exit function.
+
+        } catch (err) {
+            console.warn("[Network] Database connection failed. Using offline templates.", err);
+            // Fall through to offline logic below
+        }
+    }
+
+    // --- 3. Apply Offline Fallbacks ---
+    OFFLINE_SKILLS.forEach(t => skillMap.set(t.id, t));
+    OFFLINE_NPCS.forEach(t => npcMap.set(t.id, t));
+    console.log("[Network] Loaded templates from OFFLINE backup.");
 };
 
-// Ensure NetworkManager is available globally (for Game.js)
-window.NetworkManager = NetworkManager;
+SupabaseService.prototype.authenticate = async function () { return { error: "Offline Mode" }; };
+SupabaseService.prototype.saveCharacter = async function () { console.log("[Network] Save ignored (Offline)"); };
+
+window.SupabaseService = SupabaseService;
