@@ -1,9 +1,7 @@
-// ============================================================\
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.33 (CRITICAL CONFIG & ASSET MESH FIX)
-// Fix: 1. Removed _initMesh() call from constructor.
-//      2. Added assetManager property.
-//      3. Corrected _initMesh to use the new CONFIG.ASSETS.CLASSES path.
-// ============================================================\
+// ============================================================
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.31 (ASSET KEY FIX)
+// Fix: Ensure _initMesh uses the asset key name from the class config ('knight').
+// ============================================================
 
 class Player extends Character {
     constructor(scene) {
@@ -38,225 +36,208 @@ class Player extends Character {
         this.health = this.stats.maxHealth;
         this.mana = this.stats.maxMana;
         this.stamina = this.stats.maxStamina;
-
-        // ** PATCH 1: ADD ASSET MANAGER PROPERTY **
-        // This is set in index.html, before _initMesh is called.
-        this.assetManager = null; 
-        
-        // Assuming Inventory and Equipment are defined in item.js
+        this.abilities = []; 
         this.inventory = new Inventory(this);
         this.equipment = new Equipment(this);
-        this.abilities = []; 
 
-        // ** PATCH 2: CRITICAL FIX - REMOVED MESH INIT CALL **
-        // this._initMesh(); // <-- THIS LINE IS NOW GONE
+        this.keys = {}; // For input tracking
+        this.camera = null;
+        this.target = null;
+        this.lastAttackTime = 0;
+        this.isGrounded = true;
+        
+        this.handleKeyDown = this.handleKeyDown.bind(this);
+        this.handleKeyUp = this.handleKeyUp.bind(this);
+        this.handlePointerDown = this.handlePointerDown.bind(this);
 
         this._initCamera();
-        this._initControls();
-        // NOTE: Collision init will now run before mesh init
-        this._initCollision();
+        this._initInput();
+        this._initPhysics(); 
         this._initTargetHighlight();
-    }
 
-    // --- Core Methods ---
+        // Apply default class stats and load mesh/abilities
+        this.applyClass('Warrior'); 
+    }
     
-    update(deltaTime) {
-        super.update(deltaTime);
-        this.updateMovement(deltaTime);
-        this.updateAbilities(deltaTime);
-        this._updateCameraPosition();
-    }
-
-    updateAbilities(deltaTime) {
-        if (this.abilities) {
-            this.abilities.forEach(ability => ability.update(deltaTime));
-        }
-    }
-
-    // --- Mesh and Visuals ---
-
-    _initMesh() {
-        if (!this.assetManager) {
-            console.error("[Player] Cannot initialize mesh: AssetManager is not assigned to player.");
-            return;
-        }
-
-        // 1. Get the class config using the correct path
-        const className = this.className || 'Warrior'; 
-        // ** CRITICAL FIX: Use the new CONFIG path (CONFIG.ASSETS.CLASSES) **
-        const classConfig = CONFIG.ASSETS.CLASSES[className]; 
-
-        if (!classConfig) {
-            console.error(`[Player] Class configuration not found for: ${className}`);
-            return;
-        }
-
-        // 2. Resolve the asset key from the class model property (e.g., 'knight')
-        const assetModelKey = classConfig.model;
-        const assetKey = 'characters_' + assetModelKey; 
-        
-        const meshes = this.assetManager.getAsset(assetKey);
-        
-        if (!meshes || meshes.length === 0) {
-            console.error(`[Player] Failed to load mesh for asset: ${assetKey}. AssetManager load failed or key is wrong.`);
-            return;
-        }
-
-        // Clone the root mesh for the player instance
-        // Assuming the root mesh is the first one in the array
-        this.mesh = meshes[0].clone(this.name + "_mesh", null, true);
-        if (!this.mesh) {
-            console.error("[Player] Failed to clone player mesh.");
-            return;
-        }
-        
-        this.mesh.parent = null; 
-        this.mesh.isPickable = true;
-        this.mesh.checkCollisions = true;
-        this.mesh.position.copyFrom(this.position);
-        
-        // Hide the original asset meshes
-        meshes.forEach(m => m.setEnabled(false));
-
-        // Use the collision mesh logic to attach the visual mesh
-        this._initCollisionMesh(this.mesh); 
-        this._updateCameraPosition();
-        
-        // IMPORTANT: Update the camera target to the mesh's position once initialized
-        this.camera.target = this.mesh.position;
-    }
-
     _initCamera() {
-        this.camera = new BABYLON.FollowCamera("playerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
-        // Set an initial target, which will be updated by _initMesh
-        this.camera.target = new BABYLON.Vector3(0, 5, 0); 
-        this.camera.radius = 8;
-        this.camera.heightOffset = 4;
-        this.camera.rotationOffset = 180;
+        this.camera = new BABYLON.FollowCamera("PlayerCamera", this.position.clone(), this.scene);
+        this.camera.radius = 10; // Distance of the camera from the target
+        this.camera.heightOffset = 4; // Height of camera above the target
+        this.camera.rotationOffset = 180; // Start facing backward
         this.camera.cameraAcceleration = 0.05;
         this.camera.maxCameraSpeed = 20;
-
-        this.scene.activeCamera = this.camera;
         this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
     }
     
-    // --- Control and Movement ---
-    
-    _initControls() {
-        this.isMoving = { forward: false, backward: false, left: false, right: false, jump: false };
-        this.scene.actionManager = new BABYLON.ActionManager(this.scene);
-        this.handleKeyDown = this.handleKeyDown.bind(this);
-        this.handleKeyUp = this.handleKeyUp.bind(this);
+    _initInput() {
         window.addEventListener('keydown', this.handleKeyDown);
         window.addEventListener('keyup', this.handleKeyUp);
+        this.scene.onPointerDown = this.handlePointerDown;
     }
 
-    updateMovement(deltaTime) {
-        let movement = new BABYLON.Vector3(0, 0, 0);
-        let moveSpeed = this.stats.moveSpeed * 100 * deltaTime; 
+    _initPhysics() {
+        if (!this.mesh) {
+            // Create a simple invisible mesh just for physics collision/position
+            this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollision", {
+                height: 2, diameter: 1
+            }, this.scene);
+            this.mesh.isVisible = false;
+            this.mesh.checkCollisions = true; 
+        }
 
-        if (this.isMoving.forward) movement.z += moveSpeed;
-        if (this.isMoving.backward) movement.z -= moveSpeed;
-        if (this.isMoving.left) movement.x -= moveSpeed;
-        if (this.isMoving.right) movement.x += moveSpeed;
+        this.mesh.position.copyFrom(this.position);
+        
+        // Add a physics impostor
+        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.mesh, 
+            BABYLON.PhysicsImpostor.CylinderImpostor, 
+            { mass: 1, restitution: 0.1, friction: 0.5 }, 
+            this.scene
+        );
+        
+        // Set collision filters if necessary (future feature)
+    }
 
-        if (movement.length() > 0) {
-            movement = movement.normalize().scale(moveSpeed);
-            
-            const cameraDirection = this.camera.getDirection(BABYLON.Vector3.Forward());
-            cameraDirection.y = 0; 
-            cameraDirection.normalize();
+    _initMesh(assetKey) {
+        // CRITICAL FIX: Use the simple key name (e.g., 'knight')
+        const assetMeshes = this.scene.game.assetManager.getAsset(assetKey); 
+        
+        if (assetMeshes && assetMeshes.length > 0) {
+            const rootMesh = assetMeshes[0].clone("PlayerMesh", null);
+            rootMesh.isVisible = true;
 
-            if (this.mesh && this.mesh.physicsImpostor) {
-                this.mesh.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(movement.x * 10, this.mesh.physicsImpostor.getLinearVelocity().y, movement.z * 10));
-                
-                const targetYaw = this.camera.rotationOffset * (Math.PI / 180); 
-                this.mesh.rotation.y = targetYaw; 
+            // Attach the visual mesh to the collision mesh as a child
+            if (this.mesh) {
+                rootMesh.parent = this.mesh;
+                // Offset the visual mesh so it sits correctly on the ground relative to the collision mesh
+                rootMesh.position = new BABYLON.Vector3(0, -1, 0); 
+                rootMesh.rotation.y = Math.PI; // Face the correct direction for the camera
             }
-        } else if (this.mesh && this.mesh.physicsImpostor) {
-            const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-            this.mesh.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, currentVelocity.y, 0));
+
+            // Store the root mesh reference (might be redundant if we only interact with the collision mesh)
+            this.visualMesh = rootMesh; 
+        } else {
+            console.warn(`[Player] Failed to load mesh for asset: ${assetKey}. AssetManager load failed or key is wrong.`);
+            // Fallback: Make the collision mesh visible for debugging
+            if(this.mesh) this.mesh.isVisible = true;
         }
     }
+
+    // --- Input Handlers ---
 
     handleKeyDown(event) {
-        switch (event.key.toLowerCase()) {
-            case 'w': this.isMoving.forward = true; break;
-            case 's': this.isMoving.backward = true; break;
-            case 'a': this.isMoving.left = true; break;
-            case 'd': this.isMoving.right = true; break;
-            case ' ': this.isMoving.jump = true; break;
-        }
+        this.keys[event.key.toLowerCase()] = true;
     }
 
     handleKeyUp(event) {
-        switch (event.key.toLowerCase()) {
-            case 'w': this.isMoving.forward = false; break;
-            case 's': this.isMoving.backward = false; break;
-            case 'a': this.isMoving.left = false; break;
-            case 'd': this.isMoving.right = false; break;
-            case ' ': this.isMoving.jump = false; break;
+        this.keys[event.key.toLowerCase()] = false;
+    }
+
+    handlePointerDown(evt) {
+        if (evt.button === 0) { // Left click
+            const pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+
+            if (pickResult.hit && pickResult.pickedMesh && pickResult.pickedMesh.parent) {
+                const targetEntity = this.scene.game.world.npcs.find(
+                    (npc) => npc.mesh && npc.mesh === pickResult.pickedMesh.parent
+                );
+
+                if (targetEntity) {
+                    this.target = targetEntity;
+                    this.scene.game.ui.showMessage(`Target acquired: ${this.target.name}`, 1000, 'info');
+
+                    // If a target is acquired and an ability is ready, perform an attack
+                    const attackAbility = this.abilities[0]; 
+                    if (attackAbility && attackAbility.isReady()) {
+                        attackAbility.execute(this, this.target);
+                    }
+                } else {
+                    this.target = null;
+                }
+            } else {
+                this.target = null;
+            }
         }
+    }
+
+    // --- Core Update Loop ---
+    
+    update(deltaTime) {
+        this.abilities.forEach(ability => ability.update(deltaTime));
+        this._updateMovement(deltaTime);
+        this._updateCameraPosition();
+        
+        // Keep the Character base update (syncs collision mesh position to this.position)
+        Entity.prototype.update.call(this, deltaTime);
     }
     
-    // --- Collision and Physics ---
-
-    _initCollision() {
-        // This is a placeholder that will be completed by _initCollisionMesh, 
-        // which runs later after the mesh is loaded.
-        // It's called in the constructor, but the actual physics object
-        // creation is done in _initCollisionMesh(parentMesh).
-    }
-
-    _initCollisionMesh(parentMesh) {
-        const impostorSize = new BABYLON.Vector3(1, 2, 1);
-        const impostorMesh = BABYLON.MeshBuilder.CreateBox("playerCollisionBox", { height: impostorSize.y, width: impostorSize.x, depth: impostorSize.z }, this.scene);
-        impostorMesh.visibility = 0.0; 
-        impostorMesh.checkCollisions = true;
-        impostorMesh.isPickable = false;
-        impostorMesh.position.copyFrom(this.position);
-        impostorMesh.position.y += impostorSize.y / 2; 
-
-        this.collisionMesh = impostorMesh;
+    _updateMovement(deltaTime) {
+        if (!this.mesh || !this.mesh.physicsImpostor) return;
         
-        if (parentMesh) {
-            parentMesh.parent = impostorMesh;
-            parentMesh.position.y = -impostorSize.y / 2; 
+        const impulseForce = 25; 
+        const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+        let moveVector = BABYLON.Vector3.Zero();
+
+        if (this.keys['w']) moveVector.z += 1;
+        if (this.keys['s']) moveVector.z -= 1;
+        if (this.keys['a']) moveVector.x -= 1;
+        if (this.keys['d']) moveVector.x += 1;
+
+        if (moveVector.lengthSquared() > 0) {
+            moveVector = moveVector.normalize();
+
+            // Rotate the move vector based on the camera's rotation
+            const yRotation = this.camera.rotationOffset * (Math.PI / 180);
+            const matrix = BABYLON.Matrix.RotationY(yRotation);
+            moveVector = BABYLON.Vector3.TransformCoordinates(moveVector, matrix);
+            
+            // Apply impulse
+            const impulse = moveVector.scale(impulseForce);
+            this.mesh.physicsImpostor.applyImpulse(
+                impulse,
+                this.mesh.getAbsolutePosition()
+            );
+
+            // Update visual mesh rotation (only if visual mesh exists)
+            if (this.visualMesh) {
+                const targetAngle = Math.atan2(moveVector.x, moveVector.z);
+                this.visualMesh.rotation.y = targetAngle;
+            }
         }
 
-        impostorMesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-            impostorMesh,
-            BABYLON.PhysicsImpostor.BoxImpostor,
-            { mass: 80, friction: 0.5, restitution: 0.0 },
-            this.scene
-        );
-
-        impostorMesh.physicsImpostor.setAngularFactor(new BABYLON.Vector3(0, 1, 0));
-        console.log(`[Player] Physics impostor ready, but setAngularFactor is missing or failed to initialize correctly. Rotation may occur.`);
-
-        // The mesh property now points to the physics mesh for movement/position updates
-        this.mesh = impostorMesh; 
+        // Simple velocity dampening to prevent sliding indefinitely
+        const horizontalVelocity = new BABYLON.Vector3(velocity.x, 0, velocity.z);
+        if (horizontalVelocity.lengthSquared() > 0.01) {
+            const dampingForce = horizontalVelocity.scale(-2); // Apply opposing force
+            this.mesh.physicsImpostor.applyForce(
+                dampingForce,
+                this.mesh.getAbsolutePosition()
+            );
+        }
     }
 
-    // --- Class and Stats ---
+    // --- Class & Stats ---
 
-    applyDefaultClass(className) {
-        if (!className) {
-            className = this.className || 'Warrior'; 
-        }
-        this.className = className;
+    applyClass(className) {
         const classConfig = CONFIG.ASSETS.CLASSES[className];
 
         if (classConfig) {
+            this.className = className;
+            
+            // 1. Apply Stats
             Object.assign(this.stats, classConfig.stats);
             this.health = this.stats.maxHealth;
             this.mana = this.stats.maxMana;
             this.stamina = this.stats.maxStamina;
 
-            if (classConfig.defaultAbility && this.scene.game && this.scene.game.skillTemplates) {
+            // 2. Initialize Mesh
+            const assetKey = classConfig.model; // e.g., 'knight'
+            this._initMesh(assetKey);
+            
+            // 3. Initialize Abilities
+            if (this.scene.game.skillTemplates) {
                 const defaultAbilityTemplate = this.scene.game.skillTemplates.get(classConfig.defaultAbility);
                 if (defaultAbilityTemplate) {
-                    // Assuming Ability class is defined in ability.js
                     this.abilities = [new Ability(defaultAbilityTemplate)];
                 } else {
                     console.warn(`[Player] Default ability template not found for: ${classConfig.defaultAbility}`);
@@ -270,8 +251,7 @@ class Player extends Character {
         }
     }
 
-    // --- Cleanup/Utility ---\
-    
+    // --- Cleanup/Utility ---
     _initTargetHighlight() {
         // Placeholder for future target highlight effect
     }
