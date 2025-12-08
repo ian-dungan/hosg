@@ -9,116 +9,106 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
-    // Make Supabase config available before our own scripts
-    window.SUPABASE_CONFIG = {
-      url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
-      key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-    };
-  </script>
 
   <style>
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-    }
-    #renderCanvas {
-      width: 100%;
-      height: 100%;
-      touch-action: none;
-    }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #000; }
+    #renderCanvas { width: 100%; height: 100%; touch-action: none; outline: none; }
+    #loadingText { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: sans-serif; pointer-events: none; }
   </style>
 </head>
 <body>
 
 <canvas id="renderCanvas"></canvas>
+<div id="loadingText">Loading Game Files...</div>
 
-<script src="core.js"></script> 
-<script src="network.js"></script>
-<script src="assets.js"></script> 
-<script src="item.js"></script> 
-<script src="ability.js"></script> 
-<script src="world.js"></script> <script src="ui.js"></script> 
-<script src="game.js"></script> 
-<script src="player.js"></script> <script>
+<script src="js/core.js"></script>
+<script src="js/network.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/item.js"></script>
+<script src="js/ability.js"></script>
+<script src="js/world.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
+<script src="js/player.js"></script>
+
+<script>
     // =======================================================
-    // GAME BOOTSTRAP (v1.0.16 - ASSET MANAGER SEQUENCE FIX)
-    // Fix: AssetManager is now attached to 'game' before Player is created.
+    // GAME BOOTSTRAP (v1.2.1 - FOLDER PATH FIX)
     // =======================================================
     const canvas = document.getElementById("renderCanvas");
     const engine = new BABYLON.Engine(canvas, true);
     const scene = new BABYLON.Scene(engine);
     
-    // Ensure all references are on the scene/game for global access
+    // Global Access
     scene.game = null; 
 
-    // Asynchronous setup function
     async function initializeGame() {
-        console.log("[Bootstrap] Starting game initialization...");
+        try {
+            console.log("[Bootstrap] Starting initialization...");
+            document.getElementById("loadingText").innerText = "Initializing Core...";
 
-        // 1. Initialize core components
-        const uiManager = new UIManager(scene);
-        
-        // 2. Create the Game Orchestrator (needs minimal setup)
-        // Pass scene/engine, null for player/world initially
-        const game = new Game(engine, scene, null, null, uiManager);
-        scene.game = game; // Make game globally accessible via scene
+            // 1. Verify Scripts Loaded
+            if (typeof Game === 'undefined' || typeof UIManager === 'undefined') {
+                throw new Error("Critical scripts (Game/UI) failed to load. Check that files are in the /js/ folder.");
+            }
 
-        // 3. Initialize Asset Manager
-        const assetManager = new AssetManager(scene);
-        game.assetManager = assetManager; // CRITICAL FIX: Attach AssetManager to Game NOW
+            // 2. Setup Managers
+            const uiManager = new UIManager(scene);
+            const game = new Game(engine, scene, null, null, uiManager);
+            scene.game = game; 
+            
+            const assetManager = new AssetManager(scene);
+            game.assetManager = assetManager;
 
-        // 4. Load game templates (Abilities, NPCs)
-        const skillTemplates = new Map();
-        const npcTemplates = new Map();
-        if (typeof SupabaseService !== 'undefined') {
-            const network = new SupabaseService();
-            await network.loadTemplates(skillTemplates, npcTemplates);
-        } else {
-            console.error('[Bootstrap] SupabaseService not found. Using minimal in-file templates.');
+            // 3. Network / Templates (With Offline Safety Check)
+            document.getElementById("loadingText").innerText = "Loading Data...";
+            const skillTemplates = new Map();
+            const npcTemplates = new Map();
+            
+            if (typeof SupabaseService !== 'undefined') {
+                const network = new SupabaseService();
+                await network.loadTemplates(skillTemplates, npcTemplates);
+            } else {
+                console.warn("[Bootstrap] Network script missing. Game may behave unexpectedly.");
+            }
+
+            game.skillTemplates = skillTemplates;
+            game.npcTemplates = npcTemplates;
+            
+            // 4. Load Assets
+            document.getElementById("loadingText").innerText = "Loading Assets...";
+            await assetManager.loadAll();
+            
+            // 5. Create World & Player
+            // Note: Player relies on 'Character' which is in world.js
+            const player = new Player(scene);
+            const world = new World(scene, player);
+            
+            game.player = player; 
+            game.world = world;
+            
+            // 6. Launch
+            game.init(); 
+            uiManager.init(); 
+            world.createEnvironment(assetManager); 
+            
+            document.getElementById("loadingText").style.display = "none";
+            game.run(); 
+            console.log("[Bootstrap] Game running.");
+
+        } catch (error) {
+            console.error("[Bootstrap] FATAL ERROR:", error);
+            document.getElementById("loadingText").innerText = "Error: " + error.message;
+            document.getElementById("loadingText").style.color = "red";
         }
-
-        game.skillTemplates = skillTemplates;
-        game.npcTemplates = npcTemplates;
-        
-        // 5. Load all visual assets (models, textures)
-        console.log("[Bootstrap] Loading all game assets (models, textures)...");
-        await assetManager.loadAll();
-        assetManager.printStats();
-        console.log("[Bootstrap] All assets loaded.");
-        
-        // 6. Create Player and World (Now safe to instantiate and rely on game.assetManager)
-        const player = new Player(scene);
-        // Pass the player instance to the world for the camera to follow
-        const world = new World(scene, player);
-        
-        // 7. Finalize Game Orchestrator
-        game.player = player; 
-        game.world = world;
-        
-        game.init(); 
-        uiManager.init(); 
-
-        // 8. Build the World (Camera/Lights/Ground are created here)
-        world.createEnvironment(assetManager); 
-        
-        // 9. Start the Game
-        game.run(); 
-        console.log("[Bootstrap] Game started successfully.");
-
-        // Handle window resize events
-        window.addEventListener("resize", () => {
-            engine.resize();
-        });
     }
 
+    // Handle Resize
+    window.addEventListener("resize", () => engine.resize());
+
+    // Start
     initializeGame();
 </script>
-
 </body>
 </html>
