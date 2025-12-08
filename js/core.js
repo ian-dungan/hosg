@@ -1,6 +1,6 @@
 // ============================================================\
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.24 (ASSET CONFIG FIX)
-// Fix: Moved CLASSES config inside ASSETS block to match how it's used in Player.js
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.25 (CLEANUP & CONFIG FIX)
+// Fix: Removed duplicate Character class definition. CLASSES correctly nested.
 // ============================================================\
 
 const CONFIG = {
@@ -9,20 +9,23 @@ const CONFIG = {
         HEALTH: 100,
         MANA: 50,
         STAMINA: 100,
-        SPAWN_HEIGHT: 5
+        SPAWN_HEIGHT: 5,
+        MOVE_SPEED: 0.15
     },
     GAME: {
         GRAVITY: 9.81, 
     },
     WORLD: { 
         SKYBOX: {
-            PATH: null,
+            PATH: null, // Keep null to skip creation by default
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
             LEVEL: 0.5
         },
-        SPAWNS: []
+        SPAWNS: [
+            // Placeholder for future NPC spawn data
+        ]
     },
     ASSETS: {
         BASE_PATH: "/hosg/assets/", 
@@ -38,10 +41,12 @@ const CONFIG = {
             }
         },
         ENVIRONMENT: {
-            // ... (rest of environment assets) ...
+            terrain_base: { 
+                model: 'FantasyTerrain.glb',
+                path: '/hosg/assets/environment/' 
+            }
         },
 
-        // ** CRITICAL FIX: CLASSES MOVED HERE **
         CLASSES: { 
             Warrior: { 
                 model: 'knight',
@@ -89,8 +94,4 @@ const CONFIG = {
 
 window.CONFIG = CONFIG;
 
-// Character base class (assuming this is defined here or in a separate file)
-class Character extends Entity {
-    // ... (rest of Character class definition) ...
-    // Assuming Entity is defined in core.js or world.js
-}
+// NO Character/Entity definition here. They are now in world.js.
