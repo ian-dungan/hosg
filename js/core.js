@@ -36,7 +36,7 @@ const CONFIG = {
             knight: { 
                 model: 'Knight03.glb',
                 // Use relative path 'assets/player/character/'
-                path: 'hosg/assets/player/character/' 
+                path: 'assets/player/character/' 
             },
             wolf: {
                 model: 'Wolf.glb',
