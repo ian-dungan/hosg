@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.22 (PATCHED)
-// Fix: Changed hosg_accounts column lookups from 'name' to 'username' to match DB schema.
-// Update: Added class stats to load/save logic.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.22 (FIXED)
+// Fix: Added placeholder 'email' field to createAccount insertion
+//      to satisfy the database's NOT NULL constraint.
 // ============================================================
 
 //
@@ -55,7 +55,7 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
         const { data, error } = await this.client
             .from('hosg_accounts')
             .select('*')
-            .eq('username', accountName) // PATCHED: Changed 'name' to 'username'
+            .eq('name', accountName)
             .single();
 
         // PGRST116 is the code for 'No rows found', which is expected on first login
@@ -65,8 +65,8 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
 
         return { success: true, account: data };
     } catch (error) {
-        console.error('[Supabase] Failed to get account:', error.message || error);
-        return { success: false, error: error.message || error };
+        console.error('[Supabase] Failed to get account:', error.message);
+        return { success: false, error: error.message };
     }
 };
 
@@ -79,7 +79,13 @@ SupabaseService.prototype.createAccount = async function (accountName) {
     try {
         const { data, error } = await this.client
             .from('hosg_accounts')
-            .insert([{ username: accountName }]) // PATCHED: Changed 'name' to 'username'
+            .insert([
+                { 
+                    name: accountName, 
+                    // PATCH: Include a placeholder email to satisfy the NOT-NULL constraint
+                    email: `${accountName}@placeholder.com` 
+                }
+            ])
             .select()
             .single();
 
@@ -103,7 +109,7 @@ SupabaseService.prototype.getCharacterByName = async function (characterName) {
         if (error && error.code !== 'PGRST116') {
             throw error;
         }
-        
+
         return { success: true, character: data };
     } catch (error) {
         console.error('[Supabase] Failed to get character by name:', error.message);
@@ -116,21 +122,19 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
     if (!existingCharResult.success || existingCharResult.character) {
         return { success: false, error: existingCharResult.error || `Character name '${characterName}' is already taken.` };
     }
-
+    
     const classConfig = CONFIG.CLASSES[className];
     if (!classConfig) {
         return { success: false, error: `Invalid class name provided: ${className}` };
     }
-
     const classStats = classConfig.stats;
 
     try {
         const defaultState = {
             account_id: accountId,
             name: characterName,
-            class_name: className,
+            class_name: className, 
             
-            // Initial position (will be updated by the player when they save)
             position_x: 0,
             position_y: CONFIG.PLAYER.SPAWN_HEIGHT,
             position_z: 0,
@@ -146,74 +150,66 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
             mana: classStats.maxMana,
             stamina: classStats.maxStamina,
 
-            // Base stats (needed for level-up/gear-stat synchronization)
+            // Base stats of the class
             base_attack_power: classStats.attackPower,
             base_magic_power: classStats.magicPower,
             base_move_speed: classStats.moveSpeed,
-            
-            // Experience and Level
-            level: 1,
-            experience: 0,
         };
 
         const { data, error } = await this.client
             .from('hosg_characters')
             .insert([defaultState])
-            .select()
+            .select('id')
             .single();
 
         if (error) throw error;
-
-        // Automatically create a default inventory and equipment set
-        const { error: inventoryError } = await this.client.from('hosg_character_inventory').insert([
-            { character_id: data.id, item_template_id: 1, quantity: 1 } // Placeholder Item 1
-        ]);
-        if (inventoryError) console.warn('[Supabase] Failed to create default inventory entry:', inventoryError.message);
         
-        // No default equipment for now, it'll be empty
-
-        return { success: true, character: data };
+        return { success: true, characterId: data.id };
     } catch (error) {
         console.error('[Supabase] Failed to create character:', error.message);
         return { success: false, error: error.message };
     }
 };
 
+// ============================================================
+// DATA PERSISTENCE
+// ============================================================
+
 SupabaseService.prototype.loadCharacterState = async function (characterId) {
     try {
-        // 1. Get Core Character State
-        const { data: characterData, error: charError } = await this.client
+        // 1. Load Core Character State
+        const { data: coreData, error: coreError } = await this.client
             .from('hosg_characters')
-            .select('*')
+            .select('*') 
             .eq('id', characterId)
             .single();
 
-        if (charError) throw charError;
-
-        // 2. Get Inventory Items
-        const { data: inventoryData, error: invError } = await this.client
-            .from('hosg_character_inventory')
+        if (coreError) throw coreError;
+        
+        // 2. Load Inventory Items
+        const { data: inventoryData, error: inventoryError } = await this.client
+            .from('hosg_character_items')
             .select('*')
             .eq('character_id', characterId);
-
-        if (invError) throw invError;
-
-        // 3. Get Equipped Items
-        const { data: equipmentData, error: equipError } = await this.client
+        
+        if (inventoryError) throw inventoryError;
+        
+        // 3. Load Equipped Items
+        const { data: equipmentData, error: equipmentError } = await this.client
             .from('hosg_character_equipment')
             .select('*')
             .eq('character_id', characterId);
 
-        if (equipError) throw equipError;
+        if (equipmentError) throw equipmentError;
 
-        // Combine data into a single state object
         const state = {
-            core: characterData,
+            core: coreData, // RETURN coreData which contains class_name and all stats
             inventory: inventoryData,
             equipment: equipmentData,
         };
-
+        
         return { success: true, state: state };
+
     } catch (error) {
         console.error('[Supabase] Failed to load character state:', error.message);
         return { success: false, error: error.message };
@@ -222,24 +218,21 @@ SupabaseService.prototype.loadCharacterState = async function (characterId) {
 
 SupabaseService.prototype.saveCharacterState = async function (characterId, state) {
     try {
-        // 1. Update Core Character State (hosg_characters)
+        // 1. Update Core Character State
         const coreState = {
-            position_x: state.position_x,
-            position_y: state.position_y,
-            position_z: state.position_z,
+            // Note: We only update fields that can change during gameplay
+            position_x: state.position.x,
+            position_y: state.position.y,
+            position_z: state.position.z,
             rotation_y: state.rotation_y,
-
             health: state.health,
             mana: state.mana,
             stamina: state.stamina,
-
-            // Class base stats (needed for level-up/gear-stat synchronization)
+            
+            // NEW: Persist base stats (needed for level-up/gear-stat synchronization)
             base_attack_power: state.base_attack_power,
             base_magic_power: state.base_magic_power,
             base_move_speed: state.base_move_speed,
-            
-            level: state.level,
-            experience: state.experience,
         };
 
         const { error: coreError } = await this.client
@@ -248,17 +241,17 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
             .eq('id', characterId);
 
         if (coreError) throw coreError;
-
+        
         // 2. Update Inventory (Delete all then Insert all)
-        await this.client.from('hosg_character_inventory').delete().eq('character_id', characterId);
+        await this.client.from('hosg_character_items').delete().eq('character_id', characterId); 
         const newInventoryData = state.inventory.map(item => ({ 
             ...item, 
             character_id: characterId, 
-            // The 'id' (primary key/instance ID) should be undefined for new inserts
+            // The item object from player.js might have a temporary 'id', remove it for new inserts
             id: undefined 
         }));
         if (newInventoryData.length > 0) {
-            const { error: insertInvError } = await this.client.from('hosg_character_inventory').insert(newInventoryData);
+             const { error: insertInvError } = await this.client.from('hosg_character_items').insert(newInventoryData);
             if (insertInvError) throw insertInvError;
         }
 
