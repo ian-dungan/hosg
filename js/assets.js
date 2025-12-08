@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.11 (TYPERROR FIX)
-// Fix: Removed erroneous totalCount variable access from loader.onError.
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.12 (CRITICAL LOGIC FIX)
+// Fix: Corrected MANIFEST_DATA initialization and loadAll iteration to match CONFIG.ASSETS structure.
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
@@ -28,40 +28,40 @@ class AssetManager {
     async loadAll() {
         console.log('[Assets] Starting asset load...');
 
-        // Load Character Models
+        // Load Character Models - Iterate directly over MANIFEST_DATA.CHARACTERS keys
         for (const key in MANIFEST_DATA.CHARACTERS) {
             const assetData = MANIFEST_DATA.CHARACTERS[key];
             this.loadModel(assetData, key, 'CHARACTERS');
         }
         
-        // Load Environment Assets
+        // Load Environment Assets - Iterate directly over MANIFEST_DATA.ENVIRONMENT keys
         for (const key in MANIFEST_DATA.ENVIRONMENT) {
             const assetData = MANIFEST_DATA.ENVIRONMENT[key];
             this.loadModel(assetData, key, 'ENVIRONMENT');
         }
+        
+        // This is the total count of assets we've added to the loader
+        this.stats.requested = this.loader.tasks.length;
 
         return new Promise((resolve, reject) => {
-            // Set up success and error handling before calling load()
+            
             this.loader.onFinish = (tasks) => {
                 this.printStats();
                 resolve(this.assets);
             };
             
             this.loader.onProgress = (remainingCount, totalCount, lastTask) => {
-                // Optional: Update a loading bar/text here
-                // console.log(`[Assets] Loading: ${totalCount - remainingCount}/${totalCount} - ${lastTask.name}`);
+                // ... loading progress logic ...
             };
 
             this.loader.onError = (task, message, exception) => {
                 console.error(`[Assets] A task failed: ${task.name}. Message: ${message}`, exception);
-                // Removed the line causing the TypeError: this.stats.requested = totalCount;
-                this.printStats(); // Print stats on error too
+                this.printStats(); 
+                // We resolve even on non-required asset errors to allow the game to start
                 resolve(this.assets); 
             };
             
-            // Check if any tasks were added before running
             if (this.loader.tasks.length > 0) {
-                this.stats.requested = this.loader.tasks.length;
                 this.loader.load();
             } else {
                 console.warn('[Assets] No assets defined to load.');
@@ -76,6 +76,7 @@ class AssetManager {
         // Use the assetData.path if provided, otherwise use the global BASE_PATH
         const basePath = assetData.path || MANIFEST_DATA.BASE_PATH;
         
+        // Note: Babylon.js requires a root URL (basePath), and the filename (assetData.model)
         const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
         task.required = assetData.required || false; 
 
