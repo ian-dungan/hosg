@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.28 (CRASH PREVENTION)
-// Fix: Added null-checks for `this.client` (Supabase client) in all data methods
-//      to prevent a crash if the external Supabase CDN script fails to load.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.29 (SCHEMA ALIGNMENT)
+// Fix: Consolidated base stat fields (e.g., base_attack_power, max_health) 
+//      into the single 'stats' JSONB column on hosg_characters to match the schema.
 // ============================================================
 
 //
@@ -60,7 +60,7 @@ function simpleHash(input) {
 // ============================================================
 
 SupabaseService.prototype.getAccountByName = async function (accountName) {
-    if (!this.client) { // <-- CRASH PREVENTION
+    if (!this.client) { 
         return { success: false, error: "Supabase client not initialized." };
     }
     try {
@@ -83,7 +83,7 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
 };
 
 SupabaseService.prototype.createAccount = async function (accountName) {
-    if (!this.client) { // <-- CRASH PREVENTION
+    if (!this.client) { 
         return { success: false, error: "Supabase client not initialized." };
     }
     const existingAccountResult = await this.getAccountByName(accountName);
@@ -91,7 +91,7 @@ SupabaseService.prototype.createAccount = async function (accountName) {
         return { success: false, error: existingAccountResult.error || `Account with name '${accountName}' already exists.` };
     }
 
-    // Generate placeholder values to satisfy database constraints
+    // Generate placeholder values to satisfy database constraints (username only required from user)
     const placeholderEmail = `${accountName}@placeholder.com`; 
     const hashedPassword = simpleHash(accountName); 
 
@@ -118,7 +118,7 @@ SupabaseService.prototype.createAccount = async function (accountName) {
 };
 
 SupabaseService.prototype.getCharacterByName = async function (characterName) {
-    if (!this.client) { // <-- CRASH PREVENTION
+    if (!this.client) { 
         return { success: false, error: "Supabase client not initialized." };
     }
     try {
@@ -140,7 +140,7 @@ SupabaseService.prototype.getCharacterByName = async function (characterName) {
 };
 
 SupabaseService.prototype.createCharacter = async function (accountId, characterName, className) {
-    if (!this.client) { // <-- CRASH PREVENTION
+    if (!this.client) { 
         return { success: false, error: "Supabase client not initialized." };
     }
     const existingCharResult = await this.getCharacterByName(characterName);
@@ -154,31 +154,36 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
     }
     const classStats = classConfig.stats;
 
+    // Consolidate the stats object
+    const characterStats = {
+        // Base stats from class config
+        max_health: classStats.maxHealth,
+        max_mana: classStats.maxMana,
+        max_stamina: classStats.maxStamina,
+        base_attack_power: classStats.attackPower,
+        base_magic_power: classStats.magicPower,
+        base_move_speed: classStats.moveSpeed,
+        // Add any other base stats here
+    };
+
     try {
         const defaultState = {
             user_id: accountId, 
             name: characterName,
-            class_name: className, 
+            class_name: className, // Assuming class_name is a valid column, though not in the provided schema snippet, it's safer to keep for now.
             
             position_x: 0,
             position_y: CONFIG.PLAYER.SPAWN_HEIGHT,
             position_z: 0,
             rotation_y: 0,
             
-            // Initial resource MAXES
-            max_health: classStats.maxHealth,
-            max_mana: classStats.maxMana,
-            max_stamina: classStats.maxStamina,
-
-            // Initial resource CURRENTS (set to max)
+            // Initial resource CURRENTS (set to max, but using direct fields from schema)
             health: classStats.maxHealth,
             mana: classStats.maxMana,
             stamina: classStats.maxStamina,
-
-            // Base stats of the class
-            base_attack_power: classStats.attackPower,
-            base_magic_power: classStats.magicPower,
-            base_move_speed: classStats.moveSpeed,
+            
+            // All base/max stats go into the JSONB 'stats' column
+            stats: characterStats // <-- FIX: Insert characterStats into 'stats' column
         };
 
         const { data, error } = await this.client
@@ -201,7 +206,7 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
 // ============================================================
 
 SupabaseService.prototype.loadCharacterState = async function (characterId) {
-    if (!this.client) { // <-- CRASH PREVENTION
+    if (!this.client) { 
         return { success: false, error: "Supabase client not initialized." };
     }
     try {
@@ -245,13 +250,25 @@ SupabaseService.prototype.loadCharacterState = async function (characterId) {
 };
 
 SupabaseService.prototype.saveCharacterState = async function (characterId, state) {
-    if (!this.client) { // <-- CRASH PREVENTION
+    if (!this.client) { 
         return { success: false, error: "Supabase client not initialized." };
     }
     try {
+        // Prepare stats to save into the JSONB column
+        const characterStats = {
+             // NEW: Persist base stats (needed for level-up/gear-stat synchronization)
+            base_attack_power: state.base_attack_power,
+            base_magic_power: state.base_magic_power,
+            base_move_speed: state.base_move_speed,
+            // Include Max resources here if they are also changing/persisted via JSONB
+            max_health: state.max_health,
+            max_mana: state.max_mana,
+            max_stamina: state.max_stamina,
+        };
+
         // 1. Update Core Character State
         const coreState = {
-            // Note: We only update fields that can change during gameplay
+            // Fields that are direct columns
             position_x: state.position.x,
             position_y: state.position.y,
             position_z: state.position.z,
@@ -260,12 +277,14 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
             mana: state.mana,
             stamina: state.stamina,
             
-            // NEW: Persist base stats (needed for level-up/gear-stat synchronization)
-            base_attack_power: state.base_attack_power,
-            base_magic_power: state.base_magic_power,
-            base_move_speed: state.base_move_speed,
+            // The JSONB column for custom stats
+            stats: characterStats // <-- FIX: Update the 'stats' JSONB column
         };
-
+        // NOTE: We also remove the old non-existent fields from the update object
+        delete coreState.base_attack_power;
+        delete coreState.base_magic_power;
+        delete coreState.base_move_speed;
+        
         const { error: coreError } = await this.client
             .from('hosg_characters')
             .update(coreState)
