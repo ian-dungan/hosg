@@ -1,34 +1,30 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.20 (PATCHED)
-// Update: Added WORLD and SKYBOX configuration.
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.22 (PATH FIX + .JPG REVERT)
+// Fix: Retained /hosg/ path prefix.
+// Revert: Skybox path reverted to use the .jpg extension.
 // ============================================================
 
 const CONFIG = {
-    // === PATCH START: ADDING MISSING BLOCKS ===
     PLAYER: {
-        INVENTORY_SIZE: 30, // Default value to fix the critical crash in item.js
-        // Placeholder values matching fallbacks in player.js (for robust initialization):
+        INVENTORY_SIZE: 30, 
         HEALTH: 100,
         MANA: 50,
         STAMINA: 100,
         SPAWN_HEIGHT: 5
     },
     GAME: {
-        GRAVITY: 9.81, // Default gravity value to fix the warning and enable physics
+        GRAVITY: 9.81, 
     },
-    // === PATCH END ===
     
-    // ... (existing NETWORK, COMBAT blocks remain the same)
-
-    // === NEW: WORLD CONFIGURATION (READ BY world.js) ===
     WORLD: {
         SKYBOX: {
-            // CRITICAL: Must be named this file in /assets/sky/ for the 404 to resolve
-            PATH: "/assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.hdr",
-            SIZE: 512,       // Texture resolution for HDRCubeTexture
+            // CRITICAL FIX: Path includes the /hosg/ subfolder prefix.
+            // REVERT: File extension is now .jpg as requested.
+            PATH: "/hosg/assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg",
+            SIZE: 512,      
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
-            LEVEL: 0.5       // reflection level (hdrTexture.level)
+            LEVEL: 0.5      
         },
         
         SPAWN_AREAS: [
@@ -36,7 +32,6 @@ const CONFIG = {
         ]
     },
 
-    // === CHARACTER CLASSES AND BASE STATS ===
     CLASSES: {
         Fighter: { 
             model: 'knight', 
@@ -105,5 +100,4 @@ const CONFIG = {
     }
 };
 
-// Ensure CONFIG is globally accessible
 window.CONFIG = CONFIG;
