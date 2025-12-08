@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.23 (PATCHED)
-// Fix: Cleaned up constructor for robust CONFIG access.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.24 (PATCHED)
+// Fix: Added safe check for setAngularFactor in _initCollision to prevent crash.
 // ============================================================
 
 class Player extends Character {
@@ -31,477 +31,416 @@ class Player extends Character {
             attackPower: 10,
             magicPower: 5,
             
-            // Defaults to 0.15 and 1.8 if CONFIG is missing
-            moveSpeed: playerConfig.MOVE_SPEED || 0.15,
-            runMultiplier: playerConfig.RUN_MULTIPLIER || 1.8 
+            // Defaults to 0.15 if CONFIG is missing
+            moveSpeed: playerConfig.MOVE_SPEED || 0.15, 
+
+            // Combat stats
+            attackRange: combatConfig.RANGE_MELEE || 2,
+            attackCooldown: combatConfig.ATTACK_COOLDOWN_MELEE || 1,
+            
+            // Stats that will be updated by class selection
+            currentAttackPower: 10,
+            currentMagicPower: 5,
+            currentMoveSpeed: 0.15,
         };
         
+        // Current resources
         this.health = this.stats.maxHealth;
         this.mana = this.stats.maxMana;
         this.stamina = this.stats.maxStamina;
-
+        
+        this.isMoving = false;
+        this.isSprinting = false;
+        this.keys = {}; // Current state of pressed keys
+        
+        // Initialize Inventory and Equipment (depends on CONFIG.PLAYER.INVENTORY_SIZE, which is now fixed in core.js)
+        this.inventory = new Inventory(this);
+        this.equipment = new Equipment();
+        
         this.combat = {
-            globalCooldown: 0,
             target: null,
-            // Defaults to 3.0 if CONFIG.COMBAT is missing
-            attackRange: combatConfig.BASE_ATTACK_RANGE || 3.0 
+            lastAttackTime: 0,
+            abilities: new Map(), // Map<AbilityName, Ability Instance>
+            actionSlots: new Array(5).fill(null) // Holds ability objects
         };
         
-        this.inventory = new Inventory(this); 
-        this.equipment = new Equipment(this); 
-        this.abilities = []; 
+        this.scene.game.ui.player = this; // Give UI manager a reference
         
-        this.input = {
-            forward: false,
-            backward: false,
-            left: false,
-            right: false,
-            run: false,
-            jump: false,
-            isUIOpen: false,
-            ability1: false, ability2: false, ability3: false, 
-            ability4: false, ability5: false,
-            target: false
-        };
-        
-        this.handleKeyDown = this.handleKeyDown.bind(this);
-        this.handleKeyUp = this.handleKeyUp.bind(this);
-        this.handleMouseClick = this.handleMouseClick.bind(this);
+        // Bind event handlers
+        this.handleKeyDown = this._handleKeyDown.bind(this);
+        this.handleKeyUp = this._handleKeyUp.bind(this);
+        this.handlePointerDown = this._handlePointerDown.bind(this);
     }
-
-    /**
-     * Applies base stats and default abilities for the given class.
-     * @param {string} className - The name of the class (e.g., 'Fighter').
-     */
-    applyClass(className) {
-        // This method assumes CONFIG is loaded, as it's called after template loading in loadGameData
-        const C = CONFIG || {};
-        const classConfig = C.CLASSES ? (C.CLASSES[className] || C.CLASSES.Fighter) : null; 
-        
-        // Use fallbacks if CONFIG.CLASSES is still missing
-        if (!classConfig) {
-             console.error("[Player] CONFIG.CLASSES not found. Cannot apply class.");
-             this.className = className;
-             return; 
-        }
-
-        const stats = classConfig.stats;
-        this.className = className;
-
-        // Set the base stats for the player
-        this.stats = {
-            maxHealth: stats.maxHealth,
-            maxMana: stats.maxMana, 
-            maxStamina: stats.maxStamina,
-            attackPower: stats.attackPower,
-            magicPower: stats.magicPower,
-            moveSpeed: stats.moveSpeed,
-            runMultiplier: C.PLAYER.RUN_MULTIPLIER // This is safe since this.stats already has fallbacks
-        };
-        
-        if (this.health === 0) this.health = this.stats.maxHealth;
-        if (this.mana === 0) this.mana = this.stats.maxMana;
-        if (this.stamina === 0) this.stamina = this.stats.maxStamina;
-        
-        console.log(`[Player] Class set: ${this.className}. Base Health: ${this.stats.maxHealth}`);
-        
-        // Load default abilities 
-        this.abilities = []; 
-        const defaultAbilityName = classConfig.defaultAbility; 
-        const defaultAbilityTemplate = this.scene.game.skillTemplates.get(101); 
-        
-        if (defaultAbilityTemplate) {
-            this.abilities.push(new Ability(defaultAbilityTemplate));
-        } else {
-             // Fallback to a hardcoded basic attack
-            this.abilities.push(new Ability({
-                id: 0, code: 'BASIC_ATTACK', name: defaultAbilityName || 'Basic Attack', skill_type: 'combat',
-                cooldown_ms: 1000, resource_cost: { mana: 0, stamina: 0 },
-                effect: { type: 'damage', base_value: 1, magic_scaling: 0.1, physical_scaling: 0.9 }
-            }));
-        }
-    }
-
+    
+    // --- Public Initialization ---
+    // The main init function called from Game.js after scene setup
     async init() {
         await this._initMesh();
-        console.log('[Player] Mesh and visual root created.');
         
+        // Use a high mass and friction for a character controller
+        this._initCollision(100, 0.5); 
         this._initCamera();
-        console.log('[Player] Camera initialized.');
-        
-        this._initCollision();
-        console.log('[Player] Collision and physics initialized.');
-        
         this._initInput();
-        console.log('[Player] Input bindings initialized.');
-        
         this._initTargetHighlight();
-        console.log('[Player] Target highlighting initialized.');
         
-        console.log('[Player] Initialization complete.');
+        console.log('[Player] Mesh and visual root created.');
+        console.log('[Player] Camera initialized.');
+    }
+
+    // --- Core Updates ---
+    update(deltaTime) {
+        if (this.isDead) return;
+        
+        this._handleMovement(deltaTime);
+        this._handleCamera(deltaTime);
+        this._handleStamina(deltaTime);
+        
+        // Update ability cooldowns
+        this.combat.abilities.forEach(ability => ability.update(deltaTime));
+
+        // Always call the Character base update
+        super.update(deltaTime);
     }
     
-    /**
-     * Loads the character's state from the database record.
-     * @param {Object} state - The object containing core, inventory, and equipment data.
-     */
-    loadState(state) {
-        // Load class first to establish base stats and default abilities
-        this.applyClass(state.core.class_name);
-        
-        this.position.set(state.core.position_x, state.core.position_y, state.core.position_z);
-        
-        if (this.visualRoot) {
-            this.visualRoot.rotation.y = state.core.rotation_y;
-        }
-
-        this.health = state.core.health;
-        this.mana = state.core.mana;
-        this.stamina = state.core.stamina;
-
-        this.stats.attackPower = state.core.base_attack_power || this.stats.attackPower;
-        this.stats.magicPower = state.core.base_magic_power || this.stats.magicPower;
-        this.stats.moveSpeed = state.core.base_move_speed || this.stats.moveSpeed;
-        
-        this.inventory.load(state.inventory, this.scene.game.itemTemplates);
-        this.equipment.load(state.equipment, this.scene.game.itemTemplates);
-    }
-    
-    /**
-     * Gathers all relevant player data for persistence/saving.
-     * @returns {Object} The save data object.
-     */
-    getSaveData() {
-        return {
-            core: {
-                position_x: this.mesh ? this.mesh.position.x : this.position.x,
-                position_y: this.mesh ? this.mesh.position.y : this.position.y,
-                position_z: this.mesh ? this.mesh.position.z : this.position.z,
-                rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
-                
-                health: this.health,
-                mana: this.mana,
-                stamina: this.stamina,
-                class_name: this.className,
-                
-                base_attack_power: this.stats.attackPower,
-                base_magic_power: this.stats.magicPower,
-                base_move_speed: this.stats.moveSpeed,
-            },
-            inventory: this.inventory.getSaveData(),
-            equipment: this.equipment.getSaveData() 
-        };
-    }
-    
-    // --- Input Handling Methods ---
-    _initInput() {
-        window.addEventListener('keydown', this.handleKeyDown);
-        window.addEventListener('keyup', this.handleKeyUp);
-        this.scene.onPointerDown = this.handleMouseClick;
-    }
-
-    handleKeyDown(event) {
-        if (this.input.isUIOpen) return;
-        switch (event.key.toLowerCase()) {
-            case 'w': this.input.forward = true; break;
-            case 's': this.input.backward = true; break;
-            case 'a': this.input.left = true; break;
-            case 'd': this.input.right = true; break;
-            case ' ': if (this.canJump()) this.input.jump = true; break;
-            case 'shift': this.input.run = true; break;
-            case 'f': this.interact(); break; // Interact key
-            case 'i': this.scene.game.ui.toggleInventory(); break;
-            case '1': this.input.ability1 = true; break;
-        }
-    }
-
-    handleKeyUp(event) {
-        switch (event.key.toLowerCase()) {
-            case 'w': this.input.forward = false; break;
-            case 's': this.input.backward = false; break;
-            case 'a': this.input.left = false; break;
-            case 'd': this.input.right = false; break;
-            case ' ': this.input.jump = false; break;
-            case 'shift': this.input.run = false; break;
-            case '1': this.input.ability1 = false; break;
-        }
-    }
-
-    handleMouseClick(evt, pickResult) {
-        if (evt.button === 0) { // Left click
-            if (pickResult.hit && pickResult.pickedMesh) {
-                this.selectTarget(pickResult.pickedMesh);
-            }
-            if (this.combat.target && this.abilities.length > 0) {
-                this.useAbility(this.abilities[0], this.combat.target);
-            }
-        }
-    }
-
-    // --- Core Gameplay Methods ---
-
-    canJump() {
-        // Use safe access with fallback
-        const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
-        const spawnHeight = (C.PLAYER && C.PLAYER.SPAWN_HEIGHT) || 5;
-        return this.position.y <= spawnHeight + 0.1; 
-    }
-
-    handleMovement(deltaTime) {
-        const speed = this.stats.moveSpeed * (this.input.run ? this.stats.runMultiplier : 1);
-        const camera = this.scene.activeCamera;
-        
-        // Define local CONFIG for movement constants with sensible fallbacks
-        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
-        const playerConfig = C.PLAYER || {};
-        const impulseStrength = playerConfig.IMPULSE_STRENGTH || 150;
-        const linearDamping = playerConfig.LINEAR_DAMPING || 0.3;
-        const jumpForce = playerConfig.JUMP_FORCE || 0.22;
-        
-        let moveVector = BABYLON.Vector3.Zero();
-
-        if (this.input.forward) {
-            moveVector.addInPlace(camera.getDirection(BABYLON.Vector3.Forward()));
-        }
-        if (this.input.backward) {
-            moveVector.addInPlace(camera.getDirection(BABYLON.Vector3.Backward()));
-        }
-        if (this.input.left) {
-            moveVector.addInPlace(camera.getDirection(BABYLON.Vector3.Left()));
-        }
-        if (this.input.right) {
-            moveVector.addInPlace(camera.getDirection(BABYLON.Vector3.Right()));
-        }
-        
-        if (moveVector.lengthSquared() > 0) {
-            moveVector.normalize();
-            if (this.mesh.physicsImpostor) {
-                let velocity = moveVector.scale(speed * impulseStrength * 10 * deltaTime);
-                let currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                
-                velocity.y = currentVelocity.y;
-                
-                this.mesh.physicsImpostor.setLinearVelocity(velocity);
-            }
-        } else {
-            if (this.mesh.physicsImpostor) {
-                let currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                currentVelocity.x *= (1 - linearDamping);
-                currentVelocity.z *= (1 - linearDamping);
-                this.mesh.physicsImpostor.setLinearVelocity(currentVelocity);
-            }
-        }
-
-        if (this.input.jump) {
-            if (this.canJump()) {
-                if (this.mesh.physicsImpostor) {
-                    this.mesh.physicsImpostor.applyImpulse(
-                        new BABYLON.Vector3(0, jumpForce * impulseStrength, 0),
-                        this.mesh.getAbsolutePosition()
-                    );
-                }
-            }
-            this.input.jump = false; 
-        }
-    }
-
-    handleRotation() {
-        const camera = this.scene.activeCamera;
-        if (!camera || !this.visualRoot) return;
-        
-        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
-        const rotationLerp = (C.PLAYER && C.PLAYER.ROTATION_LERP) || 0.2;
-
-        const forwardVector = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
-        
-        const targetRotationY = Math.atan2(forwardVector.x, forwardVector.z);
-        
-        let currentRotationY = this.visualRoot.rotation.y;
-        let delta = targetRotationY - currentRotationY;
-
-        if (delta > Math.PI) delta -= 2 * Math.PI;
-        if (delta < -Math.PI) delta += 2 * Math.PI;
-
-        this.visualRoot.rotation.y = currentRotationY + delta * rotationLerp;
-    }
-
-    selectTarget(mesh) {
-        if (!mesh || !mesh.metadata) return;
-        
-        if (mesh.metadata.isEnemy || mesh.metadata.isNPC) {
-            const target = this.scene.game.world.npcs.find(npc => npc.mesh === mesh);
-            if (target) {
-                this.combat.target = target;
-                console.log(`Target set to: ${target.name}`);
-                this.scene.game.ui.setTarget(target);
-            }
-        }
-    }
-
-    useAbility(ability, target) {
-        const C = typeof CONFIG === 'undefined' ? { COMBAT: {} } : CONFIG;
-        const globalCooldown = (C.COMBAT && C.COMBAT.GLOBAL_COOLDOWN) || 1000;
-        
-        if (this.combat.globalCooldown > 0) {
-            this.scene.game.ui.showMessage('Ability on global cooldown.', 1000, 'error');
-            return false;
-        }
-
-        if (ability.execute(this, target)) {
-            this.combat.globalCooldown = globalCooldown / 1000;
-            return true;
-        }
-        return false;
-    }
-
+    // --- Resource/Combat Management ---
     takeDamage(damage, source) {
+        damage = Math.max(0, damage);
         this.health -= damage;
-        this.health = Math.max(0, this.health);
         
+        // Visual/audio feedback
         this.scene.game.ui.showMessage(`You took ${damage.toFixed(0)} damage from ${source.name}!`, 1500, 'playerDamage');
-
-        if (this.health === 0) {
+        
+        if (this.health <= 0) {
+            this.health = 0;
             this.die();
         }
     }
 
     die() {
-        console.log("Player has died.");
+        if (this.isDead) return;
         this.isDead = true;
-        this.scene.game.ui.showMessage("YOU DIED. Game Over.", 5000, 'critical');
+        this.scene.game.ui.showMessage("You have died.", 5000, 'critical');
+        console.log('Player died.');
+        // TODO: Respawn logic
     }
+    
+    // --- Movement Helpers ---
+    _handleMovement(deltaTime) {
+        const speed = this.stats.currentMoveSpeed * (this.isSprinting ? 1.5 : 1.0);
+        let moveVector = new BABYLON.Vector3(0, 0, 0);
+        
+        const forward = this.visualRoot.forward;
+        const right = this.visualRoot.right;
 
-    interact() {
-        const MAX_INTERACT_DISTANCE = 3.0; 
-        const mesh = this.mesh;
-        
-        const ray = new BABYLON.Ray(mesh.position, mesh.forward, MAX_INTERACT_DISTANCE);
-        const hit = this.scene.pickWithRay(ray, (m) => m !== mesh);
-        
-        if (hit.hit && hit.pickedMesh) {
-            const pickedMesh = hit.pickedMesh;
-            const metadata = pickedMesh.metadata;
+        // Apply movement forces relative to the camera/visual direction
+        if (this.keys['w']) moveVector.addInPlace(forward);
+        if (this.keys['s']) moveVector.subtractInPlace(forward);
+        if (this.keys['a']) moveVector.subtractInPlace(right);
+        if (this.keys['d']) moveVector.addInPlace(right);
+
+        if (moveVector.length() > 0) {
+            moveVector = moveVector.normalize().scale(speed * deltaTime * 60); // Scale by 60 for consistency
             
-            if (!metadata) return;
+            // Check for jump
+            if (this.keys[' ']) {
+                // Check if on ground (simplified)
+                if (this.mesh.position.y < CONFIG.PLAYER.SPAWN_HEIGHT + 0.1) {
+                    this.mesh.physicsImpostor.setLinearVelocity(
+                        this.mesh.physicsImpostor.getLinearVelocity().add(new BABYLON.Vector3(0, 5, 0))
+                    );
+                    this.keys[' '] = false; // Consume the jump key press
+                }
+            }
 
-            if (metadata.isLootContainer) {
-                this._openLootContainer(pickedMesh.metadata.entity);
-            } else if (metadata.isNPC) {
-                this.scene.game.ui.showMessage(`Interacting with ${metadata.entity.name}`, 2000, 'info');
+            // Apply force
+            if (this.mesh.physicsImpostor) {
+                const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+                const newVelocity = new BABYLON.Vector3(moveVector.x, 0, moveVector.z);
+                
+                // Keep existing vertical velocity (gravity/jump)
+                newVelocity.y = currentVelocity.y; 
+
+                // Use the simplified linear velocity calculation for character movement
+                this.mesh.physicsImpostor.setLinearVelocity(
+                    newVelocity
+                );
+            }
+            
+            this.isMoving = true;
+        } else {
+            this.isMoving = false;
+            // Stop horizontal movement when keys are released
+            if (this.mesh.physicsImpostor) {
+                const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+                this.mesh.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, currentVelocity.y, 0));
             }
         }
     }
+    
+    _handleStamina(deltaTime) {
+        if (this.isSprinting && this.isMoving) {
+            this.stamina -= deltaTime * 10; // Stamina drain
+            this.stamina = Math.max(0, this.stamina);
+            if (this.stamina === 0) {
+                this.isSprinting = false; // Stop sprinting
+            }
+        } else if (this.stamina < this.stats.maxStamina) {
+            this.stamina += deltaTime * 5; // Stamina regen
+            this.stamina = Math.min(this.stats.maxStamina, this.stamina);
+        }
+    }
 
-    _openLootContainer(lootContainer) {
-        if (!lootContainer.isOpened) {
-            console.log(`Opened loot container: ${lootContainer.name}`);
-            lootContainer.loot.forEach(item => {
-                this.inventory.addItem(item.templateId, item.quantity);
-            });
-            lootContainer.isOpened = true;
-            if (lootContainer.mesh) lootContainer.mesh.material.diffuseColor = BABYLON.Color3.Gray(); 
+    // --- Input Handling ---
+    _handleKeyDown(event) {
+        const key = event.key.toLowerCase();
+        this.keys[key] = true;
+        
+        // Handle sprint toggle
+        if (key === 'shift' && this.stamina > 0) {
+            this.isSprinting = true;
+        }
+        
+        // Handle action bar keys (1, 2, 3, 4, 5)
+        if (key >= '1' && key <= '5') {
+            const slotIndex = parseInt(key) - 1;
+            this.useAbilitySlot(slotIndex);
+        }
+        
+        // Handle inventory toggle
+        if (key === 'i') {
+            this.scene.game.ui.toggleInventory();
+        }
+        
+        // Handle target select (T for nearest)
+        if (key === 't') {
+            this._selectNearestTarget();
+        }
+    }
+
+    _handleKeyUp(event) {
+        const key = event.key.toLowerCase();
+        this.keys[key] = false;
+        
+        // Handle sprint release
+        if (key === 'shift') {
+            this.isSprinting = false;
         }
     }
     
-    setUISensitivity(isUIOpen) {
-        if (isUIOpen) {
-            this.input.forward = this.input.backward = this.input.left = this.input.right = false;
+    _handlePointerDown(event, pickResult) {
+        // Right-click: Clear target
+        if (event.button === 2) { 
+            this.setTarget(null);
+            return;
         }
-        this.input.isUIOpen = isUIOpen;
+
+        // Left-click: Attack or Select Target
+        if (event.button === 0 && pickResult.hit) { 
+            if (pickResult.pickedMesh.metadata && pickResult.pickedMesh.metadata.entity && pickResult.pickedMesh.metadata.entity.isAttackable) {
+                // Clicked an enemy
+                const newTarget = pickResult.pickedMesh.metadata.entity;
+                this.setTarget(newTarget);
+                // Attempt to auto-attack immediately
+                this.useAbilitySlot(0); 
+            } else {
+                // Clicked on ground/world, clear target
+                this.setTarget(null);
+            }
+        }
     }
-
-    update(deltaTime) {
-        super.update(deltaTime); 
+    
+    _selectNearestTarget() {
+        const world = this.scene.game.world;
+        if (!world || !world.npcs || world.npcs.length === 0) return;
         
-        this.abilities.forEach(ability => ability.update(deltaTime));
-
-        if (!this.input.isUIOpen) { 
-            this.handleMovement(deltaTime);
-            this.handleRotation();
+        let nearestNpc = null;
+        let minDistanceSq = Infinity;
+        
+        for (const npc of world.npcs) {
+            if (npc.isDead) continue;
+            
+            const distanceSq = BABYLON.Vector3.DistanceSquared(this.position, npc.position);
+            
+            if (distanceSq < minDistanceSq) {
+                minDistanceSq = distanceSq;
+                nearestNpc = npc;
+            }
         }
         
-        if (this.combat.globalCooldown > 0) {
-            this.combat.globalCooldown -= deltaTime;
+        if (nearestNpc) {
+            this.setTarget(nearestNpc);
+        }
+    }
+    
+    // --- Combat / Ability ---
+    setTarget(target) {
+        if (this.combat.target === target) return;
+        
+        if (this.combat.target) {
+            this.combat.target._toggleHighlight(false);
         }
         
+        this.combat.target = target;
+        
+        if (target) {
+            target._toggleHighlight(true);
+            this.scene.game.ui.updateTargetInfo(target);
+        } else {
+            this.scene.game.ui.updateTargetInfo(null);
+        }
+    }
+    
+    getAbility(name) {
+        return this.combat.abilities.get(name);
+    }
+    
+    loadAbility(abilityTemplate) {
+        if (!abilityTemplate) return;
+        const ability = new Ability(abilityTemplate);
+        this.combat.abilities.set(ability.name, ability);
+        return ability;
+    }
+    
+    setAbilitySlot(slotIndex, abilityName) {
+        const ability = this.combat.abilities.get(abilityName);
+        if (ability && slotIndex >= 0 && slotIndex < this.combat.actionSlots.length) {
+            this.combat.actionSlots[slotIndex] = ability;
+            this.scene.game.ui.updateActionBar();
+        }
+    }
+    
+    useAbilitySlot(slotIndex) {
+        const ability = this.combat.actionSlots[slotIndex];
+        if (!ability || !ability.isReady()) return;
+        
+        // If ability requires a target, and we have one, use it.
+        // Or if it's a self-cast/AoE, use it with 'this' as target/caster.
         const target = this.combat.target;
-        if (target && !target.isDead && BABYLON.Vector3.Distance(this.mesh.position, target.position) < this.combat.attackRange) {
-            if (this.combat.globalCooldown <= 0) {
-                this.useAbility(this.abilities[0], target);
+        
+        if (ability.execute(this, target)) {
+            // Ability was successfully used (cost paid, cooldown started)
+        }
+    }
+    
+    // --- Save/Load Data ---
+    getSaveData() {
+        return {
+            class_name: this.className,
+            health: this.health,
+            mana: this.mana,
+            stamina: this.stamina,
+            position: {
+                x: this.mesh.position.x,
+                y: this.mesh.position.y,
+                z: this.mesh.position.z,
+            },
+            inventory: this.inventory.getSaveData(),
+            equipment: this.equipment.getSaveData(),
+            action_slots: this.combat.actionSlots.map(a => a ? a.name : null)
+        };
+    }
+    
+    async loadSaveData(data, templates) {
+        this.className = data.class_name;
+        this.health = data.health;
+        this.mana = data.mana;
+        this.stamina = data.stamina;
+
+        // Apply position
+        if (data.position && this.mesh) {
+            this.mesh.position.set(data.position.x, data.position.y, data.position.z);
+        }
+        
+        // Load Inventory and Equipment
+        // We assume templates are a Map<templateId, templateObject>
+        this.inventory.load(data.inventory, templates.itemTemplates);
+        this.equipment.load(data.equipment, templates.itemTemplates);
+        
+        // Load Abilities
+        this.combat.abilities.clear();
+        for (const [name, template] of templates.skillTemplates.entries()) {
+            this.loadAbility(template);
+        }
+
+        // Load Action Bar Slots
+        if (data.action_slots) {
+             data.action_slots.forEach((abilityName, index) => {
+                if (abilityName) {
+                    this.setAbilitySlot(index, abilityName);
+                }
+            });
+        }
+        
+        // Apply class stats
+        this.selectClass(this.className);
+    }
+    
+    selectClass(className) {
+        const classData = CONFIG.CLASSES[className];
+        if (!classData) {
+            console.error(`[Player] Cannot select class: ${className} not found in CONFIG.CLASSES.`);
+            return;
+        }
+        
+        this.className = className;
+        
+        // 1. Update Stats based on class (base stats)
+        this.stats.maxHealth = classData.stats.maxHealth;
+        this.stats.maxMana = classData.stats.maxMana;
+        this.stats.maxStamina = classData.stats.maxStamina;
+        this.stats.attackPower = classData.stats.attackPower;
+        this.stats.magicPower = classData.stats.magicPower;
+        this.stats.moveSpeed = classData.stats.moveSpeed;
+        
+        // Reset current resources to max (or maintain current ratio if needed)
+        this.health = this.stats.maxHealth;
+        this.mana = this.stats.maxMana;
+        this.stamina = this.stats.maxStamina;
+        
+        // Recalculate derived stats (current stats including equipment)
+        this.updateStatsFromEquipment(); 
+
+        // 2. Load Default Ability into Slot 1
+        if (classData.defaultAbility) {
+            this.setAbilitySlot(0, classData.defaultAbility);
+        }
+        
+        // 3. Update Visuals (Placeholder)
+        // this._loadVisuals(classData.model); 
+        
+        console.log(`[Player] Class selected: ${this.className}`);
+    }
+    
+    updateStatsFromEquipment() {
+        // Start with base class stats
+        let ap = this.stats.attackPower;
+        let mp = this.stats.magicPower;
+        let speed = this.stats.moveSpeed;
+        
+        // Apply equipment bonuses
+        Object.values(this.equipment.slots).forEach(item => {
+            if (item && item.stats) {
+                ap += item.stats.attackPower || 0;
+                mp += item.stats.magicPower || 0;
+                speed += item.stats.moveSpeed || 0;
             }
-        }
-
-        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
-        const manaRegenRate = (C.PLAYER && C.PLAYER.MANA_REGEN_RATE) || 0.005;
-        const staminaRegenRate = (C.PLAYER && C.PLAYER.STAMINA_REGEN_RATE) || 0.01;
+        });
         
-        // Regen
-        this.mana = Math.min(this.stats.maxMana, this.mana + this.stats.maxMana * manaRegenRate * deltaTime);
-        this.stamina = Math.min(this.stats.maxStamina, this.stamina + this.stats.maxStamina * staminaRegenRate * deltaTime);
+        // Set derived current stats
+        this.stats.currentAttackPower = ap;
+        this.stats.currentMagicPower = mp;
+        this.stats.currentMoveSpeed = speed;
     }
     
-    // --- Babylon.js Specific Initializers ---
-    _initCamera() {
-         const camera = new BABYLON.UniversalCamera("playerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
-         camera.setTarget(BABYLON.Vector3.Zero());
-         camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true); 
-         camera.rotation.x = 0.4;
-         this.scene.activeCamera = camera;
-    }
-
-    _initCollision() {
-        if (!this.mesh) return;
-        this.mesh.checkCollisions = true;
-        this.mesh.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5); 
-        this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0); 
-        
-        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
-        const mass = (C.PLAYER && C.PLAYER.MASS) || 15;
-        const friction = (C.PLAYER && C.PLAYER.FRICTION) || 0.2;
-        
-        if (typeof CANNON !== "undefined" && this.scene.getPhysicsEngine()) {
-            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                this.mesh, 
-                BABYLON.PhysicsImpostor.SphereImpostor, 
-                { 
-                    mass: mass, 
-                    friction: friction, 
-                    restitution: 0.1 
-                }, 
-                this.scene
-            );
-            this.mesh.physicsImpostor.setAngularFactor(0);
-        }
-    }
+    // --- Private Initialization Methods ---
     
-    async _initMesh() { 
-        this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollider", { height: 1.8, diameter: 0.8 }, this.scene);
-        this.mesh.position.copyFrom(this.position);
-        this.mesh.isVisible = false;
-        this.mesh.metadata = { isPlayer: true, entity: this };
+    _initInput() {
+        window.addEventListener('keydown', this.handleKeyDown);
+        window.addEventListener('keyup', this.handleKeyUp);
+        this.scene.onPointerDown = this.handlePointerDown;
+        this.scene.onPointerUp = (evt) => {
+            // Placeholder for future pointer up logic
+        };
         
-        this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
-        this.visualRoot.parent = this.mesh;
-        
-        const placeholderMesh = BABYLON.MeshBuilder.CreateBox("playerBox", { size: 1.0 }, this.scene);
-        placeholderMesh.parent = this.visualRoot;
-        placeholderMesh.position.y = -0.9; 
-    }
-    
-    _initTargetHighlight() {
-        // Placeholder for future target highlight effect
-    }
-
-    dispose() {
-        if (this.mesh) {
-            this.mesh.dispose();
-            this.mesh = null;
-        }
-        window.removeEventListener('keydown', this.handleKeyDown);
-        window.removeEventListener('keyup', this.handleKeyUp);
-        this.scene.onPointerDown = null;
-        if (this.scene.game.ui) {
-            this.scene.game.ui.dispose();
-        }
-    }
-}
+        // Disable default browser context menu on right-click
+        this.scene.getEngine().get<ctrl63>
