@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.31 (ASSET KEY FIX)
-// Fix: Ensure _initMesh uses the asset key name from the class config ('knight').
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.32 (CRITICAL ASSETMANAGER NULL FIX)
+// Fix: Added null-check in _initMesh to ensure assetManager is available before use.
 // ============================================================
 
 class Player extends Character {
@@ -53,9 +53,9 @@ class Player extends Character {
         this._initCamera();
         this._initInput();
         this._initPhysics(); 
-        this._initTargetHighlight();
 
-        // Apply default class stats and load mesh/abilities
+        // CRITICAL: applyClass calls _initMesh immediately.
+        // The fix is to ensure the assetManager is assigned BEFORE new Player(scene) runs.
         this.applyClass('Warrior'); 
     }
     
@@ -99,7 +99,15 @@ class Player extends Character {
     }
 
     _initMesh(assetKey) {
-        // CRITICAL FIX: Use the simple key name (e.g., 'knight')
+        // CRITICAL FIX: Check if assetManager is ready
+        if (!this.scene.game || !this.scene.game.assetManager) {
+            console.error("[Player] Cannot initialize mesh. AssetManager is not available on game object.");
+            // Fallback: Make the collision mesh visible for debugging
+            if(this.mesh) this.mesh.isVisible = true;
+            return;
+        }
+
+        // Use the simple key name (e.g., 'knight')
         const assetMeshes = this.scene.game.assetManager.getAsset(assetKey); 
         
         if (assetMeshes && assetMeshes.length > 0) {
@@ -114,7 +122,7 @@ class Player extends Character {
                 rootMesh.rotation.y = Math.PI; // Face the correct direction for the camera
             }
 
-            // Store the root mesh reference (might be redundant if we only interact with the collision mesh)
+            // Store the root mesh reference 
             this.visualMesh = rootMesh; 
         } else {
             console.warn(`[Player] Failed to load mesh for asset: ${assetKey}. AssetManager load failed or key is wrong.`);
@@ -241,7 +249,7 @@ class Player extends Character {
                     this.abilities = [new Ability(defaultAbilityTemplate)];
                 } else {
                     console.warn(`[Player] Default ability template not found for: ${classConfig.defaultAbility}`);
-                    this.abilities = []; 
+                    this.abilities = []; // Ensure it's still an array
                 }
             }
             
