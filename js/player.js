@@ -1,5 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.27 (FIXED)
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.28 (FIXED)
+// Fix: Corrected SyntaxError in _initCamera's attachControl call (missing parenthesis/malformed arguments).
 // Fix: Added physics impostor setAngularFactor(0, 0, 0) to prevent unintended character rotation.
 // ============================================================
 
@@ -58,8 +59,6 @@ class Player extends Character {
             abilities: new Map(), // Map<AbilityName, Ability Instance>
             actionSlots: new Array(5).fill(null) // Holds ability objects
         };
-        
-        // REMOVED: this.scene.game.ui.player = this; // THIS LINE WAS CAUSING THE CRASH
         
         // Bind event handlers
         this.handleKeyDown = this._handleKeyDown.bind(this);
@@ -203,13 +202,9 @@ class Player extends Character {
         placeholder.parent = this.visualRoot;
         placeholder.position.y = 0.4; // Center it on the physics sphere
         
-        // Set up collision for the mesh (will be done in _initCollision)
-        // this.mesh.checkCollisions = true; // Not needed if using physics
-        
         return Promise.resolve();
     }
     
-    // PATCH: Added setAngularFactor(0, 0, 0) to fix the rotation warning/bug.
     _initCollision(mass, friction) {
         if (!this.mesh) {
             console.error('[Player] Cannot initialize collision: mesh is null.');
@@ -223,12 +218,11 @@ class Player extends Character {
             this.scene
         );
         
-        // PATCH: Lock angular rotation to prevent the player from spinning uncontrollably.
+        // Fix for unintended character rotation
         if (this.mesh.physicsImpostor.setAngularFactor) {
             this.mesh.physicsImpostor.setAngularFactor(new BABYLON.Vector3(0, 0, 0));
             console.log('[Player] Physics impostor ready. Angular factor set to (0, 0, 0).');
         } else {
-            // Original warning message (kept for fallback)
             console.warn('[Player] Physics impostor ready, but setAngularFactor is missing or failed to initialize correctly. Rotation may occur.');
         }
     }
@@ -241,8 +235,10 @@ class Player extends Character {
 
         this.camera.lowerRadiusLimit = 5;
         this.camera.upperRadiusLimit = 20;
-        this.camera.attachControl(this.scene.getEngine().get
-            this.scene.getEngine().get)
+        
+        // PATCH: Corrected the SyntaxError on the attachControl call
+        this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
+        
         this.camera.target = this.mesh.position;
     }
     
@@ -489,7 +485,7 @@ class Player extends Character {
         this.scene.onPointerDown = null; 
         
         // Dispose camera control
-        if(this.camera) this.camera.detachControl(this.scene.getEngine().get)
+        if(this.camera) this.camera.detachControl(this.scene.getEngine().getRenderingCanvas())
     }
 
     _handleCamera(deltaTime) {
