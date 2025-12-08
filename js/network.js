@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.27 (FINAL FIX)
-// Fix: Changed 'account_id' to 'user_id' in hosg_characters insertion
-//      to match the provided database schema.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.28 (CRASH PREVENTION)
+// Fix: Added null-checks for `this.client` (Supabase client) in all data methods
+//      to prevent a crash if the external Supabase CDN script fails to load.
 // ============================================================
 
 //
@@ -52,8 +52,6 @@ SupabaseService.prototype._init = function () {
 
 function simpleHash(input) {
     if (!input) return 'NO_INPUT_SUPPLIED';
-    // Use the username to generate a simulated hash.
-    // NOTE: This is a PLACEHOLDER for satisfying the database constraint. 
     return `HASHED_TEST_${input}_${input.length}chars`;
 }
 
@@ -62,6 +60,9 @@ function simpleHash(input) {
 // ============================================================
 
 SupabaseService.prototype.getAccountByName = async function (accountName) {
+    if (!this.client) { // <-- CRASH PREVENTION
+        return { success: false, error: "Supabase client not initialized." };
+    }
     try {
         const { data, error } = await this.client
             .from('hosg_accounts')
@@ -76,12 +77,15 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
 
         return { success: true, account: data };
     } catch (error) {
-        console.error('[Supabase] Failed to get account:', error.message);
-        return { success: false, error: error.message };
+        console.error('[Supabase] Failed to get account:', error.message || error);
+        return { success: false, error: error.message || String(error) };
     }
 };
 
 SupabaseService.prototype.createAccount = async function (accountName) {
+    if (!this.client) { // <-- CRASH PREVENTION
+        return { success: false, error: "Supabase client not initialized." };
+    }
     const existingAccountResult = await this.getAccountByName(accountName);
     if (!existingAccountResult.success || existingAccountResult.account) {
         return { success: false, error: existingAccountResult.error || `Account with name '${accountName}' already exists.` };
@@ -108,12 +112,15 @@ SupabaseService.prototype.createAccount = async function (accountName) {
         
         return { success: true, account: data };
     } catch (error) {
-        console.error('[Supabase] Failed to create account:', error.message);
-        return { success: false, error: error.message };
+        console.error('[Supabase] Failed to create account:', error.message || error);
+        return { success: false, error: error.message || String(error) };
     }
 };
 
 SupabaseService.prototype.getCharacterByName = async function (characterName) {
+    if (!this.client) { // <-- CRASH PREVENTION
+        return { success: false, error: "Supabase client not initialized." };
+    }
     try {
         const { data, error } = await this.client
             .from('hosg_characters')
@@ -127,12 +134,15 @@ SupabaseService.prototype.getCharacterByName = async function (characterName) {
 
         return { success: true, character: data };
     } catch (error) {
-        console.error('[Supabase] Failed to get character by name:', error.message);
-        return { success: false, error: error.message };
+        console.error('[Supabase] Failed to get character by name:', error.message || error);
+        return { success: false, error: error.message || String(error) };
     }
 };
 
 SupabaseService.prototype.createCharacter = async function (accountId, characterName, className) {
+    if (!this.client) { // <-- CRASH PREVENTION
+        return { success: false, error: "Supabase client not initialized." };
+    }
     const existingCharResult = await this.getCharacterByName(characterName);
     if (!existingCharResult.success || existingCharResult.character) {
         return { success: false, error: existingCharResult.error || `Character name '${characterName}' is already taken.` };
@@ -146,7 +156,7 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
 
     try {
         const defaultState = {
-            user_id: accountId, // <-- FIX: Changed 'account_id' to 'user_id'
+            user_id: accountId, 
             name: characterName,
             class_name: className, 
             
@@ -181,8 +191,7 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
         
         return { success: true, characterId: data.id };
     } catch (error) {
-        // The error about 'account_id' not found in schema cache indicates a column name problem.
-        console.error('[Supabase] Failed to create character: ' + (error.message || error));
+        console.error('[Supabase] Failed to create character:', error.message || error);
         return { success: false, error: error.message || String(error) };
     }
 };
@@ -192,6 +201,9 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
 // ============================================================
 
 SupabaseService.prototype.loadCharacterState = async function (characterId) {
+    if (!this.client) { // <-- CRASH PREVENTION
+        return { success: false, error: "Supabase client not initialized." };
+    }
     try {
         // 1. Load Core Character State
         const { data: coreData, error: coreError } = await this.client
@@ -227,12 +239,15 @@ SupabaseService.prototype.loadCharacterState = async function (characterId) {
         return { success: true, state: state };
 
     } catch (error) {
-        console.error('[Supabase] Failed to load character state:', error.message);
-        return { success: false, error: error.message };
+        console.error('[Supabase] Failed to load character state:', error.message || error);
+        return { success: false, error: error.message || String(error) };
     }
 };
 
 SupabaseService.prototype.saveCharacterState = async function (characterId, state) {
+    if (!this.client) { // <-- CRASH PREVENTION
+        return { success: false, error: "Supabase client not initialized." };
+    }
     try {
         // 1. Update Core Character State
         const coreState = {
@@ -263,7 +278,6 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
         const newInventoryData = state.inventory.map(item => ({ 
             ...item, 
             character_id: characterId, 
-            // The item object from player.js might have a temporary 'id', remove it for new inserts
             id: undefined 
         }));
         if (newInventoryData.length > 0) {
@@ -286,8 +300,8 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
         return { success: true };
 
     } catch (error) {
-        console.error('[Supabase] Failed to save character state:', error.message);
-        return { success: false, error: error.message };
+        console.error('[Supabase] Failed to save character state:', error.message || error);
+        return { success: false, error: error.message || String(error) };
     }
 };
 
