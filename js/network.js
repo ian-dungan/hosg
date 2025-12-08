@@ -1,6 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.31 (TEMPLATE SIMULATION FIX)
-// Fix: Added placeholder template data for item and skill to prevent runtime warnings/errors.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.32 (CRITICAL INIT FIX)
+// Fix: Moved _init logic directly into the constructor to resolve a TypeError
+//      where the prototype method was not fully registered before being called.
 // ============================================================
 
 //
@@ -9,33 +10,31 @@
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
-    // Line 12: This call now works because _init is defined below
-    this._init();
-}
-
-// *** PATCH START: Defining the missing _init function ***
-SupabaseService.prototype._init = function() {
-    // 1. DEFINE YOUR CONNECTION VARIABLES (MUST BE UPDATED BY YOU)
+    
+    // Line 12 FIX: _init logic is now defined directly here.
+    
+    // 1. DEFINE YOUR CONNECTION VARIABLES
     const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
     const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
     
-    // Ensure the global 'supabase' object is available (loaded via CDN or bundle)
+    // 2. Initialize the Supabase Client
     if (typeof supabase !== 'undefined') {
         this.client = supabase.createClient(supabaseUrl, supabaseKey);
         console.log("[Network] Supabase client initialized.");
     } else {
+        // This suggests an issue with the <script> tag in your HTML.
         console.error("[Network] Supabase client library not found. Check your HTML imports.");
     }
-};
-// *** PATCH END ***
+}
 
-// ... (other SupabaseService methods remain the same) ...
-// SupabaseService.prototype.authenticate
-// SupabaseService.prototype.fetchCharacterId
-// SupabaseService.prototype.fetchCharacterState
-// SupabaseService.prototype.createCharacterState
-// SupabaseService.prototype.saveCharacterState
+// NOTE: All previous prototype definitions for _init have been removed 
+// as the logic is now in the constructor. Other methods remain attached to the prototype.
 
+// SupabaseService.prototype.authenticate = ...
+// SupabaseService.prototype.fetchCharacterId = ...
+// SupabaseService.prototype.fetchCharacterState = ...
+// SupabaseService.prototype.createCharacterState = ...
+// SupabaseService.prototype.saveCharacterState = ...
 
 var supabaseService = new SupabaseService();
 
