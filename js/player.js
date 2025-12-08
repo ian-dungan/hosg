@@ -1,30 +1,47 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.22 (PATCHED)
-// Fix: Corrected SyntaxError in _initCamera() method.
-// Refactored to use a class-based stat system.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.12 (PATCHED)
+// Fix: Added safe access checks for the global CONFIG object in the constructor 
+// to prevent "Cannot read properties of undefined" errors.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
-        // Character constructor needs to be called first
-        super(scene, new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT, 0), 'Player');
+        // Safely access CONFIG and create fallback objects
+        const isConfigLoaded = (typeof CONFIG !== 'undefined');
+        const playerConfig = isConfigLoaded ? CONFIG.PLAYER : {};
+        const combatConfig = isConfigLoaded ? CONFIG.COMBAT : {};
+        
+        // Line 10 Fix: Safely get SPAWN_HEIGHT with a default of 5
+        const spawnHeight = playerConfig.SPAWN_HEIGHT || 5; 
+        
+        super(scene, new BABYLON.Vector3(0, spawnHeight, 0), 'Player');
         
         this.isPlayer = true; 
-        this.className = null; // Store class name
+        this.className = null; 
         
-        // Stats are now set by applyClass or loadState
-        this.stats = {}; 
-        this.health = 0;
-        this.mana = 0; 
-        this.stamina = 0;
+        // Safely initialize stats
+        this.stats = {
+            maxHealth: playerConfig.HEALTH || 100,
+            maxMana: playerConfig.MANA || 50, 
+            maxStamina: playerConfig.STAMINA || 100,
+            attackPower: 10,
+            magicPower: 5,
+            moveSpeed: playerConfig.MOVE_SPEED || 0.15,
+            runMultiplier: playerConfig.RUN_MULTIPLIER || 1.8
+        };
+        
+        this.health = this.stats.maxHealth;
+        this.mana = this.stats.maxMana;
+        this.stamina = this.stats.maxStamina;
 
         this.combat = {
             globalCooldown: 0,
             target: null,
-            attackRange: CONFIG.COMBAT.BASE_ATTACK_RANGE // Assuming CONFIG.COMBAT exists
+            // Fallback to 3.0 if CONFIG.COMBAT.BASE_ATTACK_RANGE is undefined
+            attackRange: combatConfig.BASE_ATTACK_RANGE || 3.0 
         };
         
-        // Assuming Inventory/Equipment are correctly imported from item.js
+        // Inventory and Equipment constructors are assumed to handle their CONFIG access or use fallbacks.
         this.inventory = new Inventory(this); 
         this.equipment = new Equipment(this); 
         this.abilities = []; 
@@ -37,13 +54,11 @@ class Player extends Character {
             run: false,
             jump: false,
             isUIOpen: false,
-            // Ability keys (e.g., 1-5 for action bar)
             ability1: false, ability2: false, ability3: false, 
             ability4: false, ability5: false,
             target: false
         };
         
-        // We will now bind input methods to the instance for Babylon event listeners
         this.handleKeyDown = this.handleKeyDown.bind(this);
         this.handleKeyUp = this.handleKeyUp.bind(this);
         this.handleMouseClick = this.handleMouseClick.bind(this);
@@ -70,19 +85,16 @@ class Player extends Character {
             runMultiplier: CONFIG.PLAYER.RUN_MULTIPLIER 
         };
         
-        // Set current resources to max if they were zero (first load/creation)
         if (this.health === 0) this.health = this.stats.maxHealth;
         if (this.mana === 0) this.mana = this.stats.maxMana;
         if (this.stamina === 0) this.stamina = this.stats.maxStamina;
         
         console.log(`[Player] Class set: ${this.className}. Base Health: ${this.stats.maxHealth}`);
         
-        // Load default abilities 
         this.abilities = []; 
         const defaultAbilityName = classConfig.defaultAbility; 
-        const defaultAbilityTemplate = this.scene.game.skillTemplates.get(101); // Assuming 101 is a basic skill ID
+        const defaultAbilityTemplate = this.scene.game.skillTemplates.get(101); 
         
-        // If template exists, add it. Otherwise, add a generic basic attack.
         if (defaultAbilityTemplate) {
             this.abilities.push(new Ability(defaultAbilityTemplate));
         } else {
@@ -111,8 +123,6 @@ class Player extends Character {
         this._initTargetHighlight();
         console.log('[Player] Target highlighting initialized.');
         
-        // Note: applyClass is called by loadState in game.js after fetching data.
-        
         console.log('[Player] Initialization complete.');
     }
     
@@ -130,12 +140,10 @@ class Player extends Character {
             this.visualRoot.rotation.y = state.core.rotation_y;
         }
 
-        // Current resources are loaded from the state, overriding the class defaults
         this.health = state.core.health;
         this.mana = state.core.mana;
         this.stamina = state.core.stamina;
 
-        // Base stats from the DB override CONFIG defaults if they exist (for persistence)
         this.stats.attackPower = state.core.base_attack_power || this.stats.attackPower;
         this.stats.magicPower = state.core.base_magic_power || this.stats.magicPower;
         this.stats.moveSpeed = state.core.base_move_speed || this.stats.moveSpeed;
@@ -149,20 +157,22 @@ class Player extends Character {
      * @returns {Object} The save data object.
      */
     getSaveData() {
-        // Ensure you save the new base class stats for persistence!
         return {
-            position: this.mesh ? this.mesh.position : this.position,
-            rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
-            
-            health: this.health,
-            mana: this.mana,
-            stamina: this.stamina,
-            
-            // Explicitly save the current base stats
-            base_attack_power: this.stats.attackPower,
-            base_magic_power: this.stats.magicPower,
-            base_move_speed: this.stats.moveSpeed,
-            
+            core: {
+                position_x: this.mesh ? this.mesh.position.x : this.position.x,
+                position_y: this.mesh ? this.mesh.position.y : this.position.y,
+                position_z: this.mesh ? this.mesh.position.z : this.position.z,
+                rotation_y: this.visualRoot ? this.visualRoot.rotation.y : 0,
+                
+                health: this.health,
+                mana: this.mana,
+                stamina: this.stamina,
+                class_name: this.className,
+                
+                base_attack_power: this.stats.attackPower,
+                base_magic_power: this.stats.magicPower,
+                base_move_speed: this.stats.moveSpeed,
+            },
             inventory: this.inventory.getSaveData(),
             equipment: this.equipment.getSaveData() 
         };
@@ -187,7 +197,6 @@ class Player extends Character {
             case 'f': this.interact(); break; // Interact key
             case 'i': this.scene.game.ui.toggleInventory(); break;
             case '1': this.input.ability1 = true; break;
-            // ... add more keys for other abilities
         }
     }
 
@@ -200,7 +209,6 @@ class Player extends Character {
             case ' ': this.input.jump = false; break;
             case 'shift': this.input.run = false; break;
             case '1': this.input.ability1 = false; break;
-            // ... add more keys for other abilities
         }
     }
 
@@ -210,7 +218,6 @@ class Player extends Character {
                 this.selectTarget(pickResult.pickedMesh);
             }
             if (this.combat.target && this.abilities.length > 0) {
-                // Auto-cast the first ability on left click if a target is selected
                 this.useAbility(this.abilities[0], this.combat.target);
             }
         }
@@ -219,13 +226,15 @@ class Player extends Character {
     // --- Core Gameplay Methods ---
 
     canJump() {
-        // Simple check: In a real physics system, you'd check if the player is grounded.
-        return this.position.y <= CONFIG.PLAYER.SPAWN_HEIGHT + 0.1; 
+        // Use a safe check for the constant
+        const spawnHeight = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER.SPAWN_HEIGHT : 5;
+        return this.position.y <= spawnHeight + 0.1; 
     }
 
     handleMovement(deltaTime) {
         const speed = this.stats.moveSpeed * (this.input.run ? this.stats.runMultiplier : 1);
         const camera = this.scene.activeCamera;
+        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { IMPULSE_STRENGTH: 150, LINEAR_DAMPING: 0.3, JUMP_FORCE: 0.22 };
         
         let moveVector = BABYLON.Vector3.Zero();
 
@@ -244,22 +253,19 @@ class Player extends Character {
         
         if (moveVector.lengthSquared() > 0) {
             moveVector.normalize();
-            // Apply movement to the physics body
             if (this.mesh.physicsImpostor) {
-                let velocity = moveVector.scale(speed * CONFIG.PLAYER.IMPULSE_STRENGTH * 10 * deltaTime);
+                let velocity = moveVector.scale(speed * playerConfig.IMPULSE_STRENGTH * 10 * deltaTime);
                 let currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
                 
-                // Keep vertical velocity (gravity/jump)
                 velocity.y = currentVelocity.y;
                 
                 this.mesh.physicsImpostor.setLinearVelocity(velocity);
             }
         } else {
-            // Apply damping when no input
             if (this.mesh.physicsImpostor) {
                 let currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                currentVelocity.x *= (1 - CONFIG.PLAYER.LINEAR_DAMPING);
-                currentVelocity.z *= (1 - CONFIG.PLAYER.LINEAR_DAMPING);
+                currentVelocity.x *= (1 - playerConfig.LINEAR_DAMPING);
+                currentVelocity.z *= (1 - playerConfig.LINEAR_DAMPING);
                 this.mesh.physicsImpostor.setLinearVelocity(currentVelocity);
             }
         }
@@ -268,40 +274,36 @@ class Player extends Character {
             if (this.canJump()) {
                 if (this.mesh.physicsImpostor) {
                     this.mesh.physicsImpostor.applyImpulse(
-                        new BABYLON.Vector3(0, CONFIG.PLAYER.JUMP_FORCE * CONFIG.PLAYER.IMPULSE_STRENGTH, 0),
+                        new BABYLON.Vector3(0, playerConfig.JUMP_FORCE * playerConfig.IMPULSE_STRENGTH, 0),
                         this.mesh.getAbsolutePosition()
                     );
                 }
             }
-            this.input.jump = false; // Only jump once per key press
+            this.input.jump = false; 
         }
     }
 
     handleRotation() {
         const camera = this.scene.activeCamera;
         if (!camera || !this.visualRoot) return;
+        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { ROTATION_LERP: 0.2 };
 
-        // Get the direction the camera is facing on the XZ plane
         const forwardVector = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
         
-        // Calculate the target rotation angle based on the forward vector
         const targetRotationY = Math.atan2(forwardVector.x, forwardVector.z);
         
-        // Apply smooth rotation (using lerp/slerp approximation)
         let currentRotationY = this.visualRoot.rotation.y;
         let delta = targetRotationY - currentRotationY;
 
-        // Handle wrap-around
         if (delta > Math.PI) delta -= 2 * Math.PI;
         if (delta < -Math.PI) delta += 2 * Math.PI;
 
-        this.visualRoot.rotation.y = currentRotationY + delta * CONFIG.PLAYER.ROTATION_LERP;
+        this.visualRoot.rotation.y = currentRotationY + delta * playerConfig.ROTATION_LERP;
     }
 
     selectTarget(mesh) {
         if (!mesh || !mesh.metadata) return;
         
-        // Check if clicked mesh is targetable (assuming Enemy and NPC are targetable)
         if (mesh.metadata.isEnemy || mesh.metadata.isNPC) {
             const target = this.scene.game.world.npcs.find(npc => npc.mesh === mesh);
             if (target) {
@@ -313,14 +315,15 @@ class Player extends Character {
     }
 
     useAbility(ability, target) {
+        const combatConfig = (typeof CONFIG !== 'undefined' && CONFIG.COMBAT) ? CONFIG.COMBAT : { GLOBAL_COOLDOWN: 1000 };
+        
         if (this.combat.globalCooldown > 0) {
             this.scene.game.ui.showMessage('Ability on global cooldown.', 1000, 'error');
             return false;
         }
 
         if (ability.execute(this, target)) {
-             // Successful cast, start GCD
-            this.combat.globalCooldown = CONFIG.COMBAT.GLOBAL_COOLDOWN / 1000;
+            this.combat.globalCooldown = combatConfig.GLOBAL_COOLDOWN / 1000;
             return true;
         }
         return false;
@@ -341,14 +344,12 @@ class Player extends Character {
         console.log("Player has died.");
         this.isDead = true;
         this.scene.game.ui.showMessage("YOU DIED. Game Over.", 5000, 'critical');
-        // TODO: Implement respawn logic
     }
 
     interact() {
-        const MAX_INTERACT_DISTANCE = 3.0; // Max distance for interaction
+        const MAX_INTERACT_DISTANCE = 3.0; 
         const mesh = this.mesh;
         
-        // Simple raycast forward
         const ray = new BABYLON.Ray(mesh.position, mesh.forward, MAX_INTERACT_DISTANCE);
         const hit = this.scene.pickWithRay(ray, (m) => m !== mesh);
         
@@ -361,7 +362,6 @@ class Player extends Character {
             if (metadata.isLootContainer) {
                 this._openLootContainer(pickedMesh.metadata.entity);
             } else if (metadata.isNPC) {
-                // Start dialogue
                 this.scene.game.ui.showMessage(`Interacting with ${metadata.entity.name}`, 2000, 'info');
             }
         }
@@ -370,7 +370,6 @@ class Player extends Character {
     _openLootContainer(lootContainer) {
         if (!lootContainer.isOpened) {
             console.log(`Opened loot container: ${lootContainer.name}`);
-            // Add items to inventory, then mark as opened
             lootContainer.loot.forEach(item => {
                 this.inventory.addItem(item.templateId, item.quantity);
             });
@@ -400,25 +399,24 @@ class Player extends Character {
             this.combat.globalCooldown -= deltaTime;
         }
         
-        // Auto Attack logic (simple: if target is in range and GCD is down, auto-attack)
         const target = this.combat.target;
         if (target && !target.isDead && BABYLON.Vector3.Distance(this.mesh.position, target.position) < this.combat.attackRange) {
             if (this.combat.globalCooldown <= 0) {
-                 // Use the first ability (which should be the basic attack)
                 this.useAbility(this.abilities[0], target);
             }
         }
 
+        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { MANA_REGEN_RATE: 0.005, STAMINA_REGEN_RATE: 0.01 };
+        
         // Regen
-        this.mana = Math.min(this.stats.maxMana, this.mana + this.stats.maxMana * CONFIG.PLAYER.MANA_REGEN_RATE * deltaTime);
-        this.stamina = Math.min(this.stats.maxStamina, this.stamina + this.stats.maxStamina * CONFIG.PLAYER.STAMINA_REGEN_RATE * deltaTime);
+        this.mana = Math.min(this.stats.maxMana, this.mana + this.stats.maxMana * playerConfig.MANA_REGEN_RATE * deltaTime);
+        this.stamina = Math.min(this.stats.maxStamina, this.stamina + this.stats.maxStamina * playerConfig.STAMINA_REGEN_RATE * deltaTime);
     }
     
     // --- Babylon.js Specific Initializers ---
     _initCamera() {
          const camera = new BABYLON.UniversalCamera("playerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
          camera.setTarget(BABYLON.Vector3.Zero());
-         // FIX: Corrected Syntax Error here. Attach control to the rendering canvas.
          camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true); 
          camera.rotation.x = 0.4;
          this.scene.activeCamera = camera;
@@ -430,24 +428,24 @@ class Player extends Character {
         this.mesh.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5); 
         this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0); 
         
+        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { MASS: 15, FRICTION: 0.2 };
+        
         if (typeof CANNON !== "undefined" && this.scene.getPhysicsEngine()) {
             this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                 this.mesh, 
                 BABYLON.PhysicsImpostor.SphereImpostor, 
                 { 
-                    mass: CONFIG.PLAYER.MASS, 
-                    friction: CONFIG.PLAYER.FRICTION, 
+                    mass: playerConfig.MASS, 
+                    friction: playerConfig.FRICTION, 
                     restitution: 0.1 
                 }, 
                 this.scene
             );
-            // Lock rotation
             this.mesh.physicsImpostor.setAngularFactor(0);
         }
     }
     
     async _initMesh() { 
-        // Dummy implementation to ensure visualRoot and mesh are defined. 
         this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollider", { height: 1.8, diameter: 0.8 }, this.scene);
         this.mesh.position.copyFrom(this.position);
         this.mesh.isVisible = false;
@@ -456,10 +454,9 @@ class Player extends Character {
         this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
         this.visualRoot.parent = this.mesh;
         
-        // Placeholder visible mesh (Box for now)
         const placeholderMesh = BABYLON.MeshBuilder.CreateBox("playerBox", { size: 1.0 }, this.scene);
         placeholderMesh.parent = this.visualRoot;
-        placeholderMesh.position.y = -0.9; // offset to stand on the ground
+        placeholderMesh.position.y = -0.9; 
     }
     
     _initTargetHighlight() {
@@ -475,7 +472,7 @@ class Player extends Character {
         window.removeEventListener('keyup', this.handleKeyUp);
         this.scene.onPointerDown = null;
         if (this.scene.game.ui) {
-            this.scene.game.ui.dispose(); // Also dispose UI when player is disposed
+            this.scene.game.ui.dispose();
         }
     }
 }
