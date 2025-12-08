@@ -77,7 +77,7 @@ class UIManager {
 
         for (let i = 0; i < 5; i++) {
             const slotId = "actionSlot" + i;
-            // The method is static, so it should be called on the class, not an instance
+            // FIX: The method CreateSimpleButton is static and MUST be called on the BABYLON.GUI.Button class, not 'e' or 'this'.
             const button = BABYLON.GUI.Button.CreateSimpleButton(slotId, (i + 1).toString());
             button.width = "60px";
             button.height = "60px";
@@ -217,7 +217,9 @@ class UIManager {
                 if (player.isPlayer && !slot.button.actionRegistered) {
                     slot.button.onPointerClickObservable.add(() => {
                         if (ability.isReady()) {
-                            ability.execute(player, player.target);
+                            // Check if the game has a target property and it's not null before executing
+                            const target = player.scene.game.player.target;
+                            ability.execute(player, target);
                         } else {
                             this.showMessage(`[${ability.name}] is on cooldown!`, 1000, 'error');
                         }
