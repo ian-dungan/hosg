@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.22 (FIXED)
-// Fix: Added placeholder 'email' field to createAccount insertion
-//      to satisfy the database's NOT NULL constraint.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.23 (FIXED)
+// Fix: Corrected Supabase column name from 'name' to 'username' in getAccountByName and createAccount.
+// Fix: Re-added placeholder 'email' field to createAccount to satisfy NOT NULL constraint.
 // ============================================================
 
 //
@@ -55,7 +55,7 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
         const { data, error } = await this.client
             .from('hosg_accounts')
             .select('*')
-            .eq('name', accountName)
+            .eq('username', accountName) // <-- FIX: Changed 'name' to 'username'
             .single();
 
         // PGRST116 is the code for 'No rows found', which is expected on first login
@@ -81,9 +81,8 @@ SupabaseService.prototype.createAccount = async function (accountName) {
             .from('hosg_accounts')
             .insert([
                 { 
-                    name: accountName, 
-                    // PATCH: Include a placeholder email to satisfy the NOT-NULL constraint
-                    email: `${accountName}@placeholder.com` 
+                    username: accountName, // <-- FIX: Changed 'name' to 'username'
+                    email: `${accountName}@placeholder.com` // <-- FIX: Re-added required email
                 }
             ])
             .select()
@@ -203,7 +202,7 @@ SupabaseService.prototype.loadCharacterState = async function (characterId) {
         if (equipmentError) throw equipmentError;
 
         const state = {
-            core: coreData, // RETURN coreData which contains class_name and all stats
+            core: coreData, 
             inventory: inventoryData,
             equipment: equipmentData,
         };
@@ -290,8 +289,10 @@ function NetworkManager() {
 }
 
 NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcMap) {
-    // ... (Existing implementation remains the same)
-    // Removed for brevity, assume templates are loaded correctly
+    // This function is for loading template data (items, skills, npcs)
+    // from the database, not for saving player state.
+    
+    // Placeholder implementation for now:
     console.log('[Network] Templates loaded (Simulated/Supabase).');
     return true; 
 };
