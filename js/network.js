@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.29 (SCHEMA ALIGNMENT)
-// Fix: Consolidated base stat fields (e.g., base_attack_power, max_health) 
-//      into the single 'stats' JSONB column on hosg_characters to match the schema.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.30 (FULL SCHEMA ALIGNMENT)
+// Fix: All base stats, max resources (max_health, max_mana, etc.), and class_name
+//      are now correctly moved into the 'stats' JSONB column for both creation and saving.
 // ============================================================
 
 //
@@ -154,36 +154,39 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
     }
     const classStats = classConfig.stats;
 
-    // Consolidate the stats object
+    // Consolidate ALL non-standard columns into the JSONB 'stats' object
     const characterStats = {
-        // Base stats from class config
+        class_name: className, // No class_name column, move to stats
+        
+        // Max resources (No max_health column, move to stats)
         max_health: classStats.maxHealth,
         max_mana: classStats.maxMana,
         max_stamina: classStats.maxStamina,
+
+        // Base stats (No base_X_power columns, move to stats)
         base_attack_power: classStats.attackPower,
         base_magic_power: classStats.magicPower,
         base_move_speed: classStats.moveSpeed,
-        // Add any other base stats here
     };
 
     try {
         const defaultState = {
             user_id: accountId, 
             name: characterName,
-            class_name: className, // Assuming class_name is a valid column, though not in the provided schema snippet, it's safer to keep for now.
+            // class_name REMOVED (moved to stats)
             
             position_x: 0,
             position_y: CONFIG.PLAYER.SPAWN_HEIGHT,
             position_z: 0,
             rotation_y: 0,
             
-            // Initial resource CURRENTS (set to max, but using direct fields from schema)
+            // Current resources (Direct columns in schema)
             health: classStats.maxHealth,
             mana: classStats.maxMana,
             stamina: classStats.maxStamina,
             
-            // All base/max stats go into the JSONB 'stats' column
-            stats: characterStats // <-- FIX: Insert characterStats into 'stats' column
+            // All custom data goes into the 'stats' JSONB column
+            stats: characterStats 
         };
 
         const { data, error } = await this.client
@@ -236,7 +239,7 @@ SupabaseService.prototype.loadCharacterState = async function (characterId) {
         if (equipmentError) throw equipmentError;
 
         const state = {
-            core: coreData, 
+            core: coreData, // coreData now contains the 'stats' jsonb field with max/base stats
             inventory: inventoryData,
             equipment: equipmentData,
         };
@@ -255,15 +258,15 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
     }
     try {
         // Prepare stats to save into the JSONB column
+        // Assuming the player's getSaveData() passes all base/max stats as top-level properties.
         const characterStats = {
-             // NEW: Persist base stats (needed for level-up/gear-stat synchronization)
-            base_attack_power: state.base_attack_power,
-            base_magic_power: state.base_magic_power,
-            base_move_speed: state.base_move_speed,
-            // Include Max resources here if they are also changing/persisted via JSONB
+            class_name: state.className, 
             max_health: state.max_health,
             max_mana: state.max_mana,
             max_stamina: state.max_stamina,
+            base_attack_power: state.base_attack_power,
+            base_magic_power: state.base_magic_power,
+            base_move_speed: state.base_move_speed,
         };
 
         // 1. Update Core Character State
@@ -278,12 +281,8 @@ SupabaseService.prototype.saveCharacterState = async function (characterId, stat
             stamina: state.stamina,
             
             // The JSONB column for custom stats
-            stats: characterStats // <-- FIX: Update the 'stats' JSONB column
+            stats: characterStats 
         };
-        // NOTE: We also remove the old non-existent fields from the update object
-        delete coreState.base_attack_power;
-        delete coreState.base_magic_power;
-        delete coreState.base_move_speed;
         
         const { error: coreError } = await this.client
             .from('hosg_characters')
