@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.11 (PATCHED)
-// Fix: Added safe access for CONFIG.GAME.GRAVITY in constructor.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.12 (FIXED)
+// Fix: Reordered Game.init() to ensure UIManager is created and assigned before Player initialization.
 // ============================================================
 
 class Game {
@@ -51,12 +51,17 @@ class Game {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     
     this.world = new World(this.scene); 
+    
+    // FIX 1: Initialize UIManager first, as Player depends on it
+    this.ui = new UIManager(this); 
+    
     this.player = new Player(this.scene);
+    
+    // FIX 2: Explicitly assign the Player to the UI Manager
+    this.ui.player = this.player;
     
     await this.player.init(); 
 
-    this.ui = new UIManager(this); 
-    
     await this.loadGameData();
     
     this.run(); 
