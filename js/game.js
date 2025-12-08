@@ -1,6 +1,8 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.13 (FIXED)
-// Fix: Passing loaded NPC templates to World.init() to resolve TypeError.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.13 (CRITICAL FIX)
+// Fix 1: Removed non-existent this.player.init() call.
+// Fix 2: Implemented AssetManager initialization and await before Player/World creation.
+// Update: Added this.assetManager property to constructor.
 // ============================================================
 
 class Game {
@@ -14,7 +16,6 @@ class Game {
     this.scene.game = this; 
 
     if (typeof CANNON !== "undefined") {
-      // FIX: Check if CONFIG and CONFIG.GAME are defined before accessing GRAVITY
       const gameConfig = (typeof CONFIG !== 'undefined' && CONFIG.GAME) ? CONFIG.GAME : {};
       
       if (gameConfig.GRAVITY) {
@@ -34,6 +35,7 @@ class Game {
     this.player = null;
     this.ui = null;
     this.network = null;
+    this.assetManager = null; // NEW: Property for AssetManager
     this.characterId = null; 
 
     this.itemTemplates = new Map();
@@ -50,18 +52,27 @@ class Game {
   async init() {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     
+    // CRITICAL FIX: Initialize and load assets BEFORE Player or World creation
+    if (typeof AssetManager !== 'undefined') {
+        this.assetManager = new AssetManager(this.scene);
+        await this.assetManager.loadAll(); // Wait for all models to load
+    } else {
+        console.error("[Game] AssetManager class is not defined. Check assets.js script.");
+    }
+
     this.world = new World(this.scene); 
     
-    // FIX 1: Initialize UIManager first, as Player depends on it
+    // Initialize UIManager first
     this.ui = new UIManager(this); 
     
+    // Player initialization now happens after assets are loaded
     this.player = new Player(this.scene);
     
-    // FIX 2: Explicitly assign the Player to the UI Manager
+    // Explicitly assign the Player to the UI Manager
     this.ui.player = this.player;
     
-    await this.player.init(); 
-
+    // REMOVED: await this.player.init(); // This call caused the TypeError
+    
     await this.loadGameData();
     
     this.run(); 
@@ -73,6 +84,15 @@ class Game {
       const accountName = "TestUser"; 
       const characterName = "TestChar";
       const className = "Fighter";
+      
+      // Check if NetworkManager is defined globally (it should be in network.js)
+      if (typeof NetworkManager === 'undefined') {
+          console.error("[Game] NetworkManager class not defined. Skipping Supabase calls.");
+          // Initialize world with no templates for now to allow game to run
+          this.world.init();
+          this.player.applyClass(className);
+          return; 
+      }
       
       const networkManager = new NetworkManager();
       this.network = networkManager;
@@ -100,15 +120,19 @@ class Game {
 
       const stateResult = await this.network.supabase.loadCharacterState(this.characterId);
       if (stateResult.success) {
-          this.player.loadState(stateResult.state);
+          // Assuming player.loadState exists to restore state
+          this.player.loadState(stateResult.state); 
           console.log(`[Game] Character state loaded for ID: ${this.characterId}`);
       } else {
           console.warn(`[Game] Failed to load character state. Applying default class: ${className}`);
+          // Assuming player.applyClass exists to set initial stats/class
           this.player.applyClass(className);
       }
       
-      // PATCH: Pass loaded templates to the world initialization
-      this.world.init({ npcTemplates: this.npcTemplates });
+      // Initialize the world with loaded templates
+      this.world.init({
+          npcTemplates: this.npcTemplates
+      });
   }
 
   run() {
@@ -168,3 +192,6 @@ class Game {
     this.engine.dispose();
   }
 }
+
+// Ensure the Game class is globally accessible (required by hosg.html)
+window.Game = Game;
