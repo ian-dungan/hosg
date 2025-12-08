@@ -1,7 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - UI MANAGER v1.0.12 (PATCHED)
-// Fix: Corrected getCanvas() to getRenderingCanvas() in createInputBindings.
-// Fix: Added placeholder grid creation methods for Inventory/Equipment.
+// HEROES OF SHADY GROVE - UI MANAGER v1.0.13 (FINAL PATCH)
+// Fix: Added complete createActionBar() and robust updateActionBar() to prevent 'undefined' crashes.
 // ============================================================
 
 class UIManager {
@@ -31,7 +30,7 @@ class UIManager {
     _init() {
         this.createHUD();
         this.createTargetFrame();
-        this.createActionBar();
+        this.createActionBar(); 
         this.createInventoryWindow();
         this.createInputBindings(); 
     }
@@ -41,297 +40,323 @@ class UIManager {
         const container = new BABYLON.GUI.Rectangle(name + "Container");
         container.width = `${width}px`;
         container.height = `${height}px`;
-        container.thickness = 1;
         container.cornerRadius = 5;
-        container.color = "white";
-        container.background = "#333333";
+        container.color = "#FFF";
+        container.thickness = 1;
+        container.background = "rgba(0, 0, 0, 0.7)";
         container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
         container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
         container.top = top + "px";
         container.left = left + "px";
         this.gui.addControl(container);
-
+        
+        // The inner bar
         const bar = new BABYLON.GUI.Rectangle(name + "Bar");
-        bar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        bar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        bar.background = colorHex;
-        bar.color = colorHex;
+        bar.width = 1; // Start at full width
         bar.height = 1;
-        bar.width = 1; // Starts full
+        bar.cornerRadius = 5;
         bar.thickness = 0;
+        bar.background = colorHex;
+        bar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
         container.addControl(bar);
 
-        const text = new BABYLON.GUI.TextBlock(name + "Text");
-        text.text = `${labelText}: 100/100`;
+        // The label text
+        const text = new BABYLON.GUI.TextBlock(name + "Label", labelText);
         text.color = "white";
-        text.fontSize = 16;
+        text.fontSize = 14;
         container.addControl(text);
 
         return { container, bar, text };
     }
-
+    
+    // --- HUD ---
     createHUD() {
-        // Player Status Bars
-        this.healthBar = this.createStatusBar("health", "HP", "#A00000", 250, 25, 10, 10);
-        this.manaBar = this.createStatusBar("mana", "MP", "#0000A0", 250, 25, 40, 10);
-        this.staminaBar = this.createStatusBar("stamina", "STM", "#00A000", 250, 25, 70, 10);
-        console.log("[UI] HUD created.");
+        // Health Bar (Top Left)
+        this.healthBar = this.createStatusBar("healthBar", "HP", "#C44", 250, 25, 10, 10);
+        // Mana Bar (Below Health)
+        this.manaBar = this.createStatusBar("manaBar", "MP", "#44C", 250, 25, 40, 10);
+        // Stamina Bar (Below Mana)
+        this.staminaBar = this.createStatusBar("staminaBar", "STM", "#4C4", 250, 25, 70, 10);
+        
+        console.log('[UI] HUD created.');
     }
 
+    // --- Target Frame ---
     createTargetFrame() {
-        // Placeholder for the target frame UI element
-        const container = new BABYLON.GUI.Rectangle("targetFrameContainer");
-        container.width = "200px";
-        container.height = "100px";
-        container.thickness = 1;
-        container.color = "white";
-        container.background = "#222222";
-        container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        container.top = "10px";
-        container.left = "-10px";
-        container.isVisible = false;
-        this.gui.addControl(container);
-
-        const nameText = new BABYLON.GUI.TextBlock("targetName");
-        nameText.text = "Target Name";
-        nameText.color = "yellow";
-        nameText.fontSize = 20;
-        nameText.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        nameText.top = "5px";
-        container.addControl(nameText);
+        this.targetFrame = {};
+        this.targetFrame.container = new BABYLON.GUI.Rectangle("targetFrameContainer");
+        this.targetFrame.container.width = "200px";
+        this.targetFrame.container.height = "70px";
+        this.targetFrame.container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        this.targetFrame.container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.targetFrame.container.thickness = 1;
+        this.targetFrame.container.background = "rgba(0, 0, 0, 0.7)";
+        this.targetFrame.container.top = "10px";
+        this.targetFrame.container.left = "-10px";
+        this.targetFrame.container.isVisible = false; // Hidden by default
+        this.gui.addControl(this.targetFrame.container);
         
-        // Target Health Bar (simple placeholder)
-        const barContainer = new BABYLON.GUI.Rectangle("targetHealthContainer");
-        barContainer.width = 0.9;
-        barContainer.height = "15px";
-        barContainer.thickness = 0;
-        barContainer.background = "black";
-        barContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        container.addControl(barContainer);
+        // Target Name Text
+        this.targetFrame.nameText = new BABYLON.GUI.TextBlock("targetNameText", "Target Name");
+        this.targetFrame.nameText.height = "20px";
+        this.targetFrame.nameText.color = "yellow";
+        this.targetFrame.nameText.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.targetFrame.container.addControl(this.targetFrame.nameText);
         
-        const healthBar = new BABYLON.GUI.Rectangle("targetHealthBar");
-        healthBar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        healthBar.height = 1;
-        healthBar.width = 1; 
-        healthBar.background = "red";
-        healthBar.thickness = 0;
-        barContainer.addControl(healthBar);
+        // Target Health Bar
+        this.targetFrame.healthBarContainer = this.createStatusBar("targetHealthBar", "HP", "#C44", 180, 20);
+        this.targetFrame.healthBarContainer.container.top = "25px";
+        this.targetFrame.healthBarContainer.container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        this.targetFrame.healthBarContainer.container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.targetFrame.healthBarContainer.container.left = "0px";
+        this.targetFrame.healthBarContainer.container.thickness = 0;
+        this.targetFrame.container.addControl(this.targetFrame.healthBarContainer.container);
 
-        this.targetFrame = { container, nameText, healthBar };
-        console.log("[UI] Target frame created.");
+        console.log('[UI] Target frame created.');
     }
     
     updateTargetInfo(target) {
-        if (!this.targetFrame) return;
-
-        if (target && !target.isDead) {
-            this.targetFrame.container.isVisible = true;
-            this.targetFrame.nameText.text = target.name;
-            const healthRatio = target.health / target.stats.maxHealth;
-            this.targetFrame.healthBar.width = healthRatio.toFixed(2);
-        } else {
+        if (!target) {
             this.targetFrame.container.isVisible = false;
+            return;
         }
+
+        this.targetFrame.container.isVisible = true;
+        this.targetFrame.nameText.text = `${target.name} (Lvl ${target.level})`;
+        
+        const ratio = target.health / target.stats.maxHealth;
+        this._updateBar(this.targetFrame.healthBarContainer, target.health, target.stats.maxHealth, "HP");
     }
 
+    // --- Action Bar ---
     createActionBar() {
-        // Simple placeholder for the action bar
-        this.actionBar = new BABYLON.GUI.StackPanel();
-        this.actionBar.isVertical = false;
-        this.actionBar.height = "60px";
-        this.actionBar.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        this.actionBar.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        this.actionBar.paddingBottom = "10px";
-        
-        for (let i = 0; i < 5; i++) {
-            const button = BABYLON.GUI.Button.CreateSimpleButton("ability" + (i + 1), i + 1);
-            button.width = "50px";
-            button.height = "50px";
-            button.color = "white";
-            button.background = "#555555";
-            button.thickness = 1;
-            button.paddingLeft = "5px";
-            button.paddingRight = "5px";
-            this.actionBar.addControl(button);
-        }
+        this.actionBar = {
+            container: new BABYLON.GUI.Rectangle("actionBarContainer"),
+            slots: [] // Array to hold references to UI elements for easy updating
+        };
+        this.actionBar.container.width = "400px";
+        this.actionBar.container.height = "55px";
+        this.actionBar.container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        this.actionBar.container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        this.actionBar.container.thickness = 1;
+        this.actionBar.container.color = "#FFF";
+        this.actionBar.container.background = "rgba(0, 0, 0, 0.5)";
+        this.actionBar.container.paddingBottom = "5px";
+        this.gui.addControl(this.actionBar.container);
 
-        this.gui.addControl(this.actionBar);
-        console.log("[UI] Action bar created.");
+        const slotPanel = new BABYLON.GUI.StackPanel("actionBarSlotPanel");
+        slotPanel.isHorizontal = true;
+        slotPanel.width = 1;
+        this.actionBar.container.addControl(slotPanel);
+        
+        // Create 5 slots
+        for (let i = 0; i < 5; i++) {
+            const slotContainer = new BABYLON.GUI.Rectangle(`actionSlot${i}`);
+            slotContainer.width = "50px";
+            slotContainer.height = "50px";
+            slotContainer.thickness = 1;
+            slotContainer.color = "#FFF";
+            slotContainer.background = "rgba(100, 100, 100, 0.8)";
+            slotContainer.paddingLeft = "5px";
+            
+            const abilityIcon = new BABYLON.GUI.Image(`abilityIcon${i}`, "");
+            abilityIcon.width = 0.8;
+            abilityIcon.height = 0.8;
+            slotContainer.addControl(abilityIcon);
+
+            const cooldownText = new BABYLON.GUI.TextBlock(`cooldownText${i}`);
+            cooldownText.text = "";
+            cooldownText.color = "white";
+            cooldownText.fontSize = 20;
+            slotContainer.addControl(cooldownText);
+            
+            // This object holds references to the UI elements we need to update
+            this.actionBar.slots.push({
+                container: slotContainer,
+                abilityIcon: abilityIcon,
+                cooldownText: cooldownText,
+                // The key bind label
+                abilityName: new BABYLON.GUI.TextBlock(`abilityName${i}`, (i + 1).toString()) 
+            });
+            
+            // Add key bind label
+            this.actionBar.slots[i].abilityName.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+            this.actionBar.slots[i].abilityName.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+            this.actionBar.slots[i].abilityName.fontSize = 12;
+            this.actionBar.slots[i].abilityName.color = "yellow";
+            this.actionBar.slots[i].container.addControl(this.actionBar.slots[i].abilityName);
+            
+            slotPanel.addControl(slotContainer);
+        }
+        
+        console.log('[UI] Action bar created.');
     }
-    
-    updateActionBar() {
-        // This method would update the button visuals based on player.abilities and cooldowns
-        if (!this.game.player || !this.actionBar) return;
-        
-        const buttons = this.actionBar.children.filter(c => c.name.startsWith('ability'));
-        const playerAbilities = this.game.player.abilities;
-        
-        buttons.forEach((button, index) => {
-            const ability = playerAbilities[index];
+
+    updateActionBar() { 
+        if (!this.game.player || !this.actionBar || !this.actionBar.slots) return;
+
+        const actionSlots = this.game.player.combat.actionSlots;
+
+        // Safely iterate and update the action bar UI elements
+        actionSlots.forEach((ability, index) => { 
+            const uiSlot = this.actionBar.slots[index]; 
+
+            if (!uiSlot || !uiSlot.container) return; 
+
             if (ability) {
+                // Ability is assigned to the slot
                 const ratio = ability.getCooldownRatio();
                 
-                // Set text to ability name
-                const textBlock = button.children[0];
-                textBlock.text = ability.name;
-                
-                // Simple cooldown visual: darken the button
-                if (!ability.isReady()) {
-                    button.background = `rgba(100, 0, 0, ${0.5 + 0.5 * ratio})`;
+                // Cooldown logic
+                if (ratio > 0) {
+                    const remaining = ability.currentCooldown.toFixed(1);
+                    uiSlot.cooldownText.text = remaining;
+                    // Darken the slot to show cooldown
+                    uiSlot.container.background = `rgba(0, 0, 0, ${0.5 + 0.5 * ratio})`;
                 } else {
-                    button.background = "#555555";
+                    uiSlot.cooldownText.text = "";
+                    uiSlot.container.background = "rgba(100, 100, 100, 0.8)";
                 }
+                
+                // Set the ability icon (or a placeholder)
+                uiSlot.abilityIcon.source = ability.icon || ""; 
+                
+            } else {
+                // Slot is empty
+                uiSlot.cooldownText.text = "";
+                uiSlot.abilityIcon.source = "";
+                uiSlot.container.background = "rgba(100, 100, 100, 0.5)"; 
             }
         });
     }
 
+    // --- Inventory Window ---
     createInventoryWindow() {
         this.inventoryWindow = new BABYLON.GUI.Rectangle("inventoryWindow");
         this.inventoryWindow.width = "400px";
-        this.inventoryWindow.height = "600px";
-        this.inventoryWindow.thickness = 2;
-        this.inventoryWindow.color = "#AAAAAA";
+        this.inventoryWindow.height = "500px";
+        this.inventoryWindow.color = "#FFF";
+        this.inventoryWindow.thickness = 1;
         this.inventoryWindow.background = "rgba(0, 0, 0, 0.7)";
-        this.inventoryWindow.isHitTestVisible = true; // Block raycasts
+        this.inventoryWindow.isHitTestVisible = false; // Not clickable when hidden
         this.inventoryWindow.isVisible = false;
         this.gui.addControl(this.inventoryWindow);
         
-        // Title
-        const title = new BABYLON.GUI.TextBlock("inventoryTitle");
-        title.text = "Character Inventory";
+        const title = new BABYLON.GUI.TextBlock("inventoryTitle", "INVENTORY");
         title.fontSize = 24;
-        title.color = "white";
         title.height = "40px";
+        title.color = "white";
         title.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
         this.inventoryWindow.addControl(title);
-        
-        // Main content area
-        const contentPanel = new BABYLON.GUI.StackPanel("inventoryContent");
-        contentPanel.isVertical = false;
-        contentPanel.paddingTop = "40px";
-        this.inventoryWindow.addControl(contentPanel);
 
-        // Sub-panels
-        const equipmentPanel = new BABYLON.GUI.StackPanel("equipmentPanel");
-        equipmentPanel.width = "30%";
-        contentPanel.addControl(equipmentPanel);
-        this.equipmentGrid = this._createEquipmentGrid();
-        equipmentPanel.addControl(this.equipmentGrid);
-        
-        const inventoryPanel = new BABYLON.GUI.StackPanel("inventoryPanel");
-        inventoryPanel.width = "70%";
-        contentPanel.addControl(inventoryPanel);
         this.inventoryGrid = this._createInventoryGrid();
-        inventoryPanel.addControl(this.inventoryGrid);
-
-        console.log("[UI] Inventory window created.");
+        this.inventoryGrid.top = "40px";
+        this.inventoryGrid.height = "80%";
+        this.inventoryWindow.addControl(this.inventoryGrid);
+        
+        console.log('[UI] Inventory window created.');
     }
     
     _createInventoryGrid() {
-        // Placeholder for the inventory grid
+        // Placeholder for the Grid layout. Actual population happens during update/open.
         const grid = new BABYLON.GUI.Grid("inventoryGrid");
-        const CAPACITY = CONFIG.PLAYER.INVENTORY_SIZE;
-        const COLUMNS = 4;
-        const ROWS = Math.ceil(CAPACITY / COLUMNS);
-        
-        for (let i = 0; i < ROWS; i++) {
-            grid.addRowDefinition(1 / ROWS, true);
+        const columns = 5;
+        const rows = CONFIG.PLAYER.INVENTORY_SIZE / columns; 
+
+        // Set up columns
+        for (let i = 0; i < columns; i++) {
+            grid.addColumnDefinition(1 / columns);
         }
-        for (let j = 0; j < COLUMNS; j++) {
-            grid.addColumnDefinition(1 / COLUMNS, true);
-        }
-        
-        for (let i = 0; i < CAPACITY; i++) {
-            const button = BABYLON.GUI.Button.CreateImageButton(`invSlot${i}`, "", "");
-            button.width = 0.8;
-            button.height = 0.8;
-            button.background = "#111111";
-            button.color = "#555555";
-            button.thickness = 1;
-            grid.addControl(button, Math.floor(i / COLUMNS), i % COLUMNS);
+        // Set up rows
+        for (let i = 0; i < rows; i++) {
+            grid.addRowDefinition(1 / rows);
         }
         
-        grid.height = "90%";
-        grid.width = "90%";
-        return grid;
-    }
-    
-    _createEquipmentGrid() {
-        // Placeholder for the equipment grid (Head, Chest, Weapon, etc.)
-        const grid = new BABYLON.GUI.Grid("equipmentGrid");
-        // Define some rows for slots (Head, Body, Weapon)
-        grid.addRowDefinition(0.33, true); 
-        grid.addRowDefinition(0.33, true);
-        grid.addRowDefinition(0.34, true);
-        grid.addColumnDefinition(1.0, true);
-
-        // Placeholder button for "Head"
-        const headSlot = BABYLON.GUI.Button.CreateSimpleButton("equipSlot_Head", "Head");
-        headSlot.color = "white";
-        headSlot.background = "#111111";
-        grid.addControl(headSlot, 0, 0);
-
-        // Placeholder button for "Body"
-        const bodySlot = BABYLON.GUI.Button.CreateSimpleButton("equipSlot_Body", "Body");
-        bodySlot.color = "white";
-        bodySlot.background = "#111111";
-        grid.addControl(bodySlot, 1, 0);
-        
-        // Placeholder button for "Weapon"
-        const weaponSlot = BABYLON.GUI.Button.CreateSimpleButton("equipSlot_Weapon", "Weapon");
-        weaponSlot.color = "white";
-        weaponSlot.background = "#111111";
-        grid.addControl(weaponSlot, 2, 0);
-
-        grid.height = "90%";
-        grid.width = "90%";
         return grid;
     }
 
     toggleInventory() {
         this.uiVisible.inventory = !this.uiVisible.inventory;
         this.inventoryWindow.isVisible = this.uiVisible.inventory;
-
-        // Tell the player class whether the UI is open to disable movement
-        if (this.game.player) {
-            this.game.player.setUISensitivity(this.uiVisible.inventory);
+        this.inventoryWindow.isHitTestVisible = this.uiVisible.inventory;
+        
+        if (this.uiVisible.inventory) {
+            this.updateInventoryWindow();
         }
     }
     
-    createInputBindings() {
-        // Key B for Inventory
-        const canvas = this.scene.getEngine().getRenderingCanvas(); // CRASH FIX: getRenderingCanvas()
+    updateInventoryWindow() {
+        if (!this.game.player || !this.uiVisible.inventory) return;
         
-        canvas.addEventListener("keydown", (evt) => {
-            // Only handle UI keypresses if the UI is not completely locked (e.g. by a modal)
-            if (evt.keyCode === 66) { // B key
-                this.toggleInventory();
+        const playerInventory = this.game.player.inventory.slots;
+        const columns = 5;
+        
+        this.inventoryGrid.clearControls(); // Clear old items
+
+        for (let i = 0; i < playerInventory.length; i++) {
+            const item = playerInventory[i];
+            
+            const slotContainer = new BABYLON.GUI.Rectangle(`invSlot${i}`);
+            slotContainer.width = 0.9;
+            slotContainer.height = 0.9;
+            slotContainer.thickness = 1;
+            slotContainer.color = "#FFF";
+            slotContainer.background = "rgba(50, 50, 50, 0.8)";
+            slotContainer.metadata = { slotIndex: i };
+            
+            if (item) {
+                const itemIcon = new BABYLON.GUI.Image(`invItemIcon${i}`, item.icon || "");
+                itemIcon.width = 0.8;
+                itemIcon.height = 0.8;
+                slotContainer.addControl(itemIcon);
+                
+                if (item.quantity > 1) {
+                    const quantityText = new BABYLON.GUI.TextBlock(`invItemQuantity${i}`, item.quantity.toString());
+                    quantityText.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+                    quantityText.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+                    quantityText.fontSize = 14;
+                    quantityText.color = "white";
+                    slotContainer.addControl(quantityText);
+                }
             }
-        });
-        
-        console.log("[UI] Input bindings created.");
+            
+            const row = Math.floor(i / columns);
+            const col = i % columns;
+            this.inventoryGrid.addControl(slotContainer, row, col);
+        }
     }
 
+    // --- Input Bindings ---
+    createInputBindings() {
+        // Simple display of input context (placeholder)
+        const text = new BABYLON.GUI.TextBlock("inputBindingsText", "W, A, S, D: Move | Shift: Sprint | 1-5: Ability | I: Inventory | T: Target");
+        text.color = "white";
+        text.fontSize = 14;
+        text.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        text.paddingBottom = "5px";
+        this.gui.addControl(text);
+        
+        console.log('[UI] Input bindings created.');
+    }
+    
     // --- System Messages ---
-    showMessage(text, duration, type = 'info') {
-        const label = {
-            'info': { color: 'white', duration: 1500 },
-            'error': { color: 'red', duration: 2500 },
-            'success': { color: 'lime', duration: 1500 },
-            'playerDamage': { color: 'red', duration: 1000 },
-            'enemyDamage': { color: 'yellow', duration: 1000 },
-            'heal': { color: 'lime', duration: 1000 },
-            'death': { color: 'darkred', duration: 5000 },
-        }[type] || { color: 'white', duration: 1500 };
+    showMessage(message, durationMs = 3000, messageType = 'info') {
+        const durationSeconds = durationMs / 1000;
+        const finalDuration = durationMs;
+        
+        const color = {
+            'info': 'white',
+            'success': '#0F0',
+            'error': '#F00',
+            'critical': '#FF0',
+            'playerDamage': '#C44',
+            'enemyDamage': '#FF0',
+            'heal': '#4C4'
+        }[messageType] || 'white';
 
-        // Duration override
-        const finalDuration = duration || label.duration;
-
-        // Create a system message (will appear at the bottom of the screen, transient messages)
         const systemMessage = new BABYLON.GUI.TextBlock();
-        systemMessage.text = text;
-        systemMessage.color = label.color;
+        systemMessage.text = message;
+        systemMessage.color = color;
         systemMessage.fontSize = 24;
         systemMessage.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
         systemMessage.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
@@ -341,7 +366,6 @@ class UIManager {
         
         setTimeout(() => {
              // Fade out system message
-             // This is an over-simplified fade, just a dispose after time
              systemMessage.dispose();
         }, finalDuration);
     }
@@ -364,9 +388,12 @@ class UIManager {
     }
 
     _updateBar(barElements, current, max, label) {
+        if (!barElements || !barElements.bar) return; // Safety check
         const ratio = current / max;
         // Ensure ratio is a string representation of the number
         barElements.bar.width = ratio.toFixed(2); 
-        barElements.text.text = `${label}: ${current.toFixed(0)}/${max.toFixed(0)}`;
+        barElements.text.text = `${label}: ${Math.max(0, current).toFixed(0)} / ${max.toFixed(0)}`;
     }
 }
+// Ensure the UIManager class is globally accessible
+window.UIManager = UIManager;
