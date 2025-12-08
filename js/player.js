@@ -1,316 +1,261 @@
-// ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.32 (CRITICAL ASSETMANAGER NULL FIX)
-// Fix: Added null-check in _initMesh to ensure assetManager is available before use.
-// ============================================================
+// ===========================================================
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.33 (INHERITANCE FIX)
+// Fix: Removed unnecessary Entity/Character fallbacks, now relies on world.js.
+// Fix: Cleaned up AssetManager access by relying on the game global.
+// ===========================================================
 
-// Safety guards: ensure Entity/Character exist even if previous scripts failed to load.
-if (typeof Entity === 'undefined') {
-    console.warn('[Player] Entity base class missing. Installing minimal fallback.');
-    class Entity {
-        constructor(scene, position) {
-            this.scene = scene;
-            this.position = position || new BABYLON.Vector3(0, 0, 0);
-            this.mesh = null;
-            this.isDead = false;
-        }
-
-        update() {
-            if (this.mesh && this.mesh.position && this.position && typeof this.mesh.position.copyFrom === 'function') {
-                this.mesh.position.copyFrom(this.position);
-            }
-        }
-
-        dispose() {
-            this.isDead = true;
-            if (this.mesh && typeof this.mesh.dispose === 'function') {
-                this.mesh.dispose();
-                this.mesh = null;
-            }
-        }
-    }
-    window.Entity = Entity;
+// Ensure Character base class exists from world.js
+if (typeof Character === 'undefined') {
+    throw new Error('[Player] Character base class not found. Ensure world.js loads first.');
 }
 
-// Safety guard: if Character failed to load (e.g., due to script order issues),
-// provide a minimal fallback to avoid a ReferenceError and allow the game to
-// continue using basic Entity behavior until assets load correctly.
-if (typeof Character === 'undefined' && typeof Entity !== 'undefined') {
-    console.warn('[Player] Character base class missing. Using minimal fallback.');
-    class Character extends Entity {
-        constructor(scene, position, name = 'Character') {
-            super(scene, position, name);
-            this.name = name;
-            this.health = 100;
-            this.target = null;
-        }
-    }
-    window.Character = Character;
-}
 
 class Player extends Character {
-    constructor(scene) {
-        const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
-        const playerConfig = C.PLAYER || {};
-        const combatConfig = C.COMBAT || {};
-        
-        const spawnHeight = playerConfig.SPAWN_HEIGHT || 5; 
-        
-        super(scene, new BABYLON.Vector3(0, spawnHeight, 0), 'Player');
-        
-        this.isPlayer = true; 
-        this.className = null; 
-        
-        this.stats = {
-            maxHealth: playerConfig.HEALTH || 100,
-            maxMana: playerConfig.MANA || 50, 
-            maxStamina: playerConfig.STAMINA || 100,
-            
-            attackPower: 10,
-            magicPower: 5,
-            
-            moveSpeed: playerConfig.MOVE_SPEED || 0.15, 
-
-            attackRange: combatConfig.RANGE_MELEE || 2,
-            attackCooldown: combatConfig.ATTACK_COOLDOWN_MELEE || 1,
-            
-            currentAttackPower: 10,
-            currentMagicPower: 5,
-        };
-        
-        this.health = this.stats.maxHealth;
-        this.mana = this.stats.maxMana;
-        this.stamina = this.stats.maxStamina;
-        this.abilities = []; 
-        this.inventory = new Inventory(this);
-        this.equipment = new Equipment(this);
-
-        this.keys = {}; // For input tracking
+    // className should match a key in CONFIG.ASSETS.CLASSES (e.g., 'Warrior')
+    constructor(scene, position, className = 'Warrior') {
+        super(scene, position, 'Player');
+        this.isPlayer = true;
+        this.className = className;
         this.camera = null;
-        this.target = null;
-        this.lastAttackTime = 0;
-        this.isGrounded = true;
-        
-        this.handleKeyDown = this.handleKeyDown.bind(this);
-        this.handleKeyUp = this.handleKeyUp.bind(this);
-        this.handlePointerDown = this.handlePointerDown.bind(this);
+        this.controls = { up: false, down: false, left: false, right: false };
+        this.moveSpeed = CONFIG.PLAYER.MOVE_SPEED || 0.15; // Base speed
 
+        this.applyClass(this.className);
         this._initCamera();
         this._initInput();
-        this._initPhysics(); 
+        this._initTargetHighlight();
 
-        // CRITICAL: applyClass calls _initMesh immediately.
-        // It must be safe even if the class config fails to load.
-        this.applyClass('Warrior');
-    }
-    
-    _initCamera() {
-        this.camera = new BABYLON.FollowCamera("PlayerCamera", this.position.clone(), this.scene);
-        this.camera.radius = 10; // Distance of the camera from the target
-        this.camera.heightOffset = 4; // Height of camera above the target
-        this.camera.rotationOffset = 180; // Start facing backward
-        this.camera.cameraAcceleration = 0.05;
-        this.camera.maxCameraSpeed = 20;
-        this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
-    }
-    
-    _initInput() {
-        window.addEventListener('keydown', this.handleKeyDown);
-        window.addEventListener('keyup', this.handleKeyUp);
-        this.scene.onPointerDown = this.handlePointerDown;
+        console.log(`[Player] Player class '${this.className}' initialized.`);
     }
 
-    _initPhysics() {
-        if (!this.mesh) {
-            // Create a simple invisible mesh just for physics collision/position
-            this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollision", {
-                height: 2, diameter: 1
-            }, this.scene);
-            this.mesh.isVisible = false;
-            this.mesh.checkCollisions = true; 
-        }
+    // --- Initialization & Setup ---
 
-        this.mesh.position.copyFrom(this.position);
+    // This method is the core setup for the Player's stats and model.
+    applyClass(className, optionalConfig = null) {
+        this.className = className;
         
-        // Add a physics impostor
-        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.mesh, 
-            BABYLON.PhysicsImpostor.CylinderImpostor, 
-            { mass: 1, restitution: 0.1, friction: 0.5 }, 
-            this.scene
-        );
+        let classConfig = optionalConfig || this._getClassConfig(className);
         
-        // Set collision filters if necessary (future feature)
-    }
-
-    _initMesh(assetKey) {
-        // CRITICAL FIX: Check if assetManager is ready
-        if (!this.scene.game || !this.scene.game.assetManager) {
-            console.error("[Player] Cannot initialize mesh. AssetManager is not available on game object.");
-            // Fallback: Make the collision mesh visible for debugging
-            if(this.mesh) this.mesh.isVisible = true;
-            return;
-        }
-
-        // Use the simple key name (e.g., 'knight')
-        const assetMeshes = this.scene.game.assetManager.getAsset(assetKey); 
-        
-        if (assetMeshes && assetMeshes.length > 0) {
-            const rootMesh = assetMeshes[0].clone("PlayerMesh", null);
-            rootMesh.isVisible = true;
-
-            // Attach the visual mesh to the collision mesh as a child
-            if (this.mesh) {
-                rootMesh.parent = this.mesh;
-                // Offset the visual mesh so it sits correctly on the ground relative to the collision mesh
-                rootMesh.position = new BABYLON.Vector3(0, -1, 0); 
-                rootMesh.rotation.y = Math.PI; // Face the correct direction for the camera
-            }
-
-            // Store the root mesh reference 
-            this.visualMesh = rootMesh; 
-        } else {
-            console.warn(`[Player] Failed to load mesh for asset: ${assetKey}. AssetManager load failed or key is wrong.`);
-            // Fallback: Make the collision mesh visible for debugging
-            if(this.mesh) this.mesh.isVisible = true;
-        }
-    }
-
-    // --- Input Handlers ---
-
-    handleKeyDown(event) {
-        this.keys[event.key.toLowerCase()] = true;
-    }
-
-    handleKeyUp(event) {
-        this.keys[event.key.toLowerCase()] = false;
-    }
-
-    handlePointerDown(evt) {
-        if (evt.button === 0) { // Left click
-            const pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
-
-            if (pickResult.hit && pickResult.pickedMesh && pickResult.pickedMesh.parent) {
-                const targetEntity = this.scene.game.world.npcs.find(
-                    (npc) => npc.mesh && npc.mesh === pickResult.pickedMesh.parent
-                );
-
-                if (targetEntity) {
-                    this.target = targetEntity;
-                    this.scene.game.ui.showMessage(`Target acquired: ${this.target.name}`, 1000, 'info');
-
-                    // If a target is acquired and an ability is ready, perform an attack
-                    const attackAbility = this.abilities[0]; 
-                    if (attackAbility && attackAbility.isReady()) {
-                        attackAbility.execute(this, this.target);
-                    }
-                } else {
-                    this.target = null;
-                }
-            } else {
-                this.target = null;
-            }
-        }
-    }
-
-    // --- Core Update Loop ---
-    
-    update(deltaTime) {
-        this.abilities.forEach(ability => ability.update(deltaTime));
-        this._updateMovement(deltaTime);
-        this._updateCameraPosition();
-        
-        // Keep the Character base update (syncs collision mesh position to this.position)
-        Entity.prototype.update.call(this, deltaTime);
-    }
-    
-    _updateMovement(deltaTime) {
-        if (!this.mesh || !this.mesh.physicsImpostor) return;
-        
-        const impulseForce = 25; 
-        const velocity = this.mesh.physicsImpostor.getLinearVelocity();
-        let moveVector = BABYLON.Vector3.Zero();
-
-        if (this.keys['w']) moveVector.z += 1;
-        if (this.keys['s']) moveVector.z -= 1;
-        if (this.keys['a']) moveVector.x -= 1;
-        if (this.keys['d']) moveVector.x += 1;
-
-        if (moveVector.lengthSquared() > 0) {
-            moveVector = moveVector.normalize();
-
-            // Rotate the move vector based on the camera's rotation
-            const yRotation = this.camera.rotationOffset * (Math.PI / 180);
-            const matrix = BABYLON.Matrix.RotationY(yRotation);
-            moveVector = BABYLON.Vector3.TransformCoordinates(moveVector, matrix);
-            
-            // Apply impulse
-            const impulse = moveVector.scale(impulseForce);
-            this.mesh.physicsImpostor.applyImpulse(
-                impulse,
-                this.mesh.getAbsolutePosition()
-            );
-
-            // Update visual mesh rotation (only if visual mesh exists)
-            if (this.visualMesh) {
-                const targetAngle = Math.atan2(moveVector.x, moveVector.z);
-                this.visualMesh.rotation.y = targetAngle;
-            }
-        }
-
-        // Simple velocity dampening to prevent sliding indefinitely
-        const horizontalVelocity = new BABYLON.Vector3(velocity.x, 0, velocity.z);
-        if (horizontalVelocity.lengthSquared() > 0.01) {
-            const dampingForce = horizontalVelocity.scale(-2); // Apply opposing force
-            this.mesh.physicsImpostor.applyForce(
-                dampingForce,
-                this.mesh.getAbsolutePosition()
-            );
-        }
-    }
-
-    // --- Class & Stats ---
-
-    applyClass(className) {
-        const classConfig = (CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
-            ? CONFIG.ASSETS.CLASSES[className]
-            : null) || this._getFallbackClassConfig(className);
-
         if (classConfig) {
-            this.className = className;
-            
             // 1. Apply Stats
-            Object.assign(this.stats, classConfig.stats);
+            this.stats = { ...this.stats, ...classConfig.stats };
             this.health = this.stats.maxHealth;
             this.mana = this.stats.maxMana;
             this.stamina = this.stats.maxStamina;
 
-            // 2. Initialize Mesh
-            const assetKey = classConfig.model; // e.g., 'knight'
-            this._initMesh(assetKey);
-            
-            // 3. Initialize Abilities
-            if (this.scene.game.skillTemplates) {
-                const defaultAbilityTemplate = this.scene.game.skillTemplates.get(classConfig.defaultAbility);
-                if (defaultAbilityTemplate) {
-                    this.abilities = [new Ability(defaultAbilityTemplate)];
-                } else {
-                    console.warn(`[Player] Default ability template not found for: ${classConfig.defaultAbility}`);
-                    this.abilities = []; // Ensure it's still an array
-                }
+            // 2. Initialize Model/Mesh
+            this._initMesh(classConfig.model);
+
+            // 3. Add Default Ability
+            if (classConfig.defaultAbility && typeof game !== 'undefined' && game.skillTemplates) {
+                const template = game.skillTemplates.get(classConfig.defaultAbility);
+                this.addAbility(classConfig.defaultAbility, template);
+                console.log(`[Player] Added default ability: ${classConfig.defaultAbility}`);
+            } else {
+                 console.warn(`[Player] Could not add default ability: ${classConfig.defaultAbility}. Template missing?`);
             }
             
-            console.log(`[Player] Applied default class: ${className}`);
         } else {
-            console.warn(`[Player] Class config not found for: ${className}`);
+            console.error(`[Player] FATAL: Class config not found for: ${className}`);
+            // Fallback to minimal stats to prevent total crash
+            this.stats = { maxHealth: 100, maxMana: 50, maxStamina: 100, attackPower: 10, magicPower: 5, moveSpeed: 0.15 };
+            this.health = this.stats.maxHealth;
+        }
+    }
+
+    _initMesh(modelAssetKey) {
+        if (this.mesh) {
+            this.mesh.dispose();
+            this.mesh = null;
+        }
+
+        // CRITICAL FIX: Ensure game and assetManager are available before trying to load.
+        if (typeof game === 'undefined' || !game.assetManager) {
+             console.error('[Player] game.assetManager is not initialized. Cannot load mesh.');
+             return;
+        }
+
+        const meshes = game.assetManager.getAsset(modelAssetKey);
+
+        if (meshes && meshes.length > 0) {
+            // Instantiate the loaded model (clone it)
+            this.mesh = meshes[0].clone(this.name + "Mesh");
+            this.mesh.position.copyFrom(this.position);
+            this.mesh.scaling.setAll(1.5); // Example scaling
+            this.mesh.checkCollisions = true;
+            
+            // Add physics impostor for movement/collision
+            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                this.mesh,
+                BABYLON.PhysicsImpostor.BoxImpostor, // Box is often better for simple characters
+                { mass: 1, restitution: 0.1, friction: 0.5 },
+                this.scene
+            );
+
+            // Set up animations (requires the specific glb structure, placeholder)
+            if (meshes[0].skeleton) {
+                this.mesh.skeleton = meshes[0].skeleton.clone();
+            }
+
+            // Lock rotation to Y axis
+            this.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+            this.mesh.physicsImpostor.registerBeforePhysics(this._lockRotation);
+
+            console.log(`[Player] Mesh initialized with model: ${modelAssetKey}`);
+        } else {
+            // Minimal fallback mesh if asset failed to load
+            this.mesh = BABYLON.MeshBuilder.CreateSphere(this.name + "Mesh", { diameter: 2 }, this.scene);
+            const mat = new BABYLON.StandardMaterial("fallbackMat", this.scene);
+            mat.diffuseColor = new BABYLON.Color3(1, 0, 0);
+            this.mesh.material = mat;
+            console.warn(`[Player] Failed to load asset key: ${modelAssetKey}. Using fallback sphere.`);
+        }
+    }
+    
+    _lockRotation = () => {
+        if (this.mesh && this.mesh.physicsImpostor) {
+            this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+        }
+    }
+
+    _initCamera() {
+        if (typeof game !== 'undefined' && game.world && game.world.camera) {
+            this.camera = game.world.camera;
+            this.camera.target = this.mesh || new BABYLON.Vector3(0, 5, 0); // Target the mesh
+            this.camera.target.y += 1.5; // Offset to target head height
+        }
+    }
+
+    _initInput() {
+        this.handleKeyDown = (evt) => {
+            switch (evt.key.toLowerCase()) {
+                case 'w': this.controls.up = true; break;
+                case 's': this.controls.down = true; break;
+                case 'a': this.controls.left = true; break;
+                case 'd': this.controls.right = true; break;
+                case '1': this.executeAbilityInSlot(1); break;
+                case '2': this.executeAbilityInSlot(2); break;
+                // Add more keys for abilities 3-5
+            }
+        };
+
+        this.handleKeyUp = (evt) => {
+            switch (evt.key.toLowerCase()) {
+                case 'w': this.controls.up = false; break;
+                case 's': this.controls.down = false; break;
+                case 'a': this.controls.left = false; break;
+                case 'd': this.controls.right = false; break;
+            }
+        };
+        
+        window.addEventListener('keydown', this.handleKeyDown);
+        window.addEventListener('keyup', this.handleKeyUp);
+        
+        // Handle Target selection (simple click on a mesh)
+        this.scene.onPointerDown = (evt, pickResult) => {
+            if (pickResult.hit && pickResult.pickedMesh) {
+                // Check if the picked mesh is an NPC (i.e., a Player instance not marked as player)
+                const targetEntity = this.scene.game.world.npcs.find(npc => npc.mesh === pickResult.pickedMesh);
+                if (targetEntity) {
+                    this.target = targetEntity;
+                    this.scene.game.ui.setTarget(this.target);
+                    console.log(`[Player] Target selected: ${this.target.name}`);
+                }
+            }
+        };
+    }
+    
+    // --- Core Logic (Update & Movement) ---
+
+    update(deltaTime) {
+        super.update(deltaTime); // Update abilities/cooldowns
+
+        this._updateMovement(deltaTime);
+        this._updateCameraPosition();
+    }
+
+    _updateMovement(deltaTime) {
+        if (!this.mesh || !this.mesh.physicsImpostor) return;
+
+        let velocity = this.mesh.physicsImpostor.getLinearVelocity();
+        let forward = this.mesh.forward; // Use mesh's forward vector for movement
+        let right = this.mesh.right;
+
+        let moveVector = new BABYLON.Vector3(0, 0, 0);
+
+        // Movement relative to camera (better for 3rd person)
+        const cameraForward = this.camera.getDirection(BABYLON.Vector3.Forward());
+        cameraForward.y = 0; // Ignore Y-component for horizontal movement
+        cameraForward.normalize();
+        
+        const cameraRight = BABYLON.Vector3.Cross(BABYLON.Vector3.Up(), cameraForward);
+
+        if (this.controls.up) moveVector.addInPlace(cameraForward);
+        if (this.controls.down) moveVector.subtractInPlace(cameraForward);
+        if (this.controls.right) moveVector.addInPlace(cameraRight);
+        if (this.controls.left) moveVector.subtractInPlace(cameraRight);
+        
+        // Only apply force if there's movement
+        if (moveVector.lengthSquared() > 0) {
+            moveVector.normalize().scaleInPlace(this.stats.moveSpeed);
+            
+            // Set horizontal velocity to the movement vector
+            velocity.x = moveVector.x * (1 / deltaTime);
+            velocity.z = moveVector.z * (1 / deltaTime);
+            
+            // Calculate rotation towards the movement direction (Y-axis only)
+            const angle = Math.atan2(-moveVector.x, -moveVector.z);
+            this.mesh.rotation.y = angle;
+        } else {
+             velocity.x = 0;
+             velocity.z = 0;
+        }
+
+        // Apply new velocity, keeping existing Y velocity (for gravity/jumping)
+        this.mesh.physicsImpostor.setLinearVelocity(velocity);
+    }
+    
+    // --- Utility Methods ---
+    
+    executeAbilityInSlot(slotIndex) {
+        // Simple mapping: 1 -> first ability in the map (default ability)
+        const abilityArray = Array.from(this.abilities.values());
+        const ability = abilityArray[slotIndex - 1]; 
+        
+        if (ability) {
+            if (ability.isReady()) {
+                const success = ability.execute(this, this.target);
+                if (success) {
+                    // Force a UI update if the action was successful
+                    if (this.scene.game && this.scene.game.ui) {
+                        this.scene.game.ui.update(this);
+                    }
+                }
+            } else {
+                 this.scene.game.ui.showMessage(`[${ability.name}] is on cooldown!`, 1000, 'error');
+            }
+        } else {
+            this.scene.game.ui.showMessage(`Ability slot ${slotIndex} is empty.`, 1000, 'info');
+        }
+    }
+
+    _getClassConfig(className) {
+        // CRITICAL: Ensure CONFIG is available and check both ASSETS.CLASSES and fallbacks
+        if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES) {
+            return CONFIG.ASSETS.CLASSES[className] || this._getFallbackClassConfig(className);
+        } else {
+            console.warn(`[Player] CONFIG.ASSETS.CLASSES unavailable. Using minimal fallback.`);
+            return this._getFallbackClassConfig(className);
         }
     }
 
         // Provide a minimal on-file fallback so the player can still spawn even when
         // CONFIG.ASSETS.CLASSES is unavailable (e.g., if a previous script failed).
         _getFallbackClassConfig(className) {
-            if (className !== 'Warrior') return null;
+            if (className !== 'Warrior' && className !== 'Wolf') return null; // 'Wolf' for NPC check
 
-            return {
+            // Warrior Fallback
+            if (className === 'Warrior') return {
                 model: 'knight',
                 stats: {
                     maxHealth: 100,
@@ -322,6 +267,20 @@ class Player extends Character {
                 },
                 defaultAbility: 'Cleave'
             };
+            
+            // Wolf Fallback (for NPC)
+            if (className === 'Wolf') return {
+                 model: 'wolf',
+                 stats: {
+                    maxHealth: 30,
+                    maxMana: 0,
+                    maxStamina: 50,
+                    attackPower: 5,
+                    magicPower: 0,
+                    moveSpeed: 0.18
+                },
+                defaultAbility: 'Bite' // Assuming 'Bite' will be added to network.js
+            }
         }
 
     // --- Cleanup/Utility ---
@@ -339,11 +298,14 @@ class Player extends Character {
         this.scene.onPointerDown = null; 
         
         if(this.camera) this.camera.detachControl(this.scene.getEngine().getRenderingCanvas());
+        super.dispose(); // Call Character/Entity dispose
     }
 
     _updateCameraPosition() {
         if (this.camera && this.mesh) {
+            // Target slightly above the mesh center
             this.camera.target.copyFrom(this.mesh.position);
+            this.camera.target.y += 1.5; 
         }
     }
 }
