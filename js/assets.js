@@ -1,7 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.10 (CONFIG PATHS)
-// Update: AssetManager now reads all manifest data from CONFIG.ASSETS.
-// Fix: loadModel now correctly uses custom 'path' defined in CONFIG.ASSETS.
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.11 (TYPERROR FIX)
+// Fix: Removed erroneous totalCount variable access from loader.onError.
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
@@ -23,7 +22,6 @@ class AssetManager {
         };
         this.loader = new BABYLON.AssetsManager(scene);
         
-        // Bind methods used as callbacks to the instance
         this.printStats = this.printStats.bind(this);
     }
 
@@ -56,9 +54,8 @@ class AssetManager {
 
             this.loader.onError = (task, message, exception) => {
                 console.error(`[Assets] A task failed: ${task.name}. Message: ${message}`, exception);
-                this.stats.requested = totalCount; // Set total for stats
+                // Removed the line causing the TypeError: this.stats.requested = totalCount;
                 this.printStats(); // Print stats on error too
-                // We resolve here even on error to prevent a total game crash if a non-required asset fails.
                 resolve(this.assets); 
             };
             
@@ -74,28 +71,24 @@ class AssetManager {
     }
 
     loadModel(assetData, key, category) {
-        // The unique name for asset retrieval (e.g., CHARACTERS_knight)
         const taskName = `${category}_${key}`;
         
         // Use the assetData.path if provided, otherwise use the global BASE_PATH
         const basePath = assetData.path || MANIFEST_DATA.BASE_PATH;
         
         const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
-        task.required = assetData.required || false; // Assume assets are not strictly required unless marked
+        task.required = assetData.required || false; 
 
         task.onSuccess = (task) => {
             this.stats.loaded++;
             this.assets[taskName] = task.loadedMeshes;
         };
         
-        // Add specific error handling to the task itself for better console output
         task.onError = (task, message, exception) => {
             console.warn(`[Assets] Failed to load ${taskName}. Check the path: ${basePath}${assetData.model}`);
-            // Do not reject the promise here; let the main loader.onError handle the overall completion
         };
     }
     
-    // Helper to retrieve an asset by its full key (e.g., 'CHARACTERS_knight')
     getAsset(name) {
         return this.assets[name] || null;
     }
