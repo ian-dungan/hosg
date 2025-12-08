@@ -1,8 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.13 (CRITICAL FIX)
-// Fix 1: Removed non-existent this.player.init() call.
-// Fix 2: Implemented AssetManager initialization and await before Player/World creation.
-// Update: Added this.assetManager property to constructor.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.14 (CRITICAL FIX)
+// Fix: Corrected the call from this.player.loadState to this.player.loadSaveData.
 // ============================================================
 
 class Game {
@@ -35,7 +33,7 @@ class Game {
     this.player = null;
     this.ui = null;
     this.network = null;
-    this.assetManager = null; // NEW: Property for AssetManager
+    this.assetManager = null;
     this.characterId = null; 
 
     this.itemTemplates = new Map();
@@ -52,7 +50,7 @@ class Game {
   async init() {
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
     
-    // CRITICAL FIX: Initialize and load assets BEFORE Player or World creation
+    // Initialize and load assets BEFORE Player or World creation
     if (typeof AssetManager !== 'undefined') {
         this.assetManager = new AssetManager(this.scene);
         await this.assetManager.loadAll(); // Wait for all models to load
@@ -71,8 +69,6 @@ class Game {
     // Explicitly assign the Player to the UI Manager
     this.ui.player = this.player;
     
-    // REMOVED: await this.player.init(); // This call caused the TypeError
-    
     await this.loadGameData();
     
     this.run(); 
@@ -85,12 +81,11 @@ class Game {
       const characterName = "TestChar";
       const className = "Fighter";
       
-      // Check if NetworkManager is defined globally (it should be in network.js)
       if (typeof NetworkManager === 'undefined') {
           console.error("[Game] NetworkManager class not defined. Skipping Supabase calls.");
-          // Initialize world with no templates for now to allow game to run
           this.world.init();
-          this.player.applyClass(className);
+          // NOTE: We rely on a placeholder player.applyClass which must be defined
+          this.player.applyClass(className); 
           return; 
       }
       
@@ -120,13 +115,12 @@ class Game {
 
       const stateResult = await this.network.supabase.loadCharacterState(this.characterId);
       if (stateResult.success) {
-          // Assuming player.loadState exists to restore state
-          this.player.loadState(stateResult.state); 
+          // CRITICAL FIX: The player function is loadSaveData, not loadState.
+          this.player.loadSaveData(stateResult.state); 
           console.log(`[Game] Character state loaded for ID: ${this.characterId}`);
       } else {
           console.warn(`[Game] Failed to load character state. Applying default class: ${className}`);
-          // Assuming player.applyClass exists to set initial stats/class
-          this.player.applyClass(className);
+          this.player.applyClass(className); 
       }
       
       // Initialize the world with loaded templates
