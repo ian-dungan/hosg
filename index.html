@@ -30,21 +30,7 @@
 <body>
   <canvas id="renderCanvas"></canvas>
 
-<script src="js/core.js"></script>
-<script src="js/assets.js"></script>
-
-<script src="js/world.js"></script>
-<script src="js/ability.js"></script>
-<script src="js/item.js"></script>
-
-<script src="js/player.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/network.js"></script>
-
-<script src="js/game.js"></script>
-  
-<script>
-  // This asynchronous function orchestrates the entire game startup.
+<script src="js/core.js"></script>    <script src="js/assets.js"></script>   <script src="js/item.js"></script>     <script src="js/ability.js"></script>  <script src="js/world.js"></script>    <script src="js/player.js"></script>   <script src="js/ui.js"></script>       <script src="js/network.js"></script>  <script src="js/game.js"></script>     <script>
   async function initializeGame() {
     console.log("[Bootstrap] Starting game initialization sequence...");
     
@@ -58,60 +44,62 @@
     const engine = new BABYLON.Engine(canvas, true);
     const scene = new BABYLON.Scene(engine);
     
-    // Apply Gravity and Physics
     scene.collisionsEnabled = true;
     scene.gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
     scene.enablePhysics(scene.gravity, new BABYLON.CannonJSPlugin());
 
     // 2. Instantiate Manager Classes
-    // Player and World must be instantiated BEFORE Game
     const uiManager = new UIManager(scene);
-    const player = new Player(scene);
-    const world = new World(scene, player);
     const networkManager = new NetworkManager(); 
-    const game = new Game(engine, scene, world, player, uiManager);
     
-    // Make game object globally accessible via the scene
-    scene.game = game; 
-    
-    // 3. Asset and Template Loading Sequence
-    // ASSET MANAGER MUST BE CREATED BEFORE PLAYER MESH INITIALIZATION
-    const assetManager = new AssetManager(scene);
-    
-    // ATTACH ASSET MANAGER TO PLAYER/WORLD FOR EASY ACCESS TO MODELS
-    player.assetManager = assetManager; // <--- PATCH 1: MAKE ASSET MANAGER AVAILABLE
-    world.assetManager = assetManager; // <--- PATCH 2: MAKE ASSET MANAGER AVAILABLE
-
-    // Load Templates first (needed for Player, Abilities, etc.)
-    game.itemTemplates = new Map();
-    game.skillTemplates = new Map();
-    game.npcTemplates = new Map();
-    
+    // 3. Template Loading Sequence
     console.log("[Bootstrap] Loading templates from Network...");
-    const templatesLoaded = await networkManager.loadTemplates(game.itemTemplates, game.skillTemplates, game.npcTemplates);
+    const itemTemplates = new Map();
+    const skillTemplates = new Map();
+    const npcTemplates = new Map();
+    
+    const templatesLoaded = await networkManager.loadTemplates(itemTemplates, skillTemplates, npcTemplates);
     
     if (!templatesLoaded) {
         console.error("[Bootstrap] Failed to load essential game templates. Halting.");
         return;
     }
+
+    // 4. Create Player and World *after* templates
+    const player = new Player(scene);
+    const world = new World(scene, player);
+    const game = new Game(engine, scene, world, player, uiManager);
+
+    // Make game object and templates globally accessible
+    scene.game = game; 
+    game.itemTemplates = itemTemplates;
+    game.skillTemplates = skillTemplates;
+    game.npcTemplates = npcTemplates;
     
+    // 5. Asset Manager
+    const assetManager = new AssetManager(scene);
+    
+    // ATTACH ASSET MANAGER TO PLAYER/WORLD
+    player.assetManager = assetManager; 
+    world.assetManager = assetManager; 
+
     // Load all visual assets (models, textures)
     console.log("[Bootstrap] Loading all game assets (models, textures)...");
     await assetManager.loadAll(); 
     assetManager.printStats();
     console.log("[Bootstrap] All assets loaded.");
     
-    // 4. Final Setup and Initialization
-    // CRITICAL FIX: Initialize Player's VISUAL MESH *AFTER* assets are loaded
-    player._initMesh(); // <--- PATCH 3: CALL INIT MESH HERE
+    // 6. Final Setup and Initialization
+    player.applyDefaultClass('Warrior'); // Apply class before mesh init
+    player._initMesh(); // CRITICAL FIX: Initialize Player's VISUAL MESH *after* assets are loaded
 
     game.init(); 
     uiManager.init(); 
 
-    // 5. Build the World using the loaded assets
+    // 7. Build the World
     world.createEnvironment(assetManager); 
     
-    // 6. Start the Game
+    // 8. Start the Game
     game.run(); 
     console.log("[Bootstrap] Game started successfully.");
 
@@ -121,7 +109,6 @@
     });
   }
 
-  // Start the entire process
   initializeGame();
 </script>
 
