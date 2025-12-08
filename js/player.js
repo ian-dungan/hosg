@@ -1,8 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.27 (FINAL PATCH)
-// Fix: Renamed loadSaveData to loadState to fix Game.js error.
-// Fix: Updated getSaveData() for flattened position/stats.
-// Fix: Added template safety checks in loadState() to prevent itemTemplates crash.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.28 (FINAL PATCH)
+// Fix: Corrected Babylon.js API calls in _initInput, _initCamera, and dispose.
+// Fix: Renamed loadSaveData to loadState and added template safety checks.
 // ============================================================
 
 class Player extends Character {
@@ -52,9 +51,16 @@ class Player extends Character {
         this.keys = {}; // Current state of pressed keys
         
         // Initialize Inventory and Equipment
-        this.inventory = new Inventory(this);
-        this.equipment = new Equipment();
-        
+        // These classes must be defined in item.js
+        if (typeof Inventory === 'undefined' || typeof Equipment === 'undefined') {
+            console.error("[Player] Inventory/Equipment classes are not defined. Check item.js script order.");
+            this.inventory = { getSaveData: () => [], load: () => {} };
+            this.equipment = { getSaveData: () => [], load: () => {}, slots: {} };
+        } else {
+            this.inventory = new Inventory(this);
+            this.equipment = new Equipment();
+        }
+
         this.combat = {
             target: null,
             lastAttackTime: 0,
@@ -104,7 +110,9 @@ class Player extends Character {
         this.health -= damage;
         
         // Visual/audio feedback
-        this.scene.game.ui.showMessage(`You took ${damage.toFixed(0)} damage from ${source.name}!`, 1500, 'playerDamage');
+        if (this.scene.game.ui && this.scene.game.ui.showMessage) {
+            this.scene.game.ui.showMessage(`You took ${damage.toFixed(0)} damage from ${source.name}!`, 1500, 'playerDamage');
+        }
         
         if (this.health <= 0) {
             this.health = 0;
@@ -115,16 +123,24 @@ class Player extends Character {
     die() {
         if (this.isDead) return;
         this.isDead = true;
-        this.scene.game.ui.showMessage("You have died.", 5000, 'critical');
+        if (this.scene.game.ui && this.scene.game.ui.showMessage) {
+            this.scene.game.ui.showMessage("You have died.", 5000, 'critical');
+        }
         console.log('Player died.');
         // TODO: Respawn logic
     }
     
     // --- Movement Helpers ---
     _handleMovement(deltaTime) {
+        // Fallback for CONFIG check
+        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : {};
+        const spawnHeight = playerConfig.SPAWN_HEIGHT || 5;
+
         const speed = this.stats.currentMoveSpeed * (this.isSprinting ? 1.5 : 1.0);
         let moveVector = new BABYLON.Vector3(0, 0, 0);
         
+        if (!this.visualRoot || !this.mesh || !this.mesh.physicsImpostor) return;
+
         const forward = this.visualRoot.forward;
         const right = this.visualRoot.right;
 
@@ -140,7 +156,7 @@ class Player extends Character {
             // Check for jump
             if (this.keys[' ']) {
                 // Check if on ground (simplified)
-                if (this.mesh.position.y < CONFIG.PLAYER.SPAWN_HEIGHT + 0.1) {
+                if (this.mesh.position.y < spawnHeight + 0.1) {
                     this.mesh.physicsImpostor.setLinearVelocity(
                         this.mesh.physicsImpostor.getLinearVelocity().add(new BABYLON.Vector3(0, 5, 0))
                     );
@@ -149,27 +165,23 @@ class Player extends Character {
             }
 
             // Apply force
-            if (this.mesh.physicsImpostor) {
-                const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                const newVelocity = new BABYLON.Vector3(moveVector.x, 0, moveVector.z);
-                
-                // Keep existing vertical velocity (gravity/jump)
-                newVelocity.y = currentVelocity.y; 
+            const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+            const newVelocity = new BABYLON.Vector3(moveVector.x, 0, moveVector.z);
+            
+            // Keep existing vertical velocity (gravity/jump)
+            newVelocity.y = currentVelocity.y; 
 
-                // Use the simplified linear velocity calculation for character movement
-                this.mesh.physicsImpostor.setLinearVelocity(
-                    newVelocity
-                );
-            }
+            // Use the simplified linear velocity calculation for character movement
+            this.mesh.physicsImpostor.setLinearVelocity(
+                newVelocity
+            );
             
             this.isMoving = true;
         } else {
             this.isMoving = false;
             // Stop horizontal movement when keys are released
-            if (this.mesh.physicsImpostor) {
-                const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                this.mesh.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, currentVelocity.y, 0));
-            }
+            const currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
+            this.mesh.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(0, currentVelocity.y, 0));
         }
     }
     
@@ -204,7 +216,9 @@ class Player extends Character {
         
         // Handle inventory toggle
         if (key === 'i') {
-            this.scene.game.ui.toggleInventory();
+            if (this.scene.game.ui && this.scene.game.ui.toggleInventory) {
+                this.scene.game.ui.toggleInventory();
+            }
         }
         
         // Handle target select (T for nearest)
@@ -285,9 +299,13 @@ class Player extends Character {
             if (typeof target._toggleHighlight === 'function') {
                 target._toggleHighlight(true);
             }
-            this.scene.game.ui.updateTargetInfo(target);
+            if (this.scene.game.ui && this.scene.game.ui.updateTargetInfo) {
+                this.scene.game.ui.updateTargetInfo(target);
+            }
         } else {
-            this.scene.game.ui.updateTargetInfo(null);
+            if (this.scene.game.ui && this.scene.game.ui.updateTargetInfo) {
+                this.scene.game.ui.updateTargetInfo(null);
+            }
         }
     }
     
@@ -311,8 +329,6 @@ class Player extends Character {
         const ability = this.combat.abilities.get(abilityName);
         if (ability && slotIndex >= 0 && slotIndex < this.combat.actionSlots.length) {
             this.combat.actionSlots[slotIndex] = ability;
-            // The UI manager will check this when it updates
-            // this.scene.game.ui.updateActionBar();
         }
     }
     
@@ -373,7 +389,6 @@ class Player extends Character {
     
     /**
      * Loads the character state from a database record and templates.
-     * Renamed from loadSaveData to loadState to fix Game.js error.
      */
     async loadState(data, templates) {
         if (!data) return;
@@ -382,9 +397,11 @@ class Player extends Character {
         const itemTemplates = templates && templates.itemTemplates ? templates.itemTemplates : new Map();
         const skillTemplates = templates && templates.skillTemplates ? templates.skillTemplates : new Map();
 
-        // Load basic character state from the hosg_characters record
-        const spawnHeight = CONFIG.PLAYER.SPAWN_HEIGHT || 5;
+        // Fallback for CONFIG check
+        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : {};
+        const spawnHeight = playerConfig.SPAWN_HEIGHT || 5;
 
+        // Load basic character state from the hosg_characters record
         this.level = data.level !== undefined ? data.level : 1;
         this.health = data.health !== undefined ? data.health : this.stats.maxHealth;
         this.mana = data.mana !== undefined ? data.mana : this.stats.maxMana;
@@ -438,7 +455,10 @@ class Player extends Character {
     }
     
     selectClass(className) {
-        const classData = CONFIG.CLASSES[className];
+        // Fallback for CONFIG check
+        const configClasses = (typeof CONFIG !== 'undefined' && CONFIG.CLASSES) ? CONFIG.CLASSES : {};
+        const classData = configClasses[className];
+
         if (!classData) {
             console.error(`[Player] Cannot select class: ${className} not found in CONFIG.CLASSES.`);
             return;
@@ -504,9 +524,12 @@ class Player extends Character {
             // Placeholder for future pointer up logic
         };
         
+        // FIX: Replaced non-existent 'getRenderingCanvasId' with 'getRenderingCanvas()'
         // Disable default browser context menu on right-click
-        document.getElementById(this.scene.getEngine().getRenderingCanvasId()).addEventListener('contextmenu', (e) => e.preventDefault());
-
+        const canvas = this.scene.getEngine().getRenderingCanvas();
+        if (canvas) {
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
     }
 
     _initCamera() {
@@ -517,7 +540,12 @@ class Player extends Character {
         this.camera.rotationOffset = 180; // Angle around the target
         this.camera.cameraAcceleration = 0.05;
         this.camera.maxSpeed = 10;
-        this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
+        
+        // FIX: Completed the call to attachControl
+        const canvas = this.scene.getEngine().getRenderingCanvas();
+        if (canvas) {
+            this.camera.attachControl(canvas, true);
+        }
     }
 
     _initCollision(mass, friction) { 
@@ -574,11 +602,16 @@ class Player extends Character {
         window.removeEventListener('keyup', this.handleKeyUp);
         this.scene.onPointerDown = null; 
         
-        // Dispose camera control
-        if(this.camera) this.camera.detachControl(this.scene.getEngine().getRenderingCanvas())
+        // FIX: Completed the call to detachControl
+        const canvas = this.scene.getEngine().getRenderingCanvas();
+        if(this.camera && canvas) {
+            this.camera.detachControl(canvas)
+        }
     }
 
     _handleCamera(deltaTime) {
+        if (!this.visualRoot || !this.mesh || !this.mesh.physicsImpostor) return;
+        
         // Camera rotation to match player visual direction
         if(this.visualRoot) {
             // Simple rotation logic to face movement direction
