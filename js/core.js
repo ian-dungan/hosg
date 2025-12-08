@@ -1,7 +1,7 @@
-// ============================================================\
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.25 (CLEANUP & CONFIG FIX)
-// Fix: Removed duplicate Character class definition. CLASSES correctly nested.
-// ============================================================\
+// ============================================================
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.24 (ASSET PATH FIX)
+// Fix: Changed all asset paths to be relative to the index.html file to resolve 404 errors.
+// ============================================================
 
 const CONFIG = {
     PLAYER: {
@@ -17,7 +17,7 @@ const CONFIG = {
     },
     WORLD: { 
         SKYBOX: {
-            PATH: null, // Keep null to skip creation by default
+            PATH: null, 
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
@@ -28,22 +28,26 @@ const CONFIG = {
         ]
     },
     ASSETS: {
-        BASE_PATH: "/hosg/assets/", 
+        // CHANGED: Use relative path "assets/"
+        BASE_PATH: "assets/", 
         
         CHARACTERS: {
             knight: { 
                 model: 'Knight03.glb',
-                path: '/hosg/assets/player/character/' 
+                // CHANGED: Relative path 'assets/player/character/'
+                path: 'assets/player/character/' 
             },
             wolf: {
                 model: 'Wolf.glb',
-                path: '/hosg/assets/models/'
+                // CHANGED: Relative path 'assets/models/'
+                path: 'assets/models/'
             }
         },
         ENVIRONMENT: {
             terrain_base: { 
                 model: 'FantasyTerrain.glb',
-                path: '/hosg/assets/environment/' 
+                // CHANGED: Relative path 'assets/environment/'
+                path: 'assets/environment/' 
             }
         },
 
@@ -93,5 +97,3 @@ const CONFIG = {
 };
 
 window.CONFIG = CONFIG;
-
-// NO Character/Entity definition here. They are now in world.js.
