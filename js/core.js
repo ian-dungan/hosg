@@ -1,12 +1,24 @@
 // ============================================================
 // HEROES OF SHADY GROVE - CONFIGURATION v1.0.19 (PATCHED)
-// Added CONFIG.CLASSES for character creation base stats.
+// Fix: Added missing CONFIG.PLAYER.INVENTORY_SIZE and CONFIG.GAME.GRAVITY.
 // ============================================================
 
 const CONFIG = {
-    // ... (existing CONFIG fields remain the same)
+    // === PATCH START: ADDING MISSING BLOCKS ===
+    PLAYER: {
+        INVENTORY_SIZE: 30, // Default value to fix the critical crash in item.js
+        // Placeholder values matching fallbacks in player.js (for robust initialization):
+        HEALTH: 100,
+        MANA: 50,
+        STAMINA: 100,
+        SPAWN_HEIGHT: 5
+    },
+    GAME: {
+        GRAVITY: 9.81, // Default gravity value to fix the warning and enable physics
+    },
+    // === PATCH END ===
     
-    // ... (existing PLAYER, WORLD, NETWORK, COMBAT blocks remain the same)
+    // ... (existing WORLD, NETWORK, COMBAT blocks remain the same)
 
     // === NEW: CHARACTER CLASSES AND BASE STATS ===
     CLASSES: {
