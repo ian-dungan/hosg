@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - WORLD CORE v1.0.16 (CONFIG PATCH)
-// Update: createSky now loads all parameters from CONFIG.WORLD.SKYBOX.
+// HEROES OF SHADY GROVE - WORLD CORE v1.0.17 (ASSET RECOVERY PATCH)
+// Update: createGround uses TerrainBase model. Enemy uses Wolf model.
 // ============================================================
 
 // Base Entity class
@@ -84,7 +84,7 @@ class Character extends Entity {
 }
 
 // ============================================================
-// ENEMY CLASS (Placeholder)
+// ENEMY CLASS (Uses Wolf Model)
 // ============================================================
 class Enemy extends Character {
     constructor(scene, position, template, spawnData) {
@@ -106,29 +106,40 @@ class Enemy extends Character {
         this.isEnemy = true;
         this.isAttackable = true;
         
-        this._initMesh(template.model);
+        // Use the hardcoded model key 'wolf' if the template doesn't specify one
+        this._initMesh(template.model || 'wolf'); 
         this._initCollision(10, 0.5); 
     }
     
     async _initMesh(modelKey) {
         const assets = this.scene.game.assetManager ? this.scene.game.assetManager.assets : null;
-        const modelAsset = assets ? assets[`CHARACTERS_${modelKey}`] : null;
+        // Use the hardcoded asset key for the enemy wolf
+        const modelAssetKey = `CHARACTERS_${modelKey}`;
+        const modelAsset = assets ? assets[modelAssetKey] : null;
         
         if (modelAsset && modelAsset[0]) {
+             // Create an instance of the loaded mesh
              this.visualRoot = modelAsset[0].clone(this.name, null);
              this.visualRoot.position.copyFrom(this.position);
              this.visualRoot.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
              
+             // Create a simple, invisible collision mesh for physics
              this.mesh = BABYLON.MeshBuilder.CreateCylinder("enemyCollider", { height: 2, diameter: 1 }, this.scene);
              this.mesh.position.copyFrom(this.position);
              this.mesh.isVisible = false;
              
+             // Attach visual root to the collider mesh
              this.visualRoot.parent = this.mesh;
              
+             // Recursively make all parts of the model not pickable to ensure only the collider is pickable
+             this.visualRoot.getChildMeshes().forEach(m => m.isPickable = false);
+             
+             // Metadata allows picking/targeting
              this.mesh.metadata = { isEnemy: true, entity: this };
              
         } else {
-             console.warn(`[Enemy] Model ${modelKey} not found. Using placeholder.`);
+             // Fallback: Simple placeholder box
+             console.warn(`[Enemy] Model ${modelKey} not found in AssetManager. Using placeholder.`);
              this.mesh = BABYLON.MeshBuilder.CreateBox(this.name + "_Box", { size: 1 }, this.scene);
              this.mesh.position.copyFrom(this.position);
              this.mesh.metadata = { isEnemy: true, entity: this };
@@ -209,6 +220,7 @@ class World {
         this.createGround();
         this.createWater();
         this.createSky();
+        this.createEnvironmentAssets(); // NEW: Add trees/grass
         
         this.spawnAreas = (typeof CONFIG !== 'undefined' && CONFIG.WORLD && CONFIG.WORLD.SPAWN_AREAS) 
                           ? CONFIG.WORLD.SPAWN_AREAS : [];
@@ -226,23 +238,79 @@ class World {
     
     // --- Environment Creation ---
     createGround() {
-        const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 500, height: 500 }, this.scene);
-        const groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
-        
-        groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.7, 0.5);
-        groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-        ground.material = groundMaterial;
-        
-        if (this.scene.isPhysicsEnabled) {
-            ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-                ground, 
-                BABYLON.PhysicsImpostor.BoxImpostor, 
-                { mass: 0, friction: 0.5, restitution: 0.1 }, 
-                this.scene
-            );
+        // RECOVERY: Use the loaded TerrainBase model instead of a simple ground mesh
+        const assets = this.scene.game.assetManager ? this.scene.game.assetManager.assets : null;
+        const terrainAsset = assets ? assets['ENVIRONMENT_terrain_base'] : null;
+        let ground;
+
+        if (terrainAsset && terrainAsset[0]) {
+            ground = terrainAsset[0].clone("ground", null);
+            // Ensure the terrain is positioned correctly (e.g., at Y=0)
+            ground.position.y = 0; 
+            ground.isPickable = false;
+            console.log("[World] Ground created using TerrainBase asset.");
+            
+            // Apply physics impostor to the cloned mesh
+            if (this.scene.isPhysicsEnabled) {
+                 // Assuming the asset is a single mesh, or you pick the correct one.
+                 // We use a Box impostor as a safe default for a large flat mesh.
+                 ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    ground, 
+                    BABYLON.PhysicsImpostor.BoxImpostor, 
+                    { mass: 0, friction: 0.5, restitution: 0.1 }, 
+                    this.scene
+                );
+            }
+        } else {
+            // FALLBACK: Simple Box/Ground placeholder (your original code)
+            ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 500, height: 500 }, this.scene);
+            const groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
+            groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.7, 0.5);
+            groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+            ground.material = groundMaterial;
+            
+            if (this.scene.isPhysicsEnabled) {
+                ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    ground, 
+                    BABYLON.PhysicsImpostor.BoxImpostor, 
+                    { mass: 0, friction: 0.5, restitution: 0.1 }, 
+                    this.scene
+                );
+            }
+            ground.isPickable = false; 
+            console.warn("[World] TerrainBase asset not found. Using simple placeholder ground.");
         }
+    }
+    
+    createEnvironmentAssets() {
+        // NEW: Instantiates trees and grass (simple example)
+        const assets = this.scene.game.assetManager ? this.scene.game.assetManager.assets : null;
+        const treeAsset = assets ? assets['ENVIRONMENT_tree_pine'] : null;
+        const grassAsset = assets ? assets['ENVIRONMENT_grass_tuft'] : null;
         
-        ground.isPickable = false; 
+        if (treeAsset && treeAsset[0]) {
+            for (let i = 0; i < 20; i++) {
+                const x = Math.random() * 200 - 100;
+                const z = Math.random() * 200 - 100;
+                const tree = treeAsset[0].clone(`tree_${i}`, null);
+                tree.position.set(x, 0, z); // Adjust Y based on model pivot
+                tree.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
+                tree.isPickable = false;
+            }
+            console.log('[World] Spawned 20 pine trees.');
+        }
+
+        if (grassAsset && grassAsset[0]) {
+            for (let i = 0; i < 50; i++) {
+                const x = Math.random() * 200 - 100;
+                const z = Math.random() * 200 - 100;
+                const grass = grassAsset[0].clone(`grass_${i}`, null);
+                grass.position.set(x, 0, z); // Adjust Y based on model pivot
+                grass.scaling = new BABYLON.Vector3(1, 1, 1);
+                grass.isPickable = false;
+            }
+            console.log('[World] Spawned 50 grass tufts.');
+        }
     }
 
     createWater() {
@@ -266,7 +334,7 @@ class World {
         
         // Load the HDRI texture using the path and size from CONFIG
         const hdrTexture = new BABYLON.HDRCubeTexture(
-            skyConfig.PATH, // <-- Using configured path
+            skyConfig.PATH, 
             this.scene, 
             skyConfig.SIZE 
         );
@@ -290,7 +358,7 @@ class World {
         console.log(`[World] Skybox created using configured HDRI: ${skyConfig.PATH}`);
     }
     
-    // --- Spawning Logic ---
+    // --- Spawning Logic (Remains the same) ---
     spawnUpdate(deltaTime) {
         this.lastSpawnUpdateTime += deltaTime * 1000;
         
