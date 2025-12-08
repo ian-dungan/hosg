@@ -1,37 +1,60 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.22 (PATH FIX + .JPG REVERT)
-// Fix: Retained /hosg/ path prefix.
-// Revert: Skybox path reverted to use the .jpg extension.
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.20 (ASSET PATHS)
+// Fix: Added CONFIG.ASSETS to allow custom model paths.
 // ============================================================
 
 const CONFIG = {
+    // === PATCH START: ADDING MISSING BLOCKS ===
     PLAYER: {
-        INVENTORY_SIZE: 30, 
+        INVENTORY_SIZE: 30, // Default value to fix the critical crash in item.js
+        // Placeholder values matching fallbacks in player.js (for robust initialization):
         HEALTH: 100,
         MANA: 50,
         STAMINA: 100,
         SPAWN_HEIGHT: 5
     },
     GAME: {
-        GRAVITY: 9.81, 
+        GRAVITY: 9.81, // Default gravity value to fix the warning and enable physics
     },
+    // NEW BLOCK: Custom Asset Paths
+    ASSETS: {
+        // This path is used for any asset that doesn't define its own custom 'path'
+        BASE_PATH: "/hosg/assets/models/", 
+        
+        CHARACTERS: {
+            knight: { 
+                model: 'Knight03.glb',
+                // CUSTOM PATH: This will override BASE_PATH for the knight model
+                path: '/hosg/assets/player/character/' 
+            },
+            wolf: {
+                model: 'Wolf.glb'
+                // Uses BASE_PATH
+            }
+        },
+        ENVIRONMENT: {
+            terrain_base: { model: 'TerrainBase.glb' },
+            tree_pine: { model: 'TreePine.glb' },
+            grass_tuft: { model: 'GrassTuft.glb' }
+        }
+    },
+    // === PATCH END ===
     
     WORLD: {
-        SKYBOX: {
-            // CRITICAL FIX: Path includes the /hosg/ subfolder prefix.
-            // REVERT: File extension is now .jpg as requested.
-            PATH: "/hosg/assets/sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg",
-            SIZE: 512,      
-            EXPOSURE: 0.6,
-            CONTRAST: 1.2,
-            LEVEL: 0.5      
-        },
-        
-        SPAWN_AREAS: [
-            // Your existing spawn area definitions will go here
-        ]
+        MAX_NPCS: 50,
+        CHUNK_SIZE: 16
+    },
+    NETWORK: {
+        // Placeholder for future network config
+        HOST: 'localhost',
+        PORT: 8080
+    },
+    COMBAT: {
+        RANGE_MELEE: 2,
+        ATTACK_COOLDOWN_MELEE: 1.0
     },
 
+    // === CHARACTER CLASSES AND BASE STATS ===
     CLASSES: {
         Fighter: { 
             model: 'knight', 
@@ -39,17 +62,17 @@ const CONFIG = {
                 maxHealth: 120, maxMana: 30, maxStamina: 100, 
                 attackPower: 15, magicPower: 5, moveSpeed: 0.15 
             }, 
-            defaultAbility: 'Basic Attack' 
+            defaultAbility: 'Basic Attack' // Ability name for the action bar
         },
         Rogue: { 
             model: 'knight', 
             stats: { 
                 maxHealth: 80, maxMana: 0, maxStamina: 120, 
-                attackPower: 18, magicPower: 0, moveSpeed: 0.18 
+                attackPower: 14, magicPower: 8, moveSpeed: 0.16 
             }, 
-            defaultAbility: 'Backstab'
+            defaultAbility: 'Backstab' 
         },
-        Wizard: { 
+        Mage: { 
             model: 'knight',
             stats: { 
                 maxHealth: 70, maxMana: 150, maxStamina: 80, 
@@ -85,19 +108,12 @@ const CONFIG = {
             model: 'knight',
             stats: { 
                 maxHealth: 110, maxMana: 50, maxStamina: 130, 
-                attackPower: 12, magicPower: 5, moveSpeed: 0.17 
+                attackPower: 12, magicPower: 8, moveSpeed: 0.17 
             }, 
-            defaultAbility: 'Fists of Fury'
-        },
-        Bard: { 
-            model: 'knight',
-            stats: { 
-                maxHealth: 95, maxMana: 90, maxStamina: 95, 
-                attackPower: 10, magicPower: 10, moveSpeed: 0.15 
-            }, 
-            defaultAbility: 'Inspire'
+            defaultAbility: 'Flurry'
         }
     }
 };
 
+// Ensure CONFIG is globally accessible
 window.CONFIG = CONFIG;
