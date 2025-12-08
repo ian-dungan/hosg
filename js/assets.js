@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.14 (CRITICAL TYPERROR FIX)
-// Fix: Added defensive checks (|| {}) to prevent crash when iterating over manifest properties.
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.16 (DEFINITIVE TYPERROR FIX)
+// Fix: Added explicit check for this.loader.tasks existence before reading its length.
 // ============================================================
 
 // ==================== ASSET MANIFEST ====================
@@ -9,6 +9,7 @@ const getManifestData = () => {
     if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
         return CONFIG.ASSETS;
     }
+    // Safe fallback structure
     return {
         BASE_PATH: "/hosg/assets/", 
         CHARACTERS: {},
@@ -34,7 +35,7 @@ class AssetManager {
     async loadAll() {
         console.log('[Assets] Starting asset load...');
 
-        // CRITICAL FIX: Use || {} to ensure we are iterating over an object, even if it's undefined in CONFIG.
+        // Defensive checks on the iteration object.
         const characters = MANIFEST_DATA.CHARACTERS || {}; 
         const environment = MANIFEST_DATA.ENVIRONMENT || {}; 
 
@@ -50,7 +51,8 @@ class AssetManager {
             this.loadModel(assetData, key, 'ENVIRONMENT');
         }
         
-        this.stats.requested = this.loader.tasks.length;
+        // CRITICAL FIX: Ensure this.loader.tasks is defined before accessing length.
+        this.stats.requested = (this.loader.tasks && this.loader.tasks.length) ? this.loader.tasks.length : 0;
 
         if (this.stats.requested === 0) {
             console.warn('[Assets] No assets defined to load.');
