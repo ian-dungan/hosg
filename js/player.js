@@ -1,17 +1,19 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.12 (PATCHED)
-// Fix: Added safe access checks for the global CONFIG object in the constructor 
-// to prevent "Cannot read properties of undefined" errors.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.23 (PATCHED)
+// Fix: Cleaned up constructor for robust CONFIG access.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
-        // Safely access CONFIG and create fallback objects
-        const isConfigLoaded = (typeof CONFIG !== 'undefined');
-        const playerConfig = isConfigLoaded ? CONFIG.PLAYER : {};
-        const combatConfig = isConfigLoaded ? CONFIG.COMBAT : {};
+        // Safe access to CONFIG properties using logical OR for fallbacks.
+        // It is critical that CONFIG is defined in core.js before this script loads.
+        // If CONFIG is not defined, it defaults to an empty object {} to avoid a crash.
+        const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
+        const playerConfig = C.PLAYER || {};
+        const combatConfig = C.COMBAT || {};
         
-        // Line 10 Fix: Safely get SPAWN_HEIGHT with a default of 5
+        // 1. Character constructor (Line 15 Fix)
+        // Defaults to 5 if CONFIG.PLAYER.SPAWN_HEIGHT is not available.
         const spawnHeight = playerConfig.SPAWN_HEIGHT || 5; 
         
         super(scene, new BABYLON.Vector3(0, spawnHeight, 0), 'Player');
@@ -19,15 +21,19 @@ class Player extends Character {
         this.isPlayer = true; 
         this.className = null; 
         
-        // Safely initialize stats
+        // 2. Safely initialize stats object using fallbacks
         this.stats = {
+            // Defaults to 100, 50, 100 if CONFIG is missing
             maxHealth: playerConfig.HEALTH || 100,
             maxMana: playerConfig.MANA || 50, 
             maxStamina: playerConfig.STAMINA || 100,
+            
             attackPower: 10,
             magicPower: 5,
+            
+            // Defaults to 0.15 and 1.8 if CONFIG is missing
             moveSpeed: playerConfig.MOVE_SPEED || 0.15,
-            runMultiplier: playerConfig.RUN_MULTIPLIER || 1.8
+            runMultiplier: playerConfig.RUN_MULTIPLIER || 1.8 
         };
         
         this.health = this.stats.maxHealth;
@@ -37,11 +43,10 @@ class Player extends Character {
         this.combat = {
             globalCooldown: 0,
             target: null,
-            // Fallback to 3.0 if CONFIG.COMBAT.BASE_ATTACK_RANGE is undefined
+            // Defaults to 3.0 if CONFIG.COMBAT is missing
             attackRange: combatConfig.BASE_ATTACK_RANGE || 3.0 
         };
         
-        // Inventory and Equipment constructors are assumed to handle their CONFIG access or use fallbacks.
         this.inventory = new Inventory(this); 
         this.equipment = new Equipment(this); 
         this.abilities = []; 
@@ -69,8 +74,17 @@ class Player extends Character {
      * @param {string} className - The name of the class (e.g., 'Fighter').
      */
     applyClass(className) {
-        // NOTE: CONFIG.CLASSES must be defined in core.js for this to work
-        const classConfig = CONFIG.CLASSES[className] || CONFIG.CLASSES.Fighter; // Default to Fighter
+        // This method assumes CONFIG is loaded, as it's called after template loading in loadGameData
+        const C = CONFIG || {};
+        const classConfig = C.CLASSES ? (C.CLASSES[className] || C.CLASSES.Fighter) : null; 
+        
+        // Use fallbacks if CONFIG.CLASSES is still missing
+        if (!classConfig) {
+             console.error("[Player] CONFIG.CLASSES not found. Cannot apply class.");
+             this.className = className;
+             return; 
+        }
+
         const stats = classConfig.stats;
         this.className = className;
 
@@ -82,7 +96,7 @@ class Player extends Character {
             attackPower: stats.attackPower,
             magicPower: stats.magicPower,
             moveSpeed: stats.moveSpeed,
-            runMultiplier: CONFIG.PLAYER.RUN_MULTIPLIER 
+            runMultiplier: C.PLAYER.RUN_MULTIPLIER // This is safe since this.stats already has fallbacks
         };
         
         if (this.health === 0) this.health = this.stats.maxHealth;
@@ -91,6 +105,7 @@ class Player extends Character {
         
         console.log(`[Player] Class set: ${this.className}. Base Health: ${this.stats.maxHealth}`);
         
+        // Load default abilities 
         this.abilities = []; 
         const defaultAbilityName = classConfig.defaultAbility; 
         const defaultAbilityTemplate = this.scene.game.skillTemplates.get(101); 
@@ -100,7 +115,7 @@ class Player extends Character {
         } else {
              // Fallback to a hardcoded basic attack
             this.abilities.push(new Ability({
-                id: 0, code: 'BASIC_ATTACK', name: defaultAbilityName, skill_type: 'combat',
+                id: 0, code: 'BASIC_ATTACK', name: defaultAbilityName || 'Basic Attack', skill_type: 'combat',
                 cooldown_ms: 1000, resource_cost: { mana: 0, stamina: 0 },
                 effect: { type: 'damage', base_value: 1, magic_scaling: 0.1, physical_scaling: 0.9 }
             }));
@@ -226,15 +241,22 @@ class Player extends Character {
     // --- Core Gameplay Methods ---
 
     canJump() {
-        // Use a safe check for the constant
-        const spawnHeight = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER.SPAWN_HEIGHT : 5;
+        // Use safe access with fallback
+        const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
+        const spawnHeight = (C.PLAYER && C.PLAYER.SPAWN_HEIGHT) || 5;
         return this.position.y <= spawnHeight + 0.1; 
     }
 
     handleMovement(deltaTime) {
         const speed = this.stats.moveSpeed * (this.input.run ? this.stats.runMultiplier : 1);
         const camera = this.scene.activeCamera;
-        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { IMPULSE_STRENGTH: 150, LINEAR_DAMPING: 0.3, JUMP_FORCE: 0.22 };
+        
+        // Define local CONFIG for movement constants with sensible fallbacks
+        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
+        const playerConfig = C.PLAYER || {};
+        const impulseStrength = playerConfig.IMPULSE_STRENGTH || 150;
+        const linearDamping = playerConfig.LINEAR_DAMPING || 0.3;
+        const jumpForce = playerConfig.JUMP_FORCE || 0.22;
         
         let moveVector = BABYLON.Vector3.Zero();
 
@@ -254,7 +276,7 @@ class Player extends Character {
         if (moveVector.lengthSquared() > 0) {
             moveVector.normalize();
             if (this.mesh.physicsImpostor) {
-                let velocity = moveVector.scale(speed * playerConfig.IMPULSE_STRENGTH * 10 * deltaTime);
+                let velocity = moveVector.scale(speed * impulseStrength * 10 * deltaTime);
                 let currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
                 
                 velocity.y = currentVelocity.y;
@@ -264,8 +286,8 @@ class Player extends Character {
         } else {
             if (this.mesh.physicsImpostor) {
                 let currentVelocity = this.mesh.physicsImpostor.getLinearVelocity();
-                currentVelocity.x *= (1 - playerConfig.LINEAR_DAMPING);
-                currentVelocity.z *= (1 - playerConfig.LINEAR_DAMPING);
+                currentVelocity.x *= (1 - linearDamping);
+                currentVelocity.z *= (1 - linearDamping);
                 this.mesh.physicsImpostor.setLinearVelocity(currentVelocity);
             }
         }
@@ -274,7 +296,7 @@ class Player extends Character {
             if (this.canJump()) {
                 if (this.mesh.physicsImpostor) {
                     this.mesh.physicsImpostor.applyImpulse(
-                        new BABYLON.Vector3(0, playerConfig.JUMP_FORCE * playerConfig.IMPULSE_STRENGTH, 0),
+                        new BABYLON.Vector3(0, jumpForce * impulseStrength, 0),
                         this.mesh.getAbsolutePosition()
                     );
                 }
@@ -286,7 +308,9 @@ class Player extends Character {
     handleRotation() {
         const camera = this.scene.activeCamera;
         if (!camera || !this.visualRoot) return;
-        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { ROTATION_LERP: 0.2 };
+        
+        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
+        const rotationLerp = (C.PLAYER && C.PLAYER.ROTATION_LERP) || 0.2;
 
         const forwardVector = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
         
@@ -298,7 +322,7 @@ class Player extends Character {
         if (delta > Math.PI) delta -= 2 * Math.PI;
         if (delta < -Math.PI) delta += 2 * Math.PI;
 
-        this.visualRoot.rotation.y = currentRotationY + delta * playerConfig.ROTATION_LERP;
+        this.visualRoot.rotation.y = currentRotationY + delta * rotationLerp;
     }
 
     selectTarget(mesh) {
@@ -315,7 +339,8 @@ class Player extends Character {
     }
 
     useAbility(ability, target) {
-        const combatConfig = (typeof CONFIG !== 'undefined' && CONFIG.COMBAT) ? CONFIG.COMBAT : { GLOBAL_COOLDOWN: 1000 };
+        const C = typeof CONFIG === 'undefined' ? { COMBAT: {} } : CONFIG;
+        const globalCooldown = (C.COMBAT && C.COMBAT.GLOBAL_COOLDOWN) || 1000;
         
         if (this.combat.globalCooldown > 0) {
             this.scene.game.ui.showMessage('Ability on global cooldown.', 1000, 'error');
@@ -323,7 +348,7 @@ class Player extends Character {
         }
 
         if (ability.execute(this, target)) {
-            this.combat.globalCooldown = combatConfig.GLOBAL_COOLDOWN / 1000;
+            this.combat.globalCooldown = globalCooldown / 1000;
             return true;
         }
         return false;
@@ -406,11 +431,13 @@ class Player extends Character {
             }
         }
 
-        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { MANA_REGEN_RATE: 0.005, STAMINA_REGEN_RATE: 0.01 };
+        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
+        const manaRegenRate = (C.PLAYER && C.PLAYER.MANA_REGEN_RATE) || 0.005;
+        const staminaRegenRate = (C.PLAYER && C.PLAYER.STAMINA_REGEN_RATE) || 0.01;
         
         // Regen
-        this.mana = Math.min(this.stats.maxMana, this.mana + this.stats.maxMana * playerConfig.MANA_REGEN_RATE * deltaTime);
-        this.stamina = Math.min(this.stats.maxStamina, this.stamina + this.stats.maxStamina * playerConfig.STAMINA_REGEN_RATE * deltaTime);
+        this.mana = Math.min(this.stats.maxMana, this.mana + this.stats.maxMana * manaRegenRate * deltaTime);
+        this.stamina = Math.min(this.stats.maxStamina, this.stamina + this.stats.maxStamina * staminaRegenRate * deltaTime);
     }
     
     // --- Babylon.js Specific Initializers ---
@@ -428,15 +455,17 @@ class Player extends Character {
         this.mesh.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5); 
         this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0); 
         
-        const playerConfig = (typeof CONFIG !== 'undefined' && CONFIG.PLAYER) ? CONFIG.PLAYER : { MASS: 15, FRICTION: 0.2 };
+        const C = typeof CONFIG === 'undefined' ? { PLAYER: {} } : CONFIG;
+        const mass = (C.PLAYER && C.PLAYER.MASS) || 15;
+        const friction = (C.PLAYER && C.PLAYER.FRICTION) || 0.2;
         
         if (typeof CANNON !== "undefined" && this.scene.getPhysicsEngine()) {
             this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                 this.mesh, 
                 BABYLON.PhysicsImpostor.SphereImpostor, 
                 { 
-                    mass: playerConfig.MASS, 
-                    friction: playerConfig.FRICTION, 
+                    mass: mass, 
+                    friction: friction, 
                     restitution: 0.1 
                 }, 
                 this.scene
