@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.22 (SYNTAX FIX)
-// Fix: Removed trailing backslash in Cleric class definition.
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.23 (WORLD CONFIG FIX)
+// Fix: Added missing WORLD configuration block.
 // ============================================================
 
 const CONFIG = {
@@ -13,6 +13,18 @@ const CONFIG = {
     },
     GAME: {
         GRAVITY: 9.81, 
+    },
+    WORLD: { // <--- NEW: Added missing WORLD config to prevent warnings
+        SKYBOX: {
+            PATH: null, // Keep null to skip creation by default
+            SIZE: 512,
+            EXPOSURE: 0.6,
+            CONTRAST: 1.2,
+            LEVEL: 0.5
+        },
+        SPAWNS: [
+            // Placeholder for future NPC spawn data
+        ]
     },
     ASSETS: {
         // Now points to the top-level assets folder as requested
@@ -48,35 +60,24 @@ const CONFIG = {
             }
         }
     },
-    
-    WORLD: {
-        MAX_NPCS: 50,
-        CHUNK_SIZE: 16
-    },
-    NETWORK: {
-        HOST: 'localhost',
-        PORT: 8080
-    },
     COMBAT: {
-        RANGE_MELEE: 2,
-        ATTACK_COOLDOWN_MELEE: 1.0
+        RANGE_MELEE: 2.0,
+        ATTACK_COOLDOWN_MELEE: 1.0, // 1 second
     },
-
-    // === CHARACTER CLASSES AND BASE STATS ===
     CLASSES: {
-        Fighter: { 
-            model: 'knight', 
+        Warrior: { 
+            model: 'knight',
             stats: { 
-                maxHealth: 120, maxMana: 30, maxStamina: 100, 
+                maxHealth: 120, maxMana: 30, maxStamina: 120, 
                 attackPower: 15, magicPower: 5, moveSpeed: 0.15 
             }, 
-            defaultAbility: 'Basic Attack'
+            defaultAbility: 'Cleave' 
         },
         Rogue: { 
-            model: 'knight', 
+            model: 'knight',
             stats: { 
-                maxHealth: 80, maxMana: 0, maxStamina: 120, 
-                attackPower: 14, magicPower: 8, moveSpeed: 0.16 
+                maxHealth: 90, maxMana: 40, maxStamina: 130, 
+                attackPower: 12, magicPower: 8, moveSpeed: 0.16 
             }, 
             defaultAbility: 'Backstab' 
         },
@@ -89,7 +90,7 @@ const CONFIG = {
             defaultAbility: 'Fireball' 
         },
         Cleric: { 
-            model: 'knight', // <-- Backslash removed here
+            model: 'knight', 
             stats: { 
                 maxHealth: 100, maxMana: 100, maxStamina: 90, 
                 attackPower: 10, magicPower: 12, moveSpeed: 0.15 
@@ -112,16 +113,7 @@ const CONFIG = {
             }, 
             defaultAbility: 'Shadow Bolt'
         },
-        Monk: { 
-            model: 'knight',
-            stats: { 
-                maxHealth: 110, maxMana: 50, maxStamina: 130, 
-                attackPower: 12, magicPower: 8, moveSpeed: 0.17 
-            }, 
-            defaultAbility: 'Flurry'
-        }
     }
 };
 
-// Ensure CONFIG is globally accessible
 window.CONFIG = CONFIG;
