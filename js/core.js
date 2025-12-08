@@ -56,12 +56,6 @@ const CONFIG = {
                 // Use relative path to the repository root
                 path: 'assets/enemies/'
             }
-        },
-        ENVIRONMENT: {
-            terrain_base: { 
-                model: 'terrain_base.glb', // Model for the grass terrain
-                path: 'assets/environment/' 
-            }
         }
     },
     COMBAT: {
@@ -79,37 +73,51 @@ const CONFIG = {
             }, 
             defaultAbility: 'Cleave' 
         },
-        Rogue: { 
-            model: 'knight',
-            stats: { 
-                maxHealth: 90, maxMana: 40, maxStamina: 130, 
-                attackPower: 12, magicPower: 8, moveSpeed: 0.16 
-            }, 
-            defaultAbility: 'Backstab' 
-        },
-        Mage: { 
-            model: 'knight',
-            stats: { 
-                maxHealth: 70, maxMana: 150, maxStamina: 80, 
-                attackPower: 5, magicPower: 20, moveSpeed: 0.14 
-            }, 
-            defaultAbility: 'Fireball' 
-        },
-        Cleric: { 
-            model: 'knight', 
-            stats: { 
-                maxHealth: 100, maxMana: 100, maxStamina: 90, 
-                attackPower: 10, magicPower: 12, moveSpeed: 0.15 
-            }, 
-            defaultAbility: 'Heal'
-        },
-        Ranger: { 
-            model: 'knight',
-            stats: { 
-                maxHealth: 90, maxMana: 50, maxStamina: 110, 
-                attackPower: 14, magicPower: 8, moveSpeed: 0.15
-            }, 
-            defaultAbility: 'Shoot'
+        // No environment meshes are currently available in the repository.
+        // Keep the object for future expansion but leave it empty to avoid 404s.
+        ENVIRONMENT: {},
+
+        CLASSES: { 
+            Warrior: { 
+                model: 'knight', // Asset key name
+                stats: { 
+                    maxHealth: 120, maxMana: 50, maxStamina: 120, 
+                    attackPower: 15, magicPower: 5, moveSpeed: 0.15 
+                }, 
+                defaultAbility: 'Cleave' 
+            },
+            Rogue: { 
+                model: 'knight',
+                stats: { 
+                    maxHealth: 90, maxMana: 40, maxStamina: 130, 
+                    attackPower: 12, magicPower: 8, moveSpeed: 0.16 
+                }, 
+                defaultAbility: 'Backstab' 
+            },
+            Mage: { 
+                model: 'knight',
+                stats: { 
+                    maxHealth: 70, maxMana: 150, maxStamina: 80, 
+                    attackPower: 5, magicPower: 20, moveSpeed: 0.14 
+                }, 
+                defaultAbility: 'Fireball' 
+            },
+            Cleric: { 
+                model: 'knight', 
+                stats: { 
+                    maxHealth: 100, maxMana: 100, maxStamina: 90, 
+                    attackPower: 10, magicPower: 12, moveSpeed: 0.15 
+                }, 
+                defaultAbility: 'Heal'
+            },
+            Ranger: { 
+                model: 'knight',
+                stats: { 
+                    maxHealth: 90, maxMana: 50, maxStamina: 110, 
+                    attackPower: 14, magicPower: 8, moveSpeed: 0.15 
+                }, 
+                defaultAbility: 'Shoot'
+            }
         }
     }
 };

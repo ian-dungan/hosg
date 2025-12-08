@@ -227,7 +227,9 @@ class Player extends Character {
     // --- Class & Stats ---
 
     applyClass(className) {
-        const classConfig = CONFIG.ASSETS.CLASSES[className];
+        const classConfig = CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
+            ? CONFIG.ASSETS.CLASSES[className]
+            : null;
 
         if (classConfig) {
             this.className = className;
