@@ -305,24 +305,24 @@ class Player extends Character {
         }
     }
 
-    // Provide a minimal on-file fallback so the player can still spawn even when
-    // CONFIG.ASSETS.CLASSES is unavailable (e.g., if a previous script failed).
-    _getFallbackClassConfig(className) {
-        if (className !== 'Warrior') return null;
+        // Provide a minimal on-file fallback so the player can still spawn even when
+        // CONFIG.ASSETS.CLASSES is unavailable (e.g., if a previous script failed).
+        _getFallbackClassConfig(className) {
+            if (className !== 'Warrior') return null;
 
-        return {
-            model: 'knight',
-            stats: {
-                maxHealth: 100,
-                maxMana: 50,
-                maxStamina: 100,
-                attackPower: 10,
-                magicPower: 5,
-                moveSpeed: 0.15
-            },
-            defaultAbility: null
-        };
-    }
+            return {
+                model: 'knight',
+                stats: {
+                    maxHealth: 100,
+                    maxMana: 50,
+                    maxStamina: 100,
+                    attackPower: 10,
+                    magicPower: 5,
+                    moveSpeed: 0.15
+                },
+                defaultAbility: 'Cleave'
+            };
+        }
 
     // --- Cleanup/Utility ---
     _initTargetHighlight() {

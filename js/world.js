@@ -256,21 +256,22 @@ World.prototype.spawnUpdate = function(deltaTime) {
         // 2. Setup PBR Environment using pre-filtered data (.env)
         // Prefer a prefiltered environment map if available. Use a reliable CDN fallback
         // to avoid 404s when the local file is missing.
-        const environmentSource = `${CONFIG.ASSETS.BASE_PATH}textures/environment/ibl/room.env`;
+        const environmentSource = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
 
-        // Rebuild the block to rule out any hidden characters that were causing
-        // syntax errors in some browsers. Keep the logic equivalent.
+        // Older browsers reported a stray syntax error inside this block. Rebuild it using
+        // only classic functions/strings to avoid any parsing surprises.
         let hdrTexture = null;
-        const createTexture = source => BABYLON.CubeTexture.CreateFromPrefilteredData(source, this.scene);
-
         try {
-            hdrTexture = createTexture(environmentSource);
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
         } catch (err) {
             console.warn(
-                `[World] Failed to load environment map from ${environmentSource}. Using Babylon fallback.`,
+                "[World] Failed to load environment map from " + environmentSource + ". Using Babylon fallback.",
                 err
             );
-            hdrTexture = createTexture("https://assets.babylonjs.com/environments/environmentSpecular.env");
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+                "https://assets.babylonjs.com/environments/environmentSpecular.env",
+                this.scene
+            );
         }
 
         this.scene.environmentTexture = hdrTexture;
