@@ -1,7 +1,8 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.32 (CRITICAL INIT FIX)
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.33 (NPC TEMPLATE ADDED)
 // Fix: Moved _init logic directly into the constructor to resolve a TypeError
 //      where the prototype method was not fully registered before being called.
+// New: Added Wolf NPC template for World spawning.
 // ============================================================
 
 //
@@ -10,8 +11,6 @@
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
-    
-    // Line 12 FIX: _init logic is now defined directly here.
     
     // 1. DEFINE YOUR CONNECTION VARIABLES
     const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
@@ -22,19 +21,17 @@ function SupabaseService(config) {
         this.client = supabase.createClient(supabaseUrl, supabaseKey);
         console.log("[Network] Supabase client initialized.");
     } else {
-        // This suggests an issue with the <script> tag in your HTML.
         console.error("[Network] Supabase client library not found. Check your HTML imports.");
     }
 }
 
-// NOTE: All previous prototype definitions for _init have been removed 
-// as the logic is now in the constructor. Other methods remain attached to the prototype.
+// NOTE: Placeholder implementations for Supabase methods
+SupabaseService.prototype.authenticate = async function (email, password) { /* ... implementation ... */ return { session: { access_token: 'fake_token' }, user: { id: 'fake_id' } }; };
+SupabaseService.prototype.fetchCharacterId = async function (userId) { /* ... implementation ... */ return 1; };
+SupabaseService.prototype.fetchCharacterState = async function (characterId) { /* ... implementation ... */ return { position: { x: 0, y: 5, z: 0 }, health: 100, mana: 50, stamina: 100, inventory: [], equipment: [] }; };
+SupabaseService.prototype.createCharacterState = async function (userId, data) { /* ... implementation ... */ return { id: 1, ...data }; };
+SupabaseService.prototype.saveCharacterState = async function (characterId, data) { /* ... implementation ... */ return true; };
 
-// SupabaseService.prototype.authenticate = ...
-// SupabaseService.prototype.fetchCharacterId = ...
-// SupabaseService.prototype.fetchCharacterState = ...
-// SupabaseService.prototype.createCharacterState = ...
-// SupabaseService.prototype.saveCharacterState = ...
 
 var supabaseService = new SupabaseService();
 
@@ -70,8 +67,26 @@ NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcM
         // Placeholder for other abilities (Fireball, Heal, etc.)
     ];
 
+    // --- Simulated NPC Templates (NEW) ---
+    const NPC_TEMPLATES = [
+        {
+            id: 'Wolf', 
+            name: 'Wolf',
+            model: 'wolf', // Asset key name from CONFIG.ASSETS.CHARACTERS
+            level: 1,
+            stats: {
+                maxHealth: 30,
+                attackPower: 5,
+                moveSpeed: 0.18,
+            },
+            defaultAbility: 'Bite', // Placeholder for a default ability
+            loot: [ /* ... loot table data ... */ ],
+        }
+    ];
+
     // --- Populate Maps ---
     SKILL_TEMPLATES.forEach(t => skillMap.set(t.id, t));
+    NPC_TEMPLATES.forEach(t => npcMap.set(t.id, t)); // CRITICAL: Populate the NPC map
 
     console.log('[Network] Templates loaded (Simulated/Supabase).');
     return true; 
