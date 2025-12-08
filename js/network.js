@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.26 (USERNAME ONLY)
-// Fix: Modified createAccount to only accept 'username' and automatically
-//      generate placeholders for the required 'email' and 'password_hash' columns.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.27 (FINAL FIX)
+// Fix: Changed 'account_id' to 'user_id' in hosg_characters insertion
+//      to match the provided database schema.
 // ============================================================
 
 //
@@ -54,7 +54,6 @@ function simpleHash(input) {
     if (!input) return 'NO_INPUT_SUPPLIED';
     // Use the username to generate a simulated hash.
     // NOTE: This is a PLACEHOLDER for satisfying the database constraint. 
-    // Do not use this method in production for real authentication!
     return `HASHED_TEST_${input}_${input.length}chars`;
 }
 
@@ -82,15 +81,15 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
     }
 };
 
-SupabaseService.prototype.createAccount = async function (accountName) { // <-- Only accepts username
+SupabaseService.prototype.createAccount = async function (accountName) {
     const existingAccountResult = await this.getAccountByName(accountName);
     if (!existingAccountResult.success || existingAccountResult.account) {
         return { success: false, error: existingAccountResult.error || `Account with name '${accountName}' already exists.` };
     }
 
     // Generate placeholder values to satisfy database constraints
-    const placeholderEmail = `${accountName}@placeholder.com`; // <-- Placeholder email
-    const hashedPassword = simpleHash(accountName); // <-- Placeholder hash based on username
+    const placeholderEmail = `${accountName}@placeholder.com`; 
+    const hashedPassword = simpleHash(accountName); 
 
     try {
         const { data, error } = await this.client
@@ -98,8 +97,8 @@ SupabaseService.prototype.createAccount = async function (accountName) { // <-- 
             .insert([
                 { 
                     username: accountName, 
-                    email: placeholderEmail, // <-- Insert placeholder email
-                    password_hash: hashedPassword // <-- Insert placeholder hash
+                    email: placeholderEmail, 
+                    password_hash: hashedPassword 
                 }
             ])
             .select()
@@ -147,7 +146,7 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
 
     try {
         const defaultState = {
-            account_id: accountId,
+            user_id: accountId, // <-- FIX: Changed 'account_id' to 'user_id'
             name: characterName,
             class_name: className, 
             
@@ -182,8 +181,9 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
         
         return { success: true, characterId: data.id };
     } catch (error) {
-        console.error('[Supabase] Failed to create character:', error.message);
-        return { success: false, error: error.message };
+        // The error about 'account_id' not found in schema cache indicates a column name problem.
+        console.error('[Supabase] Failed to create character: ' + (error.message || error));
+        return { success: false, error: error.message || String(error) };
     }
 };
 
