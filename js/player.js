@@ -1,19 +1,18 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.24 (PATCHED)
-// Fix: Added safe check for setAngularFactor in _initCollision to prevent crash.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.24 (FINAL PATCH)
+// Fix: 1. Corrected SyntaxError (Unexpected end of input).
+// Fix: 2. Added safe check for setAngularFactor in _initCollision.
 // ============================================================
 
 class Player extends Character {
     constructor(scene) {
         // Safe access to CONFIG properties using logical OR for fallbacks.
         // It is critical that CONFIG is defined in core.js before this script loads.
-        // If CONFIG is not defined, it defaults to an empty object {} to avoid a crash.
         const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
         const playerConfig = C.PLAYER || {};
         const combatConfig = C.COMBAT || {};
         
-        // 1. Character constructor (Line 15 Fix)
-        // Defaults to 5 if CONFIG.PLAYER.SPAWN_HEIGHT is not available.
+        // 1. Character constructor
         const spawnHeight = playerConfig.SPAWN_HEIGHT || 5; 
         
         super(scene, new BABYLON.Vector3(0, spawnHeight, 0), 'Player');
@@ -23,7 +22,6 @@ class Player extends Character {
         
         // 2. Safely initialize stats object using fallbacks
         this.stats = {
-            // Defaults to 100, 50, 100 if CONFIG is missing
             maxHealth: playerConfig.HEALTH || 100,
             maxMana: playerConfig.MANA || 50, 
             maxStamina: playerConfig.STAMINA || 100,
@@ -31,7 +29,6 @@ class Player extends Character {
             attackPower: 10,
             magicPower: 5,
             
-            // Defaults to 0.15 if CONFIG is missing
             moveSpeed: playerConfig.MOVE_SPEED || 0.15, 
 
             // Combat stats
@@ -53,7 +50,7 @@ class Player extends Character {
         this.isSprinting = false;
         this.keys = {}; // Current state of pressed keys
         
-        // Initialize Inventory and Equipment (depends on CONFIG.PLAYER.INVENTORY_SIZE, which is now fixed in core.js)
+        // Initialize Inventory and Equipment
         this.inventory = new Inventory(this);
         this.equipment = new Equipment();
         
@@ -352,7 +349,6 @@ class Player extends Character {
         }
         
         // Load Inventory and Equipment
-        // We assume templates are a Map<templateId, templateObject>
         this.inventory.load(data.inventory, templates.itemTemplates);
         this.equipment.load(data.equipment, templates.itemTemplates);
         
@@ -443,4 +439,15 @@ class Player extends Character {
         };
         
         // Disable default browser context menu on right-click
-        this.scene.getEngine().get<ctrl63>
+        this.scene.getEngine().get
+    }
+
+    _initCamera() {
+        // Use a standard FollowCamera
+        this.camera = new BABYLON.FollowCamera("PlayerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
+        this.camera.radius = 15; // Distance from the target
+        this.camera.heightOffset = 4; // Height above the target
+        this.camera.rotationOffset = 180; // Angle around the target
+        this.camera.cameraAcceleration = 0.05;
+        this.camera.maxSpeed = 10;
+        this.camera.attachControl(this.scene.getEngine().get</ctrl63>
