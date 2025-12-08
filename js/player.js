@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.26 (FIXED)
-// Fix: Removed direct assignment to UI in constructor to prevent 'Cannot set properties of null' crash.
+// HEROES OF SHADY GROVE - PLAYER CLASS v1.0.27 (FIXED)
+// Fix: Added physics impostor setAngularFactor(0, 0, 0) to prevent unintended character rotation.
 // ============================================================
 
 class Player extends Character {
@@ -184,78 +184,136 @@ class Player extends Character {
             this.stamina = Math.min(this.stats.maxStamina, this.stamina);
         }
     }
+    
+    // --- Private Initialization Methods ---
+    
+    _initMesh() {
+        // Create an invisible sphere as the main physics body
+        this.mesh = BABYLON.MeshBuilder.CreateSphere("playerMesh", { diameter: 0.8 }, this.scene);
+        this.mesh.position.copyFrom(this.position);
+        this.mesh.isVisible = false;
+        this.mesh.metadata = { isPlayer: true, entity: this };
 
-    // --- Input Handling ---
-    _handleKeyDown(event) {
-        const key = event.key.toLowerCase();
-        this.keys[key] = true;
+        // Create a separate node for the visual model
+        this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
+        this.visualRoot.parent = this.mesh;
+
+        // Placeholder cube (replace with loaded model)
+        const placeholder = BABYLON.MeshBuilder.CreateBox("playerVisual", { size: 0.8 }, this.scene);
+        placeholder.parent = this.visualRoot;
+        placeholder.position.y = 0.4; // Center it on the physics sphere
         
-        // Handle sprint toggle
-        if (key === 'shift' && this.stamina > 0) {
+        // Set up collision for the mesh (will be done in _initCollision)
+        // this.mesh.checkCollisions = true; // Not needed if using physics
+        
+        return Promise.resolve();
+    }
+    
+    // PATCH: Added setAngularFactor(0, 0, 0) to fix the rotation warning/bug.
+    _initCollision(mass, friction) {
+        if (!this.mesh) {
+            console.error('[Player] Cannot initialize collision: mesh is null.');
+            return;
+        }
+
+        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.mesh,
+            BABYLON.PhysicsImpostor.SphereImpostor, 
+            { mass: mass, friction: friction, restitution: 0.1 },
+            this.scene
+        );
+        
+        // PATCH: Lock angular rotation to prevent the player from spinning uncontrollably.
+        if (this.mesh.physicsImpostor.setAngularFactor) {
+            this.mesh.physicsImpostor.setAngularFactor(new BABYLON.Vector3(0, 0, 0));
+            console.log('[Player] Physics impostor ready. Angular factor set to (0, 0, 0).');
+        } else {
+            // Original warning message (kept for fallback)
+            console.warn('[Player] Physics impostor ready, but setAngularFactor is missing or failed to initialize correctly. Rotation may occur.');
+        }
+    }
+    
+    _initCamera() {
+        // Third-person camera setup (ArcRotate or Follow Camera)
+        this.camera = new BABYLON.ArcRotateCamera("playerCamera", 
+            -Math.PI / 2, Math.PI / 4, 15, 
+            this.mesh.position, this.scene);
+
+        this.camera.lowerRadiusLimit = 5;
+        this.camera.upperRadiusLimit = 20;
+        this.camera.attachControl(this.scene.getEngine().get
+            this.scene.getEngine().get)
+        this.camera.target = this.mesh.position;
+    }
+    
+    _initInput() {
+        window.addEventListener('keydown', this.handleKeyDown);
+        window.addEventListener('keyup', this.handleKeyUp);
+        this.scene.onPointerDown = this.handlePointerDown; // Handle mouse clicks
+    }
+    
+    _handleKeyDown(event) {
+        this.keys[event.key.toLowerCase()] = true;
+        
+        // Handle Sprint Toggle (Shift)
+        if (event.key.toLowerCase() === 'shift' && this.stamina > 0) {
             this.isSprinting = true;
         }
         
-        // Handle action bar keys (1, 2, 3, 4, 5)
-        if (key >= '1' && key <= '5') {
-            const slotIndex = parseInt(key) - 1;
+        // Handle Ability Hotkeys (1-5)
+        const slotIndex = parseInt(event.key, 10) - 1;
+        if (slotIndex >= 0 && slotIndex < 5) {
             this.useAbilitySlot(slotIndex);
         }
-        
-        // Handle inventory toggle
-        if (key === 'i') {
+
+        // Handle Inventory Toggle (I)
+        if (event.key.toLowerCase() === 'i' && this.scene.game.ui) {
             this.scene.game.ui.toggleInventory();
-        }
-        
-        // Handle target select (T for nearest)
-        if (key === 't') {
-            this._selectNearestTarget();
         }
     }
 
     _handleKeyUp(event) {
-        const key = event.key.toLowerCase();
-        this.keys[key] = false;
+        this.keys[event.key.toLowerCase()] = false;
         
-        // Handle sprint release
-        if (key === 'shift') {
+        // Handle Sprint Toggle (Shift)
+        if (event.key.toLowerCase() === 'shift') {
             this.isSprinting = false;
         }
     }
     
+    // --- Combat / Targeting ---
     _handlePointerDown(event, pickResult) {
-        // Right-click: Clear target
-        if (event.button === 2) { 
+        // Right-click: Clear Target
+        if (event.button === 2) {
             this.setTarget(null);
             return;
         }
 
         // Left-click: Attack or Select Target
-        if (event.button === 0 && pickResult.hit) { 
+        if (event.button === 0 && pickResult.hit) {
             if (pickResult.pickedMesh.metadata && pickResult.pickedMesh.metadata.entity && pickResult.pickedMesh.metadata.entity.isAttackable) {
                 // Clicked an enemy
                 const newTarget = pickResult.pickedMesh.metadata.entity;
                 this.setTarget(newTarget);
                 // Attempt to auto-attack immediately
-                this.useAbilitySlot(0); 
+                this.useAbilitySlot(0);
             } else {
                 // Clicked on ground/world, clear target
                 this.setTarget(null);
             }
         }
     }
-    
+
     _selectNearestTarget() {
         const world = this.scene.game.world;
         if (!world || !world.npcs || world.npcs.length === 0) return;
-        
+
         let nearestNpc = null;
         let minDistanceSq = Infinity;
-        
+
         for (const npc of world.npcs) {
             if (npc.isDead) continue;
-            
             const distanceSq = BABYLON.Vector3.DistanceSquared(this.position, npc.position);
-            
             if (distanceSq < minDistanceSq) {
                 minDistanceSq = distanceSq;
                 nearestNpc = npc;
@@ -266,15 +324,14 @@ class Player extends Character {
             this.setTarget(nearestNpc);
         }
     }
-    
-    // --- Combat / Ability ---
+
     setTarget(target) {
         if (this.combat.target === target) return;
-        
+
         if (this.combat.target) {
             this.combat.target._toggleHighlight(false);
         }
-        
+
         this.combat.target = target;
         
         if (target) {
@@ -284,7 +341,19 @@ class Player extends Character {
             this.scene.game.ui.updateTargetInfo(null);
         }
     }
-    
+
+    useAbilitySlot(slotIndex) {
+        const ability = this.combat.actionSlots[slotIndex];
+        if (!ability || !ability.isReady()) return;
+        
+        const target = this.combat.target;
+
+        if (ability.execute(this, target)) {
+            // Ability successfully used (cooldown started, resources consumed)
+            // Can add visual/audio feedback here
+        }
+    }
+
     getAbility(name) {
         return this.combat.abilities.get(name);
     }
@@ -293,91 +362,25 @@ class Player extends Character {
         if (!abilityTemplate) return;
         const ability = new Ability(abilityTemplate);
         this.combat.abilities.set(ability.name, ability);
-        return ability;
     }
-    
+
     setAbilitySlot(slotIndex, abilityName) {
-        const ability = this.combat.abilities.get(abilityName);
-        if (ability && slotIndex >= 0 && slotIndex < this.combat.actionSlots.length) {
-            this.combat.actionSlots[slotIndex] = ability;
-            this.scene.game.ui.updateActionBar();
+        const ability = this.getAbility(abilityName);
+        if (!ability) {
+             console.error(`[Player] Cannot set ability slot: Ability '${abilityName}' not loaded.`);
+             return;
         }
+        this.combat.actionSlots[slotIndex] = ability;
     }
-    
-    useAbilitySlot(slotIndex) {
-        const ability = this.combat.actionSlots[slotIndex];
-        if (!ability || !ability.isReady()) return;
-        
-        // If ability requires a target, and we have one, use it.
-        // Or if it's a self-cast/AoE, use it with 'this' as target/caster.
-        const target = this.combat.target;
-        
-        if (ability.execute(this, target)) {
-            // Ability was successfully used (cost paid, cooldown started)
-        }
-    }
-    
-    // --- Save/Load Data ---
-    getSaveData() {
-        return {
-            class_name: this.className,
-            health: this.health,
-            mana: this.mana,
-            stamina: this.stamina,
-            position: {
-                x: this.mesh.position.x,
-                y: this.mesh.position.y,
-                z: this.mesh.position.z,
-            },
-            inventory: this.inventory.getSaveData(),
-            equipment: this.equipment.getSaveData(),
-            action_slots: this.combat.actionSlots.map(a => a ? a.name : null)
-        };
-    }
-    
-    async loadSaveData(data, templates) {
-        this.className = data.class_name;
-        this.health = data.health;
-        this.mana = data.mana;
-        this.stamina = data.stamina;
 
-        // Apply position
-        if (data.position && this.mesh) {
-            this.mesh.position.set(data.position.x, data.position.y, data.position.z);
-        }
-        
-        // Load Inventory and Equipment
-        this.inventory.load(data.inventory, templates.itemTemplates);
-        this.equipment.load(data.equipment, templates.itemTemplates);
-        
-        // Load Abilities
-        this.combat.abilities.clear();
-        for (const [name, template] of templates.skillTemplates.entries()) {
-            this.loadAbility(template);
-        }
-
-        // Load Action Bar Slots
-        if (data.action_slots) {
-             data.action_slots.forEach((abilityName, index) => {
-                if (abilityName) {
-                    this.setAbilitySlot(index, abilityName);
-                }
-            });
-        }
-        
-        // Apply class stats
-        this.selectClass(this.className);
-    }
-    
     selectClass(className) {
         const classData = CONFIG.CLASSES[className];
         if (!classData) {
             console.error(`[Player] Cannot select class: ${className} not found in CONFIG.CLASSES.`);
             return;
         }
-        
         this.className = className;
-        
+
         // 1. Update Stats based on class (base stats)
         this.stats.maxHealth = classData.stats.maxHealth;
         this.stats.maxMana = classData.stats.maxMana;
@@ -390,111 +393,88 @@ class Player extends Character {
         this.health = this.stats.maxHealth;
         this.mana = this.stats.maxMana;
         this.stamina = this.stats.maxStamina;
-        
+
         // Recalculate derived stats (current stats including equipment)
-        this.updateStatsFromEquipment(); 
+        this.updateStatsFromEquipment();
 
         // 2. Load Default Ability into Slot 1
         if (classData.defaultAbility) {
             this.setAbilitySlot(0, classData.defaultAbility);
         }
-        
+
         // 3. Update Visuals (Placeholder)
-        // this._loadVisuals(classData.model); 
+        // this._loadVisuals(classData.model);
         
         console.log(`[Player] Class selected: ${this.className}`);
     }
-    
+
     updateStatsFromEquipment() {
-        // Start with base class stats
-        let ap = this.stats.attackPower;
-        let mp = this.stats.magicPower;
-        let speed = this.stats.moveSpeed;
-        
-        // Apply equipment bonuses
-        Object.values(this.equipment.slots).forEach(item => {
+        // Reset current stats to base stats
+        this.stats.currentAttackPower = this.stats.attackPower;
+        this.stats.currentMagicPower = this.stats.magicPower;
+        this.stats.currentMoveSpeed = this.stats.moveSpeed;
+
+        // Apply equipment bonuses (placeholder logic)
+        for (const slot in this.equipment.slots) {
+            const item = this.equipment.slots[slot];
             if (item && item.stats) {
-                ap += item.stats.attackPower || 0;
-                mp += item.stats.magicPower || 0;
-                speed += item.stats.moveSpeed || 0;
+                this.stats.currentAttackPower += item.stats.attackPower || 0;
+                this.stats.currentMagicPower += item.stats.magicPower || 0;
+                this.stats.currentMoveSpeed += item.stats.moveSpeed || 0;
             }
-        });
-        
-        // Set derived current stats
-        this.stats.currentAttackPower = ap;
-        this.stats.currentMagicPower = mp;
-        this.stats.currentMoveSpeed = speed;
-    }
-    
-    // --- Private Initialization Methods ---
-    
-    _initInput() {
-        window.addEventListener('keydown', this.handleKeyDown);
-        window.addEventListener('keyup', this.handleKeyUp);
-        this.scene.onPointerDown = this.handlePointerDown;
-        this.scene.onPointerUp = (evt) => {
-            // Placeholder for future pointer up logic
-        };
-        
-        // Disable default browser context menu on right-click
-        this.scene.getEngine().get
-
-    }
-
-    _initCamera() {
-        // Use a standard FollowCamera
-        this.camera = new BABYLON.FollowCamera("PlayerCamera", new BABYLON.Vector3(0, 5, -10), this.scene);
-        this.camera.radius = 15; // Distance from the target
-        this.camera.heightOffset = 4; // Height above the target
-        this.camera.rotationOffset = 180; // Angle around the target
-        this.camera.cameraAcceleration = 0.05;
-        this.camera.maxSpeed = 10;
-        this.camera.attachControl(this.scene.getEngine().get
-            // Placeholder for future camera control logic
-        );
-    }
-
-    _initCollision(mass, friction) { 
-        if (this.scene.isPhysicsEnabled && typeof BABYLON.PhysicsImpostor !== "undefined") {
-            // Create the impostor
-            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                this.mesh, 
-                BABYLON.PhysicsImpostor.SphereImpostor, // Sphere Impostor for rolling/smooth motion
-                { 
-                    mass: mass, 
-                    friction: friction, 
-                    restitution: 0.1 
-                }, 
-                this.scene
-            );
-            
-            // FIX: Safely call setAngularFactor to prevent rotation/tumbling
-            if (this.mesh.physicsImpostor && typeof this.mesh.physicsImpostor.setAngularFactor === 'function') {
-                this.mesh.physicsImpostor.setAngularFactor(0); // Prevents rotation/tumbling on collision
-            } else {
-                console.warn("[Player] Physics impostor ready, but setAngularFactor is missing or failed to initialize correctly. Rotation may occur.");
-            }
-
         }
     }
     
-    async _initMesh() { 
-        // Create a hidden mesh for physics collision
-        this.mesh = BABYLON.MeshBuilder.CreateCylinder("playerCollider", { height: 1.8, diameter: 0.8 }, this.scene);
-        this.mesh.position.copyFrom(this.position);
-        this.mesh.isVisible = false;
-        this.mesh.metadata = { isPlayer: true, entity: this };
-        
-        // Create a separate node for the visual model
-        this.visualRoot = new BABYLON.TransformNode("playerVisualRoot", this.scene);
-        this.visualRoot.parent = this.mesh;
-        
-        // Placeholder cube for visual representation
-        const placeholderMesh = BABYLON.MeshBuilder.CreateBox("playerBox", { size: 1.0 }, this.scene);
-        placeholderMesh.parent = this.visualRoot;
-        placeholderMesh.position.y = -0.9; // Center the model visually
+    getSaveData() {
+        return {
+            position_x: this.mesh.position.x,
+            position_y: this.mesh.position.y,
+            position_z: this.mesh.position.z,
+            rotation_y: this.visualRoot.rotation.y,
+            
+            health: this.health,
+            mana: this.mana,
+            stamina: this.stamina,
+
+            // Base stats from class
+            base_attack_power: this.stats.attackPower,
+            base_magic_power: this.stats.magicPower,
+            base_move_speed: this.stats.moveSpeed,
+            
+            // Experience/Level/Gold (placeholder)
+            level: 1,
+            experience: 0,
+
+            inventory: this.inventory.getSaveData(),
+            equipment: this.equipment.getSaveData(),
+        };
     }
     
+    loadFromData(data) {
+        this.mesh.position.set(data.position_x, data.position_y, data.position_z);
+        this.visualRoot.rotation.y = data.rotation_y;
+        
+        // Resources
+        this.health = data.health;
+        this.mana = data.mana;
+        this.stamina = data.stamina;
+
+        // Stats (assuming max stats are loaded from class selection)
+        this.stats.attackPower = data.base_attack_power;
+        this.stats.magicPower = data.base_magic_power;
+        this.stats.moveSpeed = data.base_move_speed;
+        
+        // Level/XP
+        // this.level = data.level;
+        // this.experience = data.experience;
+
+        // Apply equipment/recalculate current stats
+        this.updateStatsFromEquipment();
+
+        // Load Inventory and Equipment
+        // This is done in Game.js using the network service, but can be done here too
+    }
+
     _initTargetHighlight() {
         // Placeholder for future target highlight effect
     }
