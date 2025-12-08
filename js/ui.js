@@ -19,11 +19,11 @@ class UIManager {
     // --- Initialization ---
 
     init() {
-        this._createHUD(); // Line 81
-        this._createTargetFrame(); // Line 115
-        this._createActionBar(); // Line 192
-        this._createInventoryWindow(); // Line 257
-        this._createInputBindings(); // Line 339
+        this._createHUD(); 
+        this._createTargetFrame(); 
+        this._createActionBar(); 
+        this._createInventoryWindow(); 
+        this._createInputBindings(); 
         console.log('[UI] All UI components initialized.');
     }
 
@@ -44,7 +44,7 @@ class UIManager {
         healthBar.height = "20px";
         this.hud.addControl(healthBar);
 
-        console.log('[UI] HUD created.'); // Line 81 (approximate)
+        console.log('[UI] HUD created.'); 
     }
 
     _createTargetFrame() {
@@ -65,7 +65,7 @@ class UIManager {
         targetName.height = "20px";
         this.targetFrame.addControl(targetName);
 
-        console.log('[UI] Target frame created.'); // Line 115 (approximate)
+        console.log('[UI] Target frame created.'); 
     }
 
     _createActionBar() {
@@ -96,13 +96,13 @@ class UIManager {
             this.actionBarSlots.push(slot);
         }
 
-        console.log('[UI] Action bar created.'); // Line 192 (approximate)
+        console.log('[UI] Action bar created.'); 
     }
 
     updateActionBar(player) {
         // CRITICAL FIX: Ensure player.abilities is an array before calling forEach
         // This prevents the TypeError: Cannot read properties of undefined (reading 'forEach')
-        const abilities = player.abilities || []; // Line 201 (approximate)
+        const abilities = player.abilities || []; 
 
         abilities.forEach((ability, index) => {
             const slot = this.actionBarSlots[index];
@@ -132,7 +132,7 @@ class UIManager {
         title.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
         this.inventoryWindow.addControl(title);
 
-        console.log('[UI] Inventory window created.'); // Line 257 (approximate)
+        console.log('[UI] Inventory window created.'); 
     }
 
     _createInputBindings() {
@@ -151,20 +151,20 @@ class UIManager {
             )
         );
 
-        console.log('[UI] Input bindings created.'); // Line 339 (approximate)
+        console.log('[UI] Input bindings created.'); 
     }
 
     // --- Update Loop ---
     
-    // Line 387 (approximate)
     update(player) {
         // Update HUD elements (Health, Mana, Stamina)
         const healthText = this.hud.getChildByName("healthText");
         if (healthText) {
             // Placeholder: Assuming player has health/stats properties
-            const currentHealth = player.stats ? player.stats.health : 100;
+            // Use player.health and player.stats.maxHealth (as set in player.js)
+            const currentHealth = player.health;
             const maxHealth = player.stats ? player.stats.maxHealth : 100;
-            healthText.text = `HP: ${currentHealth}/${maxHealth}`;
+            healthText.text = `HP: ${currentHealth.toFixed(0)}/${maxHealth}`;
         }
         
         // Update action bar state
