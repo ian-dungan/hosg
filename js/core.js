@@ -17,7 +17,7 @@ const CONFIG = {
     },
     WORLD: { 
         SKYBOX: {
-            PATH: null, 
+            PATH: null, // Keep null to skip box mesh skybox creation
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
@@ -28,25 +28,25 @@ const CONFIG = {
         ]
     },
     ASSETS: {
-        // CHANGED: Use relative path "assets/"
+        // CRITICAL FIX: Use relative path "assets/"
         BASE_PATH: "assets/", 
         
         CHARACTERS: {
             knight: { 
                 model: 'Knight03.glb',
-                // CHANGED: Relative path 'assets/player/character/'
+                // CRITICAL FIX: Relative path 'assets/player/character/'
                 path: 'assets/player/character/' 
             },
             wolf: {
                 model: 'Wolf.glb',
-                // CHANGED: Relative path 'assets/models/'
+                // CRITICAL FIX: Relative path 'assets/models/'
                 path: 'assets/models/'
             }
         },
         ENVIRONMENT: {
             terrain_base: { 
                 model: 'FantasyTerrain.glb',
-                // CHANGED: Relative path 'assets/environment/'
+                // CRITICAL FIX: Relative path 'assets/environment/'
                 path: 'assets/environment/' 
             }
         },
