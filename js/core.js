@@ -1,24 +1,21 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.21 (ASSET PATHS FIX)
-// Fix: Updated BASE_PATH per request and made other paths explicit to prevent 404s.
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.22 (SYNTAX FIX)
+// Fix: Removed trailing backslash in Cleric class definition.
 // ============================================================
 
 const CONFIG = {
-    // === PATCH START: ADDING MISSING BLOCKS ===
     PLAYER: {
-        INVENTORY_SIZE: 30, // Default value to fix the critical crash in item.js
-        // Placeholder values matching fallbacks in player.js (for robust initialization):\
+        INVENTORY_SIZE: 30, 
         HEALTH: 100,
         MANA: 50,
         STAMINA: 100,
         SPAWN_HEIGHT: 5
     },
     GAME: {
-        GRAVITY: 9.81, // Default gravity value to fix the warning and enable physics
+        GRAVITY: 9.81, 
     },
-    // NEW BLOCK: Custom Asset Paths
     ASSETS: {
-        // UPDATED: Now points to the top-level assets folder as requested
+        // Now points to the top-level assets folder as requested
         BASE_PATH: "/hosg/assets/", 
         
         CHARACTERS: {
@@ -37,7 +34,7 @@ const CONFIG = {
             terrain_base: { 
                 model: 'TerrainBase.glb',
                 // EXPLICIT PATH: Overrides BASE_PATH
-                path: 'textures/ground/grass/Grass004_2K-JPG_Color.jpg'
+                path: '/hosg/assets/models/'
             },
             tree_pine: { 
                 model: 'TreePine.glb',
@@ -51,14 +48,12 @@ const CONFIG = {
             }
         }
     },
-    // === PATCH END ===
     
     WORLD: {
         MAX_NPCS: 50,
         CHUNK_SIZE: 16
     },
     NETWORK: {
-        // Placeholder for future network config
         HOST: 'localhost',
         PORT: 8080
     },
@@ -75,7 +70,7 @@ const CONFIG = {
                 maxHealth: 120, maxMana: 30, maxStamina: 100, 
                 attackPower: 15, magicPower: 5, moveSpeed: 0.15 
             }, 
-            defaultAbility: 'Basic Attack' // Ability name for the action bar
+            defaultAbility: 'Basic Attack'
         },
         Rogue: { 
             model: 'knight', 
@@ -94,7 +89,7 @@ const CONFIG = {
             defaultAbility: 'Fireball' 
         },
         Cleric: { 
-            model: 'knight',\
+            model: 'knight', // <-- Backslash removed here
             stats: { 
                 maxHealth: 100, maxMana: 100, maxStamina: 90, 
                 attackPower: 10, magicPower: 12, moveSpeed: 0.15 
