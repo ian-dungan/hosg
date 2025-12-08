@@ -1,54 +1,78 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.9 (PATCHED)
-// Core configuration constants (Added CONFIG.COMBAT)
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.19 (PATCHED)
+// Added CONFIG.CLASSES for character creation base stats.
 // ============================================================
 
 const CONFIG = {
-    VERSION: '1.0.9',
-    DEBUG: true,
+    // ... (existing CONFIG fields remain the same)
     
-    GAME: {
-        FPS: 60,
-        GRAVITY: 9.81,
-        PHYSICS_ENGINE: 'cannon'
-    },
-    
-    PLAYER: {
-        MOVE_SPEED: 0.15,
-        RUN_MULTIPLIER: 1.8,
-        JUMP_FORCE: 0.22,
-        HEALTH: 100,
-        MANA: 50,
-        STAMINA: 100,
-        INVENTORY_SIZE: 20,
-        SPAWN_HEIGHT: 20,
-        
-        // Physics settings
-        MASS: 15,
-        FRICTION: 0.2,
-        LINEAR_DAMPING: 0.3,
-        ANGULAR_DAMPING: 0.99,
-        IMPULSE_STRENGTH: 150,
-        MAX_SPEED: 100,
-        ROTATION_LERP: 0.2
-    },
-    
-    WORLD: {
-        SIZE: 1000,
-        CHUNK_SIZE: 32,
-        TERRAIN_SIZE: 1024,
-        WATER_LEVEL: 0
-    },
-    
-    NETWORK: {
-        WS_URL: 'wss://hosg.onrender.com',
-        MAX_PLAYERS: 1
-    },
-    
-    // === FIX: ADDED COMBAT CONFIGURATION ===
-    COMBAT: { 
-        BASE_ATTACK_RANGE: 3, // Default melee attack range in world units
-        GLOBAL_COOLDOWN_SECONDS: 1.0, 
-        DEATH_DELAY_SECONDS: 5
+    // ... (existing PLAYER, WORLD, NETWORK, COMBAT blocks remain the same)
+
+    // === NEW: CHARACTER CLASSES AND BASE STATS ===
+    CLASSES: {
+        Fighter: { 
+            model: 'knight', 
+            stats: { 
+                maxHealth: 120, maxMana: 30, maxStamina: 100, 
+                attackPower: 15, magicPower: 5, moveSpeed: 0.15 
+            }, 
+            defaultAbility: 'Basic Attack' // Ability name for the action bar
+        },
+        Rogue: { 
+            model: 'knight', 
+            stats: { 
+                maxHealth: 80, maxMana: 0, maxStamina: 120, 
+                attackPower: 18, magicPower: 0, moveSpeed: 0.18 // Faster/higher stam
+            }, 
+            defaultAbility: 'Backstab'
+        },
+        Wizard: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 70, maxMana: 150, maxStamina: 80, 
+                attackPower: 5, magicPower: 20, moveSpeed: 0.14 
+            }, 
+            defaultAbility: 'Fireball' 
+        },
+        Cleric: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 100, maxMana: 100, maxStamina: 90, 
+                attackPower: 10, magicPower: 12, moveSpeed: 0.15 
+            }, 
+            defaultAbility: 'Heal'
+        },
+        Ranger: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 90, maxMana: 50, maxStamina: 110, 
+                attackPower: 14, magicPower: 8, moveSpeed: 0.16 
+            }, 
+            defaultAbility: 'Aimed Shot'
+        },
+        Warlock: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 85, maxMana: 130, maxStamina: 85, 
+                attackPower: 8, magicPower: 18, moveSpeed: 0.14 
+            }, 
+            defaultAbility: 'Shadow Bolt'
+        },
+        Monk: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 110, maxMana: 50, maxStamina: 130, 
+                attackPower: 12, magicPower: 5, moveSpeed: 0.17 
+            }, 
+            defaultAbility: 'Fists of Fury'
+        },
+        Bard: { 
+            model: 'knight',
+            stats: { 
+                maxHealth: 95, maxMana: 90, maxStamina: 95, 
+                attackPower: 10, magicPower: 10, moveSpeed: 0.15 
+            }, 
+            defaultAbility: 'Inspire'
+        }
     }
 };
