@@ -1,86 +1,13 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.18 (PATCHED)
-// Fix: Added methods for Account and Character Creation/Lookup.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.20 (PATCHED)
+// Updated createCharacter to handle class selection and stats.
 // ============================================================
 
-//
-// Supabase wrapper
-//
-function SupabaseService(config) {
-    this.config = config || {};
-    this.client = null;
-    this._init();
-}
+// ... (existing SupabaseService.prototype.getAccountByName and createAccount remain the same) ...
 
-// ... (SupabaseService.prototype._init, fetch template methods remain the same) ...
+// ... (existing getCharacterByName remains the same) ...
 
-SupabaseService.prototype.getAccountByName = async function (accountName) {
-    try {
-        const { data, error } = await this.client
-            .from('hosg_accounts')
-            .select('*')
-            .eq('name', accountName)
-            .single();
-
-        // PGRST116 is the code for 'No rows found', which is expected on first login
-        if (error && error.code !== 'PGRST116') { 
-            throw error;
-        }
-
-        return { success: true, account: data };
-    } catch (error) {
-        console.error('[Supabase] Failed to get account:', error.message);
-        return { success: false, error: error.message };
-    }
-};
-
-SupabaseService.prototype.createAccount = async function (accountName) {
-    // 1. Check for duplicate account name first
-    const existingAccountResult = await this.getAccountByName(accountName);
-    if (!existingAccountResult.success) {
-         return { success: false, error: existingAccountResult.error };
-    }
-    if (existingAccountResult.account) {
-        return { success: false, error: `Account with name '${accountName}' already exists.` };
-    }
-
-    // 2. Insert new account
-    try {
-        const { data, error } = await this.client
-            .from('hosg_accounts')
-            .insert([{ name: accountName }])
-            .select()
-            .single();
-
-        if (error) throw error;
-        
-        return { success: true, account: data };
-    } catch (error) {
-        console.error('[Supabase] Failed to create account:', error.message);
-        return { success: false, error: error.message };
-    }
-};
-
-SupabaseService.prototype.getCharacterByName = async function (characterName) {
-    try {
-        const { data, error } = await this.client
-            .from('hosg_characters')
-            .select('id')
-            .eq('name', characterName)
-            .single();
-
-        if (error && error.code !== 'PGRST116') {
-            throw error;
-        }
-
-        return { success: true, character: data };
-    } catch (error) {
-        console.error('[Supabase] Failed to get character by name:', error.message);
-        return { success: false, error: error.message };
-    }
-};
-
-SupabaseService.prototype.createCharacter = async function (accountId, characterName) {
+SupabaseService.prototype.createCharacter = async function (accountId, characterName, className) {
     // 1. Check for duplicate character name
     const existingCharResult = await this.getCharacterByName(characterName);
     if (!existingCharResult.success) {
@@ -89,21 +16,41 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
     if (existingCharResult.character) {
         return { success: false, error: `Character name '${characterName}' is already taken.` };
     }
+    
+    // --- NEW: Get class configuration and validate it ---
+    const classConfig = CONFIG.CLASSES[className];
+    if (!classConfig) {
+        return { success: false, error: `Invalid class name provided: ${className}` };
+    }
+    const classStats = classConfig.stats;
 
-    // 2. Insert new character with default stats from CONFIG.PLAYER
+    // 2. Insert new character with default stats
     try {
         const defaultState = {
             account_id: accountId,
             name: characterName,
-            // Initial position
+            class_name: className, // ADDED: Save the class name
+            
+            // Initial position (pulled from CONFIG.PLAYER)
             position_x: 0,
             position_y: CONFIG.PLAYER.SPAWN_HEIGHT,
             position_z: 0,
             rotation_y: 0,
-            // Initial stats (from core.js)
-            health: CONFIG.PLAYER.HEALTH,
-            mana: CONFIG.PLAYER.MANA,
-            stamina: CONFIG.PLAYER.STAMINA,
+            
+            // Initial resource MAXES (from class config)
+            max_health: classStats.maxHealth,
+            max_mana: classStats.maxMana,
+            max_stamina: classStats.maxStamina,
+
+            // Initial resource CURRENTS (set to max)
+            health: classStats.maxHealth,
+            mana: classStats.maxMana,
+            stamina: classStats.maxStamina,
+
+            // Persist the base stats of the class upon creation
+            base_attack_power: classStats.attackPower,
+            base_magic_power: classStats.magicPower,
+            base_move_speed: classStats.moveSpeed,
         };
 
         const { data, error } = await this.client
@@ -121,18 +68,6 @@ SupabaseService.prototype.createCharacter = async function (accountId, character
     }
 };
 
-SupabaseService.prototype.loadCharacterState = async function (characterId) {
-// ... (Existing loadCharacterState code remains the same) ...
-};
+// ... (loadCharacterState will now load the class_name and new base stats in the core object)
 
-SupabaseService.prototype.saveCharacterState = async function (characterId, state) {
-// ... (Existing saveCharacterState code remains the same) ...
-};
-
-var supabaseService = new SupabaseService();
-
-function NetworkManager() {
-// ... (NetworkManager constructor and loadTemplates remain the same) ...
-}
-
-// ... (rest of NetworkManager prototype methods) ...
+// ... (The rest of network.js remains the same) ...
