@@ -1,7 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - WORLD CORE v1.0.10 (PATCHED)
-// Fix: Added missing World class definition and environment creation methods (createGround, createWater, createSky)
-// Fix: Added placeholder Enemy class definition.
+// HEROES OF SHADY GROVE - WORLD CORE v1.0.11 (PATCHED)
+// Fix: Added the World class definition and the required init(templates) method.
 // ============================================================
 
 // Base Entity class
@@ -20,13 +19,11 @@ function Entity(scene, position) {
 
   this.mesh = null;
   this.isDead = false;
+  this.isAttackable = false; // Entities are not attackable by default
 }
 
 Entity.prototype.update = function (deltaTime) {
-  if (this.mesh && this.mesh.position && this.position &&
-      typeof this.mesh.position.copyFrom === "function") {
-    this.mesh.position.copyFrom(this.position);
-  }
+    // Rely on physics impostor for position update for physics-controlled entities (Characters/NPCs)
 };
 
 Entity.prototype.dispose = function () {
@@ -45,159 +42,186 @@ class Character extends Entity {
     constructor(scene, position, name) {
         super(scene, position);
         this.name = name;
-        this.isDead = false;
-        // Placeholder stats (will be overwritten by Player/Enemy classes)
-        this.stats = { maxHealth: 100, attackPower: 1 }; 
-        this.health = this.stats.maxHealth;
+        this.level = 1;
+        this.health = 100;
+        this.mana = 50;
+        this.stamina = 100;
+        this.isAttackable = true;
     }
     
-    // Placeholder damage function, necessary for the ability.js/player.js combat logic
-    takeDamage(damage) {
+    // Placeholder takeDamage method required by Ability.js
+    takeDamage(damage, source) {
         this.health -= damage;
+        this.health = Math.max(0, this.health);
+        
         if (this.health <= 0) {
-            this.health = 0;
-            this.isDead = true;
-            this.dispose(); 
+            this.die();
         }
     }
     
-    // Placeholder update function, necessary for player/enemy loops
-    update(deltaTime) {
-        // Base character update logic (e.g. animation, pathfinding, etc.)
+    die() {
+        if (this.isDead) return;
+        this.isDead = true;
+        // Basic cleanup: Hide the mesh and remove physics
+        if (this.mesh) {
+            this.mesh.isVisible = false;
+            if (this.mesh.physicsImpostor) {
+                this.mesh.physicsImpostor.dispose();
+            }
+        }
     }
 }
 
-
 // ============================================================
-// ENEMY CLASS (Extends Character - Placeholder to prevent crash)
+// ENEMY CLASS (Placeholder)
 // ============================================================
 class Enemy extends Character {
     constructor(scene, position, template, spawnData) {
         super(scene, position, template.name || 'Enemy');
         this.template = template;
         this.spawnData = spawnData;
-        this.isEnemy = true;
         
-        // Placeholder Enemy Mesh
-        this.mesh = BABYLON.MeshBuilder.CreateBox("enemyBox", { height: 1.5, width: 0.8, depth: 0.8 }, this.scene);
-        this.mesh.position.copyFrom(position);
-        this.mesh.material = new BABYLON.StandardMaterial("enemyMat", this.scene);
-        this.mesh.material.diffuseColor = BABYLON.Color3.Red();
+        // Apply template stats
+        this.level = template.level;
+        this.stats = template.stats || {};
+        this.health = this.stats.maxHealth || 100;
+        this.isAggro = false; // State
         
-        // Add physics impostor
-        if (typeof BABYLON.PhysicsImpostor !== "undefined") {
+        this._initMesh();
+        this._initCollision(100, 0.5); 
+    }
+    
+    _initMesh() {
+        // Create a hidden mesh for physics collision
+        this.mesh = BABYLON.MeshBuilder.CreateCylinder(`npcCollider_${this.name}`, { height: 1.8, diameter: 0.8 }, this.scene);
+        this.mesh.position.copyFrom(this.position);
+        this.mesh.isVisible = false;
+        this.mesh.metadata = { isNPC: true, entity: this };
+        
+        // Create a separate node for the visual model
+        this.visualRoot = new BABYLON.TransformNode(`npcVisualRoot_${this.name}`, this.scene);
+        this.visualRoot.parent = this.mesh;
+        
+        // Placeholder cube for visual representation
+        const placeholderMesh = BABYLON.MeshBuilder.CreateBox("npcBox", { size: 1.0 }, this.scene);
+        placeholderMesh.material = new BABYLON.StandardMaterial("npcMat", this.scene);
+        placeholderMesh.material.diffuseColor = BABYLON.Color3.Red();
+        placeholderMesh.parent = this.visualRoot;
+        placeholderMesh.position.y = -0.9;
+    }
+    
+    _initCollision(mass, friction) { 
+        if (this.scene.isPhysicsEnabled && typeof BABYLON.PhysicsImpostor !== "undefined") {
             this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                 this.mesh, 
-                BABYLON.PhysicsImpostor.BoxImpostor, 
-                { mass: 10, friction: 0.5, restitution: 0.1 }, 
+                BABYLON.PhysicsImpostor.SphereImpostor, 
+                { mass: mass, friction: friction, restitution: 0.1 }, 
                 this.scene
             );
+            if (this.mesh.physicsImpostor && typeof this.mesh.physicsImpostor.setAngularFactor === 'function') {
+                this.mesh.physicsImpostor.setAngularFactor(0); 
+            }
         }
+    }
 
-        // Metadata for player targeting
-        this.mesh.metadata = { entity: this, isEnemy: true }; 
+    update(deltaTime) {
+        if (this.isDead) return;
+        super.update(deltaTime);
     }
 }
 
 
 // ============================================================
-// WORLD CLASS (Implementation for Game.init())
+// WORLD CLASS 
 // ============================================================
 class World {
     constructor(scene) {
         this.scene = scene;
         this.npcs = [];
         this.loots = [];
-        this.activeSpawns = new Map(); // Map<spawnId, Entity[]>
+        this.activeSpawns = new Map(); // Map<SpawnID, Entity[]>
+        this.templates = {};
+        
+        // Make the world accessible on the scene for convenience
+        this.scene.world = this; 
+    }
+
+    /**
+     * Initializes the world, creates environment, and sets up NPC spawns.
+     * Called from Game.js after templates are loaded.
+     * @param {Object} templates - The collection of all loaded templates (items, skills, npcs, zones).
+     */
+    init(templates) {
+        // 1. Store templates
+        this.templates = templates || {};
+        
+        // 2. Create the environment
+        this.createGround();
+        this.createSky();
+        this.createWater();
+        
+        // 3. Setup Spawns
+        // Placeholder data, normally loaded from hosg_npc_spawns.
+        const starterSpawnData = [
+            { id: 1, npc_template_id: 101, zone_id: 1, position_x: 0, position_y: 0, position_z: 10, respawn_seconds: 15, max_spawn: 3, spawn_radius: 5.0 },
+        ];
+
+        const spawnRecords = this.templates.npcSpawnRecords || starterSpawnData;
+
+        for (const spawnRecord of spawnRecords) {
+            const npcTemplate = this.templates.npcTemplates ? this.templates.npcTemplates.get(spawnRecord.npc_template_id) : null;
+            if (npcTemplate) {
+                 this._loadSpawn(spawnRecord, npcTemplate);
+            } else {
+                 console.warn(`[World] NPC template ${spawnRecord.npc_template_id} not found for spawn ${spawnRecord.id}.`);
+            }
+        }
+        
+        console.log('[World] Initialized. Spawning NPCs...');
     }
 
     createGround() {
-        const ground = BABYLON.MeshBuilder.CreateGround("ground", {
-            width: CONFIG.WORLD.TERRAIN_SIZE,
-            height: CONFIG.WORLD.TERRAIN_SIZE
-        }, this.scene);
+        const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, this.scene);
         
-        ground.checkCollisions = true;
-        ground.isPickable = true;
+        const groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
+        groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.6, 0.4);
+        ground.material = groundMaterial;
         
-        // Ground material
-        const groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
-        groundMat.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.1); 
-        ground.material = groundMat;
-
-        // Physics impostor for ground (Static: mass 0)
-        if (typeof BABYLON.PhysicsImpostor !== "undefined") {
-             ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+        if (this.scene.isPhysicsEnabled && typeof BABYLON.PhysicsImpostor !== "undefined") {
+            ground.physicsImpostor = new BABYLON.PhysicsImpostor(
                 ground, 
                 BABYLON.PhysicsImpostor.BoxImpostor, 
-                { mass: 0, friction: 1.0, restitution: 0.0 }, 
+                { mass: 0, restitution: 0.1, friction: 0.5 }, 
                 this.scene
             );
         }
-        console.log("[World] Ground created.");
     }
-    
+
     createWater() {
-        if (CONFIG.WORLD.WATER_LEVEL > 0) {
-            const waterMesh = BABYLON.MeshBuilder.CreateGround("water", {
-                width: CONFIG.WORLD.TERRAIN_SIZE,
-                height: CONFIG.WORLD.TERRAIN_SIZE
-            }, this.scene);
-            waterMesh.position.y = CONFIG.WORLD.WATER_LEVEL;
-            
-            // Simple transparent blue material
-            const waterMat = new BABYLON.StandardMaterial("waterMat", this.scene);
-            waterMat.diffuseColor = new BABYLON.Color3(0, 0.5, 1);
-            waterMat.alpha = 0.6;
-            waterMesh.material = waterMat;
-        }
-        console.log("[World] Water created.");
+        // Placeholder for a water/lake surface
     }
 
     createSky() {
-        // Simple procedural skybox
         const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
         const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
         skyboxMaterial.backFaceCulling = false;
         skyboxMaterial.disableLighting = true;
-        skyboxMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.6, 0.8);
         skybox.material = skyboxMaterial;
-        console.log("[World] Sky created.");
+        skybox.infiniteDistance = true;
+        skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        // Using a placeholder cube texture
+        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture("https://playground.babylonjs.com/textures/skybox/skybox", this.scene);
+        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
     }
 
     /**
-     * Initializes NPC spawns based on data fetched from Supabase.
+     * Attempts to spawn an NPC based on its spawn data and template.
      */
-    createSpawnPoints(spawnPoints, npcTemplates) {
-        if (!spawnPoints || spawnPoints.length === 0) {
-            console.warn("[World] No spawn points loaded.");
-            return;
+    _loadSpawn(spawnData, template) {
+        if (!this.activeSpawns.has(spawnData.id)) {
+            this.activeSpawns.set(spawnData.id, []);
         }
         
-        spawnPoints.forEach(spawnData => {
-            const template = npcTemplates.get(spawnData.npc_template_id);
-            if (!template) {
-                console.warn(`[World] Template ID ${spawnData.npc_template_id} not found for spawn point ${spawnData.id}.`);
-                return;
-            }
-            
-            // Initialize the active spawn list for this point
-            this.activeSpawns.set(spawnData.id, []);
-            
-            // Spawn initial enemies up to max_spawn
-            for (let i = 0; i < spawnData.max_spawn; i++) {
-                this.trySpawn(spawnData, template);
-            }
-
-            // Set up a permanent respawn loop
-            setInterval(() => {
-                this.trySpawn(spawnData, template);
-            }, spawnData.respawn_seconds * 1000);
-        });
-        console.log(`[World] Initialized ${spawnPoints.length} spawn zones.`);
-    }
-    
-    trySpawn(spawnData, template) {
         const currentEntities = this.activeSpawns.get(spawnData.id).filter(e => !e.isDead);
         
         if (currentEntities.length >= spawnData.max_spawn) return false; 
@@ -214,7 +238,6 @@ class World {
             spawnData.position_z + offsetZ
         );
         
-        // This relies on the placeholder Enemy class definition above
         const newEnemy = new Enemy(this.scene, spawnPosition, template, spawnData);
         
         this.npcs.push(newEnemy);
@@ -235,8 +258,13 @@ class World {
     dispose() {
         this.npcs.forEach(npc => npc.dispose());
         this.loots.forEach(loot => loot.dispose());
-        this.npcs.length = 0;
-        this.loots.length = 0;
         this.activeSpawns.clear();
+        this.npcs = [];
+        this.loots = [];
+        
+        this.scene.getMeshByName("ground")?.dispose();
+        this.scene.getMeshByName("skyBox")?.dispose();
     }
 }
+// Ensure the World class is globally accessible
+window.World = World;
