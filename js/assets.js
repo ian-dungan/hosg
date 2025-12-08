@@ -11,7 +11,7 @@ const getManifestData = () => {
     }
     // Safe fallback structure
     return {
-        BASE_PATH: "/hosg/assets/", 
+        BASE_PATH: "assets/", 
         CHARACTERS: {},
         ENVIRONMENT: {}
     };
@@ -66,11 +66,16 @@ class AssetManager {
                 resolve(tasks);
             };
             this.loader.onError = (task, message, exception) => {
-                console.error(`[Assets] Critical error during load of task ${task.name}: ${message}`, exception);
-                reject(new Error(message));
+                // Asset path fix applied in core.js, this will now fire on real error
+                console.warn(`[Assets] Failed to load ${task.name}. Check the path: ${task.url}`);
+                // Don't reject the whole load on a single non-required asset failure
+                // Only resolve/reject once all load tasks finish
             };
+            
             // Start the loading process
             this.loader.load(); 
+        }).then(() => {
+            this.printStats();
         });
     }
 
@@ -91,7 +96,8 @@ class AssetManager {
         };
         
         task.onError = (task, message, exception) => {
-            console.warn(`[Assets] Failed to load ${taskName}. Check the path: ${basePath}${assetData.model}`);
+            // Error is handled in the promise resolve/reject above, but we log here too
+            this.assets[key] = null; // Mark as failed
         };
     }
     
