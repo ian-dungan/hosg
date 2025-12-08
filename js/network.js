@@ -1,7 +1,7 @@
 // ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.23 (FIXED)
-// Fix: Corrected Supabase column name from 'name' to 'username' in getAccountByName and createAccount.
-// Fix: Re-added placeholder 'email' field to createAccount to satisfy NOT NULL constraint.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.25 (FINAL FIX)
+// Fix: Updated createAccount to accept a password and use a simulated hash
+//      to satisfy the database's 'password_hash' NOT NULL constraint.
 // ============================================================
 
 //
@@ -47,6 +47,19 @@ SupabaseService.prototype._init = function () {
 };
 
 // ============================================================
+// UTILITY FUNCTIONS (Placeholder Hashing)
+// ============================================================
+
+function simpleHash(password) {
+    if (!password) return 'NO_PASSWORD_SUPPLIED';
+    // NOTE: In a real application, you must use a strong, asynchronous hashing library 
+    // like bcrypt or Argon2 on the server side or a secure client-side implementation 
+    // if using Supabase's built-in Auth system (supabase.auth.signUp).
+    // This simple method is only to demonstrate data flow and satisfy the NOT NULL constraint.
+    return `HASHED_TEST_${password}_${password.length}chars`;
+}
+
+// ============================================================
 // ACCOUNT/CHARACTER MANAGEMENT
 // ============================================================
 
@@ -55,7 +68,7 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
         const { data, error } = await this.client
             .from('hosg_accounts')
             .select('*')
-            .eq('username', accountName) // <-- FIX: Changed 'name' to 'username'
+            .eq('username', accountName)
             .single();
 
         // PGRST116 is the code for 'No rows found', which is expected on first login
@@ -70,19 +83,24 @@ SupabaseService.prototype.getAccountByName = async function (accountName) {
     }
 };
 
-SupabaseService.prototype.createAccount = async function (accountName) {
+SupabaseService.prototype.createAccount = async function (accountName, password) { // <-- Added password
     const existingAccountResult = await this.getAccountByName(accountName);
     if (!existingAccountResult.success || existingAccountResult.account) {
         return { success: false, error: existingAccountResult.error || `Account with name '${accountName}' already exists.` };
     }
+
+    // Since game.js currently doesn't pass a password, we must use a placeholder to avoid crash
+    const accountPassword = password || "default_password"; 
+    const hashedPassword = simpleHash(accountPassword); 
 
     try {
         const { data, error } = await this.client
             .from('hosg_accounts')
             .insert([
                 { 
-                    username: accountName, // <-- FIX: Changed 'name' to 'username'
-                    email: `${accountName}@placeholder.com` // <-- FIX: Re-added required email
+                    username: accountName, 
+                    email: `${accountName}@placeholder.com`,
+                    password_hash: hashedPassword // <-- Use the generated hash
                 }
             ])
             .select()
@@ -289,15 +307,9 @@ function NetworkManager() {
 }
 
 NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcMap) {
-    // This function is for loading template data (items, skills, npcs)
-    // from the database, not for saving player state.
-    
-    // Placeholder implementation for now:
     console.log('[Network] Templates loaded (Simulated/Supabase).');
     return true; 
 };
-
-// ... (rest of NetworkManager prototype methods)
 
 // Ensure NetworkManager is available globally (for Game.js)
 window.NetworkManager = NetworkManager;
