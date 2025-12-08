@@ -1,6 +1,6 @@
 // ============================================================
-// HEROES OF SHADY GROVE - UI MANAGER v1.1.1 (CRITICAL GUI BUTTON FIX)
-// Fix: Added full, correct implementation of _createActionBar to resolve 'not a constructor' error.
+// HEROES OF SHADY GROVE - UI MANAGER v1.1.2 (MESSAGE PREPEND FIX)
+// Fix: Replaced insertAt with robust prepending logic in showMessage.
 // ============================================================
 
 class UIManager {
@@ -8,13 +8,12 @@ class UIManager {
         this.scene = scene;
         this.advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
         
-        // UI Elements (Initialized in _create methods)
         this.hud = null;
         this.targetFrame = null;
         this.actionBar = null;
-        this.messageContainer = null; // New container for messages
+        this.messageContainer = null; 
         this.inventoryWindow = null;
-        this.actionBarSlots = []; // Array to hold references to the action bar buttons
+        this.actionBarSlots = []; 
     }
 
     // --- Initialization ---
@@ -23,7 +22,7 @@ class UIManager {
         this._createHUD(); 
         this._createTargetFrame(); 
         this._createActionBar(); 
-        this._createMessageSystem(); // New system for messages
+        this._createMessageSystem(); 
         this._createInventoryWindow(); 
         this._createInputBindings(); 
         console.log('[UI] All UI components initialized.');
@@ -43,8 +42,6 @@ class UIManager {
         healthText.text = "HP: 100/100";
         healthText.height = "30px";
         this.hud.addControl(healthText);
-
-        // Add Mana/Stamina placeholders here
         
         console.log('[UI] HUD created.'); 
     }
@@ -62,7 +59,6 @@ class UIManager {
     }
 
     _createActionBar() {
-        // Defensive check against missing BABYLON.GUI
         if (!BABYLON.GUI || !BABYLON.GUI.Button || !BABYLON.GUI.StackPanel) {
             console.error("[UI] BABYLON.GUI components are undefined. Check if babylon.gui.min.js is loaded correctly.");
             return;
@@ -77,7 +73,6 @@ class UIManager {
 
         for (let i = 0; i < 5; i++) {
             const slotId = "actionSlot" + i;
-            // FIX: The method CreateSimpleButton is static and MUST be called on the BABYLON.GUI.Button class, not 'e' or 'this'.
             const button = BABYLON.GUI.Button.CreateSimpleButton(slotId, (i + 1).toString());
             button.width = "60px";
             button.height = "60px";
@@ -88,7 +83,6 @@ class UIManager {
             button.paddingLeft = "5px";
             button.paddingRight = "5px";
             
-            // Add reference to the slot for later updating
             this.actionBarSlots.push({ 
                 button: button, 
                 ability: null, 
@@ -113,6 +107,8 @@ class UIManager {
     }
 
     showMessage(text, duration = 2000, type = 'info') {
+        if (!this.messageContainer) return;
+
         const textBlock = new BABYLON.GUI.TextBlock();
         textBlock.text = text;
         textBlock.color = type === 'error' ? 'red' : 
@@ -124,12 +120,25 @@ class UIManager {
         textBlock.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
         textBlock.height = "25px"; 
         
-        this.messageContainer.insertAt(0, textBlock); 
-
-        while (this.messageContainer.children.length > 8) {
-            this.messageContainer.children[this.messageContainer.children.length - 1].dispose();
+        // CRITICAL FIX: Robust prepending logic to replace missing insertAt
+        const oldChildren = [...this.messageContainer.children];
+        this.messageContainer.clearControls();
+        
+        // 1. Add the newest message
+        this.messageContainer.addControl(textBlock); 
+        
+        // 2. Re-add the old messages (maintaining order)
+        const maxMessages = 7; 
+        for (let i = 0; i < Math.min(maxMessages, oldChildren.length); i++) {
+            this.messageContainer.addControl(oldChildren[i]);
+        }
+        
+        // 3. Dispose of the messages that were culled
+        for (let i = maxMessages; i < oldChildren.length; i++) {
+            oldChildren[i].dispose();
         }
 
+        // Set a timeout to remove the message after the duration
         setTimeout(() => {
             textBlock.dispose();
         }, duration);
@@ -193,18 +202,17 @@ class UIManager {
     updateActionBar(player) {
         if (!this.actionBarSlots || this.actionBarSlots.length === 0) return;
         
-        // Bind the player's abilities to the first few slots
         for (let i = 0; i < this.actionBarSlots.length; i++) {
             const slot = this.actionBarSlots[i];
             const ability = player.abilities[i];
             
             if (ability) {
-                // Update button text to ability name or initial
                 slot.button.textBlock.text = ability.name.substring(0, 1);
                 
                 if (ability.isReady()) {
                     slot.button.background = "green";
                     slot.button.alpha = 1.0;
+                    slot.button.textBlock.text = ability.name.substring(0, 1);
                 } else {
                     const ratio = ability.getCooldownRatio();
                     slot.button.background = "black";
@@ -217,7 +225,6 @@ class UIManager {
                 if (player.isPlayer && !slot.button.actionRegistered) {
                     slot.button.onPointerClickObservable.add(() => {
                         if (ability.isReady()) {
-                            // Check if the game has a target property and it's not null before executing
                             const target = player.scene.game.player.target;
                             ability.execute(player, target);
                         } else {
