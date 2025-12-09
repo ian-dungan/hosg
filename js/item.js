@@ -17,8 +17,8 @@
         this.itemType = template.item_type; // e.g., 'Consumable', 'Weapon'
         this.slot = template.equip_slot; // e.g., 'Head', 'Weapon_MainHand'
         this.rarity = template.rarity || 'Common';
-        this.effects = template.effects || {}; // { health_restore: 10 }
-        this.stats = template.stats || {}; // { attackPower: 5 }
+        this.effects = template.effects || {}; 
+        this.stats = template.stats || {}; 
     }
 
     Item.prototype.canStack = function (otherItem) {

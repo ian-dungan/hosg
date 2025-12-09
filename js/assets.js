@@ -11,9 +11,9 @@ function getManifestData() {
     if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
         return CONFIG.ASSETS;
     }
-    // Safe fallback structure
+    console.warn('[Assets] CONFIG not loaded, using defaults');
     return {
-        BASE_PATH: "assets/", // Changed fallback to relative
+        BASE_PATH: "assets/",
         CHARACTERS: {},
         ENVIRONMENT: {}
     };
