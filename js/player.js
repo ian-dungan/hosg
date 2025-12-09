@@ -124,6 +124,17 @@ function Player(scene) {
 Player.prototype = Object.create(Character.prototype);
 Player.prototype.constructor = Player;
 
+// Lightweight Object.assign alternative for legacy environments
+function _copyProps(target, source) {
+    if (!source) return target;
+    for (var key in source) {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+            target[key] = source[key];
+        }
+    }
+    return target;
+}
+
 Player.prototype._initCamera = function () {
     this.camera = new BABYLON.FollowCamera('PlayerCamera', this.position.clone(), this.scene);
     this.camera.radius = 10;
@@ -149,7 +160,6 @@ Player.prototype._initPhysics = function () {
         this.mesh.isVisible = false;
         this.mesh.checkCollisions = true;
     }
-};
 
     this.mesh.position.copyFrom(this.position);
 
@@ -287,8 +297,8 @@ Player.prototype.applyClass = function (className) {
     if (classConfig) {
         this.className = className;
 
-        // 1. Apply Stats
-        Object.assign(this.stats, classConfig.stats);
+        // 1. Apply Stats (ES5 safe)
+        _copyProps(this.stats, classConfig.stats);
         this.health = this.stats.maxHealth;
         this.mana = this.stats.maxMana;
         this.stamina = this.stats.maxStamina;
