@@ -107,7 +107,6 @@ const ASSET_MANIFEST = {
         }
     },
     
-    // NOTE: This section appears redundant with CHARACTERS.ENEMIES, but serves as a dedicated block for enemy-specific data (e.g., animations, non-model assets)
     ENEMIES: {
         wolf: {
             model: 'enemies/wolf.glb',
@@ -124,8 +123,14 @@ const ASSET_MANIFEST = {
     }
 };
 
+// FIX: Expose ASSET_MANIFEST globally so other scripts checking window.ASSET_MANIFEST can find it.
+if (typeof window !== 'undefined') {
+    window.ASSET_MANIFEST = ASSET_MANIFEST;
+}
+
 // ==================== ASSET LOADER ====================
-class AssetLoader {
+class AssetLoader { 
+// ... rest of AssetLoader class (omitted for brevity)
     constructor(scene) {
         this.scene = scene;
         this.basePath = ASSET_MANIFEST.BASE_PATH;
@@ -141,170 +146,141 @@ class AssetLoader {
         if (!this.config.USE_ASSETS) {
             return null;
         }
-
         const fullPath = this.basePath + path;
         const cacheKey = 'texture_' + fullPath;
-
         if (this.loadedAssets.has(cacheKey)) {
             return this.loadedAssets.get(cacheKey);
         }
-
         if (this.loadingPromises.has(cacheKey)) {
-            return this.loadingPromises.get(cacheKey);
+            return await this.loadingPromises.get(cacheKey);
         }
-
         this.stats.requested++;
-        if (this.config.LOG_LOADING) {
-            console.log(`[AssetLoader] Requesting texture: ${fullPath}`);
-        }
 
-        const loadPromise = new Promise((resolve, reject) => {
-            const texture = new BABYLON.Texture(fullPath, this.scene,
-                false, // No skipMipMap
-                true,  // Invert Y axis
+        const promise = new Promise((resolve, reject) => {
+            const texture = new BABYLON.Texture(
+                fullPath,
+                this.scene,
+                !this.config.GENERATE_MIPMAPS, // Skip mipmaps
+                true, // Invert Y
                 BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
                 () => {
+                    if (this.config.TEXTURE_ANISOTROPY > 1) {
+                        texture.level = this.config.TEXTURE_ANISOTROPY;
+                    }
+                    this.stats.loaded++;
                     this.loadedAssets.set(cacheKey, texture);
                     this.loadingPromises.delete(cacheKey);
-                    this.stats.loaded++;
                     if (this.config.LOG_LOADING) {
                         console.log(`[AssetLoader] ✓ Loaded texture: ${fullPath}`);
                     }
-
-                    // Apply options
-                    if (options.uScale) texture.uScale = options.uScale;
-                    if (options.vScale) texture.vScale = options.vScale;
-                    if (this.config.TEXTURE_ANISOTROPY > 1) {
-                        texture.maxAnisotropy = this.config.TEXTURE_ANISOTROPY;
-                    }
-
                     resolve(texture);
                 },
                 (message, exception) => {
-                    this.loadingPromises.delete(cacheKey);
-                    this.failedAssets.add(fullPath);
                     this.stats.failed++;
-                    console.error(`[AssetLoader] ✗ Failed to load texture: ${fullPath}`, message, exception);
-                    resolve(null); // Resolve with null on failure
+                    this.failedAssets.add(cacheKey);
+                    this.loadingPromises.delete(cacheKey);
+                    console.error(`[AssetLoader] ❌ Failed to load texture: ${fullPath}`, message, exception);
+                    reject(new Error(`Failed to load texture: ${fullPath}`));
                 }
             );
+            // Apply scale options for tiling
+            if (options.uScale) texture.uScale = options.uScale;
+            if (options.vScale) texture.vScale = options.vScale;
+            
+            // Set anisotropy if available
+            if (this.scene.getEngine().getCaps().maxAnisotropy > 0) {
+                texture.anisotropicFilteringLevel = this.config.TEXTURE_ANISOTROPY;
+            }
         });
-
-        this.loadingPromises.set(cacheKey, loadPromise);
-        return loadPromise;
+        this.loadingPromises.set(cacheKey, promise);
+        return promise;
     }
-
+    
     // ========== MODEL LOADING ==========
     async loadModel(path, options = {}) {
         if (!this.config.USE_ASSETS) {
             return null;
         }
-
         const fullPath = this.basePath + path;
         const cacheKey = 'model_' + fullPath;
-
         if (this.loadedAssets.has(cacheKey)) {
-            // Return a cloned instance if caching is desired and model is cloneable
-            const cachedModel = this.loadedAssets.get(cacheKey);
-            return {
-                root: cachedModel.root.clone(`clone_${cachedModel.root.name}_${Date.now()}`),
-                instances: cachedModel.instances.map(m => m.clone(`clone_${m.name}_${Date.now()}`)),
-                animationGroups: cachedModel.animationGroups.map(ag => ag.clone())
-            };
+            return this.loadedAssets.get(cacheKey);
         }
-
         if (this.loadingPromises.has(cacheKey)) {
-            return this.loadingPromises.get(cacheKey);
+            return await this.loadingPromises.get(cacheKey);
         }
-
         this.stats.requested++;
-        if (this.config.LOG_LOADING) {
-            console.log(`[AssetLoader] Requesting model: ${fullPath}`);
-        }
 
-        const rootUrl = fullPath.substring(0, fullPath.lastIndexOf('/') + 1);
-        const sceneFileName = fullPath.substring(fullPath.lastIndexOf('/') + 1);
-
-        const loadPromise = new Promise((resolve, reject) => {
+        const promise = new Promise((resolve, reject) => {
             BABYLON.SceneLoader.ImportMesh(
-                null,
-                rootUrl,
-                sceneFileName,
+                options.meshNames || "",
+                fullPath.substring(0, fullPath.lastIndexOf('/') + 1),
+                fullPath.substring(fullPath.lastIndexOf('/') + 1),
                 this.scene,
                 (meshes, particleSystems, skeletons, animationGroups) => {
-                    if (meshes.length === 0) {
-                        this.stats.failed++;
-                        this.loadingPromises.delete(cacheKey);
-                        console.error(`[AssetLoader] ✗ Model loaded with 0 meshes: ${fullPath}`);
-                        return resolve(null);
-                    }
-
-                    // Create a root transform node to house all meshes
-                    const rootNode = new BABYLON.Mesh('assetRoot_' + sceneFileName, this.scene);
-
-                    // Parent all top-level meshes to the root node
-                    const topLevelMeshes = meshes.filter(m => !m.parent);
-                    topLevelMeshes.forEach(m => {
-                        // Position the root node to the model's initial position
-                        if (m.name === '__root__') {
-                            rootNode.position.copyFrom(m.position);
-                            m.position.setAll(0);
-                        }
-                        m.parent = rootNode;
-
-                        // Apply default options
-                        if (options.scaling) {
-                            rootNode.scaling.copyFrom(options.scaling);
+                    this.stats.loaded++;
+                    
+                    // Create a root node for the model
+                    const root = new BABYLON.TransformNode(options.name || path, this.scene);
+                    
+                    // Parent all meshes to the root node
+                    meshes.forEach(mesh => {
+                        mesh.parent = root;
+                        mesh.isPickable = true; // Default pickable
+                        
+                        // Default shadow casting
+                        if (this.scene.shadowGenerator) {
+                            this.scene.shadowGenerator.addShadowCaster(mesh);
                         }
                     });
 
-                    const assetData = {
-                        root: rootNode,
-                        instances: meshes,
+                    // Store the result
+                    const result = {
+                        root: root,
+                        meshes: meshes,
+                        skeletons: skeletons,
                         animationGroups: animationGroups
                     };
 
-                    // Cache the asset (root mesh is the key to managing instances)
-                    this.loadedAssets.set(cacheKey, assetData);
-                    this.loadingPromises.delete(cacheKey);
-                    this.stats.loaded++;
-                    if (this.config.LOG_LOADING) {
-                        console.log(`[AssetLoader] ✓ Loaded model: ${fullPath}`);
+                    if (this.config.CACHE_ASSETS) {
+                        this.loadedAssets.set(cacheKey, result);
                     }
-
-                    resolve(assetData);
+                    this.loadingPromises.delete(cacheKey);
+                    
+                    if (this.config.LOG_LOADING) {
+                        console.log(`[AssetLoader] ✓ Loaded model: ${fullPath} (${meshes.length} meshes)`);
+                    }
+                    resolve(result);
                 },
                 null, // Progress callback
                 (scene, message, exception) => {
-                    this.loadingPromises.delete(cacheKey);
-                    this.failedAssets.add(fullPath);
                     this.stats.failed++;
-                    console.error(`[AssetLoader] ✗ Failed to load model: ${fullPath}`, message, exception);
-                    resolve(null);
+                    this.failedAssets.add(cacheKey);
+                    this.loadingPromises.delete(cacheKey);
+                    console.error(`[AssetLoader] ❌ Failed to load model: ${fullPath}`, message, exception);
+                    reject(new Error(`Failed to load model: ${fullPath}`));
                 }
             );
         });
-
-        this.loadingPromises.set(cacheKey, loadPromise);
-        return loadPromise;
+        this.loadingPromises.set(cacheKey, promise);
+        return promise;
     }
 
     // ========== PROCEDURAL FALLBACKS ==========
-
-    /**
-     * Creates a simple procedural material based on a type name.
-     * @param {string} typeName - e.g., 'grass', 'dirt', 'wood'
-     */
     createProceduralMaterial(typeName) {
-        const mat = new BABYLON.StandardMaterial(`proceduralMat_${typeName}`, this.scene);
+        this.stats.procedural++;
 
+        const mat = new BABYLON.StandardMaterial('proceduralMat', this.scene);
+        
+        // Simple color mapping
         const colors = {
-            grass: new BABYLON.Color3(0.3, 0.6, 0.3),
+            grass: new BABYLON.Color3(0.3, 0.7, 0.4),
             dirt: new BABYLON.Color3(0.5, 0.4, 0.3),
-            stone: new BABYLON.Color3(0.4, 0.4, 0.4),
-            water: new BABYLON.Color3(0.1, 0.3, 0.5),
-            wood: new BABYLON.Color3(0.5, 0.3, 0.1),
-            skin: new BABYLON.Color3(0.8, 0.7, 0.5)
+            rock: new BABYLON.Color3(0.4, 0.4, 0.4),
+            water: new BABYLON.Color3(0.2, 0.5, 0.7),
+            player: new BABYLON.Color3(0.1, 0.8, 0.1),
+            enemy: new BABYLON.Color3(0.8, 0.2, 0.2),
+            default: new BABYLON.Color3(0.8, 0.7, 0.5)
         };
         
         mat.diffuseColor = colors[typeName] || colors.grass;
