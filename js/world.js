@@ -455,9 +455,16 @@ class World {
     async loadTerrainAssets() {
         try {
             const loader = this.assetLoader || new AssetLoader(this.scene);
+            
+            // PATCH 3: Safely check for ASSET_MANIFEST availability
+            const manifest = (typeof ASSET_MANIFEST !== 'undefined') ? ASSET_MANIFEST : null;
+            if (!manifest) {
+                console.warn('[World] ASSET_MANIFEST not available for terrain assets. Skipping.');
+                return;
+            }
 
             // Try to load grass textures
-            const grassData = ASSET_MANIFEST.TERRAIN.GROUND.grass;
+            const grassData = manifest.TERRAIN?.GROUND?.grass; // Use optional chaining for safer property access
 
             if (grassData && grassData.diffuse) {
                 console.log('[World] Attempting to load grass textures...');
@@ -564,7 +571,8 @@ class World {
         console.log(`[World] ✓ Water created at y=${this.water.position.y.toFixed(2)} (non-solid)`);
 
         // Try to load water bump texture if available
-        if (window.AssetLoader && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
+        // PATCH 1: Safely check for ASSET_MANIFEST availability
+        if (window.AssetLoader && typeof ASSET_MANIFEST !== 'undefined' && ASSET_MANIFEST.CONFIG.USE_ASSETS) {
             this.loadWaterAssets();
         }
     }
@@ -572,7 +580,15 @@ class World {
     async loadWaterAssets() {
         try {
             const loader = this.assetLoader || new AssetLoader(this.scene);
-            const waterData = ASSET_MANIFEST.WATER;
+            
+            // PATCH 2: Safely get ASSET_MANIFEST data
+            const manifest = (typeof ASSET_MANIFEST !== 'undefined') ? ASSET_MANIFEST : null;
+            if (!manifest) {
+                console.warn('[World] ASSET_MANIFEST not available for water assets.');
+                return;
+            }
+            const waterData = manifest.WATER;
+
 
             if (waterData && waterData.bump) {
                 console.log('[World] Attempting to load water bump texture...');
@@ -1304,12 +1320,15 @@ class NPC extends Entity {
     // This attempts to load a more complex asset model
     loadAssetModel() {
         const loader = this.scene.assetLoader;
-        if (!loader || !ASSET_MANIFEST.CHARACTERS.NPCS[this.assetKey]) {
+        
+        // PATCH 4: Safely check for ASSET_MANIFEST and nested properties
+        const manifest = (typeof ASSET_MANIFEST !== 'undefined') ? ASSET_MANIFEST : null;
+        if (!loader || !manifest || !manifest.CHARACTERS?.NPCS?.[this.assetKey]) {
             console.warn(`[NPC] AssetLoader or manifest entry for '${this.assetKey}' not found. Using fallback mesh.`);
             return;
         }
 
-        const modelData = ASSET_MANIFEST.CHARACTERS.NPCS[this.assetKey];
+        const modelData = manifest.CHARACTERS.NPCS[this.assetKey];
         const requestedScale = modelData.scale || 1.0;
 
         loader.loadModel(modelData.model, {
@@ -1570,12 +1589,15 @@ class Enemy extends Entity {
 
     loadAssetModel() {
         const loader = this.scene.assetLoader;
-        if (!loader || !ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey]) {
+        
+        // PATCH 5: Safely check for ASSET_MANIFEST and nested properties
+        const manifest = (typeof ASSET_MANIFEST !== 'undefined') ? ASSET_MANIFEST : null;
+        if (!loader || !manifest || !manifest.CHARACTERS?.ENEMIES?.[this.assetKey]) {
             this.createMesh(); // Fallback
             return;
         }
 
-        const modelData = ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey];
+        const modelData = manifest.CHARACTERS.ENEMIES[this.assetKey];
         const requestedScale = modelData.scale || 1.0;
 
         loader.loadModel(modelData.model, {
