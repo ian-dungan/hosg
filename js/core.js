@@ -66,7 +66,7 @@ const CONFIG = {
         // Character Models (3D meshes)
         CHARACTERS: {
             knight: { 
-                model: "Knight03.glb", 
+                model: "assets/player/character/Knight03.glb", 
                 required: true 
             },
             wolf: { 
