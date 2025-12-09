@@ -1,12 +1,15 @@
 {
   "name": "heroes-of-shady-grove",
-  "version": "1.0.0",
-  "description": "A Babylon.js RPG game project hosted on Render.",
+  "version": "1.1.0",
+  "description": "A Babylon.js RPG game project",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js" 
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=18.x"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
   }
 }
