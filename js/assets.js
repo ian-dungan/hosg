@@ -35,6 +35,7 @@ const ASSET_MANIFEST = {
         },
         NPCS: {
             // FIX: Commented out missing merchant model to prevent 404 errors.
+            // When an NPC tries to load it, it will correctly fall back to a procedural mesh.
             // merchant: {
             //     model: 'npcs/merchant.glb',
             //     scale: 1.0,
@@ -108,7 +109,9 @@ const ASSET_MANIFEST = {
         }
     },
     
-    ENEMIES: {
+    // Note: This separate ENEMIES block should be unified with CHARACTERS.ENEMIES eventually, 
+    // but the loader is updated to handle both structures robustly for now.
+    ENEMIES: { 
         wolf: {
             model: 'enemies/wolf.glb',
             texture: 'textures/enemies/wolf_diffuse.png',
@@ -135,8 +138,6 @@ class AssetLoader {
         this.failedAssets = new Set();
         this.stats = { requested: 0, loaded: 0, failed: 0, procedural: 0 };
     }
-
-    // ... (Remaining AssetLoader implementation)
 
     // ========== TEXTURE LOADING ==========
     async loadTexture(path, options = {}) {
@@ -172,7 +173,8 @@ class AssetLoader {
                     this.failedAssets.add(path);
                     this.loadingPromises.delete(cacheKey);
                     this.stats.failed++;
-                    resolve(this.createProceduralMaterial("grass").albedoTexture); // Fallback
+                    // Fallback to a plain texture if needed, or resolve null
+                    resolve(null); 
                 }
             );
         });
@@ -270,6 +272,7 @@ class AssetLoader {
         const instances = [];
         const clonedMeshes = [];
 
+        // Create instances for all meshes in the original model
         originalData.meshes.forEach(originalMesh => {
             const clonedMesh = originalMesh.createInstance(originalMesh.name + "_instance");
             clonedMesh.parent = newRoot;
@@ -283,7 +286,7 @@ class AssetLoader {
             newRoot.scaling.setAll(options.scale);
         }
 
-        // Clone/Retarget animations/skeletons if needed (simplified for this example)
+        // Clone/Retarget animations/skeletons if needed
         
         return {
             root: newRoot,
@@ -293,29 +296,44 @@ class AssetLoader {
         };
     }
 
+    // FIX: Corrected _getManifestEntry logic to handle keys like 'wolf' and 'CHARACTERS/ENEMIES/wolf'
     _getManifestEntry(assetKey) {
         const parts = assetKey.split('/');
-        let current = ASSET_MANIFEST.CHARACTERS;
-        
-        if (parts.length === 1) { // Check ENEMIES directly
-            return ASSET_MANIFEST.ENEMIES[parts[0]];
+        let current = ASSET_MANIFEST;
+
+        // 1. Check for full paths (e.g., 'CHARACTERS/ENEMIES/wolf')
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (current[parts[i]]) {
+                current = current[parts[i]];
+            } else {
+                // If a part of the path is not found, stop
+                return null;
+            }
         }
         
-        // Check CHARACTERS/NPCS or CHARACTERS/ENEMIES
-        if (current[parts[0]]) {
-            current = current[parts[0]];
-        } else {
-            return null;
+        const finalPart = parts[parts.length - 1];
+
+        // 2. Try the full path match (e.g., in CHARACTERS.ENEMIES['wolf'])
+        if (current[finalPart]) {
+            return current[finalPart];
         }
 
-        if (current[parts[1]]) {
-            return current[parts[1]];
+        // 3. Fallback: Check for simple keys (e.g., 'wolf', 'knight') directly in key character lists
+        if (parts.length === 1) {
+            if (ASSET_MANIFEST.CHARACTERS.PLAYER[assetKey]) {
+                return ASSET_MANIFEST.CHARACTERS.PLAYER[assetKey];
+            }
+            if (ASSET_MANIFEST.CHARACTERS.NPCS[assetKey]) {
+                return ASSET_MANIFEST.CHARACTERS.NPCS[assetKey];
+            }
+            if (ASSET_MANIFEST.CHARACTERS.ENEMIES[assetKey]) {
+                return ASSET_MANIFEST.CHARACTERS.ENEMIES[assetKey];
+            }
         }
 
         return null;
     }
 
-    // ... (Stats/Procedural methods from original snippet)
     createProceduralMaterial(typeName) {
         const mat = new BABYLON.StandardMaterial(`proceduralMat_${typeName}`, this.scene);
         const colors = {
