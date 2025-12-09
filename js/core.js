@@ -49,7 +49,7 @@ const CONFIG = {
             CHARACTERS: "player/character/",
             ENEMIES: "enemies/",
             ENVIRONMENT: "environment/",
-            SKYBOX: "sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg",
+            SKYBOX: "sky/",
             ITEMS: "items/",
             WEAPONS: "weapons/",
             ARMOR: "armor/",
