@@ -32,7 +32,16 @@ function AssetManager(scene) {
 
     // Guard against missing BABYLON or scene to avoid crashes in constrained contexts.
     if (typeof BABYLON !== 'undefined' && scene) {
-        this.loader = new BABYLON.AssetsManager(scene);
+        try {
+            this.loader = new BABYLON.AssetsManager(scene);
+            // Some constrained environments patch prototypes; make sure critical methods exist.
+            if (!this.loader.load || !this.loader.addMeshTask) {
+                throw new Error('AssetsManager incomplete');
+            }
+        } catch (err) {
+            console.warn('[Assets] Failed to create AssetsManager; running without loader.', err);
+            this.loader = null;
+        }
     } else {
         this.loader = null;
     }
