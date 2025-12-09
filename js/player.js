@@ -3,9 +3,86 @@
 // Fixes: Proper initialization order, deferred camera setup, improved controls
 // ===========================================================
 
-if (typeof Character === 'undefined') {
-    throw new Error('[Player] Character base class not found. Ensure world.js loads first.');
+// Safety guards: ensure Entity/Character exist even if previous scripts failed to load.
+if (typeof Entity === 'undefined') {
+    console.warn('[Player] Entity base class missing. Installing minimal fallback.');
+    class Entity {
+        constructor(scene, position) {
+            this.scene = scene;
+            this.position = position || new BABYLON.Vector3(0, 0, 0);
+            this.mesh = null;
+            this.isDead = false;
+        }
+
+        update() {
+            if (this.mesh && this.mesh.position && this.position && typeof this.mesh.position.copyFrom === 'function') {
+                this.mesh.position.copyFrom(this.position);
+            }
+        }
+
+        dispose() {
+            this.isDead = true;
+            if (this.mesh && typeof this.mesh.dispose === 'function') {
+                this.mesh.dispose();
+                this.mesh = null;
+            }
+        }
+    }
+    window.Entity = Entity;
 }
+
+// Safety guard: if Character failed to load (e.g., due to script order issues),
+// provide a minimal fallback to avoid a ReferenceError and allow the game to
+// continue using basic Entity behavior until assets load correctly.
+if (typeof Character === 'undefined' && typeof Entity !== 'undefined') {
+    console.warn('[Player] Character base class missing. Using minimal fallback.');
+    class Character extends Entity {
+        constructor(scene, position, name = 'Character') {
+            super(scene, position, name);
+            this.name = name;
+            this.health = 100;
+            this.target = null;
+        }
+    }
+    window.Character = Character;
+}
+
+class Player extends Character {
+    constructor(scene) {
+        const C = typeof CONFIG === 'undefined' ? {} : CONFIG;
+        const playerConfig = C.PLAYER || {};
+        const combatConfig = C.COMBAT || {};
+        
+        const spawnHeight = playerConfig.SPAWN_HEIGHT || 5; 
+        
+        super(scene, new BABYLON.Vector3(0, spawnHeight, 0), 'Player');
+        
+        this.isPlayer = true; 
+        this.className = null; 
+        
+        this.stats = {
+            maxHealth: playerConfig.HEALTH || 100,
+            maxMana: playerConfig.MANA || 50, 
+            maxStamina: playerConfig.STAMINA || 100,
+            
+            attackPower: 10,
+            magicPower: 5,
+            
+            moveSpeed: playerConfig.MOVE_SPEED || 0.15, 
+
+            attackRange: combatConfig.RANGE_MELEE || 2,
+            attackCooldown: combatConfig.ATTACK_COOLDOWN_MELEE || 1,
+            
+            currentAttackPower: 10,
+            currentMagicPower: 5,
+        };
+        
+        this.health = this.stats.maxHealth;
+        this.mana = this.stats.maxMana;
+        this.stamina = this.stats.maxStamina;
+        this.abilities = []; 
+        this.inventory = new Inventory(this);
+        this.equipment = new Equipment(this);
 
 class Player extends Character {
     constructor(scene, position, className = 'Warrior') {
@@ -22,7 +99,25 @@ class Player extends Character {
         this._initInput();
         this._initTargetHighlight();
 
-        console.log(`[Player] Player class '${this.className}' initialized.`);
+        // CRITICAL: applyClass calls _initMesh immediately.
+        // It must be safe even if the class config fails to load.
+        this.applyClass('Warrior');
+    }
+    
+    _initCamera() {
+        this.camera = new BABYLON.FollowCamera("PlayerCamera", this.position.clone(), this.scene);
+        this.camera.radius = 10; // Distance of the camera from the target
+        this.camera.heightOffset = 4; // Height of camera above the target
+        this.camera.rotationOffset = 180; // Start facing backward
+        this.camera.cameraAcceleration = 0.05;
+        this.camera.maxCameraSpeed = 20;
+        this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
+    }
+    
+    _initInput() {
+        window.addEventListener('keydown', this.handleKeyDown);
+        window.addEventListener('keyup', this.handleKeyUp);
+        this.scene.onPointerDown = this.handlePointerDown;
     }
 
     // Initialize camera - called AFTER world is created
@@ -253,37 +348,35 @@ class Player extends Character {
 
         this.mesh.physicsImpostor.setLinearVelocity(velocity);
     }
-    
-    executeAbilityInSlot(slotIndex) {
-        const abilityArray = Array.from(this.abilities.values());
-        const ability = abilityArray[slotIndex - 1]; 
-        
-        if (ability) {
-            if (ability.isReady()) {
-                // Check resource costs
-                const cost = ability.resourceCost || {};
-                if ((cost.mana || 0) > this.mana || (cost.stamina || 0) > this.stamina) {
-                    if (this.scene.game && this.scene.game.ui) {
-                        this.scene.game.ui.showMessage(`Not enough resources for ${ability.name}!`, 1000, 'error');
-                    }
-                    return;
-                }
-                
-                // Deduct costs
-                this.mana -= (cost.mana || 0);
-                this.stamina -= (cost.stamina || 0);
-                
-                // Execute ability
-                const requiresTarget = ability.effectData && ability.effectData.requiresTarget;
-                const targetToUse = requiresTarget ? this.target : this;
-                
-                const success = ability.execute(this, targetToUse);
-                if (success && this.scene.game && this.scene.game.ui) {
-                    this.scene.game.ui.update(this);
-                }
-            } else {
-                if (this.scene.game && this.scene.game.ui) {
-                    this.scene.game.ui.showMessage(`[${ability.name}] is on cooldown!`, 1000, 'error');
+
+    // --- Class & Stats ---
+
+    applyClass(className) {
+        const classConfig = (CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
+            ? CONFIG.ASSETS.CLASSES[className]
+            : null) || this._getFallbackClassConfig(className);
+
+        if (classConfig) {
+            this.className = className;
+            
+            // 1. Apply Stats
+            Object.assign(this.stats, classConfig.stats);
+            this.health = this.stats.maxHealth;
+            this.mana = this.stats.maxMana;
+            this.stamina = this.stats.maxStamina;
+
+            // 2. Initialize Mesh
+            const assetKey = classConfig.model; // e.g., 'knight'
+            this._initMesh(assetKey);
+            
+            // 3. Initialize Abilities
+            if (this.scene.game.skillTemplates) {
+                const defaultAbilityTemplate = this.scene.game.skillTemplates.get(classConfig.defaultAbility);
+                if (defaultAbilityTemplate) {
+                    this.abilities = [new Ability(defaultAbilityTemplate)];
+                } else {
+                    console.warn(`[Player] Default ability template not found for: ${classConfig.defaultAbility}`);
+                    this.abilities = []; // Ensure it's still an array
                 }
             }
         } else {
@@ -293,30 +386,28 @@ class Player extends Character {
         }
     }
 
-    _getClassConfig(className) {
-        if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES) {
-            return CONFIG.ASSETS.CLASSES[className] || this._getFallbackClassConfig(className);
-        } else {
-            console.warn(`[Player] CONFIG.ASSETS.CLASSES unavailable. Using minimal fallback.`);
-            return this._getFallbackClassConfig(className);
+        // Provide a minimal on-file fallback so the player can still spawn even when
+        // CONFIG.ASSETS.CLASSES is unavailable (e.g., if a previous script failed).
+        _getFallbackClassConfig(className) {
+            if (className !== 'Warrior') return null;
+
+            return {
+                model: 'knight',
+                stats: {
+                    maxHealth: 100,
+                    maxMana: 50,
+                    maxStamina: 100,
+                    attackPower: 10,
+                    magicPower: 5,
+                    moveSpeed: 0.15
+                },
+                defaultAbility: 'Cleave'
+            };
         }
-    }
 
-    _getFallbackClassConfig(className) {
-        if (className !== 'Warrior') return null;
-
-        return {
-            model: 'knight',
-            stats: {
-                maxHealth: 100, maxMana: 50, maxStamina: 100, 
-                attackPower: 10, magicPower: 5, moveSpeed: 0.15
-            },
-            defaultAbility: 'Cleave'
-        };
-    }
-
-    _initTargetHighlight() { 
-        // TODO: Add visual target highlighting
+    // --- Cleanup/Utility ---
+    _initTargetHighlight() {
+        // Placeholder for future target highlight effect
     }
 
     dispose() {

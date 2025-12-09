@@ -63,54 +63,15 @@ const CONFIG = {
         // Player Character Models
         // Each can have: model (filename), path (override default), required (boolean)
         CHARACTERS: {
-            knight: { 
-                model: "Knight03.glb",
-                path: "player/character/",  // Optional: override default path
-                required: true 
-            }
-            // Examples:
-            // mage: { 
-            //     model: "Mage01.glb",
-            //     path: "characters/mages/",  // Custom subfolder
-            //     required: true 
-            // },
-            // archer: {
-            //     model: "Archer.glb",
-            //     path: "https://cdn.example.com/models/",  // Use CDN
-            //     required: false
-            // }
-        },
-        
-        // Enemy Models (NPCs, Monsters, Bosses)
-        ENEMIES: {
-            wolf: { 
-                model: "Wolf.glb",
-                path: "enemies/",  // Optional: override default path
-                required: false 
-            }
-            // Examples:
-            // goblin: {
-            //     model: "Goblin.glb",
-            //     path: "enemies/humanoids/",
-            //     required: false
-            // },
-            // dragon: {
-            //     model: "Dragon_Boss.glb",
-            //     path: "enemies/bosses/",
-            //     required: true
-            // },
-            // rat: {
-            //     model: "Rat.glb",
-            //     path: "../shared/creatures/",  // Parent directory
-            //     required: false
-            // }
-        },
-        
-        // Environment Assets (trees, rocks, buildings, etc.)
-        ENVIRONMENT: {
-            tree1: { 
-                model: "Tree01.glb",
-                path: "environment/nature/"
+            knight: {
+                model: 'knight03.glb',
+                // Use relative path to the repository root
+                path: 'assets/player/character/'
+            },
+            wolf: {
+                model: 'wolf.glb',
+                // Use relative path to the repository root
+                path: 'assets/enemies/'
             }
             // Examples:
             // rock1: { 
@@ -126,48 +87,11 @@ const CONFIG = {
             //     path: "https://cdn.example.com/structures/"
             // }
         },
-        
-        // Items (can be used for loot, quest items, etc.)
-        ITEMS: {
-            // Examples:
-            // health_potion: {
-            //     model: "Potion_Red.glb",
-            //     path: "items/consumables/"
-            // },
-            // gold_coin: {
-            //     model: "Coin.glb",
-            //     path: "items/currency/"
-            // }
-        },
-        
-        // Weapons
-        WEAPONS: {
-            // Examples:
-            // iron_sword: {
-            //     model: "Sword_Iron.glb",
-            //     path: "weapons/swords/"
-            // },
-            // wooden_bow: {
-            //     model: "Bow_Wood.glb",
-            //     path: "weapons/bows/"
-            // }
-        },
-        
-        // Armor
-        ARMOR: {
-            // Examples:
-            // iron_helmet: {
-            //     model: "Helmet_Iron.glb",
-            //     path: "armor/helmets/"
-            // },
-            // leather_boots: {
-            //     model: "Boots_Leather.glb",
-            //     path: "armor/boots/"
-            // }
-        },
-        
-        // Class Definitions (link models to game classes)
-        CLASSES: {
+        // No environment meshes are currently available in the repository.
+        // Keep the object for future expansion but leave it empty to avoid 404s.
+        ENVIRONMENT: {},
+
+        CLASSES: { 
             Warrior: { 
                 model: 'knight',
                 category: 'CHARACTERS',  // Which section the model is in

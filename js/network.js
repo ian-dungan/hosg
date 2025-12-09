@@ -7,15 +7,21 @@
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
-    this.isOffline = false; // We'll keep this flag but hope to avoid setting it
 
-    // 1. DEFINE YOUR CONNECTION VARIABLES
-    // Note: It's safer to use the window global config if you set it in index.html,
-    // but we'll use the hardcoded values here since they are confirmed correct.
-    const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
-    const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
-    
-    // --- 2. Initialize the Supabase Client SAFELY ---
+    // Pull connection details from the global config (index.html) first, then fall back to the
+    // hardcoded values the user provided. This makes the behavior consistent in local and hosted builds.
+    const supabaseConfig = (typeof window !== 'undefined' && window.SUPABASE_CONFIG)
+        ? window.SUPABASE_CONFIG
+        : null;
+
+    const supabaseUrl = (supabaseConfig && supabaseConfig.url)
+        ? supabaseConfig.url
+        : 'https://vaxfoafjjybwcxwhicla.supabase.co';
+    const supabaseKey = (supabaseConfig && supabaseConfig.key)
+        ? supabaseConfig.key
+        : 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
+
+    // Initialize the Supabase Client
     if (typeof supabase !== 'undefined') {
         try {
             // CRITICAL FIX: Explicitly set storage to null to prevent browser security errors.
@@ -38,9 +44,52 @@ function SupabaseService(config) {
     }
 }
 
-// Load templates (Skills/NPCs) from DB or Fallback
-SupabaseService.prototype.loadTemplates = async function(skillMap, npcMap) {
-    console.log("[Network] Loading game templates...");
+SupabaseService.prototype._ensureClient = function () {
+    if (!this.client) {
+        console.error('[Network] Supabase client is not initialized.');
+        return false;
+    }
+    return true;
+};
+
+SupabaseService.prototype.fetchTemplates = async function () {
+    if (!this._ensureClient()) return null;
+
+    try {
+        const [items, skills, npcs] = await Promise.all([
+            this.client.from('hosg_item_templates').select('*'),
+            this.client.from('hosg_skill_templates').select('*'),
+            this.client.from('hosg_npc_templates').select('*'),
+        ]);
+
+        const results = { items: [], skills: [], npcs: [] };
+
+        if (items.error) throw items.error;
+        if (skills.error) throw skills.error;
+        if (npcs.error) throw npcs.error;
+
+        results.items = items.data || [];
+        results.skills = skills.data || [];
+        results.npcs = npcs.data || [];
+
+        console.log('[Network] Templates loaded from Supabase.');
+        return results;
+    } catch (err) {
+        console.error('[Network] Failed to load templates from Supabase:', err.message || err);
+        return null;
+    }
+};
+
+// NOTE: All previous prototype definitions for _init have been removed 
+// as the logic is now in the constructor. Other methods remain attached to the prototype.
+
+// SupabaseService.prototype.authenticate = ...
+// SupabaseService.prototype.fetchCharacterId = ...
+// SupabaseService.prototype.fetchCharacterState = ...
+// SupabaseService.prototype.createCharacterState = ...
+// SupabaseService.prototype.saveCharacterState = ...
+
+var supabaseService = new SupabaseService();
 
     // --- 1. Define Offline Fallbacks ---
     const OFFLINE_SKILLS = [
@@ -49,41 +98,39 @@ SupabaseService.prototype.loadTemplates = async function(skillMap, npcMap) {
         { id: 'Heal', code: 'HEAL', name: 'Heal', skill_type: 'Magic', resource_cost: { mana: 30, stamina: 0 }, cooldown_ms: 8000, effect: { type: 'heal', base_value: 25 } }
     ];
 
-    const OFFLINE_NPCS = [
-        { id: 'Wolf', name: 'Wolf', model: 'wolf', level: 1, stats: { maxHealth: 30, attackPower: 5, moveSpeed: 0.18 }, defaultAbility: 'Bite' }
+// Template loading now pulls from Supabase first and falls back to bundled data if unavailable
+NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcMap) {
+    const fallbackSkills = [
+        {
+            id: 'Cleave',
+            code: 'CLEAVE',
+            name: 'Cleave',
+            skill_type: 'Attack',
+            resource_cost: { mana: 0, stamina: 10 },
+            cooldown_ms: 5000,
+            effect: {
+                type: 'damage',
+                base_value: 10,
+                magic_scaling: 0,
+                physical_scaling: 0.5
+            }
+        },
     ];
 
-    // --- 2. Attempt Fetch from Supabase ---
-    if (!this.isOffline && this.client) {
-        try {
-            // Fetch Skills
-            let { data: skills, error: skillError } = await this.client.from('hosg_skills').select('*');
-            if (skillError) throw skillError;
-            skills.forEach(t => skillMap.set(t.id, t));
-            console.log(`[Network] Loaded ${skills.length} skills from database.`);
-            
-            // Fetch NPCs
-            let { data: npcs, error: npcError } = await this.client.from('hosg_npc_templates').select('*');
-            if (npcError) throw npcError;
-            npcs.forEach(t => npcMap.set(t.id, t));
-            console.log(`[Network] Loaded ${npcs.length} NPCs from database.`);
-            
-            return; // Success!
+    // Try Supabase first
+    const templates = await this.supabase.fetchTemplates();
 
-        } catch (err) {
-            console.warn("[Network] Database query failed or table access is denied. Falling back to offline templates.", err.message || err);
-            this.isOffline = true;
-            // Fall through to offline logic
-        }
+    if (templates) {
+        templates.items.forEach(t => itemMap.set(t.id, t));
+        templates.skills.forEach(t => skillMap.set(t.id, t));
+        templates.npcs.forEach(t => npcMap.set(t.id, t));
+        return true;
     }
 
-    // --- 3. Apply Offline Fallbacks ---
-    if (this.isOffline) {
-        OFFLINE_SKILLS.forEach(t => skillMap.set(t.id, t));
-        OFFLINE_NPCS.forEach(t => npcMap.set(t.id, t));
-        console.log("[Network] Loaded templates from OFFLINE backup.");
-        this.scene?.game?.ui?.showMessage("Warning: Running in Offline Mode (Storage Blocked)", 5000, 'error');
-    }
+    // Fall back to local data to keep the game playable offline or when Supabase is blocked
+    console.warn('[Network] Falling back to local templates.');
+    fallbackSkills.forEach(t => skillMap.set(t.id, t));
+    return true;
 };
 
 SupabaseService.prototype.authenticate = async function () { return { error: "Storage Disabled" }; };

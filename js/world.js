@@ -91,69 +91,116 @@ class Character extends Entity {
 }
 window.Character = Character;
 
-// ===========================================================
-// Enemy/NPC Class (Specialized for non-player characters)
-// ===========================================================
-class Enemy extends Character {
-    constructor(scene, position, template, assetManager) {
-        super(scene, position, template.name || 'Enemy');
-        this.template = template;
-        this.level = template.level || 1;
-        this.aiProfile = template.ai_profile || 'aggro';
-        this.aggroRange = 15;
-        this.attackRange = 2;
-        this.attackCooldown = 0;
-        this.attackDelay = 2.0; // seconds between attacks
-        this.wanderTimer = 0;
-        this.wanderDelay = 3.0;
-        this.spawnPosition = position.clone();
-        this.leashDistance = 50;
-        
-        // Apply stats from template
-        if (template.stats) {
-            this.stats = { ...template.stats };
-            this.health = this.stats.maxHealth || 50;
-            this.mana = this.stats.maxMana || 0;
-            this.stamina = this.stats.maxStamina || 50;
-        }
-        
-        // Initialize mesh
-        this._initMesh(template.model, assetManager);
-        
-        // Add default ability
-        if (template.defaultAbility && this.scene.game && this.scene.game.skillTemplates) {
-            const abilityTemplate = this.scene.game.skillTemplates.get(template.defaultAbility);
-            if (abilityTemplate) {
-                this.addAbility(template.defaultAbility, abilityTemplate);
-            }
-        }
+    createLight() {
+        const light = new BABYLON.DirectionalLight("dir01", new BABYLON.Vector3(0.5, -1, 0.5), this.scene);
+        light.position = new BABYLON.Vector3(-20, 40, -20);
+        light.intensity = 1.0;
     }
     
-    _initMesh(modelKey, assetManager) {
-        if (!assetManager) {
-            console.error('[Enemy] AssetManager not provided');
-            return;
+    createEnvironment() {
+        this.createSkybox();
+        // this.createWeather(); // Future feature
+    }
+    
+    createSkybox() {
+        const skyboxConfig = CONFIG.WORLD.SKYBOX;
+
+        // 1. Optional classic skybox (if PATH is provided in config)
+        if (skyboxConfig.PATH) {
+            const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: skyboxConfig.SIZE }, this.scene);
+            const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
+            skyboxMaterial.backFaceCulling = false;
+            skyboxMaterial.disableLighting = true;
+            skybox.material = skyboxMaterial;
+            skybox.infiniteDistance = true;
+            skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(skyboxConfig.PATH, this.scene);
+            skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
         }
-        
-        const meshes = assetManager.getAsset(modelKey);
-        
-        if (meshes && meshes.length > 0) {
-            this.mesh = meshes[0].clone(this.name + "_" + Math.random().toString(36).substring(7));
-            this.mesh.position.copyFrom(this.position);
-            this.mesh.scaling.setAll(1.0);
-            this.mesh.checkCollisions = true;
-            
-            // Physics
-            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                this.mesh,
-                BABYLON.PhysicsImpostor.BoxImpostor,
-                { mass: 1, restitution: 0.1, friction: 0.5 },
+
+        // 2. Setup PBR Environment using pre-filtered data (.env)
+        // Prefer a prefiltered environment map if available. Use a reliable CDN fallback
+        // to avoid 404s when the local file is missing.
+        const environmentSource = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
+
+        // Older browsers reported a stray syntax error inside this block. Rebuild it using
+        // only classic functions/strings to avoid any parsing surprises.
+        let hdrTexture = null;
+        try {
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
+        } catch (err) {
+            console.warn(
+                "[World] Failed to load environment map from " + environmentSource + ". Using Babylon fallback.",
+                err
+            );
+            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+                "https://assets.babylonjs.com/environments/environmentSpecular.env",
                 this.scene
             );
-            
-            // Clone skeleton if available
-            if (meshes[0].skeleton) {
-                this.mesh.skeleton = meshes[0].skeleton.clone();
+        }
+
+        this.scene.environmentTexture = hdrTexture;
+        this.scene.imageProcessingConfiguration.exposure = skyboxConfig.EXPOSURE;
+        this.scene.imageProcessingConfiguration.contrast = skyboxConfig.CONTRAST;
+    }
+    
+    createGround() {
+        const envConfig = CONFIG && CONFIG.ASSETS ? CONFIG.ASSETS.ENVIRONMENT : null;
+        const terrainConfig = envConfig ? envConfig.terrain_base : null;
+        const terrainAsset = terrainConfig
+            ? this.scene.game.assetManager.getAsset(terrainConfig.model)
+            : null;
+
+        if (terrainAsset && terrainAsset.length > 0) {
+            const terrain = terrainAsset[0];
+            terrain.name = "TerrainBase";
+            terrain.isPickable = true;
+            terrain.receiveShadows = true;
+
+            // Set the model to be static collision ground
+            terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
+                terrain,
+                BABYLON.PhysicsImpostor.MeshImpostor, // MeshImpostor for complex shapes
+                { mass: 0, restitution: 0.9 }, // Mass 0 for static object
+                this.scene
+            );
+        } else {
+            if (terrainConfig) {
+                console.warn(
+                    `[World] Failed to load TerrainBase mesh '${terrainConfig.model}'. Using simple plane as fallback.`
+                );
+            }
+            const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, this.scene);
+            ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+                ground,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                { mass: 0, restitution: 0.9 },
+                this.scene
+            );
+            ground.receiveShadows = true;
+
+            const groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
+            groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+            ground.material = groundMaterial;
+        }
+    }
+
+    spawnUpdate(deltaTime) {
+        if (!CONFIG.WORLD.SPAWNS) return;
+
+        CONFIG.WORLD.SPAWNS.forEach(spawnData => {
+            const spawnId = spawnData.id;
+            let timer = this.spawnTimers.get(spawnId) || 0;
+            timer += deltaTime;
+
+            const activeEntities = this.activeSpawns.get(spawnId).filter(e => !e.isDead);
+            this.activeSpawns.set(spawnId, activeEntities);
+
+            if (activeEntities.length < spawnData.max_spawn && timer >= spawnData.respawn_time_s) {
+                const template = this.scene.game.npcTemplates.get(spawnData.npc_template_id);
+                if (template) {
+                    this.spawnEnemy(spawnData, template);
+                    timer = 0; // Reset timer only on successful spawn
+                }
             }
             
             // Lock rotation
