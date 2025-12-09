@@ -1,6 +1,5 @@
 // Simplex Noise for terrain generation - MOVED TO TOP TO FIX INITIALIZATION ERROR
 class SimplexNoise {
-// ... SimplexNoise implementation (omitted for brevity)
     constructor(seed = Math.random()) {
         this.grad3 = [
             [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
@@ -300,6 +299,9 @@ class World {
                     
                     // Create collision barrier
                     this.createCollisionBarrier();
+
+                    // Apply terrain material asynchronously (FIX: Called from the sync callback)
+                    this.createTerrainMaterial(); 
                 }
             },
             this.scene
@@ -373,7 +375,8 @@ class World {
         return pickInfo.hit ? pickInfo.pickedPoint.y : 0;
     }
 
-    async createTerrainMaterial() {
+    // FIX: Removed 'async' keyword and replaced 'await' with '.then()' to fix SyntaxError
+    createTerrainMaterial() {
         if (!this.assetLoader) {
             console.warn('[World] AssetLoader not available, using simple green material');
             this.terrain.material = new BABYLON.StandardMaterial('basicTerrain', this.scene);
@@ -387,47 +390,47 @@ class World {
 
         const grassData = window.ASSET_MANIFEST?.TERRAIN?.GROUND?.grass;
         if (!grassData) return;
+        
+        const loader = this.assetLoader;
 
-        // Try to load diffuse texture
-        try {
-            const loader = this.assetLoader;
-            const diffuseTexture = await loader.loadTexture(grassData.diffuse, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 });
-            
-            if (diffuseTexture) {
-                this.terrainMaterial.diffuseTexture = diffuseTexture;
-                console.log('[World] ✓ Grass color texture loaded');
-            }
-        } catch (e) {
-            console.log('[World] Grass diffuse texture not found, using procedural green');
-        }
-
-        // Try to load normal map
-        if (grassData.normal) {
-            try {
-                const normalTexture = await this.assetLoader.loadTexture(grassData.normal, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 });
+        // Chain the texture loads
+        loader.loadTexture(grassData.diffuse, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 })
+            .then(diffuseTexture => {
+                if (diffuseTexture) {
+                    this.terrainMaterial.diffuseTexture = diffuseTexture;
+                    console.log('[World] ✓ Grass color texture loaded');
+                }
+                
+                // Load normal map
+                if (grassData.normal) {
+                    return loader.loadTexture(grassData.normal, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 })
+                }
+                return null;
+            })
+            .then(normalTexture => {
                 if (normalTexture) {
                     this.terrainMaterial.bumpTexture = normalTexture;
                     console.log('[World] ✓ Grass normal texture loaded');
                 }
-            } catch (e) {
-                console.log('[World] Grass normal texture not found, continuing without it');
-            }
-        }
-
-        // Try to load AO map
-        if (grassData.ao) {
-            try {
-                const aoTexture = await this.assetLoader.loadTexture(grassData.ao, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 });
+                
+                // Load AO map
+                if (grassData.ao) {
+                    return loader.loadTexture(grassData.ao, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 });
+                }
+                return null;
+            })
+            .then(aoTexture => {
                 if (aoTexture) {
                     this.terrainMaterial.ambientTexture = aoTexture;
                     console.log('[World] ✓ Grass AO texture loaded');
                 }
-            } catch (e) {
-                console.log('[World] Grass AO texture not found, continuing without it');
-            }
-        }
+            })
+            .catch(e => {
+                console.error('[World] Failed to load one or more terrain textures:', e);
+            });
     }
 
+    // FIX: Removed 'async' keyword and replaced 'await' with '.then()' to fix SyntaxError
     createWater() {
         const waterData = window.ASSET_MANIFEST?.WATER;
 
@@ -472,18 +475,19 @@ class World {
             
             this.water.material = this.waterMaterial;
 
-            // Load water textures
-            if (waterData) {
-                if (waterData.bump) {
-                    try {
-                        const bumpTexture = await this.assetLoader.loadTexture(waterData.bump, { uScale: 5, vScale: 5 });
-                        this.waterMaterial.bumpTexture = bumpTexture;
-                        this.waterMaterial.bumpTexture.level = 0.1;
-                        console.log('[World] ✓ Water bump texture loaded');
-                    } catch (e) {
-                        console.log('[World] Water bump texture not found, using smooth water');
-                    }
-                }
+            // Load water textures using .then()
+            if (waterData && waterData.bump) {
+                this.assetLoader.loadTexture(waterData.bump, { uScale: 5, vScale: 5 })
+                    .then(bumpTexture => {
+                        if (bumpTexture) {
+                            this.waterMaterial.bumpTexture = bumpTexture;
+                            this.waterMaterial.bumpTexture.level = 0.1;
+                            console.log('[World] ✓ Water bump texture loaded');
+                        }
+                    })
+                    .catch(e => {
+                        console.log('[World] Water bump texture not found, using smooth water:', e);
+                    });
             }
 
         } catch (error) {
