@@ -10,7 +10,7 @@ function SupabaseService(config) {
     
     // 1. DEFINE YOUR CONNECTION VARIABLES
     const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
-    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZheGZvYWZqanlid2N4d2hpY2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzI5Mjg4MTksImV4cCI6MjA0ODUwNDgxOX0.Ig1YO6ifJxIhC0T3bVL0pY-CXCz2-RVMYA6ywlN0cA4';
+    const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
     
     // 2. Initialize the Supabase Client safely
     if (typeof supabase !== 'undefined') {
