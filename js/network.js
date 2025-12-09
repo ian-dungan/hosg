@@ -10,14 +10,21 @@
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
-    
-    // Line 12 FIX: _init logic is now defined directly here.
-    
-    // 1. DEFINE YOUR CONNECTION VARIABLES
-    const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
-    const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
-    
-    // 2. Initialize the Supabase Client
+
+    // Pull connection details from the global config (index.html) first, then fall back to the
+    // hardcoded values the user provided. This makes the behavior consistent in local and hosted builds.
+    const supabaseConfig = (typeof window !== 'undefined' && window.SUPABASE_CONFIG)
+        ? window.SUPABASE_CONFIG
+        : null;
+
+    const supabaseUrl = (supabaseConfig && supabaseConfig.url)
+        ? supabaseConfig.url
+        : 'https://vaxfoafjjybwcxwhicla.supabase.co';
+    const supabaseKey = (supabaseConfig && supabaseConfig.key)
+        ? supabaseConfig.key
+        : 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
+
+    // Initialize the Supabase Client
     if (typeof supabase !== 'undefined') {
         this.client = supabase.createClient(supabaseUrl, supabaseKey);
         console.log("[Network] Supabase client initialized.");
@@ -26,6 +33,42 @@ function SupabaseService(config) {
         console.error("[Network] Supabase client library not found. Check your HTML imports.");
     }
 }
+
+SupabaseService.prototype._ensureClient = function () {
+    if (!this.client) {
+        console.error('[Network] Supabase client is not initialized.');
+        return false;
+    }
+    return true;
+};
+
+SupabaseService.prototype.fetchTemplates = async function () {
+    if (!this._ensureClient()) return null;
+
+    try {
+        const [items, skills, npcs] = await Promise.all([
+            this.client.from('hosg_item_templates').select('*'),
+            this.client.from('hosg_skill_templates').select('*'),
+            this.client.from('hosg_npc_templates').select('*'),
+        ]);
+
+        const results = { items: [], skills: [], npcs: [] };
+
+        if (items.error) throw items.error;
+        if (skills.error) throw skills.error;
+        if (npcs.error) throw npcs.error;
+
+        results.items = items.data || [];
+        results.skills = skills.data || [];
+        results.npcs = npcs.data || [];
+
+        console.log('[Network] Templates loaded from Supabase.');
+        return results;
+    } catch (err) {
+        console.error('[Network] Failed to load templates from Supabase:', err.message || err);
+        return null;
+    }
+};
 
 // NOTE: All previous prototype definitions for _init have been removed 
 // as the logic is now in the constructor. Other methods remain attached to the prototype.
@@ -49,12 +92,11 @@ function NetworkManager() {
     this._listeners = {};
 }
 
-// CRITICAL FIX: Implement template loading with simulated data
+// Template loading now pulls from Supabase first and falls back to bundled data if unavailable
 NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcMap) {
-    // --- Simulated Skill Templates ---
-    const SKILL_TEMPLATES = [
+    const fallbackSkills = [
         {
-            id: 'Cleave', // The ID the player.js file is looking for
+            id: 'Cleave',
             code: 'CLEAVE',
             name: 'Cleave',
             skill_type: 'Attack',
@@ -64,17 +106,25 @@ NetworkManager.prototype.loadTemplates = async function (itemMap, skillMap, npcM
                 type: 'damage',
                 base_value: 10,
                 magic_scaling: 0,
-                physical_scaling: 0.5 // Cleave scales with attack power
+                physical_scaling: 0.5
             }
         },
-        // Placeholder for other abilities (Fireball, Heal, etc.)
     ];
 
-    // --- Populate Maps ---
-    SKILL_TEMPLATES.forEach(t => skillMap.set(t.id, t));
+    // Try Supabase first
+    const templates = await this.supabase.fetchTemplates();
 
-    console.log('[Network] Templates loaded (Simulated/Supabase).');
-    return true; 
+    if (templates) {
+        templates.items.forEach(t => itemMap.set(t.id, t));
+        templates.skills.forEach(t => skillMap.set(t.id, t));
+        templates.npcs.forEach(t => npcMap.set(t.id, t));
+        return true;
+    }
+
+    // Fall back to local data to keep the game playable offline or when Supabase is blocked
+    console.warn('[Network] Falling back to local templates.');
+    fallbackSkills.forEach(t => skillMap.set(t.id, t));
+    return true;
 };
 
 // Ensure NetworkManager is available globally (for Game.js)
