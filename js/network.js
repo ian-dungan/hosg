@@ -1,6 +1,6 @@
 // ===========================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.1.0 (OFFLINE SAFE MODE)
-// Fix: Handles "Tracking Prevention" blocking by falling back to offline data.
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.2.0 (FIXED)
+// Fixes: Correct table names, better offline handling
 // ===========================================================
 
 function SupabaseService(config) {
@@ -10,7 +10,7 @@ function SupabaseService(config) {
     
     // 1. DEFINE YOUR CONNECTION VARIABLES
     const supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
-    const supabaseKey = 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZheGZvYWZqanlid2N4d2hpY2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzI5Mjg4MTksImV4cCI6MjA0ODUwNDgxOX0.Ig1YO6ifJxIhC0T3bVL0pY-CXCz2-RVMYA6ywlN0cA4';
     
     // 2. Initialize the Supabase Client safely
     if (typeof supabase !== 'undefined') {
@@ -60,12 +60,22 @@ SupabaseService.prototype.loadTemplates = async function(skillMap, npcMap) {
             resource_cost: { mana: 30, stamina: 0 },
             cooldown_ms: 8000,
             effect: { type: 'heal', base_value: 25 }
+        },
+        {
+            id: 'Bite',
+            code: 'BITE',
+            name: 'Bite',
+            skill_type: 'Attack',
+            resource_cost: { mana: 0, stamina: 5 },
+            cooldown_ms: 2000,
+            effect: { type: 'damage', base_value: 8, physical_scaling: 0.8 }
         }
     ];
 
     const OFFLINE_NPCS = [
         {
             id: 'Wolf',
+            code: 'WOLF',
             name: 'Wolf',
             model: 'wolf', 
             level: 1,
@@ -77,36 +87,38 @@ SupabaseService.prototype.loadTemplates = async function(skillMap, npcMap) {
     // --- 2. Attempt Fetch from Supabase ---
     if (!this.isOffline && this.client) {
         try {
-            // Fetch Skills
-            const { data: skills, error: skillError } = await this.client.from('hosg_skills').select('*');
-            if (!skillError && skills) {
-                skills.forEach(t => skillMap.set(t.id, t));
+            // Fetch Skills (FIXED: correct table name)
+            const { data: skills, error: skillError } = await this.client.from('hosg_skill_templates').select('*');
+            if (!skillError && skills && skills.length > 0) {
+                skills.forEach(t => skillMap.set(t.code || t.id, t));
                 console.log(`[Network] Loaded ${skills.length} skills from database.`);
             } else {
+                console.warn("[Network] No skills loaded from DB, using offline data");
                 throw new Error("Skill fetch failed");
             }
 
-            // Fetch NPCs
+            // Fetch NPCs (FIXED: correct table name)
             const { data: npcs, error: npcError } = await this.client.from('hosg_npc_templates').select('*');
-            if (!npcError && npcs) {
-                npcs.forEach(t => npcMap.set(t.id, t));
+            if (!npcError && npcs && npcs.length > 0) {
+                npcs.forEach(t => npcMap.set(t.code || t.id, t));
                 console.log(`[Network] Loaded ${npcs.length} NPCs from database.`);
             } else {
+                console.warn("[Network] No NPCs loaded from DB, using offline data");
                 throw new Error("NPC fetch failed");
             }
             
             return; // Success! Exit function.
 
         } catch (err) {
-            console.warn("[Network] Database connection failed. Using offline templates.", err);
+            console.warn("[Network] Database connection failed. Using offline templates.", err.message || err);
             // Fall through to offline logic below
         }
     }
 
     // --- 3. Apply Offline Fallbacks ---
-    OFFLINE_SKILLS.forEach(t => skillMap.set(t.id, t));
-    OFFLINE_NPCS.forEach(t => npcMap.set(t.id, t));
-    console.log("[Network] Loaded templates from OFFLINE backup.");
+    OFFLINE_SKILLS.forEach(t => skillMap.set(t.code || t.id, t));
+    OFFLINE_NPCS.forEach(t => npcMap.set(t.code || t.id, t));
+    console.log(`[Network] Loaded ${OFFLINE_SKILLS.length} skills and ${OFFLINE_NPCS.length} NPCs from OFFLINE backup.`);
 };
 
 SupabaseService.prototype.authenticate = async function () { return { error: "Offline Mode" }; };

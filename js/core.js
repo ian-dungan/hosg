@@ -1,5 +1,5 @@
 // ===========================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.26
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.27 (FIXED)
 // ===========================================================
 
 const CONFIG = {
@@ -30,8 +30,8 @@ const CONFIG = {
                 position_x: 20,
                 position_y: 0,
                 position_z: 20,
-                spawn_radius: 50,
-                max_spawn: 5
+                spawn_radius: 10,
+                max_spawn: 3
             }
         ]
     },
@@ -47,13 +47,27 @@ const CONFIG = {
         CLASSES: {
             Warrior: { 
                 model: 'knight', 
-                stats: { maxHealth: 120, maxMana: 50, maxStamina: 120, attackPower: 15, magicPower: 5, moveSpeed: 0.15 }, 
+                stats: { 
+                    maxHealth: 120, 
+                    maxMana: 50, 
+                    maxStamina: 120, 
+                    attackPower: 15, 
+                    magicPower: 5, 
+                    moveSpeed: 0.15 
+                }, 
                 defaultAbility: 'Cleave' 
             },
             Wolf: { 
-                 model: 'wolf',
-                 stats: { maxHealth: 30, maxMana: 0, maxStamina: 50, attackPower: 5, magicPower: 0, moveSpeed: 0.18 },
-                 defaultAbility: 'Bite'
+                model: 'wolf',
+                stats: { 
+                    maxHealth: 30, 
+                    maxMana: 0, 
+                    maxStamina: 50, 
+                    attackPower: 5, 
+                    magicPower: 0, 
+                    moveSpeed: 0.18 
+                },
+                defaultAbility: 'Bite'
             }
         }
     }

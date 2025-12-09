@@ -1,6 +1,6 @@
 // ===========================================================
-// HEROES OF SHADY GROVE - WORLD CORE v1.0.20 (CHARACTER BASE FIX)
-// Fix: Added the missing Character base class before World declaration.
+// HEROES OF SHADY GROVE - WORLD CORE v1.1.0 (FIXED)
+// Fixes: Proper Enemy class, improved NPC spawning, better physics
 // ===========================================================
 
 // Base Entity class
@@ -59,9 +59,10 @@ class Character extends Entity {
 
     takeDamage(damage, source) {
         this.health = Math.max(0, this.health - damage);
-        if (this.health <= 0) {
+        if (this.health <= 0 && !this.isDead) {
             this.isDead = true;
-            console.log(`[Character] ${this.name} was slain by ${source.name}.`);
+            console.log(`[Character] ${this.name} was slain by ${source ? source.name : 'unknown'}.`);
+            if (this.onDeath) this.onDeath();
         }
         return damage;
     }
@@ -75,16 +76,229 @@ class Character extends Entity {
         if (typeof Ability !== 'undefined' && template) {
             const newAbility = new Ability(template);
             this.abilities.set(abilityName, newAbility);
+            console.log(`[Character] ${this.name} learned ${abilityName}`);
         } else {
              console.error(`[Character] Failed to add ability ${abilityName}. Ability class or template missing.`);
         }
     }
 
     dispose() {
+        if (this.mesh && this.mesh.physicsImpostor) {
+            this.mesh.physicsImpostor.dispose();
+        }
         super.dispose();
     }
 }
 window.Character = Character;
+
+// ===========================================================
+// Enemy/NPC Class (Specialized for non-player characters)
+// ===========================================================
+class Enemy extends Character {
+    constructor(scene, position, template, assetManager) {
+        super(scene, position, template.name || 'Enemy');
+        this.template = template;
+        this.level = template.level || 1;
+        this.aiProfile = template.ai_profile || 'aggro';
+        this.aggroRange = 15;
+        this.attackRange = 2;
+        this.attackCooldown = 0;
+        this.attackDelay = 2.0; // seconds between attacks
+        this.wanderTimer = 0;
+        this.wanderDelay = 3.0;
+        this.spawnPosition = position.clone();
+        this.leashDistance = 50;
+        
+        // Apply stats from template
+        if (template.stats) {
+            this.stats = { ...template.stats };
+            this.health = this.stats.maxHealth || 50;
+            this.mana = this.stats.maxMana || 0;
+            this.stamina = this.stats.maxStamina || 50;
+        }
+        
+        // Initialize mesh
+        this._initMesh(template.model, assetManager);
+        
+        // Add default ability
+        if (template.defaultAbility && this.scene.game && this.scene.game.skillTemplates) {
+            const abilityTemplate = this.scene.game.skillTemplates.get(template.defaultAbility);
+            if (abilityTemplate) {
+                this.addAbility(template.defaultAbility, abilityTemplate);
+            }
+        }
+    }
+    
+    _initMesh(modelKey, assetManager) {
+        if (!assetManager) {
+            console.error('[Enemy] AssetManager not provided');
+            return;
+        }
+        
+        const meshes = assetManager.getAsset(modelKey);
+        
+        if (meshes && meshes.length > 0) {
+            this.mesh = meshes[0].clone(this.name + "_" + Math.random().toString(36).substring(7));
+            this.mesh.position.copyFrom(this.position);
+            this.mesh.scaling.setAll(1.0);
+            this.mesh.checkCollisions = true;
+            
+            // Physics
+            this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                this.mesh,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                { mass: 1, restitution: 0.1, friction: 0.5 },
+                this.scene
+            );
+            
+            // Clone skeleton if available
+            if (meshes[0].skeleton) {
+                this.mesh.skeleton = meshes[0].skeleton.clone();
+            }
+            
+            // Lock rotation
+            this.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
+            this.mesh.physicsImpostor.registerBeforePhysics(() => {
+                if (this.mesh && this.mesh.physicsImpostor) {
+                    this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
+                }
+            });
+            
+            console.log(`[Enemy] ${this.name} mesh initialized with model: ${modelKey}`);
+        } else {
+            // Fallback sphere
+            this.mesh = BABYLON.MeshBuilder.CreateSphere(this.name + "_mesh", { diameter: 1.5 }, this.scene);
+            this.mesh.position.copyFrom(this.position);
+            const mat = new BABYLON.StandardMaterial("enemyFallback", this.scene);
+            mat.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2);
+            this.mesh.material = mat;
+            console.warn(`[Enemy] Failed to load asset: ${modelKey}. Using fallback.`);
+        }
+    }
+    
+    update(deltaTime) {
+        if (this.isDead) return;
+        
+        super.update(deltaTime);
+        
+        // Check leash distance
+        const distFromSpawn = BABYLON.Vector3.Distance(this.position, this.spawnPosition);
+        if (distFromSpawn > this.leashDistance) {
+            this.resetToSpawn();
+            return;
+        }
+        
+        // AI behavior
+        const player = this.scene.game ? this.scene.game.player : null;
+        if (player && !player.isDead) {
+            const distToPlayer = BABYLON.Vector3.Distance(this.position, player.position);
+            
+            if (distToPlayer < this.aggroRange) {
+                this.target = player;
+                this.moveTowards(player.position, deltaTime);
+                
+                // Attack if in range
+                if (distToPlayer < this.attackRange) {
+                    this.tryAttack(deltaTime);
+                }
+            } else {
+                this.target = null;
+                this.wander(deltaTime);
+            }
+        } else {
+            this.wander(deltaTime);
+        }
+        
+        // Update attack cooldown
+        if (this.attackCooldown > 0) {
+            this.attackCooldown -= deltaTime;
+        }
+    }
+    
+    moveTowards(targetPos, deltaTime) {
+        if (!this.mesh || !this.mesh.physicsImpostor) return;
+        
+        const direction = targetPos.subtract(this.position);
+        direction.y = 0;
+        
+        if (direction.lengthSquared() > 0.01) {
+            direction.normalize();
+            
+            // Apply movement
+            const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+            const moveSpeed = this.stats.moveSpeed || 0.15;
+            velocity.x = direction.x * moveSpeed * (1 / deltaTime);
+            velocity.z = direction.z * moveSpeed * (1 / deltaTime);
+            this.mesh.physicsImpostor.setLinearVelocity(velocity);
+            
+            // Face direction
+            const angle = Math.atan2(-direction.x, -direction.z);
+            this.mesh.rotation.y = angle;
+        }
+    }
+    
+    wander(deltaTime) {
+        this.wanderTimer -= deltaTime;
+        
+        if (this.wanderTimer <= 0) {
+            this.wanderTimer = this.wanderDelay + Math.random() * 2;
+            
+            // Occasionally move to random nearby point
+            if (Math.random() < 0.3) {
+                const randomOffset = new BABYLON.Vector3(
+                    (Math.random() - 0.5) * 10,
+                    0,
+                    (Math.random() - 0.5) * 10
+                );
+                const wanderTarget = this.spawnPosition.add(randomOffset);
+                this.moveTowards(wanderTarget, deltaTime);
+            } else {
+                // Stop moving
+                if (this.mesh && this.mesh.physicsImpostor) {
+                    const velocity = this.mesh.physicsImpostor.getLinearVelocity();
+                    velocity.x = 0;
+                    velocity.z = 0;
+                    this.mesh.physicsImpostor.setLinearVelocity(velocity);
+                }
+            }
+        }
+    }
+    
+    tryAttack(deltaTime) {
+        if (this.attackCooldown <= 0 && this.target) {
+            const ability = Array.from(this.abilities.values())[0];
+            if (ability && ability.isReady()) {
+                ability.execute(this, this.target);
+                this.attackCooldown = this.attackDelay;
+            }
+        }
+    }
+    
+    resetToSpawn() {
+        this.position.copyFrom(this.spawnPosition);
+        if (this.mesh) {
+            this.mesh.position.copyFrom(this.spawnPosition);
+            if (this.mesh.physicsImpostor) {
+                this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            }
+        }
+        this.health = this.stats.maxHealth;
+        this.target = null;
+        console.log(`[Enemy] ${this.name} reset to spawn`);
+    }
+    
+    onDeath() {
+        // Death effects
+        if (this.mesh) {
+            // Fade out animation
+            this.mesh.visibility = 0.5;
+        }
+        
+        // TODO: Drop loot based on template.loot_table
+        console.log(`[Enemy] ${this.name} died`);
+    }
+}
+window.Enemy = Enemy;
 
 // ===========================================================
 // World Core Class
@@ -97,6 +311,8 @@ function World(scene, player) {
     this.spawnData = CONFIG.WORLD.SPAWNS || [];
     this.activeSpawns = new Map(); 
     this.ground = null;
+    this.camera = null;
+    this.light = null;
 
     this.scene.enablePhysics(
         new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0),
@@ -200,31 +416,46 @@ World.prototype.dispose = function() {
 
 World.prototype.spawnUpdate = function(deltaTime) {
     this.spawnData.forEach(spawn => {
-        let activeNpcs = this.activeSpawns.get(spawn.id);
+        let activeNpcs = this.activeSpawns.get(spawn.id) || [];
         
+        // Filter out dead NPCs
+        activeNpcs = activeNpcs.filter(npc => !npc.isDead);
+        this.activeSpawns.set(spawn.id, activeNpcs);
+        
+        // Spawn new enemies if needed
         if (activeNpcs.length < spawn.max_spawn) {
-            const template = this.scene.game.npcTemplates.get(spawn.npc_template_id);
+            const templateId = spawn.npc_template_id;
+            const template = this.scene.game.npcTemplates.get(templateId);
+            
             if (template && this.scene.game.assetManager.getAsset(template.model)) {
-                // Re-using Player class as NPC fallback for now
-                const npc = new window.Player(this.scene, new BABYLON.Vector3(spawn.position_x, spawn.position_y + 1, spawn.position_z), template.id);
-                npc.isPlayer = false; 
-                npc.name = template.name;
-                npc.assetManager = this.scene.game.assetManager; 
-                npc.applyClass(template.id, template); 
+                // Calculate spawn position with some randomness
+                const randomOffset = new BABYLON.Vector3(
+                    (Math.random() - 0.5) * spawn.spawn_radius,
+                    0,
+                    (Math.random() - 0.5) * spawn.spawn_radius
+                );
+                const spawnPos = new BABYLON.Vector3(
+                    spawn.position_x,
+                    spawn.position_y + 1,
+                    spawn.position_z
+                ).add(randomOffset);
                 
-                const defaultAbilityTemplate = this.scene.game.skillTemplates.get(template.defaultAbility);
-                if (defaultAbilityTemplate) {
-                    npc.addAbility(template.defaultAbility, defaultAbilityTemplate);
-                }
-
-                this.npcs.push(npc);
-                activeNpcs.push(npc);
+                // Create enemy using proper Enemy class
+                const enemy = new Enemy(
+                    this.scene,
+                    spawnPos,
+                    template,
+                    this.scene.game.assetManager
+                );
+                
+                this.npcs.push(enemy);
+                activeNpcs.push(enemy);
+                
+                console.log(`[World] Spawned ${enemy.name} at spawn zone ${spawn.name}`);
+            } else {
+                console.warn(`[World] Cannot spawn ${templateId} - template or asset missing`);
             }
         }
-    });
-
-    this.activeSpawns.forEach((npcs, spawnId) => {
-        this.activeSpawns.set(spawnId, npcs.filter(npc => !npc.isDead));
     });
 };
 

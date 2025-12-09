@@ -1,6 +1,5 @@
 // ===========================================================
-// HEROES OF SHADY GROVE - ABILITY CLASS v1.0.1 (COOLDOWN FIX)
-// Fix: Implemented the getCooldownRatio() method for UI.
+// HEROES OF SHADY GROVE - ABILITY CLASS v1.0.2 (FIXED)
 // ===========================================================
 
 class Ability {
@@ -32,17 +31,25 @@ class Ability {
             if (target && target.takeDamage) {
                 target.takeDamage(damage, caster);
                 const messageType = caster.isPlayer ? 'enemyDamage' : 'playerDamage';
-                caster.scene.game.ui.showMessage(`${this.name} hits ${target.name} for ${damage.toFixed(0)}!`, 1500, messageType);
+                if (caster.scene.game && caster.scene.game.ui) {
+                    caster.scene.game.ui.showMessage(`${this.name} hits ${target.name} for ${Math.round(damage)}!`, 1500, messageType);
+                }
             } else {
-                caster.scene.game.ui.showMessage(`[${this.name}] Requires a target.`, 1500, 'error');
+                if (caster.scene.game && caster.scene.game.ui) {
+                    caster.scene.game.ui.showMessage(`[${this.name}] Requires a target.`, 1500, 'error');
+                }
                 return false;
             }
         } else if (this.effectData.type === 'heal') {
             const healAmount = this.effectData.base_value || 0;
             caster.health = Math.min(caster.stats.maxHealth, caster.health + healAmount);
-            caster.scene.game.ui.showMessage(`Healed for ${healAmount}!`, 1500, 'heal');
+            if (caster.scene.game && caster.scene.game.ui) {
+                caster.scene.game.ui.showMessage(`Healed for ${healAmount}!`, 1500, 'heal');
+            }
         } else {
-            caster.scene.game.ui.showMessage(`[${this.name}] Effect activated.`, 1500, 'info');
+            if (caster.scene.game && caster.scene.game.ui) {
+                caster.scene.game.ui.showMessage(`[${this.name}] Effect activated.`, 1500, 'info');
+            }
         }
         
         this.currentCooldown = this.cooldownDuration;

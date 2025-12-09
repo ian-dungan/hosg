@@ -1,11 +1,12 @@
 // ===========================================================
-// HEROES OF SHADY GROVE - ASSET MANAGER
+// HEROES OF SHADY GROVE - ASSET MANAGER v1.0.1 (FIXED)
 // ===========================================================
 
 const getManifestData = () => {
     if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
         return CONFIG.ASSETS;
     }
+    console.warn('[Assets] CONFIG not loaded, using defaults');
     return {
         BASE_PATH: "assets/",
         CHARACTERS: {},
@@ -18,7 +19,7 @@ class AssetManager {
     constructor(scene) {
         this.scene = scene;
         this.assets = {}; 
-        this.stats = { requested: 0, loaded: 0 };
+        this.stats = { requested: 0, loaded: 0, failed: 0 };
         this.loader = new BABYLON.AssetsManager(scene);
     }
 
@@ -41,11 +42,17 @@ class AssetManager {
         }
 
         return new Promise((resolve) => {
-            if (this.stats.requested === 0) resolve();
+            if (this.stats.requested === 0) {
+                console.log('[Assets] No assets to load');
+                resolve();
+                return;
+            }
+            
             this.loader.onFinish = (tasks) => {
-                console.log(`[Assets] Load complete. ${this.stats.loaded}/${this.stats.requested}`);
+                console.log(`[Assets] Load complete. ${this.stats.loaded}/${this.stats.requested} succeeded, ${this.stats.failed} failed`);
                 resolve();
             };
+            
             this.loader.load();
         });
     }
@@ -60,11 +67,16 @@ class AssetManager {
             this.stats.loaded++;
             this.assets[key] = task.loadedMeshes; 
             this.assets[assetData.model] = task.loadedMeshes; 
-            task.loadedMeshes.forEach(mesh => mesh.setEnabled(false));
+            task.loadedMeshes.forEach(mesh => {
+                mesh.setEnabled(false);
+                mesh.isPickable = true;
+            });
+            console.log(`[Assets] Loaded: ${key}`);
         };
         
         task.onError = (task, message, exception) => {
-            console.error(`[Assets] Failed to load ${key}:`, message);
+            this.stats.failed++;
+            console.error(`[Assets] Failed to load ${key} from ${fullPath}${assetData.model}:`, message);
         };
     }
     
