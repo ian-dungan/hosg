@@ -33,24 +33,20 @@ const CONFIG = {
         BASE_PATH: "assets/", 
         
         CHARACTERS: {
-            knight: { 
-                model: 'Knight03.glb',
-                // Use relative path 'assets/player/character/'
-                path: '/hosg/assets/player/character/' 
+            knight: {
+                model: 'knight03.glb',
+                // Use relative path to the repository root
+                path: 'assets/player/character/'
             },
             wolf: {
-                model: 'Wolf.glb',
-                // Use relative path 'assets/models/'
-                path: '/hosg/assets/models/'
+                model: 'wolf.glb',
+                // Use relative path to the repository root
+                path: 'assets/enemies/'
             }
         },
-        ENVIRONMENT: {
-            terrain_base: { 
-                model: 'FantasyTerrain.glb',
-                // Use relative path 'assets/environment/'
-                path: 'assets/environment/' 
-            }
-        },
+        // No environment meshes are currently available in the repository.
+        // Keep the object for future expansion but leave it empty to avoid 404s.
+        ENVIRONMENT: {},
 
         CLASSES: { 
             Warrior: { 
