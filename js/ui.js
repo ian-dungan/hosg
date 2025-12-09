@@ -5,7 +5,14 @@
 class UIManager {
     constructor(scene) {
         this.scene = scene;
-        this.advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+        // Create fullscreen UI when GUI is available; otherwise fall back to an HTML container.
+        if (typeof BABYLON !== 'undefined' && BABYLON.GUI && BABYLON.GUI.AdvancedDynamicTexture) {
+            this.advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI", true, scene);
+        } else {
+            console.warn('[UI] BABYLON.GUI not available. Falling back to HTML message container.');
+            this.advancedTexture = null;
+        }
+        
         this.hud = null;
         this.targetFrame = null;
         this.actionBar = null;
@@ -15,14 +22,21 @@ class UIManager {
     }
 
     init() {
-        this._createHUD(); 
-        this._createTargetFrame(); 
-        this._createActionBar(); 
-        this._createMessageSystem(); 
-        console.log('[UI] Initialized.');
+        this._createHUD();
+        this._createTargetFrame();
+        this._createActionBar();
+        this._createMessageSystem();
+        this._createInventoryWindow(); 
+        this._createInputBindings(); 
+        console.log('[UI] All UI components initialized.');
     }
 
     _createHUD() {
+        if (!this.advancedTexture || !(typeof BABYLON !== 'undefined' && BABYLON.GUI && BABYLON.GUI.StackPanel)) {
+            console.warn('[UI] HUD skipped: GUI system unavailable.');
+            return;
+        }
+
         this.hud = new BABYLON.GUI.StackPanel("hudPanel");
         this.hud.width = "300px";
         this.hud.height = "150px";
@@ -72,6 +86,11 @@ class UIManager {
     }
 
     _createTargetFrame() {
+        if (!this.advancedTexture || !(typeof BABYLON !== 'undefined' && BABYLON.GUI && BABYLON.GUI.StackPanel)) {
+            console.warn('[UI] Target frame skipped: GUI system unavailable.');
+            return;
+        }
+
         this.targetFrame = new BABYLON.GUI.StackPanel("targetFrame");
         this.targetFrame.width = "250px";
         this.targetFrame.height = "80px";
@@ -108,7 +127,14 @@ class UIManager {
     }
 
     _createActionBar() {
-        this.actionBar = new BABYLON.GUI.StackPanel("actionBar");
+        if (!this.advancedTexture || !(typeof BABYLON !== 'undefined' && BABYLON.GUI && BABYLON.GUI.Button && BABYLON.GUI.StackPanel)) {
+            console.error("[UI] BABYLON.GUI components are undefined. Check if babylon.gui.min.js is loaded correctly.");
+            return;
+        }
+
+        this.actionBar = new BABYLON.GUI.StackPanel("actionBarPanel");
+        this.actionBar.width = "500px";
+        this.actionBar.height = "70px";
         this.actionBar.isVertical = false;
         this.actionBar.width = "450px";
         this.actionBar.height = "70px";
@@ -146,19 +172,96 @@ class UIManager {
     }
 
     _createMessageSystem() {
-        this.messageContainer = new BABYLON.GUI.StackPanel("msgContainer");
-        this.messageContainer.width = "400px";
-        this.messageContainer.height = "300px";
-        this.messageContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        this.messageContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        this.messageContainer.top = "50px";
-        this.messageContainer.isHitTestVisible = false; 
-        this.advancedTexture.addControl(this.messageContainer);
+        if (this.advancedTexture && typeof BABYLON !== 'undefined' && BABYLON.GUI && BABYLON.GUI.StackPanel) {
+            this.messageContainer = new BABYLON.GUI.StackPanel("messageContainer");
+            this.messageContainer.width = "40%";
+            this.messageContainer.height = "200px";
+            this.messageContainer.isVertical = true;
+            this.messageContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+            this.messageContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+            this.advancedTexture.addControl(this.messageContainer);
+            console.log('[UI] Message system created (GUI).');
+            return;
+        }
+
+        // HTML fallback (when GUI is unavailable)
+        var existing = document.getElementById('ui-message-container');
+        if (existing) {
+            this.messageContainer = existing;
+            return;
+        }
+
+        var body = document.body || document.getElementsByTagName('body')[0];
+        if (!body) {
+            body = document.createElement('body');
+            document.documentElement.appendChild(body);
+        }
+
+        var container = document.createElement('div');
+        container.id = 'ui-message-container';
+        container.style.position = 'fixed';
+        container.style.top = '10px';
+        container.style.left = '50%';
+        container.style.transform = 'translateX(-50%)';
+        container.style.width = '40%';
+        container.style.maxHeight = '200px';
+        container.style.overflow = 'hidden';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '6px';
+        container.style.zIndex = '9999';
+        body.appendChild(container);
+        this.messageContainer = container;
+        console.log('[UI] Message system created (HTML fallback).');
     }
 
-    showMessage(text, duration = 3000, type = 'info') {
-        const msg = new BABYLON.GUI.TextBlock();
-        msg.text = text;
+    showMessage(text, duration = 2000, type = 'info') {
+        if (!this.messageContainer) {
+            this._createMessageSystem();
+            if (!this.messageContainer) return;
+        }
+
+        // HTML fallback path
+        if (!(typeof BABYLON !== 'undefined' && BABYLON.GUI && this.messageContainer instanceof BABYLON.GUI.StackPanel)) {
+            var div = document.createElement('div');
+            div.textContent = text;
+            div.style.padding = '6px 10px';
+            div.style.background = 'rgba(0,0,0,0.7)';
+            div.style.color = type === 'error' ? 'red' :
+                type === 'heal' ? 'lightgreen' :
+                    type === 'enemyDamage' ? 'yellow' :
+                        type === 'playerDamage' ? 'orange' : 'white';
+            div.style.fontSize = '16px';
+            div.style.borderRadius = '4px';
+            div.style.border = '1px solid rgba(255,255,255,0.2)';
+
+            // Prepend
+            if (this.messageContainer.firstChild) {
+                this.messageContainer.insertBefore(div, this.messageContainer.firstChild);
+            } else {
+                this.messageContainer.appendChild(div);
+            }
+
+            // Cull overflow
+            while (this.messageContainer.childNodes.length > 7) {
+                var last = this.messageContainer.lastChild;
+                if (last) last.remove();
+            }
+
+            setTimeout(function () { div.remove(); }, duration);
+            return;
+        }
+
+        const textBlock = new BABYLON.GUI.TextBlock();
+        textBlock.text = text;
+        textBlock.color = type === 'error' ? 'red' : 
+                          type === 'heal' ? 'lightgreen' :
+                          type === 'enemyDamage' ? 'yellow' :
+                          type === 'playerDamage' ? 'orange' : 'white';
+        textBlock.fontSize = 18;
+        textBlock.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        textBlock.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        textBlock.height = "25px"; 
         
         switch(type) {
             case 'error': msg.color = "red"; break;
@@ -183,6 +286,52 @@ class UIManager {
             }
         }, duration);
     }
+    
+    _createInventoryWindow() {
+        if (!this.advancedTexture || !(typeof BABYLON !== 'undefined' && BABYLON.GUI && BABYLON.GUI.Rectangle && BABYLON.GUI.TextBlock)) {
+            console.warn('[UI] Inventory window skipped: GUI system unavailable.');
+            return;
+        }
+
+        this.inventoryWindow = new BABYLON.GUI.Rectangle("inventoryWindow");
+        this.inventoryWindow.width = "300px";
+        this.inventoryWindow.height = "400px";
+        this.inventoryWindow.background = "rgba(0,0,0,0.8)";
+        this.inventoryWindow.color = "white";
+        this.inventoryWindow.thickness = 2;
+        this.inventoryWindow.isVisible = false;
+        this.advancedTexture.addControl(this.inventoryWindow);
+        
+        const title = new BABYLON.GUI.TextBlock("invTitle");
+        title.text = "Inventory";
+        title.fontSize = 24;
+        title.color = "white";
+        title.height = "30px";
+        title.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.inventoryWindow.addControl(title);
+
+        console.log('[UI] Inventory window created.'); 
+    }
+
+    _createInputBindings() {
+        if (typeof BABYLON === 'undefined' || !this.scene) {
+            console.warn('[UI] Input bindings skipped: Babylon or scene unavailable.');
+            return;
+        }
+
+        this.scene.actionManager = new BABYLON.ActionManager(this.scene);
+
+        this.scene.actionManager.registerAction(
+            new BABYLON.ExecuteCodeAction(
+                BABYLON.ActionManager.OnKeyUpTrigger, 
+                (evt) => {
+                    if (evt.sourceEvent.key.toLowerCase() === 'i') {
+                        this.inventoryWindow.isVisible = !this.inventoryWindow.isVisible;
+                        console.log(`[UI] Toggled Inventory: ${this.inventoryWindow.isVisible}`);
+                    }
+                }
+            )
+        );
 
     setTarget(target) {
         if (target && !target.isDead) {

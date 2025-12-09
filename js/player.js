@@ -227,6 +227,8 @@ Player.prototype.handlePointerDown = function (evt) {
                 if (attackAbility && attackAbility.isReady()) {
                     attackAbility.execute(this, this.target);
                 }
+            } else {
+                this.target = null;
             }
         } else {
             this.target = null;
@@ -275,7 +277,26 @@ Player.prototype._updateMovement = function (deltaTime) {
             var targetAngle = Math.atan2(moveVector.x, moveVector.z);
             this.visualMesh.rotation.y = targetAngle;
         }
+
+        this.visualMesh = rootMesh;
+    } else {
+        console.warn('[Player] Failed to load mesh for asset: ' + assetKey + '. AssetManager load failed or key is wrong.');
+        if (this.mesh) this.mesh.isVisible = true;
     }
+};
+
+// --- Input Handlers ---
+Player.prototype.handleKeyDown = function (event) {
+    this.keys[event.key.toLowerCase()] = true;
+};
+
+Player.prototype.handleKeyUp = function (event) {
+    this.keys[event.key.toLowerCase()] = false;
+};
+
+Player.prototype.handlePointerDown = function (evt) {
+    if (evt.button === 0) {
+        var pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
 
     // Simple velocity dampening to prevent sliding indefinitely
     var horizontalVelocity = new BABYLON.Vector3(velocity.x, 0, velocity.z);
@@ -308,15 +329,33 @@ Player.prototype.applyClass = function (className) {
         this._initMesh(assetKey);
 
         // 3. Initialize Abilities
-        if (this.scene.game.skillTemplates) {
-            var defaultAbilityTemplate = this.scene.game.skillTemplates.get(classConfig.defaultAbility);
-            if (defaultAbilityTemplate) {
-                this.abilities = [new Ability(defaultAbilityTemplate)];
-            } else {
-                console.warn('[Player] Default ability template not found for: ' + classConfig.defaultAbility);
-                this.abilities = [];
-            }
+        var skillTemplates = this.scene.game.skillTemplates;
+        if (!skillTemplates) {
+            skillTemplates = new Map();
+            this.scene.game.skillTemplates = skillTemplates;
         }
+
+        var defaultAbilityTemplate = skillTemplates.get(classConfig.defaultAbility);
+        if (!defaultAbilityTemplate) {
+            console.warn('[Player] Default ability template not found for: ' + classConfig.defaultAbility + '. Installing fallback.');
+            defaultAbilityTemplate = {
+                id: classConfig.defaultAbility,
+                code: classConfig.defaultAbility.toUpperCase(),
+                name: classConfig.defaultAbility,
+                skill_type: 'Attack',
+                resource_cost: { mana: 0, stamina: 10 },
+                cooldown_ms: 5000,
+                effect: {
+                    type: 'damage',
+                    base_value: 10,
+                    magic_scaling: 0,
+                    physical_scaling: 0.5
+                }
+            };
+            skillTemplates.set(classConfig.defaultAbility, defaultAbilityTemplate);
+        }
+
+        this.abilities = [new Ability(defaultAbilityTemplate)];
 
         console.log('[Player] Applied default class: ' + className);
     } else {
