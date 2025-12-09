@@ -48,112 +48,131 @@ SupabaseService.prototype.getClient = function () {
 var supabaseService = new SupabaseService();
 
 //
-// Simple WebSocket-based network manager
+// Network Manager (WebSocket)
 //
-function NetworkManager(url, options) {
-  options = options || {};
+
+/**
+ * Event Emitter stub for simple event handling
+ */
+function Emitter() {
+  this._listeners = {};
+}
+
+Emitter.prototype.on = function (eventName, listener) {
+  if (!this._listeners[eventName]) {
+    this._listeners[eventName] = [];
+  }
+  this._listeners[eventName].push(listener);
+};
+
+Emitter.prototype.off = function (eventName, listener) {
+  if (!this._listeners[eventName]) return;
+  this._listeners[eventName] = this._listeners[eventName].filter(l => l !== listener);
+};
+
+Emitter.prototype._emit = function (eventName, data) {
+  if (this._listeners[eventName]) {
+    this._listeners[eventName].forEach(listener => {
+      try {
+        listener(data);
+      } catch (err) {
+        console.error(`[Network] Error in listener for ${eventName}:`, err);
+      }
+    });
+  }
+};
+
+
+/**
+ * @param {Game} game
+ * @param {string} url
+ */
+function NetworkManager(game, url) {
+  Emitter.call(this); // Initialize as an event emitter
+
+  this.game = game;
   this.url = url;
   this.socket = null;
   this.connected = false;
-  this.listeners = {};
+  this.shouldReconnect = true;
+  this.reconnectTimeout = 1000;
+  this.maxReconnectTimeout = 30000;
 
-  this.shouldReconnect = options.shouldReconnect !== false;
-  var defaultDelay = (typeof CONFIG !== "undefined" && CONFIG.NETWORK && CONFIG.NETWORK.RECONNECT_DELAY_MS) ? CONFIG.NETWORK.RECONNECT_DELAY_MS : 5000;
-  this.reconnectDelay = options.reconnectDelay || defaultDelay;
-  this.maxReconnectAttempts = options.maxReconnectAttempts || 5;
-  this.reconnectAttempts = 0;
+  this._init();
 }
 
-NetworkManager.prototype.on = function (eventName, handler) {
-  if (!this.listeners[eventName]) {
-    this.listeners[eventName] = [];
-  }
-  this.listeners[eventName].push(handler);
-};
+// Inherit Emitter prototype
+NetworkManager.prototype = Object.create(Emitter.prototype);
+NetworkManager.prototype.constructor = NetworkManager;
 
-NetworkManager.prototype._emit = function (eventName, payload) {
-  var list = this.listeners[eventName];
-  if (!list || !list.length) return;
-  for (var i = 0; i < list.length; i++) {
-    try {
-      list[i](payload);
-    } catch (err) {
-      console.error("[Network] Listener for '" + eventName + "' threw:", err);
-    }
-  }
+
+NetworkManager.prototype._init = function () {
+  this.supabase = supabaseService;
 };
 
 NetworkManager.prototype.connect = function () {
-  var self = this;
-
-  if (!self.url) {
-    var err = new Error("WebSocket URL not configured");
-    console.error("[Network] " + err.message);
-    return Promise.reject(err);
+  if (this.connected || this.socket) {
+    console.warn("[Network] Already connected or connecting.");
+    return;
   }
 
-  if (self.socket && (self.socket.readyState === WebSocket.OPEN || self.socket.readyState === WebSocket.CONNECTING)) {
-    return Promise.resolve();
-  }
+  this.shouldReconnect = true;
 
-  return new Promise(function (resolve, reject) {
+  return new Promise((resolve, reject) => {
     try {
-      self.socket = new WebSocket(self.url);
+      this.socket = new WebSocket(this.url);
     } catch (err) {
-      self._emit("error", err);
-      reject(err);
-      return;
+      console.error("[Network] Failed to create WebSocket:", err);
+      this._emit("error", err);
+      this._reconnect();
+      return reject(err);
     }
 
-    self.socket.addEventListener("open", function () {
+    var self = this;
+
+    this.socket.onopen = function () {
       self.connected = true;
-      self.reconnectAttempts = 0;
-      console.log("[Network] Connected to", self.url);
-      self._emit("open");
+      self.reconnectTimeout = 1000; // Reset timeout on success
+      console.log("[Network] ✅ Connected to server.");
+      self._emit("connect");
       resolve();
-    });
+    };
 
-    self.socket.addEventListener("message", function (event) {
+    this.socket.onmessage = function (event) {
       self._handleMessage(event);
-    });
+    };
 
-    self.socket.addEventListener("close", function (event) {
+    this.socket.onclose = function (event) {
       self.connected = false;
+      console.log("[Network] Disconnected from server.", event.code, event.reason);
+      self._emit("disconnect", event);
       self.socket = null;
-      console.log("[Network] Disconnected", event);
-      self._emit("close", event);
-
-      if (!self.shouldReconnect) return;
-
-      if (self.reconnectAttempts < self.maxReconnectAttempts) {
-        self.reconnectAttempts += 1;
-        var delay = self.reconnectDelay;
-        console.log(
-          "[Network] Reconnecting in " +
-            delay +
-            "ms (attempt " +
-            self.reconnectAttempts +
-            "/" +
-            self.maxReconnectAttempts +
-            ")"
-        );
-        setTimeout(function () {
-          self.connect().catch(function () {
-            // Errors will be handled by error/close events
-          });
-        }, delay);
-      } else {
-        console.warn("[Network] Max reconnect attempts reached");
-        self._emit("maxReconnectReached");
+      if (self.shouldReconnect) {
+        self._reconnect();
       }
-    });
+    };
 
-    self.socket.addEventListener("error", function (err) {
+    this.socket.onerror = function (err) {
       console.error("[Network] WebSocket error:", err);
       self._emit("error", err);
-    });
+    };
   });
 };
+
+NetworkManager.prototype._reconnect = function () {
+  if (!this.shouldReconnect) return;
+
+  var self = this;
+  console.log(`[Network] Attempting to reconnect in ${this.reconnectTimeout / 1000}s...`);
+
+  setTimeout(() => {
+    if (self.shouldReconnect) {
+      self.connect();
+      self.reconnectTimeout = Math.min(self.reconnectTimeout * 2, self.maxReconnectTimeout);
+    }
+  }, this.reconnectTimeout);
+};
+
 
 NetworkManager.prototype._handleMessage = function (event) {
   var payload = event.data;
@@ -169,7 +188,7 @@ NetworkManager.prototype._handleMessage = function (event) {
 
 /**
  * Send an event + data. If you just want to send a raw payload, pass `null`
- * as the eventName and the payload as `data`.
+ * as the eventName and the payload as `data` or pass a single data object.
  */
 NetworkManager.prototype.send = function (eventName, data) {
   if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -180,7 +199,9 @@ NetworkManager.prototype.send = function (eventName, data) {
   var payload;
 
   try {
-    if (eventName == null) {
+    if (arguments.length === 1) {
+        payload = JSON.stringify(eventName); // Assume eventName is the raw data object
+    } else if (eventName == null) {
       payload = data;
     } else {
       payload = JSON.stringify({ event: eventName, data: data });
@@ -211,9 +232,5 @@ NetworkManager.prototype.disconnect = function () {
 
 NetworkManager.prototype.dispose = function () {
   this.disconnect();
-  this.listeners = {};
+  this._listeners = {};
 };
-
-window.SupabaseService = SupabaseService;
-window.supabaseService = supabaseService;
-window.NetworkManager = NetworkManager;
