@@ -18,7 +18,7 @@ const CONFIG = {
     WORLD: { 
         SKYBOX: {
             // Skybox file (configured in ASSETS section)
-            FILE: "shadygrove_sky_specular.dds",
+            FILE: "DaySkyHDRI023B_4K_TONEMAPPED.jpg",
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
@@ -49,7 +49,7 @@ const CONFIG = {
             CHARACTERS: "player/character/",
             ENEMIES: "enemies/",
             ENVIRONMENT: "environment/",
-            SKYBOX: "environment/skybox/",
+            SKYBOX: "sky/DaySkyHDRI023B_4K_TONEMAPPED.jpg",
             ITEMS: "items/",
             WEAPONS: "weapons/",
             ARMOR: "armor/",
@@ -65,7 +65,7 @@ const CONFIG = {
         CHARACTERS: {
             knight: { 
                 model: "Knight03.glb",
-                path: "characters/",  // Optional: override default path
+                path: "player/character/",  // Optional: override default path
                 required: true 
             }
             // Examples:
