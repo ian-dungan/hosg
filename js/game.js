@@ -46,110 +46,65 @@ class Game {
   async init() {
     console.log("[Game] Initializing...");
 
-    // Basic lighting (will be overridden by World class)
-    const hemi = new BABYLON.HemisphericLight(
-      "tempLight",
-      new BABYLON.Vector3(0, 1, 0),
-      this.scene
-    );
-    hemi.intensity = 0.6;
+    // Basic lighting setup is handled by World now, but keeping ambient for safety
+    if (!this.scene.lights.length) {
+      new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), this.scene);
+    }
 
-    // World
-    try {
+    // 1. Create World
+    if (typeof World !== "undefined") {
       this.world = new World(this.scene, {
         size: CONFIG.WORLD.SIZE,
         waterLevel: CONFIG.WORLD.WATER_LEVEL
       });
-      // Expose world on the scene for other systems
-      this.scene.world = this.world;
-      console.log("[Game] World initialized");
-    } catch (err) {
-      console.error("[Game] World initialization failed:", err);
-      throw err;
-    }
-
-    // Player - WAIT for terrain first, then init
-    try {
-      this.player = new Player(this.scene);
-      await this.player.init(); // CRITICAL: Wait for player to initialize
-      // Expose player on the scene
-      this.scene.player = this.player;
-      console.log("[Game] Player initialized");
-    } catch (err) {
-      console.error("[Game] Player initialization failed:", err);
-      throw err;
-    }
-
-    // UI
-    try {
-      this.ui = new UIManager(this);
-      // Expose UI on the scene
-      this.scene.ui = this.ui;
-      console.log("[Game] UI initialized");
-    } catch (err) {
-      console.error("[Game] UI initialization failed:", err);
-      throw err;
-    }
-
-    // Network (optional - game works without it)
-    if (window.NetworkManager) {
-      try {
-        this.network = new NetworkManager(CONFIG.NETWORK.WS_URL);
-        
-        // Setup network event handlers
-        this.network.on("open", () => {
-          console.log("[Game] Connected to multiplayer server");
-          if (this.ui) {
-            this.ui.showMessage("Connected to multiplayer server", 2000);
-          }
-        });
-        
-        this.network.on("close", () => {
-          console.log("[Game] Disconnected from multiplayer server");
-        });
-        
-        this.network.on("error", (err) => {
-          console.error("[Game] Network error:", err);
-        });
-        
-        this.network.on("maxReconnectReached", () => {
-          console.error("[Game] Failed to connect to multiplayer server");
-          if (this.ui) {
-            this.ui.showMessage("Playing in offline mode", 3000);
-          }
-        });
-
-        // Connect (don't block game startup if it fails)
-        this.network.connect().catch((err) => {
-          console.warn("[Game] Failed to connect to multiplayer server:", err);
-          if (this.ui) {
-            this.ui.showMessage("Playing in offline mode", 3000);
-          }
-        });
-      } catch (err) {
-        console.error("[Game] Network initialization failed:", err);
-      }
-    }
-
-    console.log("[Game] Initialization complete");
-  }
-
-  start() {
-    if (this._running) {
-      console.warn("[Game] Already running");
+      // World's init is ASYNC now and handles asset loading.
+      // We don't await the constructor, but the world handles its own readiness signal.
+    } else {
+      console.error("[Game] World class not defined.");
       return;
     }
 
-    this._running = true;
-    this._lastFrameTime = performance.now();
+    // 2. Create Player
+    if (typeof Player !== "undefined") {
+      this.player = new Player(this.scene);
+      this.scene.player = this.player; // Global access via scene
+    } else {
+      console.error("[Game] Player class not defined.");
+      return;
+    }
 
-    console.log("[Game] Starting render loop");
+    // 3. Create UI
+    if (typeof UIManager !== "undefined") {
+      this.ui = new UIManager(this);
+    } else {
+      console.warn("[Game] UIManager class not defined.");
+    }
+    
+    // 4. Create Network Manager (if necessary)
+    if (typeof NetworkManager !== "undefined") {
+        this.network = new NetworkManager(this, CONFIG.NETWORK.WS_URL);
+        this.network.connect(); // Connect asynchronously
+    } else {
+        console.warn("[Game] NetworkManager class not defined.");
+    }
+
+    // 5. Start main loop
+    this.start();
+
+    console.log("[Game] Initialization complete.");
+  }
+
+  start() {
+    this._running = true;
+    console.log("[Game] Started");
 
     this.engine.runRenderLoop(() => {
-      if (!this._running) return;
+      if (!this._running) {
+        return;
+      }
 
       const now = performance.now();
-      const deltaTime = (now - this._lastFrameTime) / 1000;
+      const deltaTime = (now - this._lastFrameTime) / 1000; // in seconds
       this._lastFrameTime = now;
 
       // Update player
@@ -220,17 +175,15 @@ class Game {
       this.world.dispose();
       this.world = null;
     }
-    
+
     if (this.scene) {
-      this.scene.dispose();
-      this.scene = null;
+        this.scene.dispose();
+        this.scene = null;
     }
-    
+
     if (this.engine) {
-      this.engine.dispose();
-      this.engine = null;
+        this.engine.dispose();
+        this.engine = null;
     }
   }
 }
-
-window.Game = Game;
