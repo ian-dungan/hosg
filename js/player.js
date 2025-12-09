@@ -149,6 +149,7 @@ Player.prototype._initPhysics = function () {
         this.mesh.isVisible = false;
         this.mesh.checkCollisions = true;
     }
+};
 
     this.mesh.position.copyFrom(this.position);
 
@@ -216,8 +217,6 @@ Player.prototype.handlePointerDown = function (evt) {
                 if (attackAbility && attackAbility.isReady()) {
                     attackAbility.execute(this, this.target);
                 }
-            } else {
-                this.target = null;
             }
         } else {
             this.target = null;
