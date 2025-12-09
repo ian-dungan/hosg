@@ -14,27 +14,40 @@
   <style>
     html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #000; }
     #renderCanvas { width: 100%; height: 100%; touch-action: none; outline: none; }
-    #loadingText { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: sans-serif; pointer-events: none; }
+    #loadingText { 
+      position: absolute; 
+      top: 50%; 
+      left: 50%; 
+      transform: translate(-50%, -50%); 
+      color: white; 
+      font-family: 'Arial', sans-serif;
+      font-size: 24px;
+      pointer-events: none;
+      text-align: center;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+    }
   </style>
 </head>
 <body>
 
 <canvas id="renderCanvas"></canvas>
-<div id="loadingText">Loading Game Files...</div>
+<div id="loadingText">Loading Heroes of Shady Grove...</div>
 
+<!-- Load scripts in proper dependency order -->
 <script src="js/core.js"></script>
-<script src="js/network.js"></script>
-<script src="js/assets.js"></script>
 <script src="js/item.js"></script>
 <script src="js/ability.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/network.js"></script>
 <script src="js/world.js"></script>
+<script src="js/player.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/game.js"></script>
-<script src="js/player.js"></script>
 
 <script>
     // =======================================================
-    // GAME BOOTSTRAP (v1.2.1 - FOLDER PATH FIX)
+    // GAME BOOTSTRAP v1.3.0 (FIXED INITIALIZATION)
+    // Fixes: Proper initialization order, camera setup timing
     // =======================================================
     const canvas = document.getElementById("renderCanvas");
     const engine = new BABYLON.Engine(canvas, true);
@@ -43,26 +56,37 @@
     // Global Access
     scene.game = null; 
 
+    function updateLoadingText(text) {
+        const loadingEl = document.getElementById("loadingText");
+        if (loadingEl) {
+            loadingEl.innerText = text;
+        }
+    }
+
     async function initializeGame() {
         try {
             console.log("[Bootstrap] Starting initialization...");
-            document.getElementById("loadingText").innerText = "Initializing Core...";
+            updateLoadingText("Initializing Core Systems...");
 
             // 1. Verify Scripts Loaded
-            if (typeof Game === 'undefined' || typeof UIManager === 'undefined') {
-                throw new Error("Critical scripts (Game/UI) failed to load. Check that files are in the /js/ folder.");
+            const requiredClasses = ['Game', 'UIManager', 'Player', 'World', 'AssetManager', 'Character', 'Enemy'];
+            const missing = requiredClasses.filter(cls => typeof window[cls] === 'undefined');
+            
+            if (missing.length > 0) {
+                throw new Error(`Critical scripts failed to load: ${missing.join(', ')}. Check console for errors.`);
             }
 
-            // 2. Setup Managers
+            // 2. Setup Core Managers
             const uiManager = new UIManager(scene);
+            const assetManager = new AssetManager(scene);
+            
+            // Create game instance (without player/world yet)
             const game = new Game(engine, scene, null, null, uiManager);
             scene.game = game; 
-            
-            const assetManager = new AssetManager(scene);
             game.assetManager = assetManager;
 
-            // 3. Network / Templates (With Offline Safety Check)
-            document.getElementById("loadingText").innerText = "Loading Data...";
+            // 3. Load Network Templates
+            updateLoadingText("Loading Game Data...");
             const skillTemplates = new Map();
             const npcTemplates = new Map();
             
@@ -70,45 +94,69 @@
                 const network = new SupabaseService();
                 await network.loadTemplates(skillTemplates, npcTemplates);
             } else {
-                console.warn("[Bootstrap] Network script missing. Game may behave unexpectedly.");
+                console.warn("[Bootstrap] Network script missing.");
             }
 
             game.skillTemplates = skillTemplates;
             game.npcTemplates = npcTemplates;
             
             // 4. Load Assets
-            document.getElementById("loadingText").innerText = "Loading Assets...";
+            updateLoadingText("Loading 3D Assets...");
             await assetManager.loadAll();
             
-            // 5. Create World & Player
-            // Note: Player relies on 'Character' which is in world.js
-            const player = new Player(scene);
-            const world = new World(scene, player);
-            
-            game.player = player; 
+            // 5. Create World FIRST (this creates camera and environment)
+            updateLoadingText("Creating World...");
+            const world = new World(scene, null); // Player not created yet
+            world.createEnvironment(assetManager);
             game.world = world;
             
-            // 6. Launch
-            game.init(); 
-            uiManager.init(); 
-            world.createEnvironment(assetManager); 
+            // 6. NOW create Player and link camera
+            updateLoadingText("Creating Player...");
+            const spawnPos = new BABYLON.Vector3(0, CONFIG.PLAYER.SPAWN_HEIGHT || 5, 0);
+            const player = new Player(scene, spawnPos, 'Warrior');
             
-            document.getElementById("loadingText").style.display = "none";
-            game.run(); 
-            console.log("[Bootstrap] Game running.");
+            // Link player to world
+            world.player = player;
+            game.player = player;
+            
+            // Initialize player's camera (now that world camera exists)
+            player.initCamera(world.camera);
+            
+            // 7. Initialize UI
+            updateLoadingText("Setting up Interface...");
+            uiManager.init();
+            
+            // 8. Launch Game
+            updateLoadingText("Starting Adventure...");
+            game.init();
+            
+            // Hide loading screen
+            setTimeout(() => {
+                document.getElementById("loadingText").style.display = "none";
+                game.run();
+                console.log("[Bootstrap] Game running successfully!");
+            }, 500);
 
         } catch (error) {
             console.error("[Bootstrap] FATAL ERROR:", error);
-            document.getElementById("loadingText").innerText = "Error: " + error.message;
+            updateLoadingText("Error: " + error.message);
             document.getElementById("loadingText").style.color = "red";
         }
     }
 
     // Handle Resize
-    window.addEventListener("resize", () => engine.resize());
+    window.addEventListener("resize", () => {
+        if (engine) {
+            engine.resize();
+        }
+    });
 
-    // Start
-    initializeGame();
+    // Start when page loads
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeGame);
+    } else {
+        initializeGame();
+    }
 </script>
 </body>
 </html>
