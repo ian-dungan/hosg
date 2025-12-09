@@ -19,26 +19,39 @@ const MANIFEST_DATA = getManifestData();
 class AssetManager {
     constructor(scene) {
         this.scene = scene;
-        this.assets = {}; 
-        this.stats = { requested: 0, loaded: 0, failed: 0 };
+        this.assets = {};
+        this.stats = {
+            requested: 0,
+            loaded: 0
+        };
         this.loader = new BABYLON.AssetsManager(scene);
+
+        // Preserve method bindings so loadAll can safely call helpers even if
+        // the context is lost or older code grabs these functions directly.
+        this.loadAll = this.loadAll.bind(this);
+        this.loadAsset = this.loadAsset.bind(this);
+        this.loadModel = this.loadModel.bind(this);
+        this.printStats = this.printStats.bind(this);
     }
 
     async loadAll() {
         console.log('[Assets] Starting asset load...');
 
-        const characters = MANIFEST_DATA.CHARACTERS || {}; 
-        const enemies = MANIFEST_DATA.ENEMIES || {};
-        const environment = MANIFEST_DATA.ENVIRONMENT || {}; 
-        const items = MANIFEST_DATA.ITEMS || {};
-        const weapons = MANIFEST_DATA.WEAPONS || {};
-        const armor = MANIFEST_DATA.ARMOR || {};
+        const characters = MANIFEST_DATA.CHARACTERS || {};
+        const environment = MANIFEST_DATA.ENVIRONMENT || {};
+
+        // Use whatever loader the runtime exposes (legacy callers expect
+        // loadAsset, newer code calls loadModel). Binding above guarantees the
+        // function exists even if detached from the instance.
+        const loadFn = (typeof this.loadAsset === 'function')
+            ? this.loadAsset
+            : this.loadModel;
 
         // Load characters
         for (const key in characters) {
             const assetData = characters[key];
-            this.stats.requested++; 
-            this.loadAsset(key, assetData, 'CHARACTERS');
+            this.stats.requested++;
+            loadFn(key, assetData, 'characters');
         }
 
         // Load enemies
@@ -51,22 +64,8 @@ class AssetManager {
         // Load environment
         for (const key in environment) {
             const assetData = environment[key];
-            this.stats.requested++; 
-            this.loadAsset(key, assetData, 'ENVIRONMENT');
-        }
-
-        // Load items
-        for (const key in items) {
-            const assetData = items[key];
-            this.stats.requested++; 
-            this.loadAsset(key, assetData, 'ITEMS');
-        }
-
-        // Load weapons
-        for (const key in weapons) {
-            const assetData = weapons[key];
-            this.stats.requested++; 
-            this.loadAsset(key, assetData, 'WEAPONS');
+            this.stats.requested++;
+            loadFn(key, assetData, 'environment');
         }
 
         // Load armor
