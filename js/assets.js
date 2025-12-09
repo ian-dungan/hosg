@@ -115,7 +115,7 @@ const ASSET_MANIFEST = {
             scale: 1.0
         },
         goblin: {
-            model: 'models/enemies/goblin.glb',
+            model: 'models/enemies/goblin01.glb',
             texture: 'textures/enemies/goblin_diffuse.png',
             animations: ['idle', 'walk', 'run', 'attack', 'die'],
             scale: 0.8
