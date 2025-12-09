@@ -16,7 +16,8 @@ const mimeTypes = {
     '.json': 'application/json',
     '.jpg': 'image/jpeg',
     '.png': 'image/png',
-    '.hdr': 'application/octet-stream', // Crucial for HDRI textures
+    '.hdr': 'application/octet-stream',
+    '.dds': 'application/octet-stream',
     '.gltf': 'model/gltf+json',
     '.glb': 'model/gltf-binary'
 };
@@ -34,7 +35,6 @@ function serveStatic(req, res) {
 
     fs.readFile(fullPath, (error, content) => {
         if (error) {
-            // Log 404 errors (this will show if your HDRI is still failing)
             if (error.code === 'ENOENT') {
                 console.warn(`[SERVER] 404 Not Found: ${req.url}`);
                 res.writeHead(404, { 'Content-Type': 'text/plain' });
