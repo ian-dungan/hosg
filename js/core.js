@@ -42,20 +42,6 @@ const CONFIG = {
     NETWORK: {
         WS_URL: 'wss://hosg.onrender.com',
         MAX_PLAYERS: 100,
-        TICK_RATE: 20,
-        TIMEOUT: 30000
-    },
-    
-    CONTROLS: {
-        GAMEPAD: {
-            ENABLED: true,
-            DEADZONE: 0.15,
-            SENSITIVITY: 1.0
-        }
+        TICK_RATE: 2
     }
 };
-
-// Export to global scope
-window.CONFIG = CONFIG;
-
-console.log('[Config] Game configuration loaded (v' + CONFIG.VERSION + ')');
