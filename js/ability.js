@@ -20,9 +20,6 @@ class Ability {
     }
 
     execute(caster, target) {
-        // TODO: Resource check (mana/stamina)
-
-        // --- 1. Calculate Damage/Effect ---
         if (this.effectData.type === 'damage') {
             const baseDamage = this.effectData.base_value || 0;
             const magicScaling = this.effectData.magic_scaling || 0;
@@ -48,7 +45,6 @@ class Ability {
             caster.scene.game.ui.showMessage(`[${this.name}] Effect activated.`, 1500, 'info');
         }
         
-        // --- 2. Start Cooldown ---
         this.currentCooldown = this.cooldownDuration;
         return true;
     }
@@ -63,13 +59,9 @@ class Ability {
         }
     }
     
-    // Returns a ratio (0.0 to 1.0) of how much cooldown is remaining. 
-    // Used for UI visual feedback. 1.0 means full cooldown, 0.0 means ready.
     getCooldownRatio() {
         if (this.cooldownDuration <= 0) return 0;
-        // If currentCooldown is 5, and duration is 10, ratio is 0.5 (halfway through cooldown)
         return Math.min(1.0, this.currentCooldown / this.cooldownDuration);
     }
 }
-
 window.Ability = Ability;
