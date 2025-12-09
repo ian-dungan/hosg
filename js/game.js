@@ -1,56 +1,58 @@
 // ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.15 (RUN MESSAGE FIX)
-// Fix: Updated initial run message and added defensive check for ui.showMessage.
+// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.16 (ES5 SAFE)
+// Converted to ES5 syntax to avoid class/arrow parse issues in
+// legacy browsers while preserving run/render loop behavior.
 // ============================================================
 
-class Game {
-    // Assuming a constructor and properties were here previously.
-    constructor(engine, scene, world, player, ui) {
-        // Placeholder for core game properties
-        this.engine = engine;
-        this.scene = scene;
-        this.world = world;
-        this.player = player;
-        this.ui = ui;
-        this._running = false;
-        this._lastFrameTime = 0;
-    }
-
-    // *** PATCH START: Defining the missing init function ***
-    init() {
-        // This function should contain the core setup logic that happens
-        // after all components (engine, scene, etc.) are created.
-        console.log("[Bootstrap] Game components successfully initialized.");
-
-        // NOTE: If you have logic for loading assets or setting up the 
-        // Babylon.js/rendering engine, it should go here or be called from here.
-    }
-    // *** PATCH END ***
-
-    async run() {
-        this._running = true;
-        this._lastFrameTime = performance.now();
-        this.engine.runRenderLoop(() => {
-            const currentTime = performance.now();
-            const deltaTime = (currentTime - this._lastFrameTime) / 1000;
-            this._lastFrameTime = currentTime;
-
-            if (!this._running) return;
-
-            if (this.player) this.player.update(deltaTime);
-            if (this.world) this.world.update(deltaTime);
-            if (this.ui) this.ui.update(this.player); // Passes player to UI update
-
-            this.scene.render();
-        });
-
-        // FIX: The ui.showMessage method is now guaranteed to exist by the ui.js patch.
-        // We can now call it safely.
-        if (this.ui && typeof this.ui.showMessage === 'function') {
-            this.ui.showMessage("Welcome to Heroes of Shady Grove! (Persistence Active)", 3000);
-        }
-    }
-    
-    // ... (rest of the class remains the same) ...
+function Game(engine, scene, world, player, ui) {
+    this.engine = engine;
+    this.scene = scene;
+    this.world = world;
+    this.player = player;
+    this.ui = ui;
+    this._running = false;
+    this._lastFrameTime = 0;
 }
+
+Game.prototype.init = function () {
+    console.log('[Bootstrap] Game components successfully initialized.');
+};
+
+Game.prototype.run = function () {
+    if (!this.engine || !this.scene) {
+        console.error('[Game] Cannot run: engine or scene missing.');
+        return;
+    }
+
+    var self = this;
+    this._running = true;
+    this._lastFrameTime = performance.now();
+
+    this.engine.runRenderLoop(function () {
+        var currentTime = performance.now();
+        var deltaTime = (currentTime - self._lastFrameTime) / 1000;
+        self._lastFrameTime = currentTime;
+
+        if (!self._running) return;
+
+        if (self.player && typeof self.player.update === 'function') self.player.update(deltaTime);
+        if (self.world && typeof self.world.update === 'function') self.world.update(deltaTime);
+        if (self.ui && typeof self.ui.update === 'function') self.ui.update(self.player);
+
+        if (self.scene && typeof self.scene.render === 'function') {
+            self.scene.render();
+        }
+    });
+
+    if (this.ui && typeof this.ui.showMessage === 'function') {
+        this.ui.showMessage('Welcome to Heroes of Shady Grove! (Persistence Active)', 3000);
+    }
+};
+
+// Optional stop helper for completeness
+Game.prototype.stop = function () {
+    this._running = false;
+};
+
 window.Game = Game;
+
