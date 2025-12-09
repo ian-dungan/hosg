@@ -52,7 +52,7 @@ const ASSET_MANIFEST = {
                 required: false
             },
             goblin: {
-                model: 'enemies/goblin.glb',
+                model: 'enemies/goblin01.glb',
                 scale: 1.0,
                 required: false
             }
