@@ -37,6 +37,40 @@
 <body>
   <canvas id="renderCanvas"></canvas>
 
+  <script>
+    // Minimal loading text helper to avoid missing function errors during bootstrap
+    (function () {
+      function ensureLoadingElement() {
+        var el = document.getElementById('loadingText');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'loadingText';
+          el.style.position = 'absolute';
+          el.style.top = '8px';
+          el.style.left = '8px';
+          el.style.padding = '6px 10px';
+          el.style.background = 'rgba(0, 0, 0, 0.5)';
+          el.style.color = '#fff';
+          el.style.fontFamily = 'Arial, sans-serif';
+          el.style.fontSize = '14px';
+          el.style.borderRadius = '4px';
+          el.style.pointerEvents = 'none';
+          document.body.appendChild(el);
+        }
+        return el;
+      }
+
+      window.updateLoadingText = function (message) {
+        try {
+          var el = ensureLoadingElement();
+          el.textContent = message || '';
+        } catch (err) {
+          console.warn('[Bootstrap] updateLoadingText fallback failed:', err);
+        }
+      };
+    })();
+  </script>
+
 <script src="js/core.js"></script>
 <script src="js/assets.js"></script>
 <script src="js/item.js"></script>
@@ -48,90 +82,115 @@
 <script src="js/game.js"></script>
   
   <script>
-    async function initializeGame() {
-        console.log("[Bootstrap] Starting game initialization sequence...");
-        
-        // 1. Setup Babylon.js Engine and Scene
-        const canvas = document.getElementById("renderCanvas");
-        if (!canvas) {
-            console.error("[Bootstrap] Canvas element 'renderCanvas' not found.");
-            return;
+    function initializeGame() {
+        try {
+            console.log("[Bootstrap] Starting game initialization sequence...");
+
+            if (typeof NetworkManager === "undefined") {
+                console.warn("[Bootstrap] Network script missing. Using offline template fallback.");
+                window.NetworkManager = function () {
+                    this.loadTemplates = function (itemMap, skillMap, npcMap) {
+                        var fallbackSkills = [{
+                            id: 'Cleave',
+                            code: 'CLEAVE',
+                            name: 'Cleave',
+                            skill_type: 'Attack',
+                            resource_cost: { mana: 0, stamina: 10 },
+                            cooldown_ms: 5000,
+                            effect: { type: 'damage', base_value: 10, magic_scaling: 0, physical_scaling: 0.5 }
+                        }];
+
+                        fallbackSkills.forEach(function (t) { return skillMap.set(t.id, t); });
+                        return Promise.resolve(true);
+                    };
+                };
+            }
+
+            // 1. Setup Babylon.js Engine and Scene
+            var canvas = document.getElementById("renderCanvas");
+            if (!canvas) {
+                console.error("[Bootstrap] Canvas element 'renderCanvas' not found.");
+                return;
+            }
+
+            var engine = new BABYLON.Engine(canvas, true);
+            var scene = new BABYLON.Scene(engine);
+            window.engine = engine;
+            window.scene = scene;
+
+            scene.collisionsEnabled = true;
+            // Use CONFIG value if available, default to 9.81
+            var GRAVITY = (typeof CONFIG !== 'undefined' && CONFIG.GAME) ? CONFIG.GAME.GRAVITY : 9.81;
+            scene.gravity = new BABYLON.Vector3(0, -GRAVITY, 0);
+            scene.enablePhysics(scene.gravity, new BABYLON.CannonJSPlugin());
+
+            // 2. Instantiate Base Managers
+            var uiManager = new UIManager(scene);
+            var networkManager = new NetworkManager();
+            var assetManager = new AssetManager(scene);
+
+            // 3. Create Game Orchestrator and LINK CRITICAL DEPENDENCIES (THE FIX)
+            // Pass null for World/Player initially.
+            var game = new Game(engine, scene, null, null, uiManager);
+            scene.game = game;                  // CRITICAL: Link game to scene
+            game.assetManager = assetManager;   // CRITICAL: Link assetManager to game
+            game.network = networkManager;      // Link network manager
+
+            // 4. Template Loading Sequence
+            var itemTemplates = new Map();
+            var skillTemplates = new Map();
+            var npcTemplates = new Map();
+
+            console.log("[Bootstrap] Loading templates from Network...");
+            var templatesLoadedPromise = networkManager.loadTemplates(itemTemplates, skillTemplates, npcTemplates);
+
+            Promise.resolve(templatesLoadedPromise).then(function (templatesLoaded) {
+                if (!templatesLoaded) {
+                    console.error("[Bootstrap] Failed to load essential game templates. Halting.");
+                    return;
+                }
+
+                // Attach templates to game
+                game.itemTemplates = itemTemplates;
+                game.skillTemplates = skillTemplates;
+                game.npcTemplates = npcTemplates;
+
+                // 5. Load all visual assets (models, textures)
+                console.log("[Bootstrap] Loading all game assets (models, textures)...");
+                return assetManager.loadAll().then(function () {
+                    assetManager.printStats();
+                    console.log("[Bootstrap] All assets loaded.");
+
+                    // 6. Create Player and World (Now safe to instantiate)
+                    // The Player constructor calls applyClass, which now successfully finds game.assetManager.
+                    var player = new Player(scene);
+                    var world = new World(scene, player);
+
+                    // 7. Finalize Game Orchestrator
+                    game.player = player;
+                    game.world = world;
+
+                    game.init();
+                    uiManager.init();
+
+                    // 8. Build the World
+                    world.createEnvironment(assetManager);
+
+                    // 9. Start the Game
+                    game.run();
+                    console.log("[Bootstrap] Game started successfully.");
+                });
+            }).catch(function (err) {
+                console.error('[Bootstrap] FATAL ERROR during initialization:', err);
+            });
+
+            // Handle window resize events
+            window.addEventListener("resize", function () {
+                engine.resize();
+            });
+        } catch (err) {
+            console.error('[Bootstrap] FATAL ERROR before async init:', err);
         }
-
-        const engine = new BABYLON.Engine(canvas, true);
-        const scene = new BABYLON.Scene(engine);
-        
-        scene.collisionsEnabled = true;
-        // Use CONFIG value if available, default to 9.81
-        const GRAVITY = (typeof CONFIG !== 'undefined' && CONFIG.GAME) ? CONFIG.GAME.GRAVITY : 9.81;
-        scene.gravity = new BABYLON.Vector3(0, -GRAVITY, 0);
-        scene.enablePhysics(scene.gravity, new BABYLON.CannonJSPlugin());
-
-        // 2. Instantiate Base Managers
-        const uiManager = new UIManager(scene);
-        const networkManager = new NetworkManager(); 
-        const assetManager = new AssetManager(scene);
-
-        // 3. Create Game Orchestrator and LINK CRITICAL DEPENDENCIES (THE FIX)
-        // Pass null for World/Player initially.
-        const game = new Game(engine, scene, null, null, uiManager); 
-        scene.game = game;                  // CRITICAL: Link game to scene
-        game.assetManager = assetManager;   // CRITICAL: Link assetManager to game
-        game.network = networkManager;      // Link network manager
-
-        // 4. Template Loading Sequence
-        const itemTemplates = new Map();
-        const skillTemplates = new Map();
-        const npcTemplates = new Map();
-        
-        console.log("[Bootstrap] Loading templates from Network...");
-        const templatesLoaded = await networkManager.loadTemplates(itemTemplates, skillTemplates, npcTemplates);
-        
-        if (!templatesLoaded) {
-            console.error("[Bootstrap] Failed to load essential game templates. Halting.");
-            return;
-        }
-        
-        // Attach templates to game
-        game.itemTemplates = itemTemplates;
-        game.skillTemplates = skillTemplates;
-        game.npcTemplates = npcTemplates;
-        
-        // 5. Load all visual assets (models, textures)
-        console.log("[Bootstrap] Loading all game assets (models, textures)...");
-        await assetManager.loadAll();
-        assetManager.printStats();
-        console.log("[Bootstrap] All assets loaded.");
-        
-        // 6. Create Player and World (Now safe to instantiate)
-        // The Player constructor calls applyClass, which now successfully finds game.assetManager.
-        const player = new Player(scene);
-        const world = new World(scene, player);
-        
-        // 7. Finalize Game Orchestrator
-        game.player = player; 
-        game.world = world;
-        
-        // REMOVED REDUNDANT CALLS: The Player constructor handles applyClass/initMesh now.
-        // player.assetManager = assetManager; // No longer needed, as it's on game
-        // world.assetManager = assetManager;  // No longer needed, as it's on game
-        // player.applyDefaultClass('Warrior');
-        // player._initMesh();
-
-        game.init(); 
-        uiManager.init(); 
-
-        // 8. Build the World
-        world.createEnvironment(assetManager); 
-        
-        // 9. Start the Game
-        game.run(); 
-        console.log("[Bootstrap] Game started successfully.");
-
-        // Handle window resize events
-        window.addEventListener("resize", () => {
-            engine.resize();
-        });
     }
 
     initializeGame();
