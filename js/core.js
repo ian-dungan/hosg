@@ -1,212 +1,61 @@
-// ===========================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.1.0 (ENHANCED)
-// Now with ENEMIES section and per-asset custom paths
-// ===========================================================
+// ============================================================
+// HEROES OF SHADY GROVE - CONFIGURATION v1.0.7
+// Core configuration constants
+// ============================================================
 
 const CONFIG = {
-    PLAYER: {
-        INVENTORY_SIZE: 30, 
-        HEALTH: 100,
-        MANA: 50,
-        STAMINA: 100,
-        SPAWN_HEIGHT: 5,
-        MOVE_SPEED: 0.15 
-    },
+    VERSION: '1.0.7',
+    DEBUG: true,
+    
     GAME: {
-        GRAVITY: 9.81, 
+        FPS: 60,
+        GRAVITY: 9.81,
+        PHYSICS_ENGINE: 'cannon'
     },
-    WORLD: { 
-        SKYBOX: {
-            // Skybox file (configured in ASSETS section)
-            FILE: "DaySkyHDRI023B_4K_TONEMAPPED.jpg",
-            SIZE: 512,
-            EXPOSURE: 0.6,
-            CONTRAST: 1.2,
-            LEVEL: 0.5
-        },
-        SPAWNS: [
-            {
-                id: 1,
-                name: "Wolf Den",
-                npc_template_id: "Wolf",
-                position_x: 20,
-                position_y: 0,
-                position_z: 20,
-                spawn_radius: 10,
-                max_spawn: 3
-            }
-        ]
+    
+    PLAYER: {
+        MOVE_SPEED: 0.15,
+        RUN_MULTIPLIER: 1.8,
+        JUMP_FORCE: 0.22,
+        HEALTH: 100,
+        STAMINA: 100,
+        INVENTORY_SIZE: 20,
+        SPAWN_HEIGHT: 20,
+        
+        // Physics settings (v1.0.7)
+        MASS: 15,
+        FRICTION: 0.2,
+        LINEAR_DAMPING: 0.3,
+        ANGULAR_DAMPING: 0.99,
+        IMPULSE_STRENGTH: 150,
+        MAX_SPEED: 100,
+        ROTATION_LERP: 0.2
     },
-    // =========================================
-    // ASSET CONFIGURATION - EDIT PATHS HERE!
-    // =========================================
-    ASSETS: {
-        // Base asset directory (relative to index.html)
-        BASE_PATH: "assets/",
-        
-        // Subfolder structure (used as defaults)
-        PATHS: {
-            CHARACTERS: "player/character/",
-            ENEMIES: "enemies/",
-            ENVIRONMENT: "environment/",
-            SKYBOX: "sky/",
-            ITEMS: "items/",
-            WEAPONS: "weapons/",
-            ARMOR: "armor/",
-            EFFECTS: "effects/",
-            UI: "ui/",
-            AUDIO: "audio/",
-            MUSIC: "audio/music/",
-            SFX: "audio/sfx/"
-        },
-        
-        // Player Character Models
-        // Each can have: model (filename), path (override default), required (boolean)
-        CHARACTERS: {
-            knight: {
-                model: 'knight03.glb',
-                // Use relative path to the repository root
-                path: 'assets/player/character/'
-            },
-            wolf: {
-                model: 'wolf.glb',
-                // Use relative path to the repository root
-                path: 'assets/enemies/'
-            }
-            // Examples:
-            // rock1: { 
-            //     model: "Rock01.glb",
-            //     path: "environment/nature/"
-            // },
-            // house1: { 
-            //     model: "House01.glb",
-            //     path: "environment/buildings/"
-            // },
-            // castle: {
-            //     model: "Castle.glb",
-            //     path: "https://cdn.example.com/structures/"
-            // }
-        },
-        // No environment meshes are currently available in the repository.
-        // Keep the object for future expansion but leave it empty to avoid 404s.
-        ENVIRONMENT: {},
-
-        CLASSES: { 
-            Warrior: { 
-                model: 'knight',
-                category: 'CHARACTERS',  // Which section the model is in
-                stats: { 
-                    maxHealth: 120, 
-                    maxMana: 50, 
-                    maxStamina: 120, 
-                    attackPower: 15, 
-                    magicPower: 5, 
-                    moveSpeed: 0.15 
-                }, 
-                defaultAbility: 'Cleave' 
-            },
-            Wolf: { 
-                model: 'wolf',
-                category: 'ENEMIES',  // Wolf is in ENEMIES section
-                stats: { 
-                    maxHealth: 30, 
-                    maxMana: 0, 
-                    maxStamina: 50, 
-                    attackPower: 5, 
-                    magicPower: 0, 
-                    moveSpeed: 0.18 
-                },
-                defaultAbility: 'Bite'
-            }
-            // Examples:
-            // Mage: { 
-            //     model: 'mage',
-            //     category: 'CHARACTERS',
-            //     stats: {...}
-            // },
-            // Goblin: {
-            //     model: 'goblin',
-            //     category: 'ENEMIES',
-            //     stats: {...}
-            // }
-        },
-        
-        // Helper function to get full path for any asset
-        getAssetPath: function(category, assetKey) {
-            const categoryData = this[category];
-            if (!categoryData || !categoryData[assetKey]) {
-                console.warn(`[Assets] Asset not found: ${category}.${assetKey}`);
-                return null;
-            }
-            
-            const asset = categoryData[assetKey];
-            if (!asset.model) return null;
-            
-            // If asset has custom path, use it
-            if (asset.path) {
-                // Check if path is absolute (http:// or https://)
-                if (asset.path.startsWith('http://') || asset.path.startsWith('https://')) {
-                    return asset.path + asset.model;
-                }
-                // Check if path is absolute file path (starts with /)
-                if (asset.path.startsWith('/')) {
-                    return asset.path + asset.model;
-                }
-                // Otherwise combine with BASE_PATH
-                return this.BASE_PATH + asset.path + asset.model;
-            }
-            
-            // Use default path from PATHS
-            const defaultPath = this.PATHS[category] || "";
-            return this.BASE_PATH + defaultPath + asset.model;
-        },
-        
-        // Get character model path
-        getCharacterPath: function(assetKey) {
-            return this.getAssetPath('CHARACTERS', assetKey);
-        },
-        
-        // Get enemy model path
-        getEnemyPath: function(assetKey) {
-            return this.getAssetPath('ENEMIES', assetKey);
-        },
-        
-        // Get environment model path
-        getEnvironmentPath: function(assetKey) {
-            return this.getAssetPath('ENVIRONMENT', assetKey);
-        },
-        
-        // Get item model path
-        getItemPath: function(assetKey) {
-            return this.getAssetPath('ITEMS', assetKey);
-        },
-        
-        // Get weapon model path
-        getWeaponPath: function(assetKey) {
-            return this.getAssetPath('WEAPONS', assetKey);
-        },
-        
-        // Get armor model path
-        getArmorPath: function(assetKey) {
-            return this.getAssetPath('ARMOR', assetKey);
-        },
-        
-        // Get skybox path
-        getSkyboxPath: function(filename) {
-            return this.BASE_PATH + this.PATHS.SKYBOX + filename;
-        },
-        
-        // Get path by class name (looks up in CLASSES)
-        getClassModelPath: function(className) {
-            const classData = this.CLASSES[className];
-            if (!classData) {
-                console.warn(`[Assets] Class not found: ${className}`);
-                return null;
-            }
-            
-            const category = classData.category || 'CHARACTERS';
-            return this.getAssetPath(category, classData.model);
+    
+    WORLD: {
+        SIZE: 1000,
+        CHUNK_SIZE: 32,
+        TERRAIN_SIZE: 1024,
+        WATER_LEVEL: 0
+    },
+    
+    NETWORK: {
+        WS_URL: 'wss://hosg.onrender.com',
+        MAX_PLAYERS: 100,
+        TICK_RATE: 20,
+        TIMEOUT: 30000
+    },
+    
+    CONTROLS: {
+        GAMEPAD: {
+            ENABLED: true,
+            DEADZONE: 0.15,
+            SENSITIVITY: 1.0
         }
     }
 };
+
+// Export to global scope
 window.CONFIG = CONFIG;
+
+console.log('[Config] Game configuration loaded (v' + CONFIG.VERSION + ')');

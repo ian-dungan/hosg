@@ -1,58 +1,236 @@
-// ============================================================
-// HEROES OF SHADY GROVE - GAME ORCHESTRATION v1.0.16 (ES5 SAFE)
-// Converted to ES5 syntax to avoid class/arrow parse issues in
-// legacy browsers while preserving run/render loop behavior.
-// ============================================================
+// Main Game orchestration
 
-function Game(engine, scene, world, player, ui) {
-    this.engine = engine;
-    this.scene = scene;
-    this.world = world;
-    this.player = player;
-    this.ui = ui;
-    this._running = false;
-    this._lastFrameTime = 0;
-}
-
-Game.prototype.init = function () {
-    console.log('[Bootstrap] Game components successfully initialized.');
-};
-
-Game.prototype.run = function () {
-    if (!this.engine || !this.scene) {
-        console.error('[Game] Cannot run: engine or scene missing.');
-        return;
+class Game {
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    if (!this.canvas) {
+      console.error("[Game] Canvas element not found:", canvasId);
+      throw new Error("Canvas not found");
     }
 
-    var self = this;
+    this.engine = new BABYLON.Engine(this.canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true
+    });
+
+    this.scene = new BABYLON.Scene(this.engine);
+    this.scene.collisionsEnabled = true;
+    this.scene.game = this; // Allow access to game from scene
+
+    // Physics setup
+    if (typeof CANNON !== "undefined") {
+      const gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
+      try {
+        this.scene.enablePhysics(gravity, new BABYLON.CannonJSPlugin());
+        console.log("[Game] Physics engine enabled (Cannon.js)");
+      } catch (err) {
+        console.error("[Game] Failed to enable physics:", err);
+      }
+    } else {
+      console.warn("[Game] CANNON.js not found - physics disabled");
+    }
+
+    this.world = null;
+    this.player = null;
+    this.ui = null;
+    this.network = null;
+
+    this._lastFrameTime = performance.now();
+    this._running = false;
+
+    window.addEventListener("resize", () => {
+      this.engine.resize();
+    });
+  }
+
+  async init() {
+    console.log("[Game] Initializing...");
+
+    // Basic lighting (will be overridden by World class)
+    const hemi = new BABYLON.HemisphericLight(
+      "tempLight",
+      new BABYLON.Vector3(0, 1, 0),
+      this.scene
+    );
+    hemi.intensity = 0.6;
+
+    // World
+    try {
+      this.world = new World(this.scene, {
+        size: CONFIG.WORLD.SIZE,
+        waterLevel: CONFIG.WORLD.WATER_LEVEL
+      });
+      // Expose world on the scene for other systems
+      this.scene.world = this.world;
+      console.log("[Game] World initialized");
+    } catch (err) {
+      console.error("[Game] World initialization failed:", err);
+      throw err;
+    }
+
+    // Player - WAIT for terrain first, then init
+    try {
+      this.player = new Player(this.scene);
+      await this.player.init(); // CRITICAL: Wait for player to initialize
+      // Expose player on the scene
+      this.scene.player = this.player;
+      console.log("[Game] Player initialized");
+    } catch (err) {
+      console.error("[Game] Player initialization failed:", err);
+      throw err;
+    }
+
+    // UI
+    try {
+      this.ui = new UIManager(this);
+      // Expose UI on the scene
+      this.scene.ui = this.ui;
+      console.log("[Game] UI initialized");
+    } catch (err) {
+      console.error("[Game] UI initialization failed:", err);
+      throw err;
+    }
+
+    // Network (optional - game works without it)
+    if (window.NetworkManager) {
+      try {
+        this.network = new NetworkManager(CONFIG.NETWORK.WS_URL);
+        
+        // Setup network event handlers
+        this.network.on("open", () => {
+          console.log("[Game] Connected to multiplayer server");
+          if (this.ui) {
+            this.ui.showMessage("Connected to multiplayer server", 2000);
+          }
+        });
+        
+        this.network.on("close", () => {
+          console.log("[Game] Disconnected from multiplayer server");
+        });
+        
+        this.network.on("error", (err) => {
+          console.error("[Game] Network error:", err);
+        });
+        
+        this.network.on("maxReconnectReached", () => {
+          console.error("[Game] Failed to connect to multiplayer server");
+          if (this.ui) {
+            this.ui.showMessage("Playing in offline mode", 3000);
+          }
+        });
+
+        // Connect (don't block game startup if it fails)
+        this.network.connect().catch((err) => {
+          console.warn("[Game] Failed to connect to multiplayer server:", err);
+          if (this.ui) {
+            this.ui.showMessage("Playing in offline mode", 3000);
+          }
+        });
+      } catch (err) {
+        console.error("[Game] Network initialization failed:", err);
+      }
+    }
+
+    console.log("[Game] Initialization complete");
+  }
+
+  start() {
+    if (this._running) {
+      console.warn("[Game] Already running");
+      return;
+    }
+
     this._running = true;
     this._lastFrameTime = performance.now();
 
-    this.engine.runRenderLoop(function () {
-        var currentTime = performance.now();
-        var deltaTime = (currentTime - self._lastFrameTime) / 1000;
-        self._lastFrameTime = currentTime;
+    console.log("[Game] Starting render loop");
 
-        if (!self._running) return;
+    this.engine.runRenderLoop(() => {
+      if (!this._running) return;
 
-        if (self.player && typeof self.player.update === 'function') self.player.update(deltaTime);
-        if (self.world && typeof self.world.update === 'function') self.world.update(deltaTime);
-        if (self.ui && typeof self.ui.update === 'function') self.ui.update(self.player);
+      const now = performance.now();
+      const deltaTime = (now - this._lastFrameTime) / 1000;
+      this._lastFrameTime = now;
 
-        if (self.scene && typeof self.scene.render === 'function') {
-            self.scene.render();
+      // Update player
+      if (this.player && typeof this.player.update === "function") {
+        try {
+          this.player.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] Player update error:", err);
         }
+      }
+
+      // Update world
+      if (this.world && typeof this.world.update === "function") {
+        try {
+          this.world.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] World update error:", err);
+        }
+      }
+
+      // Update UI
+      if (this.ui && typeof this.ui.update === "function") {
+        try {
+          this.ui.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] UI update error:", err);
+        }
+      }
+
+      // Render scene
+      try {
+        this.scene.render();
+      } catch (err) {
+        console.error("[Game] Render error:", err);
+      }
     });
 
-    if (this.ui && typeof this.ui.showMessage === 'function') {
-        this.ui.showMessage('Welcome to Heroes of Shady Grove! (Persistence Active)', 3000);
+    if (this.ui) {
+      this.ui.showMessage("Welcome to Heroes of Shady Grove!", 3000);
     }
-};
+  }
 
-// Optional stop helper for completeness
-Game.prototype.stop = function () {
+  stop() {
     this._running = false;
-};
+    console.log("[Game] Stopped");
+  }
+
+  dispose() {
+    console.log("[Game] Disposing resources");
+    this.stop();
+    
+    if (this.network) {
+      this.network.dispose();
+      this.network = null;
+    }
+    
+    if (this.ui) {
+      this.ui.dispose();
+      this.ui = null;
+    }
+    
+    if (this.player) {
+      this.player.dispose();
+      this.player = null;
+    }
+    
+    if (this.world && typeof this.world.dispose === "function") {
+      this.world.dispose();
+      this.world = null;
+    }
+    
+    if (this.scene) {
+      this.scene.dispose();
+      this.scene = null;
+    }
+    
+    if (this.engine) {
+      this.engine.dispose();
+      this.engine = null;
+    }
+  }
+}
 
 window.Game = Game;
-

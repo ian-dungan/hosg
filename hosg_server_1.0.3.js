@@ -39,15 +39,17 @@ wss.on("connection", (ws) => {
 
     switch (msg.type) {
       
-      case "hello": {
+            case "hello": {
         const player = msg.player || {};
         const accountId = player.accountId || null;
         const characterId = player.characterId || null;
 
+        // Store the initial snapshot from this client.
         client.state = player;
         client.accountId = accountId;
         client.characterId = characterId;
 
+        // Send welcome snapshot back to this client
         const snapshot = [];
         for (const [otherWs, c] of clients) {
           if (!c.state) continue;
@@ -55,6 +57,7 @@ wss.on("connection", (ws) => {
         }
         ws.send(JSON.stringify({ type: "welcome", id: client.id, players: snapshot }));
 
+        // Notify everyone else that this player joined
         broadcast(
           { type: "playerJoined", id: client.id, player: client.state },
           ws
@@ -62,13 +65,17 @@ wss.on("connection", (ws) => {
         break;
       }
       case "state": {
+        // Update this client's state and broadcast to others
         client.state = msg.player || client.state;
 
+        // Keep account/character identifiers in sync with the latest payload, if present
         if (msg.player) {
           if (msg.player.accountId) client.accountId = msg.player.accountId;
           if (msg.player.characterId) client.characterId = msg.player.characterId;
         }
 
+        // Enforce single active connection per hero ID (characterId) here,
+        // after we know which hero this client actually represents.
         if (client.characterId) {
           for (const [otherWs, otherClient] of clients) {
             if (otherWs === ws) continue;
