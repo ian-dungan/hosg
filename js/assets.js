@@ -75,11 +75,11 @@ class AssetManager {
 
     loadModel(key, assetData, category) {
         const taskName = `${category}_${key}`;
-        
-        const basePath = assetData.path || MANIFEST_DATA.BASE_PATH;
-        
+
+        const basePath = this._resolveRootPath(assetData.path);
+
         const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
-        task.required = assetData.required || false; 
+        task.required = assetData.required || false;
 
         task.onSuccess = (task) => {
             this.stats.loaded++;
@@ -92,10 +92,28 @@ class AssetManager {
         };
         
         task.onError = (task, message, exception) => {
-            this.assets[taskName] = null; 
-            this.assets[key] = null; 
+            this.assets[taskName] = null;
+            this.assets[key] = null;
             this.assets[assetData.model] = null;
         };
+    }
+
+    _resolveRootPath(pathFromConfig) {
+        const basePath = MANIFEST_DATA.BASE_PATH || '';
+        let root = pathFromConfig || basePath;
+
+        const isAbsolute = /^https?:\/\//.test(root) || root.startsWith('/');
+        const alreadyHasBase = !isAbsolute && basePath && root.startsWith(basePath);
+
+        if (!isAbsolute && !alreadyHasBase && basePath) {
+            root = basePath + root;
+        }
+
+        if (root && !root.endsWith('/')) {
+            root += '/';
+        }
+
+        return root;
     }
     
     getAsset(name) {
