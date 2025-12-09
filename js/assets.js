@@ -64,7 +64,7 @@ const ASSET_MANIFEST = {
             grass: {
                 diffuse: 'textures/terrain/grass_diffuse.jpg',
                 normal: 'textures/terrain/grass_normal.jpg',
-                ao: 'textures/terrain/Grass004_2K-JPG_AmbientOcclusion.jpg',
+                ao: 'textures/ground/grass/Grass004_2K-JPG_AmbientOcclusion.jpg',
                 scale: 50,
                 required: true
             },
