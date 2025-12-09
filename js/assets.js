@@ -92,30 +92,63 @@ class AssetManager {
         });
     }
 
+    // Legacy compatibility: some callers still expect a loadAsset helper
+    // that forwards to the mesh loader. Keep it as a thin wrapper to
+    // prevent "loadAsset is not a function" crashes during bootstrap.
+    loadAsset(key, assetData, category) {
+        return this.loadModel(key, assetData, category);
+    }
+
     loadModel(key, assetData, category) {
+        const safeData = assetData || {};
+        const modelName = safeData.model;
+
+        if (!modelName) {
+            console.warn(`[Assets] Missing model name for ${category} asset '${key}'. Skipping load.`);
+            return;
+        }
+
         const taskName = `${category}_${key}`;
 
-        const basePath = this._resolveRootPath(assetData.path);
+        const basePath = this._resolveRootPath(safeData.path);
 
-        const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
-        task.required = assetData.required || false;
+        const task = this.loader.addMeshTask(taskName, "", basePath, modelName);
+        task.required = safeData.required || false;
 
         task.onSuccess = (task) => {
             this.stats.loaded++;
             this.assets[key] = task.loadedMeshes; 
-            this.assets[assetData.model] = task.loadedMeshes; 
-            task.loadedMeshes.forEach(mesh => {
-                mesh.setEnabled(false);
-                mesh.isPickable = true;
-            });
-            console.log(`[Assets] Loaded: ${key} from ${category}`);
+            // Also store by the exact model filename (e.g., 'Knight03.glb') for more explicit lookups
+            this.assets[modelName] = task.loadedMeshes;
         };
-        
+
         task.onError = (task, message, exception) => {
             this.assets[taskName] = null;
             this.assets[key] = null;
-            this.assets[assetData.model] = null;
+            this.assets[modelName] = null;
         };
+    }
+
+    _resolveRootPath(pathFromConfig) {
+        const basePath = MANIFEST_DATA.BASE_PATH || '';
+        let root = pathFromConfig || basePath;
+
+        const isAbsolute = /^https?:\/\//.test(root) || root.startsWith('/');
+        const alreadyHasBase = !isAbsolute && basePath && root.startsWith(basePath);
+
+        if (!isAbsolute && !alreadyHasBase && basePath) {
+            root = basePath + root;
+        }
+
+        if (root && !root.endsWith('/')) {
+            root += '/';
+        }
+
+        return root;
+    }
+    
+    getAsset(name) {
+        return this.assets[name] || null;
     }
 
     _resolveRootPath(pathFromConfig) {

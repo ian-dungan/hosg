@@ -43,23 +43,36 @@
 <script src="js/player.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/game.js"></script>
+  
+  <script>
+    async function initializeGame() {
+        console.log("[Bootstrap] Starting game initialization sequence...");
 
-<script>
-    // =======================================================
-    // GAME BOOTSTRAP v1.3.0 (FIXED INITIALIZATION)
-    // Fixes: Proper initialization order, camera setup timing
-    // =======================================================
-    const canvas = document.getElementById("renderCanvas");
-    const engine = new BABYLON.Engine(canvas, true);
-    const scene = new BABYLON.Scene(engine);
-    
-    // Global Access
-    scene.game = null; 
+        if (typeof NetworkManager === "undefined") {
+            console.warn("[Bootstrap] Network script missing. Using offline template fallback.");
+            window.NetworkManager = function () {
+                this.loadTemplates = function (itemMap, skillMap, npcMap) {
+                    const fallbackSkills = [{
+                        id: 'Cleave',
+                        code: 'CLEAVE',
+                        name: 'Cleave',
+                        skill_type: 'Attack',
+                        resource_cost: { mana: 0, stamina: 10 },
+                        cooldown_ms: 5000,
+                        effect: { type: 'damage', base_value: 10, magic_scaling: 0, physical_scaling: 0.5 }
+                    }];
 
-    function updateLoadingText(text) {
-        const loadingEl = document.getElementById("loadingText");
-        if (loadingEl) {
-            loadingEl.innerText = text;
+                    fallbackSkills.forEach((t) => skillMap.set(t.id, t));
+                    return Promise.resolve(true);
+                };
+            };
+        }
+
+        // 1. Setup Babylon.js Engine and Scene
+        const canvas = document.getElementById("renderCanvas");
+        if (!canvas) {
+            console.error("[Bootstrap] Canvas element 'renderCanvas' not found.");
+            return;
         }
     }
 
