@@ -14,6 +14,7 @@ class UIManager {
         this.debugText = null;
         this.minimap = null;
         this.minimapDots = [];
+        this.messageBox = null;
 
         this._init();
     }
@@ -24,6 +25,7 @@ class UIManager {
         if (CONFIG.DEBUG) {
             this.createDebugInfo();
         }
+        this.createMessageBox();
     }
 
     createHUD() {
@@ -48,19 +50,19 @@ class UIManager {
         );
         this.hud.addControl(this.healthBar.container);
 
-        // Mana bar
+        // Mana bar (below health)
         this.manaBar = this.createStatusBar(
             "mana",
             "MP",
-            "#4080ff",
+            "#4040ff",
             200,
             18,
             10,
-            40
+            35
         );
         this.hud.addControl(this.manaBar.container);
 
-        // Stamina bar
+        // Stamina bar (below mana)
         this.staminaBar = this.createStatusBar(
             "stamina",
             "ST",
@@ -68,299 +70,200 @@ class UIManager {
             200,
             18,
             10,
-            70
+            60
         );
         this.hud.addControl(this.staminaBar.container);
     }
 
-    createStatusBar(id, label, color, width, height, left, top) {
-        const container = new BABYLON.GUI.Rectangle(id + "Container");
-        container.width = width + "px";
-        container.height = height + 20 + "px";
-        container.thickness = 0;
+    createStatusBar(name, label, color, width, height, x, y) {
+        const container = new BABYLON.GUI.Rectangle(`${name}Container`);
+        container.width = `${width}px`;
+        container.height = `${height}px`;
         container.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
         container.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        container.left = left + "px";
-        container.top = top + "px";
+        container.left = `${x}px`;
+        container.top = `${y}px`;
+        container.color = "white";
+        container.thickness = 2;
+        container.background = "black";
 
-        // Label
-        const labelText = new BABYLON.GUI.TextBlock(id + "Label", label);
-        labelText.color = "white";
-        labelText.fontSize = 14;
-        labelText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        labelText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        labelText.paddingLeft = 4;
-        labelText.paddingTop = 0;
-        container.addControl(labelText);
-
-        // Background bar
-        const background = new BABYLON.GUI.Rectangle(id + "Background");
-        background.width = "100%";
-        background.height = height + "px";
-        background.thickness = 1;
-        background.color = "white";
-        background.background = "#000a";
-        background.cornerRadius = 4;
-        background.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        background.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        background.top = 18; // below label
-        container.addControl(background);
-
-        // Fill
-        const fill = new BABYLON.GUI.Rectangle(id + "Fill");
-        fill.width = "100%";
-        fill.height = "100%";
-        fill.thickness = 0;
-        fill.background = color;
+        // Fill bar
+        const fill = new BABYLON.GUI.Rectangle(`${name}Fill`);
+        fill.width = 1.0; // Starts full
+        fill.height = 1.0;
         fill.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        fill.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        background.addControl(fill);
+        fill.background = color;
+        fill.thickness = 0;
+        container.addControl(fill);
 
-        // Value text
-        const valueText = new BABYLON.GUI.TextBlock(id + "Value", "");
-        valueText.color = "white";
-        valueText.fontSize = 12;
-        valueText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        valueText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        background.addControl(valueText);
+        // Text label
+        const text = new BABYLON.GUI.TextBlock(`${name}Text`);
+        text.text = label;
+        text.color = "white";
+        text.fontSize = 12;
+        container.addControl(text);
 
-        const setValue = (current, max) => {
-            max = max || 1;
-            const ratio = Math.max(0, Math.min(1, current / max));
-            fill.width = (ratio * 100).toFixed(1) + "%";
-            valueText.text = `${Math.round(current)}/${Math.round(max)}`;
-        };
-
-        // Initialize with full bar
-        setValue(1, 1);
-
-        return {
-            container,
-            background,
-            fill,
-            valueText,
-            setValue
-        };
+        return { container, fill, text };
     }
 
-    createDebugInfo() {
-        this.debugText = new BABYLON.GUI.TextBlock("debugInfo");
-        this.debugText.text = "FPS: 60";
-        this.debugText.color = "lime";
-        this.debugText.fontSize = 12;
-        this.debugText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        this.debugText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        this.debugText.paddingTop = "10px";
-        this.debugText.paddingRight = "10px";
-        this.gui.addControl(this.debugText);
-    }
-    
     createMinimap() {
-        const size = 200; // Minimap size in pixels
-        const mapScale = 200; // World units to cover (200x200 world area)
-        
-        // Minimap container (bottom-right corner)
-        const minimapContainer = new BABYLON.GUI.Rectangle("minimapContainer");
-        minimapContainer.width = size + "px";
-        minimapContainer.height = size + "px";
-        minimapContainer.cornerRadius = 10;
-        minimapContainer.color = "#ffffff";
-        minimapContainer.thickness = 2;
-        minimapContainer.background = "#000000";
-        minimapContainer.alpha = 0.8;
-        minimapContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        minimapContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        minimapContainer.paddingRight = "10px";
-        minimapContainer.paddingBottom = "10px";
-        this.gui.addControl(minimapContainer);
-        
-        // Minimap title
-        const title = new BABYLON.GUI.TextBlock("minimapTitle", "MAP");
-        title.color = "#ffffff";
-        title.fontSize = 14;
-        title.fontWeight = "bold";
-        title.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        title.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        title.paddingTop = "5px";
-        minimapContainer.addControl(title);
-        
-        // Store minimap info
-        this.minimap = {
-            container: minimapContainer,
-            size: size,
-            mapScale: mapScale,
-            worldToMap: (worldX, worldZ) => {
-                // Convert world coordinates to minimap pixel coordinates
-                const pixelX = (worldX / mapScale) * (size * 0.8) + size / 2;
-                const pixelY = (worldZ / mapScale) * (size * 0.8) + size / 2;
-                return { x: pixelX, y: pixelY };
-            }
-        };
-        
-        // Add landmarks to minimap
-        this.updateMinimapLandmarks();
-        
-        console.log('[UI] Minimap created');
-    }
-    
-    updateMinimapLandmarks() {
-        if (!this.minimap || !this.game.world) return;
-        
-        // Clear old dots
-        for (const dot of this.minimapDots) {
-            this.minimap.container.removeControl(dot);
-        }
-        this.minimapDots = [];
-        
-        // Get landmarks from world
-        const landmarks = this.game.world.getLandmarks();
-        
-        // Add landmark dots
-        for (const landmark of landmarks) {
-            const { x, y } = this.minimap.worldToMap(landmark.position.x, landmark.position.z);
-            
-            // Create dot based on type
-            let color = "#ffffff";
-            let dotSize = 6;
-            
-            if (landmark.type === 'building') {
-                color = "#ffaa00"; // Orange for buildings
-                dotSize = 8;
-            } else if (landmark.type === 'tree_grove') {
-                color = "#00ff00"; // Green for forests
-                dotSize = 12;
-            } else if (landmark.type === 'rock_formation') {
-                color = "#888888"; // Gray for rocks
-                dotSize = 10;
-            }
-            
-            const dot = new BABYLON.GUI.Ellipse(`landmark_${landmark.name}`);
-            dot.width = dotSize + "px";
-            dot.height = dotSize + "px";
-            dot.color = color;
-            dot.thickness = 1;
-            dot.background = color;
-            dot.alpha = 0.7;
-            dot.left = (x - this.minimap.size / 2) + "px";
-            dot.top = (y - this.minimap.size / 2) + "px";
-            
-            // Tooltip on hover
-            dot.onPointerEnterObservable.add(() => {
-                dot.thickness = 2;
-                dot.alpha = 1;
-                // Could add label popup here
-            });
-            
-            dot.onPointerOutObservable.add(() => {
-                dot.thickness = 1;
-                dot.alpha = 0.7;
-            });
-            
-            this.minimap.container.addControl(dot);
-            this.minimapDots.push(dot);
-        }
-        
-        // Add player dot (last so it's on top)
-        const playerDot = new BABYLON.GUI.Ellipse("playerDot");
-        playerDot.width = "8px";
-        playerDot.height = "8px";
-        playerDot.color = "#ff0000";
-        playerDot.thickness = 2;
-        playerDot.background = "#ffffff";
-        this.minimap.container.addControl(playerDot);
-        this.minimap.playerDot = playerDot;
-        
-        console.log('[UI] Minimap updated with', landmarks.length, 'landmarks');
+        const size = 150;
+        this.minimap = new BABYLON.GUI.Rectangle("minimapContainer");
+        this.minimap.width = `${size}px`;
+        this.minimap.height = `${size}px`;
+        this.minimap.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        this.minimap.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.minimap.left = "-10px";
+        this.minimap.top = "10px";
+        this.minimap.color = "white";
+        this.minimap.thickness = 2;
+        this.minimap.background = "rgba(0, 0, 0, 0.5)";
+        this.minimap.clipChildren = true;
+        this.hud.addControl(this.minimap);
     }
 
-    update(deltaTime) {
-        if (!this.player) {
-            this.player = this.game.player;
-        }
-        
-        const p = this.player;
-        if (!p) return;
-
-        // Update health bar
-        if (this.healthBar) {
-            this.healthBar.setValue(p.health, p.maxHealth || CONFIG.PLAYER.HEALTH);
-        }
-        
-        // Update mana bar
-        if (this.manaBar) {
-            const mana = typeof p.mana === "number" ? p.mana : 0;
-            const maxMana = typeof p.maxMana === "number" ? p.maxMana : 100;
-            this.manaBar.setValue(mana, maxMana);
-        }
-        
-        // Update stamina bar
-        if (this.staminaBar) {
-            const stamina = typeof p.stamina === "number" ? p.stamina : 0;
-            const maxStamina = typeof p.maxStamina === "number" ? p.maxStamina : CONFIG.PLAYER.STAMINA;
-            this.staminaBar.setValue(stamina, maxStamina);
-        }
-
-        // Update debug info
-        if (this.debugText && this.game.engine) {
-            const fps = this.game.engine.getFps().toFixed(0);
-            const pos = p.mesh ? p.mesh.position : new BABYLON.Vector3(0, 0, 0);
-            this.debugText.text = `FPS: ${fps}\nPos: ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}\nGrounded: ${p.onGround ? 'Yes' : 'No'}`;
-        }
-        
-        // Update minimap player position
-        if (this.minimap && this.minimap.playerDot && p.mesh) {
-            const { x, y } = this.minimap.worldToMap(p.mesh.position.x, p.mesh.position.z);
-            this.minimap.playerDot.left = (x - this.minimap.size / 2) + "px";
-            this.minimap.playerDot.top = (y - this.minimap.size / 2) + "px";
-        }
+    createMessageBox() {
+        this.messageBox = new BABYLON.GUI.TextBlock("messageBox");
+        this.messageBox.width = 0.5;
+        this.messageBox.height = "40px";
+        this.messageBox.color = "white";
+        this.messageBox.fontSize = 20;
+        this.messageBox.outlineWidth = 1;
+        this.messageBox.outlineColor = "black";
+        this.messageBox.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+        this.messageBox.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        this.messageBox.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        this.messageBox.top = "-50px";
+        this.messageBox.text = "";
+        this.messageBox.alpha = 0;
+        this.gui.addControl(this.messageBox);
     }
 
-    showMessage(message, duration = 3000) {
-        const msgText = new BABYLON.GUI.TextBlock("message");
-        msgText.text = message;
-        msgText.color = "white";
-        msgText.fontSize = 18;
-        msgText.fontWeight = "bold";
-        msgText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        msgText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        msgText.paddingTop = "-100px";
-        
-        const bg = new BABYLON.GUI.Rectangle("messageBg");
-        bg.width = "400px";
-        bg.height = "60px";
-        bg.thickness = 2;
-        bg.color = "white";
-        bg.background = "rgba(0, 0, 0, 0.8)";
-        bg.cornerRadius = 10;
-        bg.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        bg.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        bg.paddingTop = "-100px";
-        
-        bg.addControl(msgText);
-        this.gui.addControl(bg);
+    showMessage(text, duration = 2000) {
+        if (!this.messageBox) return;
 
-        setTimeout(() => {
-            this.gui.removeControl(bg);
+        this.messageBox.text = text;
+        this.messageBox.alpha = 1;
+
+        // Fade out after duration
+        clearTimeout(this._messageTimeout);
+        this._messageTimeout = setTimeout(() => {
+            this.messageBox.alpha = 0;
         }, duration);
     }
 
+    createDebugInfo() {
+        this.debugText = new BABYLON.GUI.TextBlock("debugText");
+        this.debugText.width = 0.3;
+        this.debugText.height = "100px";
+        this.debugText.color = "white";
+        this.debugText.fontSize = 12;
+        this.debugText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        this.debugText.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        this.debugText.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        this.debugText.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        this.debugText.left = "-10px";
+        this.debugText.top = "-10px";
+        this.gui.addControl(this.debugText);
+    }
+
+    updateDebugInfo(deltaTime) {
+        if (!this.debugText || !this.player || !this.player.mesh) return;
+
+        const fps = this.game.engine.getFps().toFixed(0);
+        const pos = this.player.mesh.position;
+        const vel = this.player.velocity;
+
+        let text = `FPS: ${fps}\n`;
+        text += `Pos: x${pos.x.toFixed(1)} y${pos.y.toFixed(1)} z${pos.z.toFixed(1)}\n`;
+        text += `Vel: x${vel.x.toFixed(1)} y${vel.y.toFixed(1)} z${vel.z.toFixed(1)}\n`;
+        text += `Grounded: ${this.player.isGrounded ? 'Yes' : 'No'}\n`;
+        text += `Anim: ${this.player.currentAnimation || 'None'}`;
+
+        this.debugText.text = text;
+    }
+
+    updateMinimap() {
+        if (!this.minimap || !this.player || !this.player.mesh) return;
+
+        // Clear old dots
+        this.minimapDots.forEach(dot => dot.dispose());
+        this.minimapDots = [];
+
+        const mapSize = 150; // minimap width/height in pixels
+        const worldSize = this.game.world ? this.game.world.options.size : 1000;
+        const scale = mapSize / worldSize;
+        const playerPos = this.player.mesh.position;
+
+        // Player dot (center of the minimap)
+        const playerDot = new BABYLON.GUI.Ellipse();
+        playerDot.width = "6px";
+        playerDot.height = "6px";
+        playerDot.color = "white";
+        playerDot.background = "blue";
+        this.minimap.addControl(playerDot);
+        this.minimapDots.push(playerDot);
+
+        // Add NPC/Enemy dots
+        const entities = [...this.game.world.npcs, ...this.game.world.enemies];
+
+        for (const entity of entities) {
+            if (!entity.mesh) continue;
+
+            const entityPos = entity.mesh.position;
+            // Calculate relative position to player
+            const relX = (entityPos.x - playerPos.x) * scale;
+            const relY = (entityPos.z - playerPos.z) * scale;
+
+            // Only show entities near the player (within minimap bounds)
+            if (Math.abs(relX) > mapSize / 2 || Math.abs(relY) > mapSize / 2) {
+                continue;
+            }
+
+            const dot = new BABYLON.GUI.Ellipse();
+            dot.width = "4px";
+            dot.height = "4px";
+            dot.color = "white";
+            dot.background = entity instanceof Enemy ? "red" : "yellow";
+            dot.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+            dot.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+            dot.left = `${relX}px`;
+            dot.top = `${-relY}px`; // Invert Y for minimap convention
+
+            this.minimap.addControl(dot);
+            this.minimapDots.push(dot);
+        }
+    }
+
+
+    update(deltaTime) {
+        // Update stats bars
+        if (this.player) {
+            this.healthBar.fill.width = `${this.player.health / this.player.maxHealth}`;
+            this.manaBar.fill.width = `${this.player.mana / this.player.maxMana}`;
+            this.staminaBar.fill.width = `${this.player.stamina / this.player.maxStamina}`;
+        }
+
+        if (CONFIG.DEBUG) {
+            this.updateDebugInfo(deltaTime);
+        }
+
+        this.updateMinimap();
+    }
+
     dispose() {
-        if (this.gui) {
-            this.gui.dispose();
-            this.gui = null;
-        }
+        this.gui.dispose();
     }
 
-    showDamageNumber(amount, position, isPlayerHit) {
-        var prefix = isPlayerHit ? "-" : "";
-        var text = "" + prefix + amount;
-        this.showFloatingText(text, position, isPlayerHit ? "playerDamage" : "enemyDamage", 800);
-    }
-
-    showFloatingText(text, position, type, duration) {
-        if (!this.gui || !this.scene || typeof BABYLON === "undefined" || !BABYLON.GUI) {
-            return;
-        }
+    /**
+     * Shows a floating damage/text indicator in 3D space.
+     * @param {string} text - The text to display (e.g., damage number).
+     * @param {BABYLON.Vector3} worldPosition - The world position to display at.
+     * @param {string} type - 'playerDamage', 'enemyDamage', 'gold', 'heal', 'default'
+     * @param {number} duration - ms to display the text for.
+     */
+    showFloatingText(text, worldPosition, type, duration) {
+        if (!worldPosition) return;
 
         if (typeof type === "undefined") type = "default";
         if (typeof duration === "undefined") duration = 1500;
@@ -383,10 +286,15 @@ class UIManager {
 
         label.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
         label.textVerticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-        label.top = "-35%";
-        label.left = "0px";
-
+        
+        // Use position to place it via linkWithMesh, but we need a temporary mesh for this
+        const textMesh = BABYLON.MeshBuilder.CreateBox("floatingTextMesh", { size: 0.1 }, this.scene);
+        textMesh.position.copyFrom(worldPosition);
+        textMesh.isVisible = false;
+        
         this.gui.addControl(label);
+        label.linkWithMesh(textMesh);
+        label.linkOffsetY = -50; // Start 50px above the mesh center
 
         var scene = this.scene;
         var startTime = performance.now();
@@ -397,13 +305,72 @@ class UIManager {
             if (t >= 1) {
                 scene.onBeforeRenderObservable.remove(observer);
                 this.gui.removeControl(label);
+                textMesh.dispose();
             } else {
-                var offset = -35 - t * 15;
-                label.top = offset + "%";
+                // Animate text upwards (by changing the mesh position)
+                var offset = 0.005 * deltaTime; // Small constant upward movement
+                textMesh.position.y += offset;
+
+                // Animate fade out
                 label.alpha = 1 - t;
             }
         }.bind(this));
     }
 }
 
-window.UIManager = UIManager;
+
+/**
+ * Simple Inventory class for item management
+ */
+class Inventory {
+    constructor(size) {
+        this.size = size;
+        this.items = []; // Array of item data objects
+    }
+
+    addItem(itemData) {
+        // Check for stackable items
+        if (itemData.stackable) {
+            const existingItem = this.items.find(i => i.id === itemData.id);
+            if (existingItem) {
+                existingItem.quantity += itemData.quantity;
+                console.log(`[Inventory] Stacked ${itemData.name}. New quantity: ${existingItem.quantity}`);
+                return true;
+            }
+        }
+
+        // Add new item if space is available
+        if (this.items.length < this.size) {
+            this.items.push(itemData);
+            console.log(`[Inventory] Added new item: ${itemData.name}`);
+            return true;
+        }
+
+        console.log(`[Inventory] No space for ${itemData.name}`);
+        return false;
+    }
+
+    removeItem(itemId, quantity = 1) {
+        const index = this.items.findIndex(i => i.id === itemId);
+        if (index === -1) return false;
+
+        const item = this.items[index];
+
+        if (item.quantity > quantity) {
+            item.quantity -= quantity;
+            return true;
+        } else if (item.quantity === quantity) {
+            this.items.splice(index, 1);
+            return true;
+        }
+
+        return false;
+    }
+
+    // A stub for equipping functionality
+    equipItem(itemData, slot) {
+        // In a full implementation, this would handle moving the item to an 'equipped' slot
+        console.log(`[Inventory] Equipped ${itemData.name} to ${slot} slot.`);
+        return true;
+    }
+}
