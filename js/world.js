@@ -346,11 +346,15 @@ World.prototype.createCameraAndLights = function() {
 }
 
 World.prototype.createSkybox = function() {
-    if (CONFIG.WORLD.SKYBOX && CONFIG.WORLD.SKYBOX.PATH) {
+    if (CONFIG.WORLD.SKYBOX && CONFIG.WORLD.SKYBOX.FILE) {
         const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: CONFIG.WORLD.SKYBOX.SIZE }, this.scene);
         const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
         skyboxMaterial.backFaceCulling = false;
-        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(CONFIG.WORLD.SKYBOX.PATH, this.scene);
+        
+        // Build skybox path from ASSETS configuration
+        const skyboxPath = CONFIG.ASSETS.getSkyboxPath(CONFIG.WORLD.SKYBOX.FILE);
+        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(skyboxPath, this.scene);
+        
         skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
         skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
         skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);

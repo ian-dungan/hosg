@@ -16,7 +16,8 @@ const CONFIG = {
     },
     WORLD: { 
         SKYBOX: {
-            PATH: "assets/environment/skybox/shadygrove_sky_specular.dds", 
+            // Skybox file (configured in ASSETS section)
+            FILE: "shadygrove_sky_specular.dds",
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
@@ -35,15 +36,60 @@ const CONFIG = {
             }
         ]
     },
+    // =========================================
+    // ASSET CONFIGURATION - EDIT PATHS HERE!
+    // =========================================
     ASSETS: {
+        // Base asset directory (relative to index.html)
+        // Change this to use a CDN, different folder, etc.
         BASE_PATH: "assets/",
+        
+        // Subfolder structure
+        PATHS: {
+            CHARACTERS: "characters/",
+            ENVIRONMENT: "environment/",
+            SKYBOX: "environment/skybox/",
+            ITEMS: "items/",
+            EFFECTS: "effects/",
+            UI: "ui/",
+            AUDIO: "audio/"
+        },
+        
+        // Alternative: Use a CDN
+        // Uncomment and modify to use external hosting:
+        // BASE_PATH: "https://your-cdn.com/hosg-assets/",
+        
+        // Alternative: Different local structure
+        // BASE_PATH: "../public/game-assets/",
+        // PATHS: { CHARACTERS: "models/chars/", ... },
+        
+        // Character Models (3D meshes)
         CHARACTERS: {
-            knight: { model: "Knight03.glb", required: true },
-            wolf:   { model: "Wolf.glb",     required: false } 
+            knight: { 
+                model: "Knight03.glb", 
+                required: true 
+            },
+            wolf: { 
+                model: "Wolf.glb", 
+                required: false 
+            }
+            // Add more characters:
+            // goblin: { model: "Goblin.glb", required: false },
+            // mage: { model: "Mage01.glb", required: true },
         },
+        
+        // Environment Assets (trees, rocks, buildings, etc.)
         ENVIRONMENT: {
-            tree1:  { model: "Tree01.glb" } 
+            tree1: { 
+                model: "Tree01.glb" 
+            }
+            // Add more environment objects:
+            // rock1: { model: "Rock01.glb" },
+            // house1: { model: "House01.glb" },
+            // grass1: { model: "Grass01.glb" },
         },
+        
+        // Class Definitions (link models to game classes)
         CLASSES: {
             Warrior: { 
                 model: 'knight', 
@@ -69,6 +115,31 @@ const CONFIG = {
                 },
                 defaultAbility: 'Bite'
             }
+            // Add more classes:
+            // Mage: { model: 'mage', stats: {...}, defaultAbility: 'Fireball' },
+            // Goblin: { model: 'goblin', stats: {...}, defaultAbility: 'Stab' },
+        },
+        
+        // Helper function to build full paths
+        getPath: function(category, filename) {
+            if (!filename) return null;
+            const subPath = this.PATHS[category] || "";
+            return this.BASE_PATH + subPath + filename;
+        },
+        
+        // Get character model path
+        getCharacterPath: function(modelFile) {
+            return this.BASE_PATH + this.PATHS.CHARACTERS + modelFile;
+        },
+        
+        // Get environment model path
+        getEnvironmentPath: function(modelFile) {
+            return this.BASE_PATH + this.PATHS.ENVIRONMENT + modelFile;
+        },
+        
+        // Get skybox path
+        getSkyboxPath: function(filename) {
+            return this.BASE_PATH + this.PATHS.SKYBOX + filename;
         }
     }
 };
