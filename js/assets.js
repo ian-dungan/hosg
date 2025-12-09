@@ -54,13 +54,6 @@ class AssetManager {
             loadFn(key, assetData, 'characters');
         }
 
-        // Load enemies
-        for (const key in enemies) {
-            const assetData = enemies[key];
-            this.stats.requested++; 
-            this.loadAsset(key, assetData, 'ENEMIES');
-        }
-
         // Load environment
         for (const key in environment) {
             const assetData = environment[key];

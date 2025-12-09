@@ -30,10 +30,40 @@
 </head>
 <body>
 
-<canvas id="renderCanvas"></canvas>
-<div id="loadingText">Loading Heroes of Shady Grove...</div>
+  <script>
+    // Minimal loading text helper to avoid missing function errors during bootstrap
+    (function () {
+      function ensureLoadingElement() {
+        var el = document.getElementById('loadingText');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'loadingText';
+          el.style.position = 'absolute';
+          el.style.top = '8px';
+          el.style.left = '8px';
+          el.style.padding = '6px 10px';
+          el.style.background = 'rgba(0, 0, 0, 0.5)';
+          el.style.color = '#fff';
+          el.style.fontFamily = 'Arial, sans-serif';
+          el.style.fontSize = '14px';
+          el.style.borderRadius = '4px';
+          el.style.pointerEvents = 'none';
+          document.body.appendChild(el);
+        }
+        return el;
+      }
 
-<!-- Load scripts in proper dependency order -->
+      window.updateLoadingText = function (message) {
+        try {
+          var el = ensureLoadingElement();
+          el.textContent = message || '';
+        } catch (err) {
+          console.warn('[Bootstrap] updateLoadingText fallback failed:', err);
+        }
+      };
+    })();
+  </script>
+
 <script src="js/core.js"></script>
 <script src="js/item.js"></script>
 <script src="js/ability.js"></script>
