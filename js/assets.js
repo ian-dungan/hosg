@@ -92,25 +92,14 @@ class AssetManager {
         });
     }
 
-    loadAsset(key, assetData, category) {
-        const taskName = "load_" + key;
-        
-        // Use CONFIG.ASSETS.getAssetPath to get full path
-        const fullPath = CONFIG.ASSETS.getAssetPath(category, key);
-        
-        if (!fullPath) {
-            console.error(`[Assets] Could not determine path for ${category}.${key}`);
-            this.stats.failed++;
-            return;
-        }
-        
-        // Extract directory and filename from full path
-        const lastSlash = fullPath.lastIndexOf('/');
-        const directory = fullPath.substring(0, lastSlash + 1);
-        const filename = fullPath.substring(lastSlash + 1);
-        
-        const task = this.loader.addMeshTask(taskName, "", directory, filename);
-        
+    loadModel(key, assetData, category) {
+        const taskName = `${category}_${key}`;
+
+        const basePath = this._resolveRootPath(assetData.path);
+
+        const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
+        task.required = assetData.required || false;
+
         task.onSuccess = (task) => {
             this.stats.loaded++;
             this.assets[key] = task.loadedMeshes; 
@@ -123,9 +112,28 @@ class AssetManager {
         };
         
         task.onError = (task, message, exception) => {
-            this.stats.failed++;
-            console.error(`[Assets] Failed to load ${key} from ${fullPath}:`, message);
+            this.assets[taskName] = null;
+            this.assets[key] = null;
+            this.assets[assetData.model] = null;
         };
+    }
+
+    _resolveRootPath(pathFromConfig) {
+        const basePath = MANIFEST_DATA.BASE_PATH || '';
+        let root = pathFromConfig || basePath;
+
+        const isAbsolute = /^https?:\/\//.test(root) || root.startsWith('/');
+        const alreadyHasBase = !isAbsolute && basePath && root.startsWith(basePath);
+
+        if (!isAbsolute && !alreadyHasBase && basePath) {
+            root = basePath + root;
+        }
+
+        if (root && !root.endsWith('/')) {
+            root += '/';
+        }
+
+        return root;
     }
     
     getAsset(name) {
