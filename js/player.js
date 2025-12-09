@@ -43,6 +43,30 @@ if (typeof Character === 'undefined' && typeof Entity !== 'undefined') {
     window.Character = Character;
 }
 
+// Inventory/Equipment safety shims in case item.js fails to parse in older environments
+if (typeof Inventory === 'undefined') {
+    console.warn('[Player] Inventory class missing. Installing minimal fallback.');
+    function Inventory(player) {
+        this.player = player;
+        this.slots = [];
+    }
+    Inventory.prototype.load = function () { this.slots = []; };
+    Inventory.prototype.getSaveData = function () { return []; };
+    window.Inventory = Inventory;
+}
+
+if (typeof Equipment === 'undefined') {
+    console.warn('[Player] Equipment class missing. Installing minimal fallback.');
+    function Equipment(player) {
+        this.player = player;
+        this.slots = {};
+    }
+    Equipment.prototype.load = function () { this.slots = {}; };
+    Equipment.prototype.equip = function () { return null; };
+    Equipment.prototype.getSaveData = function () { return []; };
+    window.Equipment = Equipment;
+}
+
 function Player(scene) {
     var C = typeof CONFIG === 'undefined' ? {} : CONFIG;
     var playerConfig = C.PLAYER || {};
@@ -125,6 +149,7 @@ Player.prototype._initPhysics = function () {
         this.mesh.isVisible = false;
         this.mesh.checkCollisions = true;
     }
+};
 
     this.mesh.position.copyFrom(this.position);
 
