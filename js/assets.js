@@ -34,7 +34,7 @@ const ASSET_MANIFEST = {
             }
         },
         NPCS: {
-            merchant: { // Note: If this model is missing (404), the code handles fallback
+            merchant: {
                 model: 'npcs/merchant.glb',
                 scale: 1.0,
                 required: false
@@ -51,7 +51,7 @@ const ASSET_MANIFEST = {
                 scale: 0.02,
                 required: false
             },
-            goblin: { // Note: If this model is missing (404), the code handles fallback
+            goblin: {
                 model: 'enemies/goblin.glb',
                 scale: 1.0,
                 required: false
@@ -107,9 +107,8 @@ const ASSET_MANIFEST = {
         }
     },
     
-    // Note: This separate ENEMIES block should be unified with CHARACTERS.ENEMIES eventually, 
-    // but the loader is updated to handle both structures robustly for now.
-    ENEMIES: { 
+    // NOTE: This section appears redundant with CHARACTERS.ENEMIES, but serves as a dedicated block for enemy-specific data (e.g., animations, non-model assets)
+    ENEMIES: {
         wolf: {
             model: 'enemies/wolf.glb',
             texture: 'textures/enemies/wolf_diffuse.png',
@@ -117,7 +116,7 @@ const ASSET_MANIFEST = {
             scale: 1.0
         },
         goblin: {
-            model: 'enemies/goblin.glb',
+            model: 'models/enemies/goblin.glb',
             texture: 'textures/enemies/goblin_diffuse.png',
             animations: ['idle', 'walk', 'run', 'attack', 'die'],
             scale: 0.8
@@ -142,206 +141,170 @@ class AssetLoader {
         if (!this.config.USE_ASSETS) {
             return null;
         }
+
         const fullPath = this.basePath + path;
         const cacheKey = 'texture_' + fullPath;
+
         if (this.loadedAssets.has(cacheKey)) {
             return this.loadedAssets.get(cacheKey);
         }
 
-        this.stats.requested++;
         if (this.loadingPromises.has(cacheKey)) {
             return this.loadingPromises.get(cacheKey);
         }
 
-        const promise = new Promise((resolve, reject) => {
-            const texture = new BABYLON.Texture(fullPath, this.scene, true, true, BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+        this.stats.requested++;
+        if (this.config.LOG_LOADING) {
+            console.log(`[AssetLoader] Requesting texture: ${fullPath}`);
+        }
+
+        const loadPromise = new Promise((resolve, reject) => {
+            const texture = new BABYLON.Texture(fullPath, this.scene,
+                false, // No skipMipMap
+                true,  // Invert Y axis
+                BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
                 () => {
-                    if (this.config.LOG_LOADING) {
-                        console.log(`[Assets] ✓ Loaded texture: ${path}`);
-                    }
-                    if (options.uScale) texture.uScale = options.uScale;
-                    if (options.vScale) texture.vScale = options.vScale;
                     this.loadedAssets.set(cacheKey, texture);
                     this.loadingPromises.delete(cacheKey);
                     this.stats.loaded++;
+                    if (this.config.LOG_LOADING) {
+                        console.log(`[AssetLoader] ✓ Loaded texture: ${fullPath}`);
+                    }
+
+                    // Apply options
+                    if (options.uScale) texture.uScale = options.uScale;
+                    if (options.vScale) texture.vScale = options.vScale;
+                    if (this.config.TEXTURE_ANISOTROPY > 1) {
+                        texture.maxAnisotropy = this.config.TEXTURE_ANISOTROPY;
+                    }
+
                     resolve(texture);
                 },
                 (message, exception) => {
-                    console.error(`[Assets] ✗ Failed texture: ${path}`, exception || message);
-                    this.failedAssets.add(path);
                     this.loadingPromises.delete(cacheKey);
+                    this.failedAssets.add(fullPath);
                     this.stats.failed++;
-                    // Fallback to a plain texture if needed, or resolve null
-                    resolve(null); 
+                    console.error(`[AssetLoader] ✗ Failed to load texture: ${fullPath}`, message, exception);
+                    resolve(null); // Resolve with null on failure
                 }
             );
         });
 
-        this.loadingPromises.set(cacheKey, promise);
-        return promise;
+        this.loadingPromises.set(cacheKey, loadPromise);
+        return loadPromise;
     }
 
     // ========== MODEL LOADING ==========
-    async loadModel(assetKey, options = {}) {
+    async loadModel(path, options = {}) {
         if (!this.config.USE_ASSETS) {
             return null;
         }
 
-        const manifestEntry = this._getManifestEntry(assetKey);
-        if (!manifestEntry) {
-            console.warn(`[Assets] Model manifest entry not found for: ${assetKey}`);
-            return null;
-        }
-
-        const fullPath = this.basePath + manifestEntry.model;
+        const fullPath = this.basePath + path;
         const cacheKey = 'model_' + fullPath;
 
         if (this.loadedAssets.has(cacheKey)) {
-            return this._cloneLoadedModel(cacheKey, options);
+            // Return a cloned instance if caching is desired and model is cloneable
+            const cachedModel = this.loadedAssets.get(cacheKey);
+            return {
+                root: cachedModel.root.clone(`clone_${cachedModel.root.name}_${Date.now()}`),
+                instances: cachedModel.instances.map(m => m.clone(`clone_${m.name}_${Date.now()}`)),
+                animationGroups: cachedModel.animationGroups.map(ag => ag.clone())
+            };
+        }
+
+        if (this.loadingPromises.has(cacheKey)) {
+            return this.loadingPromises.get(cacheKey);
         }
 
         this.stats.requested++;
-        if (this.loadingPromises.has(cacheKey)) {
-            return this.loadingPromises.get(cacheKey).then(() => this._cloneLoadedModel(cacheKey, options));
+        if (this.config.LOG_LOADING) {
+            console.log(`[AssetLoader] Requesting model: ${fullPath}`);
         }
 
-        const promise = this._loadModelInternal(fullPath, assetKey, cacheKey, manifestEntry);
+        const rootUrl = fullPath.substring(0, fullPath.lastIndexOf('/') + 1);
+        const sceneFileName = fullPath.substring(fullPath.lastIndexOf('/') + 1);
 
-        this.loadingPromises.set(cacheKey, promise);
-        return promise.then(() => this._cloneLoadedModel(cacheKey, options));
-    }
-
-    _loadModelInternal(fullPath, assetKey, cacheKey, manifestEntry) {
-        return new Promise((resolve, reject) => {
+        const loadPromise = new Promise((resolve, reject) => {
             BABYLON.SceneLoader.ImportMesh(
                 null,
-                '', // Root url
-                fullPath,
+                rootUrl,
+                sceneFileName,
                 this.scene,
                 (meshes, particleSystems, skeletons, animationGroups) => {
-                    const rootMesh = new BABYLON.Mesh(`root_${assetKey}`, this.scene);
-                    rootMesh.isVisible = false;
-                    
-                    meshes.forEach(m => {
-                        m.parent = rootMesh;
-                        if (manifestEntry.offset) {
-                            m.position.addInPlace(new BABYLON.Vector3(manifestEntry.offset.x, manifestEntry.offset.y, manifestEntry.offset.z));
+                    if (meshes.length === 0) {
+                        this.stats.failed++;
+                        this.loadingPromises.delete(cacheKey);
+                        console.error(`[AssetLoader] ✗ Model loaded with 0 meshes: ${fullPath}`);
+                        return resolve(null);
+                    }
+
+                    // Create a root transform node to house all meshes
+                    const rootNode = new BABYLON.Mesh('assetRoot_' + sceneFileName, this.scene);
+
+                    // Parent all top-level meshes to the root node
+                    const topLevelMeshes = meshes.filter(m => !m.parent);
+                    topLevelMeshes.forEach(m => {
+                        // Position the root node to the model's initial position
+                        if (m.name === '__root__') {
+                            rootNode.position.copyFrom(m.position);
+                            m.position.setAll(0);
+                        }
+                        m.parent = rootNode;
+
+                        // Apply default options
+                        if (options.scaling) {
+                            rootNode.scaling.copyFrom(options.scaling);
                         }
                     });
 
-                    // Store original data
-                    const modelData = {
-                        root: rootMesh,
-                        meshes: meshes,
-                        skeletons: skeletons,
-                        animationGroups: animationGroups,
-                        scale: manifestEntry.scale // Preserve the original manifest scale for cloning
+                    const assetData = {
+                        root: rootNode,
+                        instances: meshes,
+                        animationGroups: animationGroups
                     };
 
-                    this.loadedAssets.set(cacheKey, modelData);
+                    // Cache the asset (root mesh is the key to managing instances)
+                    this.loadedAssets.set(cacheKey, assetData);
                     this.loadingPromises.delete(cacheKey);
                     this.stats.loaded++;
-
                     if (this.config.LOG_LOADING) {
-                        console.log(`[Assets] ✓ Loaded model: ${manifestEntry.model}`);
+                        console.log(`[AssetLoader] ✓ Loaded model: ${fullPath}`);
                     }
-                    resolve(modelData);
+
+                    resolve(assetData);
                 },
                 null, // Progress callback
                 (scene, message, exception) => {
-                    console.error(`[Assets] ✗ ImportMesh failed for ${fullPath}: ${message}`, exception);
-                    this.failedAssets.add(manifestEntry.model);
                     this.loadingPromises.delete(cacheKey);
+                    this.failedAssets.add(fullPath);
                     this.stats.failed++;
-                    
-                    // Resolve with null data so that the calling entity can use a procedural fallback
-                    resolve(null); 
+                    console.error(`[AssetLoader] ✗ Failed to load model: ${fullPath}`, message, exception);
+                    resolve(null);
                 }
             );
         });
+
+        this.loadingPromises.set(cacheKey, loadPromise);
+        return loadPromise;
     }
 
-    _cloneLoadedModel(cacheKey, options) {
-        const originalData = this.loadedAssets.get(cacheKey);
-        if (!originalData || !originalData.root) {
-            return null;
-        }
+    // ========== PROCEDURAL FALLBACKS ==========
 
-        const newRoot = originalData.root.clone(`instance_${originalData.root.name}_${Date.now()}`);
-        if (!newRoot) return null;
-
-        const instances = [];
-        const clonedMeshes = [];
-
-        // Create instances for all meshes in the original model
-        originalData.meshes.forEach(originalMesh => {
-            const clonedMesh = originalMesh.createInstance(originalMesh.name + "_instance");
-            clonedMesh.parent = newRoot;
-            clonedMeshes.push(clonedMesh);
-            instances.push(clonedMesh);
-        });
-
-        if (options.scaling) {
-            newRoot.scaling.copyFrom(options.scaling);
-        } else if (options.scale) {
-            newRoot.scaling.setAll(options.scale);
-        }
-
-        // Clone/Retarget animations/skeletons if needed
-        
-        return {
-            root: newRoot,
-            meshes: clonedMeshes,
-            instances: instances,
-            animationGroups: originalData.animationGroups.map(ag => ag.clone(ag.name + "_clone", null)),
-            scale: originalData.scale // Pass the original manifest scale for the entity class to use
-        };
-    }
-
-    // FIX: Re-writing _getManifestEntry to correctly handle full paths like 'CHARACTERS/ENEMIES/wolf'
-    _getManifestEntry(assetKey) {
-        // 1. Try full path resolution (e.g., CHARACTERS/NPCS/guard)
-        const parts = assetKey.split('/');
-        let current = ASSET_MANIFEST;
-
-        for (const part of parts) {
-            if (current && current[part]) {
-                current = current[part];
-            } else {
-                current = null;
-                break;
-            }
-        }
-
-        // If 'current' is a leaf object (the asset definition itself, checked by existence of 'model')
-        if (current && current !== ASSET_MANIFEST && current.model) {
-            return current;
-        }
-
-        // 2. Fallback: Check simple keys (e.g., 'guard') in common character groups
-        if (parts.length === 1) {
-            const simpleKey = parts[0];
-            if (ASSET_MANIFEST.CHARACTERS.PLAYER[simpleKey]) {
-                return ASSET_MANIFEST.CHARACTERS.PLAYER[simpleKey];
-            }
-            if (ASSET_MANIFEST.CHARACTERS.NPCS[simpleKey]) {
-                return ASSET_MANIFEST.CHARACTERS.NPCS[simpleKey];
-            }
-            if (ASSET_MANIFEST.CHARACTERS.ENEMIES[simpleKey]) {
-                return ASSET_MANIFEST.CHARACTERS.ENEMIES[simpleKey];
-            }
-        }
-
-        return null;
-    }
-
+    /**
+     * Creates a simple procedural material based on a type name.
+     * @param {string} typeName - e.g., 'grass', 'dirt', 'wood'
+     */
     createProceduralMaterial(typeName) {
         const mat = new BABYLON.StandardMaterial(`proceduralMat_${typeName}`, this.scene);
+
         const colors = {
             grass: new BABYLON.Color3(0.3, 0.6, 0.3),
-            dirt: new BABYLON.Color3(0.6, 0.4, 0.2),
-            rock: new BABYLON.Color3(0.5, 0.5, 0.5),
-            sand: new BABYLON.Color3(0.8, 0.7, 0.5)
+            dirt: new BABYLON.Color3(0.5, 0.4, 0.3),
+            stone: new BABYLON.Color3(0.4, 0.4, 0.4),
+            water: new BABYLON.Color3(0.1, 0.3, 0.5),
+            wood: new BABYLON.Color3(0.5, 0.3, 0.1),
+            skin: new BABYLON.Color3(0.8, 0.7, 0.5)
         };
         
         mat.diffuseColor = colors[typeName] || colors.grass;
