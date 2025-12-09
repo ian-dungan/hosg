@@ -1,8 +1,7 @@
-// ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.25 (FINAL ASSET PATH + CONFIG FIXES)
-// Fix: Ensured all asset paths are relative to the index.html file.
-// Fix: Added missing MOVE_SPEED to PLAYER config.
-// ============================================================
+// ===========================================================
+// HEROES OF SHADY GROVE - CONFIGURATION v1.1.0 (ENHANCED)
+// Now with ENEMIES section and per-asset custom paths
+// ===========================================================
 
 const CONFIG = {
     PLAYER: {
@@ -11,27 +10,58 @@ const CONFIG = {
         MANA: 50,
         STAMINA: 100,
         SPAWN_HEIGHT: 5,
-        MOVE_SPEED: 0.15 // Added missing config value
+        MOVE_SPEED: 0.15 
     },
     GAME: {
         GRAVITY: 9.81, 
     },
     WORLD: { 
         SKYBOX: {
-            PATH: null, 
+            // Skybox file (configured in ASSETS section)
+            FILE: "DaySkyHDRI023B_4K_TONEMAPPED.jpg",
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
             LEVEL: 0.5
         },
         SPAWNS: [
-            // Placeholder for future NPC spawn data
+            {
+                id: 1,
+                name: "Wolf Den",
+                npc_template_id: "Wolf",
+                position_x: 20,
+                position_y: 0,
+                position_z: 20,
+                spawn_radius: 10,
+                max_spawn: 3
+            }
         ]
     },
+    // =========================================
+    // ASSET CONFIGURATION - EDIT PATHS HERE!
+    // =========================================
     ASSETS: {
-        // Use relative path "assets/"
-        BASE_PATH: "assets/", 
+        // Base asset directory (relative to index.html)
+        BASE_PATH: "assets/",
         
+        // Subfolder structure (used as defaults)
+        PATHS: {
+            CHARACTERS: "player/character/",
+            ENEMIES: "enemies/",
+            ENVIRONMENT: "environment/",
+            SKYBOX: "sky/",
+            ITEMS: "items/",
+            WEAPONS: "weapons/",
+            ARMOR: "armor/",
+            EFFECTS: "effects/",
+            UI: "ui/",
+            AUDIO: "audio/",
+            MUSIC: "audio/music/",
+            SFX: "audio/sfx/"
+        },
+        
+        // Player Character Models
+        // Each can have: model (filename), path (override default), required (boolean)
         CHARACTERS: {
             knight: {
                 model: 'knight03.glb',
@@ -43,6 +73,19 @@ const CONFIG = {
                 // Use relative path to the repository root
                 path: 'assets/enemies/'
             }
+            // Examples:
+            // rock1: { 
+            //     model: "Rock01.glb",
+            //     path: "environment/nature/"
+            // },
+            // house1: { 
+            //     model: "House01.glb",
+            //     path: "environment/buildings/"
+            // },
+            // castle: {
+            //     model: "Castle.glb",
+            //     path: "https://cdn.example.com/structures/"
+            // }
         },
         // No environment meshes are currently available in the repository.
         // Keep the object for future expansion but leave it empty to avoid 404s.
@@ -50,47 +93,120 @@ const CONFIG = {
 
         CLASSES: { 
             Warrior: { 
-                model: 'knight', // Asset key name
+                model: 'knight',
+                category: 'CHARACTERS',  // Which section the model is in
                 stats: { 
-                    maxHealth: 120, maxMana: 50, maxStamina: 120, 
-                    attackPower: 15, magicPower: 5, moveSpeed: 0.15 
+                    maxHealth: 120, 
+                    maxMana: 50, 
+                    maxStamina: 120, 
+                    attackPower: 15, 
+                    magicPower: 5, 
+                    moveSpeed: 0.15 
                 }, 
                 defaultAbility: 'Cleave' 
             },
-            Rogue: { 
-                model: 'knight',
+            Wolf: { 
+                model: 'wolf',
+                category: 'ENEMIES',  // Wolf is in ENEMIES section
                 stats: { 
-                    maxHealth: 90, maxMana: 40, maxStamina: 130, 
-                    attackPower: 12, magicPower: 8, moveSpeed: 0.16 
-                }, 
-                defaultAbility: 'Backstab' 
-            },
-            Mage: { 
-                model: 'knight',
-                stats: { 
-                    maxHealth: 70, maxMana: 150, maxStamina: 80, 
-                    attackPower: 5, magicPower: 20, moveSpeed: 0.14 
-                }, 
-                defaultAbility: 'Fireball' 
-            },
-            Cleric: { 
-                model: 'knight', 
-                stats: { 
-                    maxHealth: 100, maxMana: 100, maxStamina: 90, 
-                    attackPower: 10, magicPower: 12, moveSpeed: 0.15 
-                }, 
-                defaultAbility: 'Heal'
-            },
-            Ranger: { 
-                model: 'knight',
-                stats: { 
-                    maxHealth: 90, maxMana: 50, maxStamina: 110, 
-                    attackPower: 14, magicPower: 8, moveSpeed: 0.15 
-                }, 
-                defaultAbility: 'Shoot'
+                    maxHealth: 30, 
+                    maxMana: 0, 
+                    maxStamina: 50, 
+                    attackPower: 5, 
+                    magicPower: 0, 
+                    moveSpeed: 0.18 
+                },
+                defaultAbility: 'Bite'
             }
+            // Examples:
+            // Mage: { 
+            //     model: 'mage',
+            //     category: 'CHARACTERS',
+            //     stats: {...}
+            // },
+            // Goblin: {
+            //     model: 'goblin',
+            //     category: 'ENEMIES',
+            //     stats: {...}
+            // }
+        },
+        
+        // Helper function to get full path for any asset
+        getAssetPath: function(category, assetKey) {
+            const categoryData = this[category];
+            if (!categoryData || !categoryData[assetKey]) {
+                console.warn(`[Assets] Asset not found: ${category}.${assetKey}`);
+                return null;
+            }
+            
+            const asset = categoryData[assetKey];
+            if (!asset.model) return null;
+            
+            // If asset has custom path, use it
+            if (asset.path) {
+                // Check if path is absolute (http:// or https://)
+                if (asset.path.startsWith('http://') || asset.path.startsWith('https://')) {
+                    return asset.path + asset.model;
+                }
+                // Check if path is absolute file path (starts with /)
+                if (asset.path.startsWith('/')) {
+                    return asset.path + asset.model;
+                }
+                // Otherwise combine with BASE_PATH
+                return this.BASE_PATH + asset.path + asset.model;
+            }
+            
+            // Use default path from PATHS
+            const defaultPath = this.PATHS[category] || "";
+            return this.BASE_PATH + defaultPath + asset.model;
+        },
+        
+        // Get character model path
+        getCharacterPath: function(assetKey) {
+            return this.getAssetPath('CHARACTERS', assetKey);
+        },
+        
+        // Get enemy model path
+        getEnemyPath: function(assetKey) {
+            return this.getAssetPath('ENEMIES', assetKey);
+        },
+        
+        // Get environment model path
+        getEnvironmentPath: function(assetKey) {
+            return this.getAssetPath('ENVIRONMENT', assetKey);
+        },
+        
+        // Get item model path
+        getItemPath: function(assetKey) {
+            return this.getAssetPath('ITEMS', assetKey);
+        },
+        
+        // Get weapon model path
+        getWeaponPath: function(assetKey) {
+            return this.getAssetPath('WEAPONS', assetKey);
+        },
+        
+        // Get armor model path
+        getArmorPath: function(assetKey) {
+            return this.getAssetPath('ARMOR', assetKey);
+        },
+        
+        // Get skybox path
+        getSkyboxPath: function(filename) {
+            return this.BASE_PATH + this.PATHS.SKYBOX + filename;
+        },
+        
+        // Get path by class name (looks up in CLASSES)
+        getClassModelPath: function(className) {
+            const classData = this.CLASSES[className];
+            if (!classData) {
+                console.warn(`[Assets] Class not found: ${className}`);
+                return null;
+            }
+            
+            const category = classData.category || 'CHARACTERS';
+            return this.getAssetPath(category, classData.model);
         }
     }
 };
-
 window.CONFIG = CONFIG;
