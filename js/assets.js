@@ -52,7 +52,7 @@ const ASSET_MANIFEST = {
                 required: false
             },
             goblin: {
-                model: 'enemies/goblin01.glb',
+                model: 'enemies/goblin.glb',
                 scale: 1.0,
                 required: false
             }
@@ -115,7 +115,7 @@ const ASSET_MANIFEST = {
             scale: 1.0
         },
         goblin: {
-            model: 'models/enemies/goblin01.glb',
+            model: 'models/enemies/goblin.glb',
             texture: 'textures/enemies/goblin_diffuse.png',
             animations: ['idle', 'walk', 'run', 'attack', 'die'],
             scale: 0.8
@@ -148,8 +148,7 @@ class AssetLoader {
             return null;
         }
 
-        // FIX: Check if the path already starts with basePath (due to caller error) 
-        // and remove the duplicate prefix before constructing the full path.
+        // FIX: Prevent double-prefixing (e.g., 'assets/assets/...')
         let cleanPath = path;
         if (cleanPath.startsWith(this.basePath)) {
             cleanPath = cleanPath.substring(this.basePath.length);
@@ -282,7 +281,7 @@ class AssetLoader {
             const path = skyboxData[face];
             if (!path) return null;
             
-            // Note: loadTexture is now safe against double-prefixing
+            // loadTexture is now safe against double-prefixing
             const texture = await this.loadTexture(path); 
             if (!texture) return null;
             textures.push(texture);
@@ -297,8 +296,7 @@ class AssetLoader {
             return null;
         }
 
-        // FIX: Check if the path already starts with basePath (due to caller error) 
-        // and remove the duplicate prefix before constructing the full path.
+        // FIX: Prevent double-prefixing (e.g., 'assets/assets/...')
         let cleanPath = path;
         if (cleanPath.startsWith(this.basePath)) {
             cleanPath = cleanPath.substring(this.basePath.length);
@@ -400,6 +398,15 @@ class AssetLoader {
     }
     
     // ========== PROCEDURAL FALLBACKS ==========
+
+    createProceduralMaterial(name = 'fallback', color = new BABYLON.Color3(0.5, 0.5, 0.5)) {
+        const mat = new BABYLON.StandardMaterial(name + '_mat', this.scene);
+        mat.diffuseColor = color;
+        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        mat.emissiveColor = color.scale(0.1); // Slight glow for visibility
+        return mat;
+    }
+
     createProceduralTerrain(typeName) {
         const mat = new BABYLON.StandardMaterial('proc_' + typeName, this.scene);
         
@@ -452,4 +459,4 @@ class AssetLoader {
 window.ASSET_MANIFEST = ASSET_MANIFEST;
 window.AssetLoader = AssetLoader;
 
-console.log('[Assets] Asset system loaded (v1.0.8 - Fixed Prefixing)');
+console.log('[Assets] Asset system loaded (v1.0.8)');
