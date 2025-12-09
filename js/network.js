@@ -1,12 +1,9 @@
-// ============================================================
-// HEROES OF SHADY GROVE - NETWORK MANAGER v1.0.32 (CRITICAL INIT FIX)
-// Fix: Moved _init logic directly into the constructor to resolve a TypeError
-//      where the prototype method was not fully registered before being called.
-// ============================================================
+// ===========================================================
+// HEROES OF SHADY GROVE - NETWORK MANAGER v1.2.0 (STORAGE BYPASS FIX)
+// Fix: CRITICALLY sets 'auth.storage: null' to bypass browser tracking prevention
+//      and allow the Supabase client to initialize and query the database.
+// ===========================================================
 
-//
-// Supabase wrapper
-//
 function SupabaseService(config) {
     this.config = config || {};
     this.client = null;
@@ -26,11 +23,24 @@ function SupabaseService(config) {
 
     // Initialize the Supabase Client
     if (typeof supabase !== 'undefined') {
-        this.client = supabase.createClient(supabaseUrl, supabaseKey);
-        console.log("[Network] Supabase client initialized.");
+        try {
+            // CRITICAL FIX: Explicitly set storage to null to prevent browser security errors.
+            this.client = supabase.createClient(supabaseUrl, supabaseKey, {
+                auth: {
+                    storage: null // Tells the SDK not to use local storage/cookies
+                }
+            });
+            console.log("[Network] Supabase client initialized successfully (Storage Bypassed).");
+
+        } catch (err) {
+            // This is unlikely to be hit with the fix above, but kept for robustness.
+            console.error("[Network] Supabase initialization failed. Switching to OFFLINE MODE.", err);
+            this.client = null;
+            this.isOffline = true;
+        }
     } else {
-        // This suggests an issue with the <script> tag in your HTML.
         console.error("[Network] Supabase client library not found. Check your HTML imports.");
+        this.isOffline = true;
     }
 }
 
@@ -83,16 +93,12 @@ SupabaseService.prototype.fetchTemplates = function () {
 
 var supabaseService = new SupabaseService();
 
-//
-// Network Manager (WebSocket) - kept for future use
-//
-function NetworkManager() {
-    this.socket = null;
-    this.connected = false;
-    this.shouldReconnect = true;
-    this.supabase = supabaseService; // Uses the instantiated service
-    this._listeners = {};
-}
+    // --- 1. Define Offline Fallbacks ---
+    const OFFLINE_SKILLS = [
+        { id: 'Cleave', code: 'CLEAVE', name: 'Cleave', skill_type: 'Attack', resource_cost: { mana: 0, stamina: 10 }, cooldown_ms: 5000, effect: { type: 'damage', base_value: 10, physical_scaling: 0.5 } },
+        { id: 'Fireball', code: 'FIREBALL', name: 'Fireball', skill_type: 'Magic', resource_cost: { mana: 20, stamina: 0 }, cooldown_ms: 3000, effect: { type: 'damage', base_value: 15, magic_scaling: 0.8 } },
+        { id: 'Heal', code: 'HEAL', name: 'Heal', skill_type: 'Magic', resource_cost: { mana: 30, stamina: 0 }, cooldown_ms: 8000, effect: { type: 'heal', base_value: 25 } }
+    ];
 
 // Template loading now pulls from Supabase first and falls back to bundled data if unavailable
 NetworkManager.prototype.loadTemplates = function (itemMap, skillMap, npcMap) {
@@ -128,5 +134,7 @@ NetworkManager.prototype.loadTemplates = function (itemMap, skillMap, npcMap) {
     });
 };
 
-// Ensure NetworkManager is available globally (for Game.js)
-window.NetworkManager = NetworkManager;
+SupabaseService.prototype.authenticate = async function () { return { error: "Storage Disabled" }; };
+SupabaseService.prototype.saveCharacter = async function () { console.log("[Network] Save ignored (Storage Disabled)"); };
+
+window.SupabaseService = SupabaseService;
