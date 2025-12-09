@@ -227,8 +227,6 @@ Player.prototype.handlePointerDown = function (evt) {
                 if (attackAbility && attackAbility.isReady()) {
                     attackAbility.execute(this, this.target);
                 }
-            } else {
-                this.target = null;
             }
         } else {
             this.target = null;
