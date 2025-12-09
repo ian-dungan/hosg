@@ -9,33 +9,94 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
-    // Make Supabase config available before our own scripts
-    window.SUPABASE_CONFIG = {
-      url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
-      key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-    };
-  </script>
 
   <style>
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-    }
-    #renderCanvas {
-      width: 100%;
-      height: 100%;
-      touch-action: none;
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #000; }
+    #renderCanvas { width: 100%; height: 100%; touch-action: none; outline: none; }
+    #loadingText { 
+      position: absolute; 
+      top: 50%; 
+      left: 50%; 
+      transform: translate(-50%, -50%); 
+      color: white; 
+      font-family: 'Arial', sans-serif;
+      font-size: 24px;
+      pointer-events: none;
+      text-align: center;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
     }
   </style>
 </head>
 <body>
-  <canvas id="renderCanvas"></canvas>
+
+  <script>
+    // Minimal loading text helper to avoid missing function errors during bootstrap
+    (function () {
+      function ensureLoadingElement() {
+        var el = document.getElementById('loadingText');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'loadingText';
+          el.style.position = 'absolute';
+          el.style.top = '8px';
+          el.style.left = '8px';
+          el.style.padding = '6px 10px';
+          el.style.background = 'rgba(0, 0, 0, 0.5)';
+          el.style.color = '#fff';
+          el.style.fontFamily = 'Arial, sans-serif';
+          el.style.fontSize = '14px';
+          el.style.borderRadius = '4px';
+          el.style.pointerEvents = 'none';
+          document.body.appendChild(el);
+        }
+        return el;
+      }
+
+      window.updateLoadingText = function (message) {
+        try {
+          var el = ensureLoadingElement();
+          el.textContent = message || '';
+        } catch (err) {
+          console.warn('[Bootstrap] updateLoadingText fallback failed:', err);
+        }
+      };
+    })();
+  </script>
+
+  <script>
+    // Minimal loading text helper to avoid missing function errors during bootstrap
+    (function () {
+      function ensureLoadingElement() {
+        var el = document.getElementById('loadingText');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'loadingText';
+          el.style.position = 'absolute';
+          el.style.top = '8px';
+          el.style.left = '8px';
+          el.style.padding = '6px 10px';
+          el.style.background = 'rgba(0, 0, 0, 0.5)';
+          el.style.color = '#fff';
+          el.style.fontFamily = 'Arial, sans-serif';
+          el.style.fontSize = '14px';
+          el.style.borderRadius = '4px';
+          el.style.pointerEvents = 'none';
+          document.body.appendChild(el);
+        }
+        return el;
+      }
+
+      window.updateLoadingText = function (message) {
+        try {
+          var el = ensureLoadingElement();
+          el.textContent = message || '';
+        } catch (err) {
+          console.warn('[Bootstrap] updateLoadingText fallback failed:', err);
+        }
+      };
+    })();
+  </script>
 
   <script>
     // Minimal loading text helper to avoid missing function errors during bootstrap
@@ -72,13 +133,13 @@
   </script>
 
 <script src="js/core.js"></script>
-<script src="js/assets.js"></script>
 <script src="js/item.js"></script>
 <script src="js/ability.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/network.js"></script>
 <script src="js/world.js"></script>
 <script src="js/player.js"></script>
 <script src="js/ui.js"></script>
-<script src="js/network.js"></script>
 <script src="js/game.js"></script>
   
   <script>
@@ -205,5 +266,12 @@
     }
 </script>
 
+    // Start when page loads
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeGame);
+    } else {
+        initializeGame();
+    }
+</script>
 </body>
 </html>
