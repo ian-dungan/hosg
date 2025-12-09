@@ -1,9 +1,13 @@
-// ===========================================================
-// HEROES OF SHADY GROVE - ASSET MANAGER v1.1.0 (ENHANCED)
-// Now supports ENEMIES category and per-asset custom paths
-// ===========================================================
+// ============================================================
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.18 (ES5)
+// Converts the asset loader to ES5-compatible syntax so older
+// environments don't choke on class/bind usage while keeping all
+// existing loading stats, fallbacks, and manifest handling.
+// ============================================================
 
-const getManifestData = () => {
+// ==================== ASSET MANIFEST ====================
+// Safely retrieve MANIFEST_DATA from CONFIG.ASSETS
+function getManifestData() {
     if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
         return CONFIG.ASSETS;
     }
@@ -13,156 +17,179 @@ const getManifestData = () => {
         CHARACTERS: {},
         ENVIRONMENT: {}
     };
-};
-const MANIFEST_DATA = getManifestData();
+}
 
-class AssetManager {
-    constructor(scene) {
-        this.scene = scene;
-        this.assets = {};
-        this.stats = {
-            requested: 0,
-            loaded: 0
-        };
+var MANIFEST_DATA = getManifestData();
+
+// ==================== ASSET MANAGER ====================
+function AssetManager(scene) {
+    this.scene = scene;
+    this.assets = {};
+    this.stats = {
+        requested: 0,
+        loaded: 0
+    };
+
+    // Guard against missing BABYLON or scene to avoid crashes in constrained contexts.
+    if (typeof BABYLON !== 'undefined' && scene) {
         this.loader = new BABYLON.AssetsManager(scene);
-
-        // Preserve method bindings so loadAll can safely call helpers even if
-        // the context is lost or older code grabs these functions directly.
-        this.loadAll = this.loadAll.bind(this);
-        this.loadAsset = this.loadAsset.bind(this);
-        this.loadModel = this.loadModel.bind(this);
-        this.printStats = this.printStats.bind(this);
+    } else {
+        this.loader = null;
     }
 
-    async loadAll() {
-        console.log('[Assets] Starting asset load...');
+    // Preserve method bindings manually for legacy callers that detach helpers.
+    var self = this;
+    this.loadAll = function () { return AssetManager.prototype.loadAll.call(self); };
+    this.loadAsset = function (key, assetData, category) {
+        return AssetManager.prototype.loadAsset.call(self, key, assetData, category);
+    };
+    this.loadModel = function (key, assetData, category) {
+        return AssetManager.prototype.loadModel.call(self, key, assetData, category);
+    };
+    this.printStats = function () { return AssetManager.prototype.printStats.call(self); };
+}
 
-        const characters = MANIFEST_DATA.CHARACTERS || {};
-        const environment = MANIFEST_DATA.ENVIRONMENT || {};
+AssetManager.prototype.loadAll = function () {
+    console.log('[Assets] Starting asset load...');
 
-        // Use whatever loader the runtime exposes (legacy callers expect
-        // loadAsset, newer code calls loadModel). Binding above guarantees the
-        // function exists even if detached from the instance.
-        const loadFn = (typeof this.loadAsset === 'function')
-            ? this.loadAsset
-            : this.loadModel;
+    var characters = MANIFEST_DATA.CHARACTERS || {};
+    var environment = MANIFEST_DATA.ENVIRONMENT || {};
 
-        // Load characters
-        for (const key in characters) {
-            const assetData = characters[key];
-            this.stats.requested++;
-            loadFn(key, assetData, 'characters');
-        }
+    // Use whatever loader the runtime exposes (legacy callers expect
+    // loadAsset, newer code calls loadModel). Manual binding above guarantees the
+    // function exists even if detached from the instance.
+    var loadFn = (typeof this.loadAsset === 'function')
+        ? this.loadAsset
+        : this.loadModel;
 
-        // Load environment
-        for (const key in environment) {
-            const assetData = environment[key];
-            this.stats.requested++;
-            loadFn(key, assetData, 'environment');
-        }
-
-        // Load armor
-        for (const key in armor) {
-            const assetData = armor[key];
-            this.stats.requested++; 
-            this.loadAsset(key, assetData, 'ARMOR');
-        }
-
-        return new Promise((resolve) => {
-            if (this.stats.requested === 0) {
-                console.log('[Assets] No assets to load');
-                resolve();
-                return;
-            }
-            
-            this.loader.onFinish = (tasks) => {
-                console.log(`[Assets] Load complete. ${this.stats.loaded}/${this.stats.requested} succeeded, ${this.stats.failed} failed`);
-                resolve();
-            };
-            
-            this.loader.load();
-        });
+    // Load Character Models
+    for (var key in characters) {
+        var assetDataChar = characters[key];
+        this.stats.requested++;
+        loadFn(key, assetDataChar, 'characters');
     }
 
-    // Legacy compatibility: some callers still expect a loadAsset helper
-    // that forwards to the mesh loader. Keep it as a thin wrapper to
-    // prevent "loadAsset is not a function" crashes during bootstrap.
-    loadAsset(key, assetData, category) {
-        return this.loadModel(key, assetData, category);
+    // Load Environment Models
+    for (var envKey in environment) {
+        var assetDataEnv = environment[envKey];
+        this.stats.requested++;
+        loadFn(envKey, assetDataEnv, 'environment');
     }
 
-    loadModel(key, assetData, category) {
-        const safeData = assetData || {};
-        const modelName = safeData.model;
+    if (this.stats.requested === 0) {
+        console.log('[Assets] No assets defined to load.');
+        return;
+    }
 
-        if (!modelName) {
-            console.warn(`[Assets] Missing model name for ${category} asset '${key}'. Skipping load.`);
+    var self = this;
+    return new Promise(function (resolve) {
+        if (!self.loader) {
+            console.warn('[Assets] Babylon AssetsManager unavailable; skipping load.');
+            resolve([]);
             return;
         }
 
-        const taskName = `${category}_${key}`;
-
-        const basePath = this._resolveRootPath(safeData.path);
-
-        const task = this.loader.addMeshTask(taskName, "", basePath, modelName);
-        task.required = safeData.required || false;
-
-        task.onSuccess = (task) => {
-            this.stats.loaded++;
-            this.assets[key] = task.loadedMeshes; 
-            // Also store by the exact model filename (e.g., 'Knight03.glb') for more explicit lookups
-            this.assets[modelName] = task.loadedMeshes;
+        self.loader.onFinish = function (tasks) {
+            console.log('[Assets] Finished loading ' + tasks.length + ' tasks.');
+            resolve(tasks);
+        };
+        self.loader.onError = function (task) {
+            console.warn('[Assets] Failed to load ' + task.name + '. Check the path: ' + task.url);
         };
 
-        task.onError = (task, message, exception) => {
-            this.assets[taskName] = null;
-            this.assets[key] = null;
-            this.assets[modelName] = null;
-        };
+        // Start the loading process
+        self.loader.load();
+    }).then(function () {
+        self.printStats();
+    });
+};
+
+// Legacy compatibility: some callers still expect a loadAsset helper
+// that forwards to the mesh loader. Keep it as a thin wrapper to
+// prevent "loadAsset is not a function" crashes during bootstrap.
+AssetManager.prototype.loadAsset = function (key, assetData, category) {
+    return this.loadModel(key, assetData, category);
+};
+
+AssetManager.prototype.loadModel = function (key, assetData, category) {
+    if (!this.loader) {
+        console.warn('[Assets] Loader unavailable; cannot load ' + category + ' asset ' + key + '.');
+        return;
     }
 
-    _resolveRootPath(pathFromConfig) {
-        const basePath = MANIFEST_DATA.BASE_PATH || '';
-        let root = pathFromConfig || basePath;
+    var safeData = assetData || {};
+    var modelName = safeData.model;
 
-        const isAbsolute = /^https?:\/\//.test(root) || root.startsWith('/');
-        const alreadyHasBase = !isAbsolute && basePath && root.startsWith(basePath);
-
-        if (!isAbsolute && !alreadyHasBase && basePath) {
-            root = basePath + root;
-        }
-
-        if (root && !root.endsWith('/')) {
-            root += '/';
-        }
-
-        return root;
-    }
-    
-    getAsset(name) {
-        return this.assets[name] || null;
+    if (!modelName) {
+        console.warn('[Assets] Missing model name for ' + category + ' asset ' + key + '. Skipping load.');
+        return;
     }
 
-    _resolveRootPath(pathFromConfig) {
-        const basePath = MANIFEST_DATA.BASE_PATH || '';
-        let root = pathFromConfig || basePath;
+    var taskName = category + '_' + key;
+    var basePath = this._resolveRootPath(safeData.path);
 
-        const isAbsolute = /^https?:\/\//.test(root) || root.startsWith('/');
-        const alreadyHasBase = !isAbsolute && basePath && root.startsWith(basePath);
+    var task = this.loader.addMeshTask(taskName, "", basePath, modelName);
+    task.required = safeData.required || false;
 
-        if (!isAbsolute && !alreadyHasBase && basePath) {
-            root = basePath + root;
-        }
+    var self = this;
+    task.onSuccess = function (taskResult) {
+        self.stats.loaded++;
+        // Store by task name
+        self.assets[taskName] = taskResult.loadedMeshes;
+        // Store by simple config key (e.g., 'knight') for easy Player/World lookup
+        self.assets[key] = taskResult.loadedMeshes;
+        // Also store by the exact model filename (e.g., 'Knight03.glb') for more explicit lookups
+        self.assets[modelName] = taskResult.loadedMeshes;
+    };
 
-        if (root && !root.endsWith('/')) {
-            root += '/';
-        }
+    task.onError = function () {
+        self.assets[taskName] = null;
+        self.assets[key] = null;
+        self.assets[modelName] = null;
+    };
+};
 
-        return root;
+AssetManager.prototype._resolveRootPath = function (pathFromConfig) {
+    var basePath = MANIFEST_DATA.BASE_PATH || '';
+    var root = pathFromConfig || basePath;
+
+    var isAbsolute = /^https?:\/\//.test(root) || root.indexOf('/') === 0;
+    var alreadyHasBase = !isAbsolute && basePath && root.indexOf(basePath) === 0;
+
+    if (!isAbsolute && !alreadyHasBase && basePath) {
+        root = basePath + root;
     }
-    
-    getAsset(name) {
-        return this.assets[name] || null;
+
+    if (root && root.charAt(root.length - 1) !== '/') {
+        root += '/';
     }
-}
+
+    return root;
+};
+
+AssetManager.prototype.getAsset = function (name) {
+    return this.assets[name] || null;
+};
+
+// ========== STATS ==========
+AssetManager.prototype.getStats = function () {
+    var successRate = this.stats.requested > 0 ?
+        ((this.stats.loaded / this.stats.requested) * 100).toFixed(1) : 0;
+
+    return {
+        requested: this.stats.requested,
+        loaded: this.stats.loaded,
+        successRate: successRate + '%'
+    };
+};
+
+AssetManager.prototype.printStats = function () {
+    var stats = this.getStats();
+    console.log('=== Asset Loading Statistics ===');
+    console.log('Requested: ' + stats.requested);
+    console.log('Loaded: ' + stats.loaded);
+    console.log('Success Rate: ' + stats.successRate);
+    console.log('================================');
+};
+
 window.AssetManager = AssetManager;
