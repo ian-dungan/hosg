@@ -179,6 +179,17 @@ class World {
         this.createWater();
         this.populateWorld();
         this.setupEventListeners();
+                  // In world.js, inside class World {...}
+// Add this method anywhere within the World class definition, 
+// for example, after populateWorld():
+
+    /**
+     * Returns the array of static world landmarks.
+     * This is needed by the UIManager for the minimap.
+     */
+    getLandmarks() {
+        return this.landmarks;
+    }
 
         // CRITICAL: Signal player that world is ready
         // Wait a bit to ensure physics is fully stabilized
