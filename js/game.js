@@ -46,65 +46,62 @@ class Game {
   async init() {
     console.log("[Game] Initializing...");
 
-    // Basic lighting setup is handled by World now, but keeping ambient for safety
-    if (!this.scene.lights.length) {
-      new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), this.scene);
-    }
+    // Basic lighting
+    // The World class will handle complex lighting, but a quick light helps debug
+    new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
 
-    // 1. Create World
-    if (typeof World !== "undefined") {
+    // Create World
+    if (typeof World !== 'undefined') {
+      // Use config values for world creation
       this.world = new World(this.scene, {
         size: CONFIG.WORLD.SIZE,
+        segments: CONFIG.WORLD.TERRAIN_SIZE,
+        maxHeight: 20,
+        seed: CONFIG.WORLD.SEED || Math.random(),
         waterLevel: CONFIG.WORLD.WATER_LEVEL
       });
-      // World's init is ASYNC now and handles asset loading.
-      // We don't await the constructor, but the world handles its own readiness signal.
     } else {
       console.error("[Game] World class not defined.");
-      return;
     }
 
-    // 2. Create Player
-    if (typeof Player !== "undefined") {
+    // Create Player
+    if (typeof Player !== 'undefined') {
       this.player = new Player(this.scene);
-      this.scene.player = this.player; // Global access via scene
+      this.scene.player = this.player; // Keep a scene reference
+      await this.player.init();
     } else {
       console.error("[Game] Player class not defined.");
-      return;
     }
 
-    // 3. Create UI
-    if (typeof UIManager !== "undefined") {
+    // Initialize UI
+    if (typeof UIManager !== 'undefined') {
       this.ui = new UIManager(this);
+      this.scene.ui = this.ui;
+      this.ui.player = this.player; // Re-assign player after it's created
     } else {
-      console.warn("[Game] UIManager class not defined.");
-    }
-    
-    // 4. Create Network Manager (if necessary)
-    if (typeof NetworkManager !== "undefined") {
-        this.network = new NetworkManager(this, CONFIG.NETWORK.WS_URL);
-        this.network.connect(); // Connect asynchronously
-    } else {
-        console.warn("[Game] NetworkManager class not defined.");
+      console.warn("[Game] UIManager not defined.");
     }
 
-    // 5. Start main loop
+    // Initialize Network
+    if (typeof NetworkManager !== 'undefined') {
+      this.network = new NetworkManager(this);
+      this.network.connect();
+    } else {
+      console.warn("[Game] NetworkManager not defined.");
+    }
+
+    // Start render loop
     this.start();
-
-    console.log("[Game] Initialization complete.");
   }
 
   start() {
+    if (this._running) return;
     this._running = true;
     console.log("[Game] Started");
 
     this.engine.runRenderLoop(() => {
-      if (!this._running) {
-        return;
-      }
-
       const now = performance.now();
-      const deltaTime = (now - this._lastFrameTime) / 1000; // in seconds
+      const deltaTime = (now - this._lastFrameTime) / 1000; // Convert to seconds
       this._lastFrameTime = now;
 
       // Update player
@@ -180,10 +177,10 @@ class Game {
         this.scene.dispose();
         this.scene = null;
     }
-
+    
     if (this.engine) {
-        this.engine.dispose();
-        this.engine = null;
+      this.engine.dispose();
+      this.engine = null;
     }
   }
 }
