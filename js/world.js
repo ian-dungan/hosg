@@ -1,417 +1,348 @@
-// ===========================================================
-// HEROES OF SHADY GROVE - WORLD CORE v1.1.0 (FIXED)
-// Fixes: Proper Enemy class, improved NPC spawning, better physics
-// ===========================================================
+// ============================================================
+// HEROES OF SHADY GROVE - WORLD CORE v1.0.19 (LEGACY SAFETY)
+// Rewritten with ES5-compatible syntax to avoid browser parse
+// errors that were intermittently reported on legacy engines.
+// ============================================================
 
 // Base Entity class
 function Entity(scene, position) {
-  this.scene = scene;
+    this.scene = scene;
 
-  if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-    if (position instanceof BABYLON.Vector3) {
-      this.position = position.clone();
-    } else if (position && typeof position.x === 'number') {
-      this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+    if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+        if (position instanceof BABYLON.Vector3) {
+            this.position = position.clone();
+        } else if (position && typeof position.x === "number") {
+            this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+        } else {
+            this.position = new BABYLON.Vector3(0, 0, 0);
+        }
     } else {
-      this.position = new BABYLON.Vector3(0, 0, 0);
+        this.position = position || { x: 0, y: 0, z: 0 };
     }
-  } else {
-    this.position = position || { x: 0, y: 0, z: 0 };
-  }
 
-  this.mesh = null;
-  this.isDead = false;
-  this.name = 'Entity';
+    this.mesh = null;
+    this.isDead = false;
+    this.name = "Entity";
 }
 
 Entity.prototype.update = function (deltaTime) {
-  if (this.mesh && this.mesh.physicsImpostor) {
-    this.position.copyFrom(this.mesh.position);
-  } else if (this.mesh && this.mesh.position && this.position &&
-      typeof this.mesh.position.copyFrom === "function") {
-    this.mesh.position.copyFrom(this.position);
-  }
+    if (this.mesh && this.mesh.physicsImpostor) {
+        this.position.copyFrom(this.mesh.position);
+    } else if (
+        this.mesh &&
+        this.mesh.position &&
+        this.position &&
+        typeof this.mesh.position.copyFrom === "function"
+    ) {
+        this.mesh.position.copyFrom(this.position);
+    }
 };
 
 Entity.prototype.dispose = function () {
-  this.isDead = true;
-  if (this.mesh && typeof this.mesh.dispose === "function") {
-    this.mesh.dispose();
-    this.mesh = null;
-  }
+    this.isDead = true;
+    if (this.mesh) {
+        this.mesh.dispose();
+        this.mesh = null;
+    }
 };
 
-// ===========================================================
-// Base Character Class (Inherits from Entity)
-// ===========================================================
-class Character extends Entity {
-    constructor(scene, position, name = 'Character') {
-        super(scene, position);
-        this.name = name;
-        this.isPlayer = false; 
-        this.stats = {}; 
+// Character class (extends Entity)
+function Character(scene, position, name) {
+    Entity.call(this, scene, position);
+    this.name = name || "Character";
+    this.health = 100;
+    this.target = null;
+}
+Character.prototype = Object.create(Entity.prototype);
+Character.prototype.constructor = Character;
+
+Character.prototype.takeDamage = function (damageAmount, attacker) {
+    this.health -= damageAmount;
+    if (this.health <= 0) {
         this.health = 0;
-        this.mana = 0;
-        this.stamina = 0;
-        this.abilities = new Map(); 
-        this.target = null;
+        this.die(attacker);
     }
+};
 
-    takeDamage(damage, source) {
-        this.health = Math.max(0, this.health - damage);
-        if (this.health <= 0 && !this.isDead) {
-            this.isDead = true;
-            console.log(`[Character] ${this.name} was slain by ${source ? source.name : 'unknown'}.`);
-            if (this.onDeath) this.onDeath();
-        }
-        return damage;
+Character.prototype.die = function (killer) {
+    this.isDead = true;
+    if (this.scene && this.scene.game && this.scene.game.ui) {
+        this.scene.game.ui.showMessage(this.name + " was slain by " + killer.name + "!", 3000, "error");
     }
+    this.dispose();
+};
 
-    update(deltaTime) {
-        super.update(deltaTime);
-        this.abilities.forEach(ability => ability.update(deltaTime));
-    }
-    
-    addAbility(abilityName, template) {
-        if (typeof Ability !== 'undefined' && template) {
-            const newAbility = new Ability(template);
-            this.abilities.set(abilityName, newAbility);
-            console.log(`[Character] ${this.name} learned ${abilityName}`);
-        } else {
-             console.error(`[Character] Failed to add ability ${abilityName}. Ability class or template missing.`);
-        }
-    }
+// Enemy class (extends Character)
+function Enemy(scene, position, template, spawnData) {
+    Character.call(this, scene, position, template.name);
 
-    dispose() {
-        if (this.mesh && this.mesh.physicsImpostor) {
-            this.mesh.physicsImpostor.dispose();
-        }
-        super.dispose();
-    }
+    this.template = template;
+    this.spawnData = spawnData;
+
+    // Use the model name from the asset config
+    this._initMesh(CONFIG.ASSETS.CHARACTERS.wolf.model);
+    this._initBehavior();
 }
-window.Character = Character;
+Enemy.prototype = Object.create(Character.prototype);
+Enemy.prototype.constructor = Enemy;
 
-    createLight() {
-        const light = new BABYLON.DirectionalLight("dir01", new BABYLON.Vector3(0.5, -1, 0.5), this.scene);
-        light.position = new BABYLON.Vector3(-20, 40, -20);
-        light.intensity = 1.0;
+Enemy.prototype._initMesh = function (assetName) {
+    var assetMeshes = this.scene.game.assetManager.getAsset(assetName);
+    if (assetMeshes && assetMeshes.length > 0) {
+        // Clone the asset mesh
+        this.mesh = assetMeshes[0].clone(this.name, null);
+        this.mesh.position.copyFrom(this.position);
+        this.mesh.isVisible = true;
+
+        // Apply a physics impostor for collision
+        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+            this.mesh,
+            BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 1, restitution: 0.1 },
+            this.scene
+        );
+
+        // Position the mesh correctly on the ground
+        this.mesh.position.y += 1;
+    } else {
+        console.warn(
+            "[Enemy] Failed to load mesh for asset: " + assetName + ". AssetManager load failed or key is wrong."
+        );
+        // Fallback: use a simple sphere
+        this.mesh = BABYLON.MeshBuilder.CreateSphere(this.name, { diameter: 2 }, this.scene);
+        this.mesh.position.copyFrom(this.position);
+        this.mesh.isVisible = true;
     }
-    
-    createEnvironment() {
-        this.createSkybox();
-        // this.createWeather(); // Future feature
-    }
-    
-    createSkybox() {
-        const skyboxConfig = CONFIG.WORLD.SKYBOX;
+};
 
-        // 1. Optional classic skybox (if PATH is provided in config)
-        if (skyboxConfig.PATH) {
-            const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: skyboxConfig.SIZE }, this.scene);
-            const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
-            skyboxMaterial.backFaceCulling = false;
-            skyboxMaterial.disableLighting = true;
-            skybox.material = skyboxMaterial;
-            skybox.infiniteDistance = true;
-            skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(skyboxConfig.PATH, this.scene);
-            skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        }
+Enemy.prototype._initBehavior = function () {
+    this.moveTimer = 0;
+    this.state = "idle"; // 'idle', 'chase', 'attack'
+    this.target = null;
+};
 
-        // 2. Setup PBR Environment using pre-filtered data (.env)
-        // Prefer a prefiltered environment map if available. Use a reliable CDN fallback
-        // to avoid 404s when the local file is missing.
-        const environmentSource = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
+Enemy.prototype.update = function (deltaTime) {
+    Entity.prototype.update.call(this, deltaTime);
 
-        // Older browsers reported a stray syntax error inside this block. Rebuild it using
-        // only classic functions/strings to avoid any parsing surprises.
-        let hdrTexture = null;
-        try {
-            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
-        } catch (err) {
-            console.warn(
-                "[World] Failed to load environment map from " + environmentSource + ". Using Babylon fallback.",
-                err
-            );
-            hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
-                "https://assets.babylonjs.com/environments/environmentSpecular.env",
-                this.scene
-            );
-        }
-
-        this.scene.environmentTexture = hdrTexture;
-        this.scene.imageProcessingConfiguration.exposure = skyboxConfig.EXPOSURE;
-        this.scene.imageProcessingConfiguration.contrast = skyboxConfig.CONTRAST;
-    }
-    
-    createGround() {
-        const envConfig = CONFIG && CONFIG.ASSETS ? CONFIG.ASSETS.ENVIRONMENT : null;
-        const terrainConfig = envConfig ? envConfig.terrain_base : null;
-        const terrainAsset = terrainConfig
-            ? this.scene.game.assetManager.getAsset(terrainConfig.model)
-            : null;
-
-        if (terrainAsset && terrainAsset.length > 0) {
-            const terrain = terrainAsset[0];
-            terrain.name = "TerrainBase";
-            terrain.isPickable = true;
-            terrain.receiveShadows = true;
-
-            // Set the model to be static collision ground
-            terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                terrain,
-                BABYLON.PhysicsImpostor.MeshImpostor, // MeshImpostor for complex shapes
-                { mass: 0, restitution: 0.9 }, // Mass 0 for static object
-                this.scene
-            );
-        } else {
-            if (terrainConfig) {
-                console.warn(
-                    `[World] Failed to load TerrainBase mesh '${terrainConfig.model}'. Using simple plane as fallback.`
-                );
-            }
-            const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, this.scene);
-            ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-                ground,
-                BABYLON.PhysicsImpostor.BoxImpostor,
-                { mass: 0, restitution: 0.9 },
-                this.scene
-            );
-            ground.receiveShadows = true;
-
-            const groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
-            groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-            ground.material = groundMaterial;
-        }
+    // Simple AI: always target the player
+    if (this.scene.game.player) {
+        this.target = this.scene.game.player;
     }
 
-    spawnUpdate(deltaTime) {
-        if (!CONFIG.WORLD.SPAWNS) return;
+    if (this.target) {
+        this._updateMovement(deltaTime);
+    }
+};
 
-        CONFIG.WORLD.SPAWNS.forEach(spawnData => {
-            const spawnId = spawnData.id;
-            let timer = this.spawnTimers.get(spawnId) || 0;
-            timer += deltaTime;
+Enemy.prototype._updateMovement = function (deltaTime) {
+    if (!this.mesh || !this.target.mesh) return;
 
-            const activeEntities = this.activeSpawns.get(spawnId).filter(e => !e.isDead);
-            this.activeSpawns.set(spawnId, activeEntities);
+    var distance = BABYLON.Vector3.Distance(this.mesh.position, this.target.mesh.position);
+    var chaseRange = 10;
+    var attackRange = 2;
 
-            if (activeEntities.length < spawnData.max_spawn && timer >= spawnData.respawn_time_s) {
-                const template = this.scene.game.npcTemplates.get(spawnData.npc_template_id);
-                if (template) {
-                    this.spawnEnemy(spawnData, template);
-                    timer = 0; // Reset timer only on successful spawn
-                }
-            }
-            
-            // Lock rotation
-            this.mesh.rotationQuaternion = BABYLON.Quaternion.Identity();
-            this.mesh.physicsImpostor.registerBeforePhysics(() => {
-                if (this.mesh && this.mesh.physicsImpostor) {
-                    this.mesh.physicsImpostor.setAngularVelocity(BABYLON.Vector3.Zero());
-                }
-            });
-            
-            console.log(`[Enemy] ${this.name} mesh initialized with model: ${modelKey}`);
-        } else {
-            // Fallback sphere
-            this.mesh = BABYLON.MeshBuilder.CreateSphere(this.name + "_mesh", { diameter: 1.5 }, this.scene);
-            this.mesh.position.copyFrom(this.position);
-            const mat = new BABYLON.StandardMaterial("enemyFallback", this.scene);
-            mat.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2);
-            this.mesh.material = mat;
-            console.warn(`[Enemy] Failed to load asset: ${modelKey}. Using fallback.`);
-        }
+    // Determine state
+    if (distance > chaseRange) {
+        this.state = "idle";
+    } else if (distance > attackRange) {
+        this.state = "chase";
+    } else {
+        this.state = "attack";
     }
-    
-    update(deltaTime) {
-        if (this.isDead) return;
-        
-        super.update(deltaTime);
-        
-        // Check leash distance
-        const distFromSpawn = BABYLON.Vector3.Distance(this.position, this.spawnPosition);
-        if (distFromSpawn > this.leashDistance) {
-            this.resetToSpawn();
-            return;
-        }
-        
-        // AI behavior
-        const player = this.scene.game ? this.scene.game.player : null;
-        if (player && !player.isDead) {
-            const distToPlayer = BABYLON.Vector3.Distance(this.position, player.position);
-            
-            if (distToPlayer < this.aggroRange) {
-                this.target = player;
-                this.moveTowards(player.position, deltaTime);
-                
-                // Attack if in range
-                if (distToPlayer < this.attackRange) {
-                    this.tryAttack(deltaTime);
-                }
-            } else {
-                this.target = null;
-                this.wander(deltaTime);
-            }
-        } else {
-            this.wander(deltaTime);
-        }
-        
-        // Update attack cooldown
-        if (this.attackCooldown > 0) {
-            this.attackCooldown -= deltaTime;
-        }
-    }
-    
-    moveTowards(targetPos, deltaTime) {
-        if (!this.mesh || !this.mesh.physicsImpostor) return;
-        
-        const direction = targetPos.subtract(this.position);
-        direction.y = 0;
-        
-        if (direction.lengthSquared() > 0.01) {
-            direction.normalize();
-            
-            // Apply movement
-            const velocity = this.mesh.physicsImpostor.getLinearVelocity();
-            const moveSpeed = this.stats.moveSpeed || 0.15;
-            velocity.x = direction.x * moveSpeed * (1 / deltaTime);
-            velocity.z = direction.z * moveSpeed * (1 / deltaTime);
-            this.mesh.physicsImpostor.setLinearVelocity(velocity);
-            
-            // Face direction
-            const angle = Math.atan2(-direction.x, -direction.z);
-            this.mesh.rotation.y = angle;
-        }
-    }
-    
-    wander(deltaTime) {
-        this.wanderTimer -= deltaTime;
-        
-        if (this.wanderTimer <= 0) {
-            this.wanderTimer = this.wanderDelay + Math.random() * 2;
-            
-            // Occasionally move to random nearby point
-            if (Math.random() < 0.3) {
-                const randomOffset = new BABYLON.Vector3(
-                    (Math.random() - 0.5) * 10,
-                    0,
-                    (Math.random() - 0.5) * 10
-                );
-                const wanderTarget = this.spawnPosition.add(randomOffset);
-                this.moveTowards(wanderTarget, deltaTime);
-            } else {
-                // Stop moving
-                if (this.mesh && this.mesh.physicsImpostor) {
-                    const velocity = this.mesh.physicsImpostor.getLinearVelocity();
-                    velocity.x = 0;
-                    velocity.z = 0;
-                    this.mesh.physicsImpostor.setLinearVelocity(velocity);
-                }
-            }
-        }
-    }
-    
-    tryAttack(deltaTime) {
-        if (this.attackCooldown <= 0 && this.target) {
-            const ability = Array.from(this.abilities.values())[0];
-            if (ability && ability.isReady()) {
-                ability.execute(this, this.target);
-                this.attackCooldown = this.attackDelay;
-            }
-        }
-    }
-    
-    resetToSpawn() {
-        this.position.copyFrom(this.spawnPosition);
-        if (this.mesh) {
-            this.mesh.position.copyFrom(this.spawnPosition);
-            if (this.mesh.physicsImpostor) {
-                this.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
-            }
-        }
-        this.health = this.stats.maxHealth;
-        this.target = null;
-        console.log(`[Enemy] ${this.name} reset to spawn`);
-    }
-    
-    onDeath() {
-        // Death effects
-        if (this.mesh) {
-            // Fade out animation
-            this.mesh.visibility = 0.5;
-        }
-        
-        // TODO: Drop loot based on template.loot_table
-        console.log(`[Enemy] ${this.name} died`);
-    }
-}
-window.Enemy = Enemy;
 
-// ===========================================================
-// World Core Class
-// ===========================================================
-function World(scene, player) {
+    // Execute state logic
+    if (this.state === "chase") {
+        var direction = this.target.mesh.position.subtract(this.mesh.position);
+        var moveVector = direction.normalize().scale(0.05); // Simple speed adjustment
+
+        // Only apply force in the X-Z plane to prevent flying
+        this.mesh.physicsImpostor.setLinearVelocity(
+            new BABYLON.Vector3(
+                moveVector.x * 5,
+                this.mesh.physicsImpostor.getLinearVelocity().y,
+                moveVector.z * 5
+            )
+        );
+
+        // Face the target
+        var angle = Math.atan2(direction.x, direction.z);
+        this.mesh.rotation.y = angle;
+    } else if (this.state === "attack") {
+        // Attack logic placeholder
+    }
+};
+
+// World Class
+function World(scene) {
     this.scene = scene;
-    this.player = player;
     this.npcs = [];
     this.loots = [];
-    this.spawnData = CONFIG.WORLD.SPAWNS || [];
-    this.activeSpawns = new Map(); 
-    this.ground = null;
-    this.camera = null;
-    this.light = null;
+    this.spawnTimers = new Map();
+    this.activeSpawns = new Map();
 
-    this.scene.enablePhysics(
-        new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0),
-        new BABYLON.CannonJSPlugin(true, 10, window.CANNON)
-    );
-}
-
-World.prototype.createCameraAndLights = function() {
-    const camera = new BABYLON.ArcRotateCamera(
-        "playerCamera",
-        Math.PI / 2,
-        Math.PI / 4,
-        15, 
-        new BABYLON.Vector3(0, 5, 0), 
-        this.scene
-    );
-    camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
-    camera.inputs.remove(camera.inputs.attached.mousewheel);
-    camera.upperRadiusLimit = 40;
-    camera.lowerRadiusLimit = 5;
-    camera.pinchPrecision = 50;
-
-    new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), this.scene);
-    
-    const light = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(0.5, -1, 0.2), this.scene);
-    light.position = new BABYLON.Vector3(-20, 40, -20);
-    light.intensity = 0.7;
-
-    this.camera = camera;
-    this.light = light;
-}
-
-World.prototype.createSkybox = function() {
-    if (CONFIG.WORLD.SKYBOX && CONFIG.WORLD.SKYBOX.FILE) {
-        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: CONFIG.WORLD.SKYBOX.SIZE }, this.scene);
-        const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
-        skyboxMaterial.backFaceCulling = false;
-        
-        // Build skybox path from ASSETS configuration
-        const skyboxPath = CONFIG.ASSETS.getSkyboxPath(CONFIG.WORLD.SKYBOX.FILE);
-        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(skyboxPath, this.scene);
-        
-        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-        skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-        skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-        skybox.material = skyboxMaterial;
-        
-        this.scene.environmentTexture = skyboxMaterial.reflectionTexture;
-        this.scene.imageProcessingConfiguration.exposure = CONFIG.WORLD.SKYBOX.EXPOSURE;
-        this.scene.imageProcessingConfiguration.contrast = CONFIG.WORLD.SKYBOX.CONTRAST;
+    if (CONFIG.WORLD && CONFIG.WORLD.SPAWNS) {
+        CONFIG.WORLD.SPAWNS.forEach(function (spawn) {
+            this.spawnTimers.set(spawn.id, 0);
+            this.activeSpawns.set(spawn.id, []);
+        }, this);
     }
 }
+
+World.prototype.init = function () {
+    this.createLight();
+    this.createEnvironment();
+    this.createGround();
+};
+
+World.prototype.createLight = function () {
+    var light = new BABYLON.DirectionalLight("dir01", new BABYLON.Vector3(0.5, -1, 0.5), this.scene);
+    light.position = new BABYLON.Vector3(-20, 40, -20);
+    light.intensity = 1.0;
+};
+
+World.prototype.createEnvironment = function () {
+    this.createSkybox();
+    // this.createWeather(); // Future feature
+};
+
+World.prototype.createSkybox = function () {
+    var skyboxConfig = CONFIG.WORLD.SKYBOX;
+
+    // 1. Optional classic skybox (if PATH is provided in config)
+    if (skyboxConfig.PATH) {
+        var skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: skyboxConfig.SIZE }, this.scene);
+        var skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
+        skyboxMaterial.backFaceCulling = false;
+        skyboxMaterial.disableLighting = true;
+        skybox.material = skyboxMaterial;
+        skybox.infiniteDistance = true;
+        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture(skyboxConfig.PATH, this.scene);
+        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+    }
+
+    // 2. Setup PBR Environment using pre-filtered data (.env)
+    var environmentSource = CONFIG.ASSETS.BASE_PATH + "textures/environment/ibl/room.env";
+    var hdrTexture = null;
+    try {
+        hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(environmentSource, this.scene);
+    } catch (err) {
+        console.warn(
+            "[World] Failed to load environment map from " + environmentSource + ". Using Babylon fallback.",
+            err
+        );
+        hdrTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+            "https://assets.babylonjs.com/environments/environmentSpecular.env",
+            this.scene
+        );
+    }
+
+    this.scene.environmentTexture = hdrTexture;
+    this.scene.imageProcessingConfiguration.exposure = skyboxConfig.EXPOSURE;
+    this.scene.imageProcessingConfiguration.contrast = skyboxConfig.CONTRAST;
+};
+
+World.prototype.createGround = function () {
+    var envConfig = CONFIG && CONFIG.ASSETS ? CONFIG.ASSETS.ENVIRONMENT : null;
+    var terrainConfig = envConfig ? envConfig.terrain_base : null;
+    var terrainAsset = terrainConfig ? this.scene.game.assetManager.getAsset(terrainConfig.model) : null;
+
+    if (terrainAsset && terrainAsset.length > 0) {
+        var terrain = terrainAsset[0];
+        terrain.name = "TerrainBase";
+        terrain.isPickable = true;
+        terrain.receiveShadows = true;
+
+        // Set the model to be static collision ground
+        terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
+            terrain,
+            BABYLON.PhysicsImpostor.MeshImpostor, // MeshImpostor for complex shapes
+            { mass: 0, restitution: 0.9 }, // Mass 0 for static object
+            this.scene
+        );
+    } else {
+        if (terrainConfig) {
+            console.warn(
+                "[World] Failed to load TerrainBase mesh '" + terrainConfig.model + "'. Using simple plane as fallback."
+            );
+        }
+        var ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, this.scene);
+        ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+            ground,
+            BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 0, restitution: 0.9 },
+            this.scene
+        );
+        ground.receiveShadows = true;
+
+        var groundMaterial = new BABYLON.StandardMaterial("groundMat", this.scene);
+        groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+        ground.material = groundMaterial;
+    }
+};
+
+World.prototype.spawnUpdate = function (deltaTime) {
+    if (!CONFIG.WORLD.SPAWNS) return;
+
+    CONFIG.WORLD.SPAWNS.forEach(function (spawnData) {
+        var spawnId = spawnData.id;
+        var timer = this.spawnTimers.get(spawnId) || 0;
+        timer += deltaTime;
+
+        var activeEntities = this.activeSpawns.get(spawnId).filter(function (e) { return !e.isDead; });
+        this.activeSpawns.set(spawnId, activeEntities);
+
+        if (activeEntities.length < spawnData.max_spawn && timer >= spawnData.respawn_time_s) {
+            var template = this.scene.game.npcTemplates.get(spawnData.npc_template_id);
+            if (template) {
+                this.spawnEnemy(spawnData, template);
+                timer = 0; // Reset timer only on successful spawn
+            }
+        }
+        this.spawnTimers.set(spawnId, timer);
+    }, this);
+};
+
+World.prototype.spawnEnemy = function (spawnData, template) {
+    var currentEntities = this.activeSpawns.get(spawnData.id).filter(function (e) { return !e.isDead; });
+
+    if (currentEntities.length >= spawnData.max_spawn) return null;
+
+    var angle = Math.random() * Math.PI * 2;
+    var distance = Math.random() * (spawnData.spawn_radius * 0.8);
+
+    var offsetX = distance * Math.cos(angle);
+    var offsetZ = distance * Math.sin(angle);
+
+    var spawnPosition = new BABYLON.Vector3(
+        spawnData.position_x + offsetX,
+        spawnData.position_y + 10,
+        spawnData.position_z + offsetZ
+    );
+
+    var newEnemy = new Enemy(this.scene, spawnPosition, template, spawnData);
+
+    this.npcs.push(newEnemy);
+    this.activeSpawns.get(spawnData.id).push(newEnemy);
+
+    return newEnemy;
+};
+
+World.prototype.update = function (deltaTime) {
+    this.spawnUpdate(deltaTime);
+
+    this.npcs = this.npcs.filter(function (npc) { return !npc.isDead; });
+    this.npcs.forEach(function (npc) { return npc.update(deltaTime); });
+
+    this.loots = this.loots.filter(function (loot) { return !loot.isDead; });
+    this.loots.forEach(function (loot) { return loot.update(deltaTime); });
+};
+
+World.prototype.dispose = function () {
+    this.npcs.forEach(function (npc) { return npc.dispose(); });
+    this.loots.forEach(function (loot) { return loot.dispose(); });
+    this.npcs.length = 0;
+    this.loots.length = 0;
+};
 
 World.prototype.createGround = function(assetManager) {
     const ground = BABYLON.MeshBuilder.CreateGround(
