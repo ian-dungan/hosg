@@ -108,9 +108,7 @@ NetworkManager.prototype.connect = function () {
     return;
   }
   
-  // FIX: Use query parameter for game/room ID instead of appending to the path.
-  // This is a more robust way to pass state for initial connection, as most 
-  // WebSocket servers are configured to listen on a fixed path (like '/')
+  // Use query parameter for game/room ID instead of appending to the path.
   var baseWSSUrl = this.url; // e.g., 'wss://hosg.onrender.com'
   var roomOrPlayerId = (this.game && this.game.player && this.game.player.id) ? 
                  this.game.player.id : 
@@ -182,8 +180,51 @@ NetworkManager.prototype._handleMessage = function (event) {
  * as the eventName and the payload as `data`.
  */
 NetworkManager.prototype.send = function (eventName, data) {
-// ... (rest of network.js unchanged)
-// ...
+  if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    console.warn("[Network] Cannot send, socket not open");
+    return false;
+  }
+
+  var payload;
+
+  try {
+    if (eventName == null) {
+      payload = data;
+    } else {
+      payload = JSON.stringify({ event: eventName, data: data });
+    }
+  } catch (err) {
+    console.error("[Network] Failed to serialize message:", err);
+    return false;
+  }
+
+  try {
+    this.socket.send(payload);
+  } catch (err) {
+    console.error("[Network] Failed to send message:", err);
+    return false;
+  }
+
+  return true;
+};
+
+NetworkManager.prototype.disconnect = function () {
+  this.shouldReconnect = false;
+  if (this.socket) {
+    this.socket.close();
+    this.socket = null;
+  }
+  this.connected = false;
+  clearTimeout(this.reconnectTimeout);
+  this.reconnectAttempt = 0;
+};
+
+NetworkManager.prototype.dispose = function () {
+  this.disconnect();
+  this._handlers = {};
+  console.log("[Network] Disposed.");
+};
+
 // Export for Node.js/CommonJS
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = NetworkManager;
