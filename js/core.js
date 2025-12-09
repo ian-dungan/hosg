@@ -70,7 +70,7 @@ const CONFIG = {
                 required: true 
             },
             wolf: { 
-                model: "Wolf.glb", 
+                model: "assets/enemies/Wolf.glb", 
                 required: false 
             }
             // Add more characters:
