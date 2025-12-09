@@ -88,7 +88,8 @@ class Player {
         console.log('[Player] Waiting for terrain to be ready...');
         
         // Wait for terrain with timeout
-        const terrain = await this.waitForTerrain(100); // 10 seconds
+        // FIX: Increased timeout to 300 attempts (30 seconds)
+        const terrain = await this.waitForTerrain(300); 
         if (!terrain) {
             console.error('[Player] TERRAIN TIMEOUT - Creating player anyway at y=10');
             this.createPlayerMesh(10);
@@ -192,24 +193,29 @@ class Player {
 
         // Use Babylon's built-in collision system instead of physics for stability
         this.mesh.checkCollisions = true;
-        // PATCH: The file was truncated here, causing a SyntaxError. Cleanly close the function.
-    } // PATCH END
+        this.mesh.ellipsoid = new BABYLON.Vector3(this.colliderRadius, this.colliderHeight / 2, this.colliderRadius);
+        this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, this.colliderHeight / 2, 0);
 
+        this.physicsReady = true; // Allow update to run immediately
+
+        console.log(`[Player] ✓ Player collider created at (${this.mesh.position.x}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z})`);
+    }
+    
     async loadCharacterModel() {
-        if (typeof window.ASSET_MANIFEST === 'undefined' || !window.ASSET_MANIFEST.CHARACTERS.PLAYER) {
+        if (!window.ASSET_MANIFEST || !window.ASSET_MANIFEST.CHARACTERS) {
             console.warn('[Player] Asset manifest not found, skipping character model');
             return;
         }
-
+        
         const characterConfig = window.ASSET_MANIFEST.CHARACTERS.PLAYER.knight;
         if (!characterConfig) {
             console.warn('[Player] Knight character config not found');
             return;
         }
-
+        
         const modelPath = window.ASSET_MANIFEST.BASE_PATH + characterConfig.model;
         console.log(`[Player] Loading character model: ${modelPath}`);
-
+        
         try {
             const result = await BABYLON.SceneLoader.ImportMeshAsync(
                 "",
@@ -217,201 +223,232 @@ class Player {
                 modelPath.substring(modelPath.lastIndexOf('/') + 1),
                 this.scene
             );
-
+            
             console.log(`[Player] ✓ Character model loaded (${result.meshes.length} meshes)`);
-
+            
             // Get root mesh and parent it to the visual root (keeps physics independent)
             this.characterModel = result.meshes[0];
             this.characterModel.parent = this.visualRoot || this.mesh;
             
-            // Apply scale and offset from config
+            // CRITICAL: Position character model to align with physics box
+            // Knight model needs to be centered and at the right height
+            const offset = characterConfig.offset || { x: 0, y: -0.9, z: 0 };
+            this.characterModel.position = new BABYLON.Vector3(offset.x, offset.y, offset.z);
+            
+            // NOTE: Don't rotate character model here - we rotate the parent mesh instead
+            // If your model faces backward by default, add Math.PI to mesh rotation in update()
+            
+            // Apply scale from config
             const scale = characterConfig.scale || 1.0;
-            const offset = characterConfig.offset || { x: 0, y: 0, z: 0 };
+            this.characterModel.scaling = new BABYLON.Vector3(scale, scale, scale);
             
-            this.characterModel.scaling.setAll(scale);
-            this.characterModel.position.set(offset.x, offset.y, offset.z);
+            // Make sure ALL child meshes are visible and don't have physics
+            result.meshes.forEach((mesh, index) => {
+                if (index > 0) { // Skip root
+                    mesh.isVisible = true;
+                    mesh.visibility = 1;
+                    mesh.checkCollisions = false; // No collision on visual mesh
+                    mesh.isPickable = false;      // Don't interfere with raycasts
+                    
+                    // Remove any physics impostors from model parts
+                    if (mesh.physicsImpostor) {
+                        mesh.physicsImpostor.dispose();
+                        mesh.physicsImpostor = null;
+                    }
+                }
+            });
             
-            // Enable shadows for the character model
-            this.characterModel.receiveShadows = true;
-            if (this.scene.shadowGenerator) {
-                this.scene.shadowGenerator.addShadowCaster(this.characterModel);
+            // Store animations
+            if (result.animationGroups && result.animationGroups.length > 0) {
+                console.log(`[Player] Found ${result.animationGroups.length} animations`);
+                
+                const animConfig = characterConfig.animations || {};
+                
+                // Map animations
+                result.animationGroups.forEach(anim => {
+                    const name = anim.name.toLowerCase();
+                    if (name.includes('idle') || name.includes(animConfig.idle?.toLowerCase())) {
+                        this.animations.idle = anim;
+                    } else if (name.includes('walk') || name.includes(animConfig.walk?.toLowerCase())) {
+                        this.animations.walk = anim;
+                    } else if (name.includes('run') || name.includes(animConfig.run?.toLowerCase())) {
+                        this.animations.run = anim;
+                    } else if (name.includes('jump') || name.includes(animConfig.jump?.toLowerCase())) {
+                        this.animations.jump = anim;
+                    }
+                });
+                
+                // Start idle animation
+                if (this.animations.idle) {
+                    this.animations.idle.start(true);
+                    this.currentAnimation = this.animations.idle;
+                    console.log('[Player] ✓ Playing idle animation');
+                }
             }
             
-            // Setup animations if available
-            this.setupAnimations(result.animationGroups, characterConfig.animations);
-
         } catch (error) {
-            console.error('[Player] Failed to load character model:', error);
-            // Fallback: If model fails, at least the collider exists
+            console.warn('[Player] Failed to load character model:', error.message);
+            console.log('[Player] Continuing with invisible collision box');
         }
     }
     
-    setupAnimations(animationGroups, config) {
-        if (!animationGroups || animationGroups.length === 0) {
-            console.warn('[Player] No animation groups found');
-            return;
-        }
-
-        const map = {};
-        animationGroups.forEach(group => {
-            map[group.name] = group;
-        });
-
-        // Map config names to loaded animation groups
-        this.animations.idle = map[config.idle];
-        this.animations.walk = map[config.walk];
-        this.animations.run = map[config.run];
-        this.animations.jump = map[config.jump];
-        this.animations.attack = map[config.attack];
-        
-        if (this.animations.idle) {
-            this.playAnimation('idle');
-        }
-    }
-    
-    playAnimation(name) {
-        const anim = this.animations[name];
+    playAnimation(animName) {
+        const anim = this.animations[animName];
         if (anim && anim !== this.currentAnimation) {
             if (this.currentAnimation) {
                 this.currentAnimation.stop();
             }
-            // All movement animations should loop
             anim.start(true);
             this.currentAnimation = anim;
         }
     }
-
+    
     setupCamera() {
         // Create arc rotate camera
         this.camera = new BABYLON.ArcRotateCamera(
             'playerCamera',
             -Math.PI / 2, // Start facing forward
-            Math.PI / 3, // 60 degrees down
-            10, // 10 units away
+            Math.PI / 3,  // 60 degrees down
+            10,           // 10 units away
             this.mesh.position,
             this.scene
         );
-
+        
         this.camera.lowerRadiusLimit = 3;
         this.camera.upperRadiusLimit = 20;
         this.camera.attachControl(this.scene.getEngine().getRenderingCanvas(), true);
-
+        
         // Make camera follow player
         this.camera.lockedTarget = this.mesh;
+        
         this.scene.activeCamera = this.camera;
         
         console.log('[Player] ✓ Camera setup complete');
     }
-
+    
     setupInput() {
         const canvas = this.scene.getEngine().getRenderingCanvas();
-        
         // PATCH: Prevent mobile scrolling
         if (canvas) {
-            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-            canvas.addEventListener('touchmove', (e) => {
-                // Only prevent default if it's the main 3D canvas
-                e.preventDefault();
-            }, { passive: false });
+            canvas.style.touchAction = "none";
+            canvas.style.outline = "none";
         }
 
         // Keyboard input
-        const map = {};
-        this.scene.actionManager = new BABYLON.ActionManager(this.scene);
-        
-        this.scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, (evt) => {
-            map[evt.sourceEvent.key.toLowerCase()] = evt.sourceEvent.type === "keydown";
-        }));
-        
-        this.scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, (evt) => {
-            map[evt.sourceEvent.key.toLowerCase()] = evt.sourceEvent.type === "keydown";
-        }));
-        
-        this.scene.onBeforeRenderObservable.add(() => {
-            // Update movement state
-            this.input.forward = map['w'] || map['arrowup'];
-            this.input.backward = map['s'] || map['arrowdown'];
-            this.input.left = map['a'] || map['arrowleft'];
-            this.input.right = map['d'] || map['arrowright'];
-            this.input.run = map['shift'];
-
-            // Update jump state (queue jump on press, release on up)
-            if (map[' ']) {
-                if (!this.jumpHeld) {
-                    this.queueJump();
-                }
-                this.jumpHeld = true;
-            } else {
-                this.releaseJump();
+        this.scene.onKeyboardObservable.add((kbInfo) => {
+            const key = kbInfo.event.key.toLowerCase();
+            const isDown = (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN);
+            
+            // Debug logging (first 10 key presses)
+            if (!this._keyPressCount) this._keyPressCount = 0;
+            if (this._keyPressCount < 10 && isDown) {
+                console.log(`[Player] Key pressed: ${key}`);
+                this._keyPressCount++;
             }
             
-            // Targeting key (T)
-            if (map['t'] && !this.input._tWasPressed) {
-                this.targetNext();
-                this.input._tWasPressed = true;
-            } else if (!map['t']) {
-                this.input._tWasPressed = false;
+            switch(key) {
+                // WASD keys
+                case 'w': this.input.forward = isDown; break;
+                case 's': this.input.backward = isDown; break;
+                case 'a': this.input.left = isDown; break;
+                case 'd': this.input.right = isDown; break;
+                
+                // Arrow keys (FIXED - not inverted)
+                case 'arrowup': this.input.forward = isDown; break;
+                case 'arrowdown': this.input.backward = isDown; break;
+                case 'arrowleft': this.input.left = isDown; break;
+                case 'arrowright': this.input.right = isDown; break;
+                
+                // Other controls
+                case 'shift': this.input.run = isDown; break;
+                case ' ':
+                    if (isDown) {
+                        if (!this.jumpHeld) {
+                            this.queueJump();
+                            console.log('[Player] JUMP pressed! onGround=' + this.onGround);
+                        }
+                        this.jumpHeld = true;
+                    } else {
+                        this.releaseJump();
+                    }
+                    break;
+                
+                // Tab key for targeting
+                case 'tab':
+                    if (isDown) {
+                        this.targetNext();
+                        kbInfo.event.preventDefault(); // Don't switch browser tabs
+                    }
+                    break;
             }
-            
-            // Attack key (E)
-            if (map['e']) {
-                // TODO: Attack logic
-            }
-
-            // Execute physics/movement update
-            this.update(this.scene.getEngine().getDeltaTime() / 1000);
         });
         
-        // Mouse click for targeting
+        // Mouse/pointer targeting
         this.scene.onPointerObservable.add((pointerInfo) => {
             if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
-                const pickInfo = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
-                this.handlePointerDown(pickInfo);
+                this.handlePointerDown(pointerInfo.pickInfo);
             }
         });
         
-        // Simple touch joystick/controls implementation for mobile
+        console.log('[Player] ✓ Input setup complete');
+
+        // Mobile touch controls (iPhone/iPad/Android)
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            this.setupTouchControls(canvas);
+        }
+    }
+
+    
+    
+    setupTouchControls(canvas) {
+        console.log('[Player] ✓ Touch controls enabled (mobile)');
+
         let joystickTouchId = null;
         let joystickStartX = 0;
         let joystickStartY = 0;
-        
+
         const DEADZONE = 20;
-        const RUNZONE = 80;
+        const RUNZONE  = 80;
+
+        const resetDirections = () => {
+            this.input.forward  = false;
+            this.input.backward = false;
+            this.input.left     = false;
+            this.input.right    = false;
+            this.input.run      = false;
+        };
 
         const updateFromTouch = (x, y) => {
             const dx = x - joystickStartX;
             const dy = y - joystickStartY;
 
+            resetDirections();
+
             const absDx = Math.abs(dx);
             const absDy = Math.abs(dy);
 
-            // Reset input
-            this.input.forward = this.input.backward = this.input.left = this.input.right = false;
-
-            // Determine direction based on largest axis change
             if (absDy > DEADZONE) {
                 if (dy < 0) this.input.forward = true;
-                else this.input.backward = true;
+                else        this.input.backward = true;
             }
 
             if (absDx > DEADZONE) {
                 if (dx < 0) this.input.left = true;
-                else this.input.right = true;
+                else        this.input.right = true;
             }
-            
+
             const dist = Math.sqrt(dx * dx + dy * dy);
             this.input.run = dist > RUNZONE;
         };
-        
+
         const onTouchStart = (evt) => {
             if (!evt.changedTouches || evt.changedTouches.length === 0) return;
-            
+
             for (let i = 0; i < evt.changedTouches.length; i++) {
                 const t = evt.changedTouches[i];
                 const x = t.clientX;
                 const y = t.clientY;
-                
-                // Left half of screen controls movement
+
                 if (x < window.innerWidth * 0.5) {
                     if (joystickTouchId === null) {
                         joystickTouchId = t.identifier;
@@ -420,374 +457,415 @@ class Player {
                         updateFromTouch(x, y);
                     }
                 } else {
-                    // Right half controls camera (ArcRotateCamera)
-                    // The camera already handles this via attachControl
-                }
-                
-                // Simple jump button simulation (e.g., small area in bottom right)
-                if (x > window.innerWidth * 0.8 && y > window.innerHeight * 0.8) {
-                    this.queueJump();
+                    if (!this.jumpHeld) {
+                        this.queueJump();
+                        this.jumpHeld = true;
+                    }
                 }
             }
+
+            evt.preventDefault();
         };
 
         const onTouchMove = (evt) => {
             if (joystickTouchId === null) return;
-            
+            if (!evt.changedTouches) return;
+
             for (let i = 0; i < evt.changedTouches.length; i++) {
                 const t = evt.changedTouches[i];
                 if (t.identifier === joystickTouchId) {
                     updateFromTouch(t.clientX, t.clientY);
-                    return;
+                    break;
                 }
             }
+
+            evt.preventDefault();
         };
 
         const onTouchEnd = (evt) => {
+            if (!evt.changedTouches) return;
+
             for (let i = 0; i < evt.changedTouches.length; i++) {
                 const t = evt.changedTouches[i];
                 if (t.identifier === joystickTouchId) {
-                    // Reset input and joystick
-                    this.input.forward = this.input.backward = this.input.left = this.input.right = false;
-                    this.input.run = false;
-                    this.releaseJump(); // Also release jump on touch end
                     joystickTouchId = null;
-                    return;
+                    resetDirections();
+                    break;
                 }
             }
+
+            this.releaseJump();
+
+            evt.preventDefault();
         };
 
-        canvas.addEventListener('touchstart', onTouchStart, false);
-        canvas.addEventListener('touchmove', onTouchMove, false);
-        canvas.addEventListener('touchend', onTouchEnd, false);
+        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+        canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
+        canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
+        canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
+    }
+
+    setupGamepad() {
+        // Gamepad connection events
+        window.addEventListener('gamepadconnected', (e) => {
+            console.log('[Player] Gamepad connected:', e.gamepad.id);
+            this.gamepad.connected = true;
+        });
+        
+        window.addEventListener('gamepaddisconnected', (e) => {
+            console.log('[Player] Gamepad disconnected');
+            this.gamepad.connected = false;
+        });
+        
+        console.log('[Player] ✓ Gamepad support enabled');
     }
     
-    setupGamepad() {
-        if (!navigator.getGamepads) return;
-
-        this.scene.onBeforeRenderObservable.add(() => {
-            const gamepads = navigator.getGamepads();
-            const gamepad = gamepads[0]; // Assuming player uses first connected gamepad
-
-            if (!gamepad) {
-                this.gamepad.connected = false;
-                return;
-            }
-
-            this.gamepad.connected = true;
-
-            // ==================
-            // LEFT STICK (Movement)
-            // ==================
-            const LEFT_STICK_DEADZONE = 0.2;
-            this.gamepad.moveX = gamepad.axes[0];
-            this.gamepad.moveY = gamepad.axes[1];
-
-            // Reset keyboard/touch-based input, as gamepad takes precedence
-            this.input.forward = this.input.backward = this.input.left = this.input.right = false;
-
-            if (Math.abs(this.gamepad.moveY) > LEFT_STICK_DEADZONE) {
-                if (this.gamepad.moveY < 0) this.input.forward = true;
-                else this.input.backward = true;
-            }
-            if (Math.abs(this.gamepad.moveX) > LEFT_STICK_DEADZONE) {
-                if (this.gamepad.moveX < 0) this.input.left = true;
-                else this.input.right = true;
-            }
-
-            // ==================
-            // RIGHT STICK (Camera Look)
-            // ==================
-            const RIGHT_STICK_DEADZONE = 0.1;
-            this.gamepad.lookX = Math.abs(gamepad.axes[2]) > RIGHT_STICK_DEADZONE ? gamepad.axes[2] : 0;
-            this.gamepad.lookY = Math.abs(gamepad.axes[3]) > RIGHT_STICK_DEADZONE ? gamepad.axes[3] : 0;
-
-            // ==================
-            // BUTTONS
-            // ==================
-            
-            // R-Trigger/Bumper (R1/RB) - Run
-            const runPressed = (gamepad.buttons[1] && gamepad.buttons[1].pressed) || // B button (XBox)
-                               (gamepad.buttons[6] && gamepad.buttons[6].pressed) || // L-Trigger
-                               (gamepad.buttons[7] && gamepad.buttons[7].pressed); // R-Trigger
-            this.input.run = runPressed;
-
-            // A button (0) - Jump
-            // Track jump press/release so jump must be re-pressed after landing
-            const jumpPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
-            if (jumpPressed) {
-                if (!this.jumpHeld) {
-                    this.queueJump();
-                }
-                this.jumpHeld = true;
-            } else {
-                this.releaseJump();
-            }
-
-            // X button (2) - Target next enemy (with debounce)
-            if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
-                if (!this.gamepad.targetButtonWasPressed) {
-                    this.targetNext();
-                    this.gamepad.targetButtonWasPressed = true;
-                }
-            } else {
-                this.gamepad.targetButtonWasPressed = false;
-            }
-            
-            // Y button (3) - Attack/Action
-            if (gamepad.buttons[3] && gamepad.buttons[3].pressed) {
-                // TODO: Attack logic
-            }
-        });
-    }
-
-    update(dt) {
-        this.updateMovement(dt);
-        this.updateCamera(dt);
-        // TODO: Update combat, UI, etc.
-    }
-
-    updateMovement(dt) {
-        // Apply rotation from input/gamepad
-        let targetRotation = this.lastFacing;
-        let hasMovement = false;
+    updateGamepad() {
+        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+        const gamepad = gamepads[0];
         
-        // Calculate raw movement vector based on camera direction
-        const cameraForward = this.camera.getForwardRay(1).direction;
-        cameraForward.y = 0;
-        cameraForward.normalize();
-
-        const cameraRight = BABYLON.Vector3.Cross(BABYLON.Vector3.Up(), cameraForward);
+        if (!gamepad) {
+            this.gamepad.connected = false;
+            return;
+        }
         
+        this.gamepad.connected = true;
+        
+        // Left stick - movement
+        const deadzone = 0.15;
+        this.gamepad.moveX = Math.abs(gamepad.axes[0]) > deadzone ? gamepad.axes[0] : 0;
+        this.gamepad.moveY = Math.abs(gamepad.axes[1]) > deadzone ? gamepad.axes[1] : 0;
+        
+        // Right stick - camera (optional, camera is mouse-controlled)
+        this.gamepad.lookX = Math.abs(gamepad.axes[2]) > deadzone ? gamepad.axes[2] : 0;
+        this.gamepad.lookY = Math.abs(gamepad.axes[3]) > deadzone ? gamepad.axes[3] : 0;
+        
+        // Buttons
+        // A button (0) - Jump
+        if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+            this.input.jump = true;
+        }
+        
+        // B button (1) or triggers - Run
+        const runPressed = (gamepad.buttons[1] && gamepad.buttons[1].pressed) ||
+                          (gamepad.buttons[6] && gamepad.buttons[6].pressed) ||
+                          (gamepad.buttons[7] && gamepad.buttons[7].pressed);
+        this.input.run = runPressed;
+
+        // Track jump press/release so jump must be re-pressed after landing
+        const jumpPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
+        if (jumpPressed) {
+            if (!this.jumpHeld) {
+                this.queueJump();
+            }
+            this.jumpHeld = true;
+        } else {
+            this.releaseJump();
+        }
+        
+        // X button (2) - Target next enemy (with debounce)
+        if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
+            if (!this.gamepad.targetButtonWasPressed) {
+                this.targetNext();
+                this.gamepad.targetButtonWasPressed = true;
+            }
+        } else {
+            this.gamepad.targetButtonWasPressed = false;
+        }
+    }
+    
+    update(deltaTime) {
+        // Debug logging (first 5 updates)
+        if (!this._updateLogCount) this._updateLogCount = 0;
+        if (this._updateLogCount < 5) {
+            console.log(`[Player] Update #${this._updateLogCount + 1}: mesh=${!!this.mesh}, physicsReady=${this.physicsReady}, deltaTime=${deltaTime.toFixed(3)}`);
+            this._updateLogCount++;
+        }
+
+        if (!this.mesh || !this.physicsReady) return;
+
+        // Update gamepad state
+        this.updateGamepad();
+
+        const dt = deltaTime; // deltaTime already in seconds
+        const walkSpeed = this.speed;
+        const runSpeed = walkSpeed * this.runMultiplier;
+        const jumpSpeed = this.jumpForce;
+
+        // Get camera forward/right directions
+        const forward = this.camera.getDirection(BABYLON.Axis.Z);
+        forward.y = 0;
+        forward.normalize();
+
+        const right = this.camera.getDirection(BABYLON.Axis.X);
+        right.y = 0;
+        right.normalize();
+
+        // Calculate movement direction
         let moveDir = BABYLON.Vector3.Zero();
 
-        if (this.input.forward) {
-            moveDir.addInPlace(cameraForward);
-            hasMovement = true;
+        // Keyboard input
+        if (this.input.forward) moveDir.addInPlace(forward);
+        if (this.input.backward) moveDir.subtractInPlace(forward);
+        if (this.input.right) moveDir.addInPlace(right);
+        if (this.input.left) moveDir.subtractInPlace(right);
+
+        // Debug logging (first 10 movements)
+        if (!this._moveLogCount) this._moveLogCount = 0;
+        if (this._moveLogCount < 10 && moveDir.lengthSquared() > 0) {
+            console.log(`[Player] Moving! forward=${this.input.forward}, back=${this.input.backward}, left=${this.input.left}, right=${this.input.right}`);
+            this._moveLogCount++;
         }
-        if (this.input.backward) {
-            moveDir.subtractInPlace(cameraForward);
-            hasMovement = true;
+
+        // Gamepad input
+        if (this.gamepad.connected) {
+            const gamepadMove = forward.scale(-this.gamepad.moveY).add(right.scale(this.gamepad.moveX));
+            moveDir.addInPlace(gamepadMove);
         }
-        if (this.input.right) {
-            moveDir.addInPlace(cameraRight);
-            hasMovement = true;
-        }
-        if (this.input.left) {
-            moveDir.subtractInPlace(cameraRight);
-            hasMovement = true;
-        }
-        
+
+        const hasMovement = moveDir.lengthSquared() > 0;
         if (hasMovement) {
             moveDir.normalize();
-            targetRotation = Math.atan2(moveDir.x, moveDir.z) + Math.PI;
         }
-        
-        // Apply smooth rotation
-        if (this.visualRoot) {
-            // Apply rotation only when there's movement, otherwise preserve last rotation
-            if (hasMovement) {
-                // Smooth rotation using lerp
-                let currentRotation = this.visualRoot.rotation.y;
-                let deltaAngle = targetRotation - currentRotation;
-                
-                // Handle wrap-around
-                if (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
-                if (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
-                
-                this.visualRoot.rotation.y += deltaAngle * this.rotationSpeed;
-                this.lastFacing = this.visualRoot.rotation.y;
-            } else {
-                // No movement, enforce last facing
-                this.visualRoot.rotation.y = this.lastFacing;
-            }
-        }
-        
-        // ============================================================
-        // JUMP AND GRAVITY LOGIC (Kinematic/Collision-based Movement)
-        // ============================================================
-        
-        // 1. Ground detection (Raycast downwards)
-        const groundRay = new BABYLON.Ray(
-            this.mesh.position.add(new BABYLON.Vector3(0, -this.groundOffset + 0.01, 0)),
-            BABYLON.Vector3.Down(),
-            0.1
-        );
-        const hit = this.scene.pickWithRay(groundRay, (mesh) => {
-            return mesh.checkCollisions && mesh.name === 'terrainCollisionBarrier';
-        });
 
-        const wasOnGround = this.onGround;
-        this.onGround = hit.hit;
-        this.isOnGround = this.onGround; // For UI
-        
-        // If just landed, reset vertical velocity and force snap to ground
-        if (!wasOnGround && this.onGround) {
-            this.verticalVelocity = 0;
-            this.mesh.position.y = hit.pickedPoint.y + this.groundOffset;
-            this.jumpHeld = false; // Reset jump hold
-            this.playAnimation('idle'); // Change animation to idle/walk
+        // Animation selection
+        if (hasMovement) {
+            if (this.input.run && this.animations.run) {
+                this.playAnimation('run');
+            } else if (this.animations.walk) {
+                this.playAnimation('walk');
+            }
+        } else if (this.animations.idle) {
+            this.playAnimation('idle');
         }
-        
-        // 2. Jumping
-        if (this.jumpQueued && this.onGround) {
-            this.verticalVelocity = this.jumpForce;
-            this.onGround = false;
-            this.jumpQueued = false; // Consume the queued jump
-            this.playAnimation('jump'); // Change animation to jump
-        }
-        this.jumpQueued = false; // Clear queue if jump didn't happen
-        
-        // 3. Gravity
+
+        // GRAVITY (apply before movement so vertical velocity is included in displacement)
         if (!this.onGround) {
             this.verticalVelocity += this.gravity * dt;
-            
-            // Clamp terminal velocity (to prevent falling through small gaps)
-            if (this.verticalVelocity < -50) {
-                this.verticalVelocity = -50;
-            }
+        } else {
+            this.verticalVelocity = 0;
+            this._gravityLogCount = 0; // Reset counter when on ground
         }
 
-        // 4. Calculate displacement
-        let speed = this.speed;
-        if (this.input.run) {
-            speed *= this.runMultiplier;
-            this.playAnimation(hasMovement ? 'run' : 'idle');
-        } else {
-            this.playAnimation(hasMovement ? 'walk' : 'idle');
+        // JUMP (must release and press again to queue another jump)
+        if (this.jumpQueued && this.onGround) {
+            this.verticalVelocity = jumpSpeed;
+            this.onGround = false;
+            this.isOnGround = false; // For UI
+            this.jumpQueued = false;
+            console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
         }
-        
-        const horizontalVelocity = hasMovement ? moveDir.scale(speed) : BABYLON.Vector3.Zero();
-        
-        let displacement = horizontalVelocity.scale(dt);
+
+        // Combine horizontal + vertical displacement into one collision move for stability
+        const speed = this.input.run ? runSpeed : walkSpeed;
+        const displacement = hasMovement ? moveDir.scale(speed * dt) : BABYLON.Vector3.Zero();
         displacement.y = this.verticalVelocity * dt;
 
         const previousPosition = this.mesh.position.clone();
-
-        // 5. Move with collisions (Babylon's built-in system)
         this.mesh.moveWithCollisions(displacement);
-        
+
         // Update facing from ACTUAL movement to avoid stale rotation when sliding/blocked
         const moved = this.mesh.position.subtract(previousPosition);
         const flatMovement = new BABYLON.Vector3(moved.x, 0, moved.z);
-
         if (flatMovement.lengthSquared() > 0.0001) {
-            // Only update lastFacing when there is actual horizontal movement
-            const actualRotation = Math.atan2(flatMovement.x, flatMovement.z) + Math.PI;
-            this.lastFacing = actualRotation;
+            const targetRotation = Math.atan2(flatMovement.x, flatMovement.z) + Math.PI;
+            this.lastFacing = targetRotation;
             if (this.visualRoot) {
-                this.visualRoot.rotation.y = actualRotation;
+                this.visualRoot.rotation.y = targetRotation;
             } else if (this.characterModel) {
-                this.characterModel.rotation.y = actualRotation;
+                this.characterModel.rotation.y = targetRotation;
             }
         } else if (this.visualRoot) {
-            // If no movement, enforce the last calculated facing for the visual root
             this.visualRoot.rotation.y = this.lastFacing;
         }
-        
-        // Re-check collision after movement for potential downward collision fixes (steps, etc.)
-        if (this.mesh.position.y < previousPosition.y && !this.onGround) {
-             // If we moved down but were in the air, do an immediate ground check snap
-             const postMoveGroundRay = new BABYLON.Ray(
-                this.mesh.position.add(new BABYLON.Vector3(0, -this.groundOffset + 0.01, 0)),
-                BABYLON.Vector3.Down(),
-                0.1
-            );
-            const postMoveHit = this.scene.pickWithRay(postMoveGroundRay, (mesh) => {
-                return mesh.checkCollisions && mesh.name === 'terrainCollisionBarrier';
-            });
-            
-            if (postMoveHit.hit) {
-                this.mesh.position.y = postMoveHit.pickedPoint.y + this.groundOffset;
-                this.verticalVelocity = 0;
-                this.onGround = true;
-                this.isOnGround = true;
+
+        // Debug logging (first 10 frames in air)
+        if (!this.onGround && (!this._gravityLogCount || this._gravityLogCount < 10)) {
+            if (!this._gravityLogCount) this._gravityLogCount = 0;
+            console.log(`[Player] IN AIR: verticalVel=${this.verticalVelocity.toFixed(3)}, y=${this.mesh.position.y.toFixed(2)}`);
+            this._gravityLogCount++;
+        }
+
+        // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
+        let groundY = 0;
+        const prevY = previousPosition.y;
+
+        // Determine terrain height under the player using fixed World method
+        if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+            groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+        } else {
+            // Fallback: assume flat ground at y=0
+            groundY = 0;
+        }
+
+        const desiredY = groundY + this.groundOffset;
+        const distanceToGround = this.mesh.position.y - desiredY;
+
+        // Start by assuming we're in the air
+        let grounded = false;
+
+        // 1) Direct contact or slight penetration → snap to ground
+        if (distanceToGround <= 0.02) {
+            this.mesh.position.y = desiredY;
+            grounded = true;
+        }
+        // 2) moveWithCollisions blocked vertical motion while we were falling
+        else if (this.mesh.position.y === prevY && this.verticalVelocity <= 0) {
+            this.mesh.position.y = desiredY;
+            grounded = true;
+        }
+        // 3) Slope-hover correction: very close to the ground and almost not moving vertically
+        else if (distanceToGround > 0 && distanceToGround < 0.15 && this.verticalVelocity <= 0.1) {
+            this.mesh.position.y = desiredY;
+            grounded = true;
+        }
+
+        if (grounded) {
+            this.onGround = true;
+            this.isOnGround = true; // For UI
+            this.verticalVelocity = 0;
+        } else {
+            this.onGround = false;
+            this.isOnGround = false; // For UI
+        }
+
+        // Prevent upward velocity from persisting while grounded
+        if (this.onGround && this.verticalVelocity > 0) {
+            this.verticalVelocity = 0;
+        }
+        // Gamepad camera control (right stick) - INVERTED
+        if (this.camera && this.gamepad.connected) {
+            const lookSpeed = 0.75;
+
+            if (Math.abs(this.gamepad.lookX) > 0.001) {
+                // Horizontal orbit (left/right) - INVERTED
+                this.camera.alpha -= this.gamepad.lookX * lookSpeed * dt;
             }
+
+            if (Math.abs(this.gamepad.lookY) > 0.001) {
+                // Vertical orbit (up/down) - INVERTED
+                this.camera.beta -= this.gamepad.lookY * lookSpeed * dt;
+
+                const minBeta = 0.2;
+                const maxBeta = Math.PI - 0.2;
+                if (this.camera.beta < minBeta) this.camera.beta = minBeta;
+                if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
+            }
+        }
+
+        // ============================================================
+        // SAFETY CHECKS - Collision floor right below terrain surface
+        // ============================================================
+        
+        // Layer 1: Collision floor detection (y < -0.05)
+        // Floor is at y=-0.1, so this catches ANY clipping through terrain
+        if (this.mesh.position.y < -0.05) {
+            console.warn('[Player] Clipping detected! Snapping to terrain...');
+
+            // Get accurate terrain height at current position
+            if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+                const groundY = this.scene.world.getTerrainHeight(
+                    this.mesh.position.x,
+                    this.mesh.position.z
+                );
+                this.mesh.position.y = groundY + this.groundOffset;
+            } else {
+                // Fallback to safe height
+                this.mesh.position.y = this.groundOffset + 0.2;
+            }
+            
+            this.verticalVelocity = 0;
+            this.onGround = true;
+            this.isOnGround = true; // For UI
+        }
+
+        // Layer 2: Emergency reset (y < -1)
+        // If somehow fell completely through everything
+        if (this.mesh.position.y < -1) {
+            console.warn('[Player] Emergency reset!');
+            this.mesh.position.y = 20;
+
+            this.verticalVelocity = 0;
+            this.onGround = false;
+            this.isOnGround = false; // For UI
         }
     }
     
-    updateCamera(dt) {
-        const lookSpeed = 2.0; // Camera rotation speed multiplier
-        
-        if (this.gamepad.lookX !== 0) {
-            // Horizontal orbit (left/right)
-            this.camera.alpha -= this.gamepad.lookX * lookSpeed * dt;
-        }
-        
-        if (this.gamepad.lookY !== 0) {
-            // Vertical orbit (up/down) - INVERTED
-            this.camera.beta -= this.gamepad.lookY * lookSpeed * dt;
-
-            // Clamp vertical rotation (0.2 to Math.PI - 0.2)
-            const minBeta = 0.2;
-            const maxBeta = Math.PI - 0.2;
-            if (this.camera.beta < minBeta) this.camera.beta = minBeta;
-            if (this.camera.beta > maxBeta) this.camera.beta = maxBeta;
-        }
-    }
-
     // ============================================================
-    // COMBAT AND TARGETING
+    // TARGETING SYSTEM
     // ============================================================
     
     targetNext() {
-        if (!this.scene.game || !this.scene.game.world) return;
+        // Get all targetable entities (enemies/NPCs) in the scene
+        const targetables = this.scene.meshes.filter(m => 
+            m.metadata && (m.metadata.isEnemy || m.metadata.isNPC) && 
+            m.metadata.health > 0
+        );
         
-        const enemies = this.scene.game.world.enemies.filter(e => e.mesh);
-        if (enemies.length === 0) {
+        if (targetables.length === 0) {
+            console.log('[Player] No targets available');
             this.clearTarget();
             return;
         }
         
-        const playerPos = this.mesh.position;
+        // Find current target index
+        let currentIndex = -1;
+        if (this.currentTarget) {
+            currentIndex = targetables.findIndex(m => m === this.currentTarget);
+        }
         
-        if (!this.currentTarget) {
-            // Target the closest enemy
-            let closest = null;
-            let minDistSq = Infinity;
-            
-            enemies.forEach(enemy => {
-                const distSq = BABYLON.Vector3.DistanceSquared(playerPos, enemy.mesh.position);
-                if (distSq < minDistSq) {
-                    minDistSq = distSq;
-                    closest = enemy;
-                }
-            });
-            
-            this.setTarget(closest);
-        } else {
-            // Cycle to the next closest enemy
-            const currentIndex = enemies.findIndex(e => e.mesh === this.currentTarget);
-            let nextIndex = (currentIndex + 1) % enemies.length;
-            this.setTarget(enemies[nextIndex].mesh);
+        // Get next target (cycle through)
+        const nextIndex = (currentIndex + 1) % targetables.length;
+        this.setTarget(targetables[nextIndex]);
+    }
+    
+    setTarget(mesh) {
+        if (!mesh) {
+            this.clearTarget();
+            return;
+        }
+        
+        this.currentTarget = mesh;
+        console.log('[Player] Targeted:', mesh.name);
+        
+        // Create/update target highlight
+        this.updateTargetHighlight();
+        
+        // Show in UI if available
+        if (this.scene.ui && typeof this.scene.ui.showTargetInfo === 'function') {
+            const metadata = mesh.metadata || {};
+            this.scene.ui.showTargetInfo(
+                mesh.name,
+                metadata.health || 0,
+                metadata.maxHealth || 100
+            );
         }
     }
     
-    setTarget(targetMesh) {
-        if (this.currentTarget === targetMesh) return;
-
-        // Clear existing highlight
+    clearTarget() {
+        this.currentTarget = null;
+        
+        // Remove highlight
         if (this.targetHighlight) {
             this.targetHighlight.dispose();
             this.targetHighlight = null;
         }
         
-        this.currentTarget = targetMesh;
-        
-        if (this.currentTarget) {
-            console.log(`[Player] Targeting: ${this.currentTarget.name || 'Enemy'}`);
-            this.createTargetHighlight();
-        } else {
-            console.log('[Player] Target cleared');
+        // Hide UI
+        if (this.scene.ui && typeof this.scene.ui.hideTargetInfo === 'function') {
+            this.scene.ui.hideTargetInfo();
         }
+        
+        console.log('[Player] Target cleared');
     }
     
-    clearTarget() {
-        this.setTarget(null);
-    }
-    
-    createTargetHighlight() {
-        if (!this.currentTarget || this.targetHighlight) return;
+    updateTargetHighlight() {
+        // Remove old highlight
+        if (this.targetHighlight) {
+            this.targetHighlight.dispose();
+        }
+        
+        if (!this.currentTarget) return;
         
         // Create ring around target
         this.targetHighlight = BABYLON.MeshBuilder.CreateTorus('targetHighlight', {
@@ -796,8 +874,9 @@ class Player {
             tessellation: 32
         }, this.scene);
         
-        this.targetHighlight.rotation.x = Math.PI / 2; // Flat on the ground
-        this.targetHighlight.position.y = this.currentTarget.position.y + 0.02;
+        this.targetHighlight.position = this.currentTarget.position.clone();
+        this.targetHighlight.position.y = 0.1; // Just above ground
+        this.targetHighlight.rotation.x = Math.PI / 2;
         
         // Red glow material
         const mat = new BABYLON.StandardMaterial('targetMat', this.scene);
@@ -841,7 +920,9 @@ class Player {
         if (this.camera) {
             this.camera.dispose();
         }
-        // ... dispose other members
-        console.log('[Player] Disposed');
     }
 }
+
+// Export for use in game.js
+window.Player = Player;
+console.log('[Player] Player class loaded');
