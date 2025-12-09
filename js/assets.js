@@ -1,126 +1,135 @@
-// ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.18 (ASSET KEY FIX)
-// Fix: Explicitly stores loaded assets under their simple config key name.
-// ============================================================
+// ===========================================================
+// HEROES OF SHADY GROVE - ASSET MANAGER v1.1.0 (ENHANCED)
+// Now supports ENEMIES category and per-asset custom paths
+// ===========================================================
 
-// ==================== ASSET MANIFEST ====================
-// Safely retrieve MANIFEST_DATA from CONFIG.ASSETS
 const getManifestData = () => {
     if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
         return CONFIG.ASSETS;
     }
-    // Safe fallback structure
+    console.warn('[Assets] CONFIG not loaded, using defaults');
     return {
-        BASE_PATH: "assets/", // Changed fallback to relative
+        BASE_PATH: "assets/",
         CHARACTERS: {},
         ENVIRONMENT: {}
     };
 };
 const MANIFEST_DATA = getManifestData();
 
-// ==================== ASSET MANAGER CLASS ====================
 class AssetManager {
     constructor(scene) {
         this.scene = scene;
         this.assets = {}; 
-        this.stats = {
-            requested: 0,
-            loaded: 0
-        };
+        this.stats = { requested: 0, loaded: 0, failed: 0 };
         this.loader = new BABYLON.AssetsManager(scene);
-        
-        this.printStats = this.printStats.bind(this);
     }
 
     async loadAll() {
         console.log('[Assets] Starting asset load...');
 
         const characters = MANIFEST_DATA.CHARACTERS || {}; 
+        const enemies = MANIFEST_DATA.ENEMIES || {};
         const environment = MANIFEST_DATA.ENVIRONMENT || {}; 
+        const items = MANIFEST_DATA.ITEMS || {};
+        const weapons = MANIFEST_DATA.WEAPONS || {};
+        const armor = MANIFEST_DATA.ARMOR || {};
 
-        // Load Character Models
+        // Load characters
         for (const key in characters) {
             const assetData = characters[key];
             this.stats.requested++; 
-            this.loadModel(key, assetData, 'characters');
+            this.loadAsset(key, assetData, 'CHARACTERS');
         }
 
-        // Load Environment Models
+        // Load enemies
+        for (const key in enemies) {
+            const assetData = enemies[key];
+            this.stats.requested++; 
+            this.loadAsset(key, assetData, 'ENEMIES');
+        }
+
+        // Load environment
         for (const key in environment) {
             const assetData = environment[key];
             this.stats.requested++; 
-            this.loadModel(key, assetData, 'environment');
+            this.loadAsset(key, assetData, 'ENVIRONMENT');
         }
 
-        if (this.stats.requested === 0) {
-            console.log('[Assets] No assets defined to load.');
-            return; 
+        // Load items
+        for (const key in items) {
+            const assetData = items[key];
+            this.stats.requested++; 
+            this.loadAsset(key, assetData, 'ITEMS');
         }
-        
-        return new Promise((resolve, reject) => {
+
+        // Load weapons
+        for (const key in weapons) {
+            const assetData = weapons[key];
+            this.stats.requested++; 
+            this.loadAsset(key, assetData, 'WEAPONS');
+        }
+
+        // Load armor
+        for (const key in armor) {
+            const assetData = armor[key];
+            this.stats.requested++; 
+            this.loadAsset(key, assetData, 'ARMOR');
+        }
+
+        return new Promise((resolve) => {
+            if (this.stats.requested === 0) {
+                console.log('[Assets] No assets to load');
+                resolve();
+                return;
+            }
+            
             this.loader.onFinish = (tasks) => {
-                console.log(`[Assets] Finished loading ${tasks.length} tasks.`);
-                resolve(tasks);
-            };
-            this.loader.onError = (task, message, exception) => {
-                console.warn(`[Assets] Failed to load ${task.name}. Check the path: ${task.url}`);
+                console.log(`[Assets] Load complete. ${this.stats.loaded}/${this.stats.requested} succeeded, ${this.stats.failed} failed`);
+                resolve();
             };
             
-            // Start the loading process
-            this.loader.load(); 
-        }).then(() => {
-            this.printStats();
+            this.loader.load();
         });
     }
 
-    loadModel(key, assetData, category) {
-        const taskName = `${category}_${key}`;
+    loadAsset(key, assetData, category) {
+        const taskName = "load_" + key;
         
-        const basePath = assetData.path || MANIFEST_DATA.BASE_PATH;
+        // Use CONFIG.ASSETS.getAssetPath to get full path
+        const fullPath = CONFIG.ASSETS.getAssetPath(category, key);
         
-        const task = this.loader.addMeshTask(taskName, "", basePath, assetData.model);
-        task.required = assetData.required || false; 
-
+        if (!fullPath) {
+            console.error(`[Assets] Could not determine path for ${category}.${key}`);
+            this.stats.failed++;
+            return;
+        }
+        
+        // Extract directory and filename from full path
+        const lastSlash = fullPath.lastIndexOf('/');
+        const directory = fullPath.substring(0, lastSlash + 1);
+        const filename = fullPath.substring(lastSlash + 1);
+        
+        const task = this.loader.addMeshTask(taskName, "", directory, filename);
+        
         task.onSuccess = (task) => {
             this.stats.loaded++;
-            // Store by task name
-            this.assets[taskName] = task.loadedMeshes;
-            // Store by simple config key (e.g., 'knight') for easy Player/World lookup
             this.assets[key] = task.loadedMeshes; 
-            // Also store by the exact model filename (e.g., 'Knight03.glb') for more explicit lookups
             this.assets[assetData.model] = task.loadedMeshes; 
+            task.loadedMeshes.forEach(mesh => {
+                mesh.setEnabled(false);
+                mesh.isPickable = true;
+            });
+            console.log(`[Assets] Loaded: ${key} from ${category}`);
         };
         
         task.onError = (task, message, exception) => {
-            this.assets[taskName] = null; 
-            this.assets[key] = null; 
-            this.assets[assetData.model] = null;
+            this.stats.failed++;
+            console.error(`[Assets] Failed to load ${key} from ${fullPath}:`, message);
         };
     }
     
     getAsset(name) {
         return this.assets[name] || null;
     }
-
-    // ========== STATS ==========
-    getStats() {
-        const successRate = this.stats.requested > 0 ? 
-            ((this.stats.loaded / this.stats.requested) * 100).toFixed(1) : 0;
-        
-        return {
-            ...this.stats,
-            successRate: successRate + '%'
-        };
-    }
-    
-    printStats() {
-        const stats = this.getStats();
-        console.log('=== Asset Loading Statistics ===');
-        console.log(`Requested: ${stats.requested}`);
-        console.log(`Loaded: ${stats.loaded}`);
-        console.log(`Success Rate: ${stats.successRate}`);
-        console.log('================================');
-    }
 }
-
 window.AssetManager = AssetManager;
