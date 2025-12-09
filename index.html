@@ -532,6 +532,64 @@
     })();
   </script>
 
+  <script>
+    // Utility helpers that must exist before bootstrap executes
+    (function () {
+      function ensureLoadingElement() {
+        var el = document.getElementById('loadingText');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'loadingText';
+          el.style.position = 'absolute';
+          el.style.top = '8px';
+          el.style.left = '8px';
+          el.style.padding = '6px 10px';
+          el.style.background = 'rgba(0, 0, 0, 0.5)';
+          el.style.color = '#fff';
+          el.style.fontFamily = 'Arial, sans-serif';
+          el.style.fontSize = '14px';
+          el.style.borderRadius = '4px';
+          el.style.pointerEvents = 'none';
+          document.body.appendChild(el);
+        }
+        return el;
+      }
+
+      window.updateLoadingText = function (message) {
+        try {
+          var el = ensureLoadingElement();
+          el.textContent = message || '';
+        } catch (err) {
+          console.warn('[Bootstrap] updateLoadingText fallback failed:', err);
+        }
+      };
+
+      // Ensure a render canvas exists and keep a reference on window for scripts that run early
+      window.ensureRenderCanvas = function () {
+        // In some constrained environments document.body may not be ready yet; create one if needed.
+        if (!document.body) {
+          var body = document.createElement('body');
+          document.documentElement.appendChild(body);
+        }
+
+        var canvas = document.getElementById('renderCanvas');
+        if (!canvas) {
+          console.warn("[Bootstrap] Canvas element 'renderCanvas' not found. Creating one dynamically.");
+          canvas = document.createElement('canvas');
+          canvas.id = 'renderCanvas';
+          canvas.style.width = '100%';
+          canvas.style.height = '100%';
+          canvas.style.touchAction = 'none';
+          document.body.appendChild(canvas);
+        }
+
+        // Some environments access window.renderCanvas directly; keep it updated
+        window.renderCanvas = canvas;
+        return canvas;
+      };
+    })();
+  </script>
+
 <script src="js/core.js"></script>
 <script src="js/item.js"></script>
 <script src="js/ability.js"></script>

@@ -318,6 +318,26 @@ Player.prototype.applyClass = function (className) {
     if (classConfig) {
         this.className = className;
 
+    // Simple velocity dampening to prevent sliding indefinitely
+    var horizontalVelocity = new BABYLON.Vector3(velocity.x, 0, velocity.z);
+    if (horizontalVelocity.lengthSquared() > 0.01) {
+        var dampingForce = horizontalVelocity.scale(-2);
+        this.mesh.physicsImpostor.applyForce(
+            dampingForce,
+            this.mesh.getAbsolutePosition()
+        );
+    }
+};
+
+// --- Class & Stats ---
+Player.prototype.applyClass = function (className) {
+    var classConfig = (CONFIG && CONFIG.ASSETS && CONFIG.ASSETS.CLASSES
+        ? CONFIG.ASSETS.CLASSES[className]
+        : null) || this._getFallbackClassConfig(className);
+
+    if (classConfig) {
+        this.className = className;
+
         // 1. Apply Stats (ES5 safe)
         _copyProps(this.stats, classConfig.stats);
         this.health = this.stats.maxHealth;
