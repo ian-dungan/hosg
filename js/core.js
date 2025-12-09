@@ -46,7 +46,7 @@ const CONFIG = {
         
         // Subfolder structure (used as defaults)
         PATHS: {
-            CHARACTERS: "characters/",
+            CHARACTERS: "player/character/",
             ENEMIES: "enemies/",
             ENVIRONMENT: "environment/",
             SKYBOX: "environment/skybox/",
