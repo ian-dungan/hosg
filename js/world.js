@@ -344,8 +344,101 @@ World.prototype.dispose = function () {
     this.loots.length = 0;
 };
 
-// Ensure World, Entity, Character, and Enemy are globally accessible
+World.prototype.createGround = function(assetManager) {
+    const ground = BABYLON.MeshBuilder.CreateGround(
+        "ground",
+        { width: 500, height: 500 },
+        this.scene
+    );
+    
+    const groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
+    groundMat.diffuseColor = new BABYLON.Color3(0.3, 0.5, 0.3);
+    groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
+    ground.material = groundMat;
+
+    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+        ground,
+        BABYLON.PhysicsImpostor.BoxImpostor,
+        { mass: 0, restitution: 0.9, friction: 0.5 },
+        this.scene
+    );
+    this.ground = ground;
+}
+
+World.prototype.createSpawns = function() {
+    this.spawnData.forEach(spawn => {
+        this.activeSpawns.set(spawn.id, []);
+        console.log(`[World] Initialized spawn zone: ${spawn.name}`);
+    });
+}
+
+World.prototype.createEnvironment = function(assetManager) {
+    this.createCameraAndLights();
+    this.createSkybox();
+    this.createGround(assetManager);
+    this.createSpawns();
+    console.log("[World] Environment setup complete.");
+};
+
+World.prototype.update = function(deltaTime) {
+    this.spawnUpdate(deltaTime);
+    this.npcs = this.npcs.filter(npc => !npc.isDead);
+    this.npcs.forEach(npc => npc.update(deltaTime));
+    this.loots = this.loots.filter(loot => !loot.isDead);
+    this.loots.forEach(loot => loot.update(deltaTime));
+};
+
+World.prototype.dispose = function() {
+    this.npcs.forEach(npc => npc.dispose());
+    this.loots.forEach(loot => loot.dispose());
+    if (this.ground) this.ground.dispose();
+    if (this.camera) this.camera.dispose();
+    this.scene.dispose();
+};
+
+World.prototype.spawnUpdate = function(deltaTime) {
+    this.spawnData.forEach(spawn => {
+        let activeNpcs = this.activeSpawns.get(spawn.id) || [];
+        
+        // Filter out dead NPCs
+        activeNpcs = activeNpcs.filter(npc => !npc.isDead);
+        this.activeSpawns.set(spawn.id, activeNpcs);
+        
+        // Spawn new enemies if needed
+        if (activeNpcs.length < spawn.max_spawn) {
+            const templateId = spawn.npc_template_id;
+            const template = this.scene.game.npcTemplates.get(templateId);
+            
+            if (template && this.scene.game.assetManager.getAsset(template.model)) {
+                // Calculate spawn position with some randomness
+                const randomOffset = new BABYLON.Vector3(
+                    (Math.random() - 0.5) * spawn.spawn_radius,
+                    0,
+                    (Math.random() - 0.5) * spawn.spawn_radius
+                );
+                const spawnPos = new BABYLON.Vector3(
+                    spawn.position_x,
+                    spawn.position_y + 1,
+                    spawn.position_z
+                ).add(randomOffset);
+                
+                // Create enemy using proper Enemy class
+                const enemy = new Enemy(
+                    this.scene,
+                    spawnPos,
+                    template,
+                    this.scene.game.assetManager
+                );
+                
+                this.npcs.push(enemy);
+                activeNpcs.push(enemy);
+                
+                console.log(`[World] Spawned ${enemy.name} at spawn zone ${spawn.name}`);
+            } else {
+                console.warn(`[World] Cannot spawn ${templateId} - template or asset missing`);
+            }
+        }
+    });
+};
+
 window.World = World;
-window.Entity = Entity;
-window.Character = Character;
-window.Enemy = Enemy;
