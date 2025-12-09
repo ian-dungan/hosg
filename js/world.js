@@ -344,27 +344,6 @@ World.prototype.dispose = function () {
     this.loots.length = 0;
 };
 
-World.prototype.createGround = function(assetManager) {
-    const ground = BABYLON.MeshBuilder.CreateGround(
-        "ground",
-        { width: 500, height: 500 },
-        this.scene
-    );
-    
-    const groundMat = new BABYLON.StandardMaterial("groundMat", this.scene);
-    groundMat.diffuseColor = new BABYLON.Color3(0.3, 0.5, 0.3);
-    groundMat.specularColor = new BABYLON.Color3(0, 0, 0);
-    ground.material = groundMat;
-
-    ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-        ground,
-        BABYLON.PhysicsImpostor.BoxImpostor,
-        { mass: 0, restitution: 0.9, friction: 0.5 },
-        this.scene
-    );
-    this.ground = ground;
-}
-
 World.prototype.createSpawns = function() {
     this.spawnData.forEach(spawn => {
         this.activeSpawns.set(spawn.id, []);
