@@ -344,8 +344,4 @@ World.prototype.dispose = function () {
     this.loots.length = 0;
 };
 
-// Ensure World, Entity, Character, and Enemy are globally accessible
 window.World = World;
-window.Entity = Entity;
-window.Character = Character;
-window.Enemy = Enemy;
