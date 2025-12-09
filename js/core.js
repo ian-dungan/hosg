@@ -46,7 +46,7 @@ const CONFIG = {
         
         // Subfolder structure
         PATHS: {
-            CHARACTERS: "characters/",
+            CHARACTERS: "player/character/",
             ENVIRONMENT: "environment/",
             SKYBOX: "environment/skybox/",
             ITEMS: "items/",
