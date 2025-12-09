@@ -183,7 +183,7 @@ class Player {
         
         // Setup physics impostor
         if (this.scene.getPhysicsEngine() && this.mesh.getScene().getPhysicsEngine().get
-        name() === 'CannonJSPlugin') {
+        name() === ('CannonJSPlugin') {
             try {
                 this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                     this.mesh,
