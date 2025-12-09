@@ -344,13 +344,6 @@ World.prototype.dispose = function () {
     this.loots.length = 0;
 };
 
-World.prototype.createSpawns = function() {
-    this.spawnData.forEach(spawn => {
-        this.activeSpawns.set(spawn.id, []);
-        console.log(`[World] Initialized spawn zone: ${spawn.name}`);
-    });
-}
-
 World.prototype.createEnvironment = function(assetManager) {
     this.createCameraAndLights();
     this.createSkybox();
