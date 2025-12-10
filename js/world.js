@@ -162,6 +162,22 @@ class World {
         this.populateWorld();
         this.setupEventListeners();
 
+        // Create terrain physics after short delay if needed
+        // This ensures Babylon has processed vertex modifications
+        if (this.needsPhysics && this.terrain) {
+            setTimeout(() => {
+                if (this.scene.getPhysicsEngine()) {
+                    this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
+                        this.terrain,
+                        BABYLON.PhysicsImpostor.MeshImpostor,
+                        { mass: 0, friction: 1.0, restitution: 0.0 },
+                        this.scene
+                    );
+                    console.log('[World] ✓ Terrain physics created and enabled');
+                }
+            }, 100);
+        }
+
         // CRITICAL: Signal player that world is ready
         // Wait a bit to ensure physics is fully stabilized
         setTimeout(() => {
@@ -302,51 +318,34 @@ class World {
         );
         } else {
             // No heightmap - create ground with FIXED SEED procedural generation
-            // This gives you consistent hills/valleys every time (static world)
             console.log('[World] No heightmap, using fixed-seed procedural terrain');
             
-            // Use CreateGroundFromHeightMap approach (async) - even though file doesn't exist
-            // This ensures proper timing for physics creation AFTER geometry modification
-            this.terrain = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
+            // Create flat ground first (synchronous)
+            this.terrain = BABYLON.MeshBuilder.CreateGround(
                 "terrain",
-                "assets/heightmaps/placeholder.png", // Doesn't need to exist - onReady fires anyway
                 {
                     width: this.options.size,
                     height: this.options.size,
-                    subdivisions: this.options.segments,
-                    maxHeight: this.options.maxHeight,
-                    onReady: () => {
-                        // Apply procedural heightmap NOW
-                        this.generateHeightmap();
-                        this.terrain.checkCollisions = true;
-                        this.terrain.isPickable = true; // Ensure raycasting works for getHeightAt
-
-                        // Create physics impostor AFTER geometry is modified
-                        if (this.scene.getPhysicsEngine()) {
-                            this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                                this.terrain,
-                                BABYLON.PhysicsImpostor.MeshImpostor,
-                                { mass: 0, friction: 1.0, restitution: 0.0 },
-                                this.scene
-                            );
-                            console.log('[World] ✓ Terrain physics created and enabled');
-                        }
-                        
-                        // NO collision barrier
-                        console.log('[World] Collision barrier disabled');
-
-                        // Apply terrain material
-                        this.createTerrainMaterial(); 
-                    }
+                    subdivisions: this.options.segments
                 },
                 this.scene
             );
-
-            // Apply material early (updated again in onReady)
-            this.createTerrainMaterial();
+            
+            // Apply procedural heightmap immediately
+            this.generateHeightmap();
+            
+            // Set properties
+            this.terrain.checkCollisions = true;
+            this.terrain.isPickable = true;
             this.terrain.receiveShadows = true;
-            this.terrain.isPickable = true; // Ensure raycasting works
             this.terrain.metadata = { isTerrain: true, type: 'ground' };
+            
+            // Apply material
+            this.createTerrainMaterial();
+            
+            // Physics will be created in init() after a delay
+            // This ensures Babylon has processed the vertex modifications
+            this.needsPhysics = true;
         }
 
         // Common setup for both terrain types
