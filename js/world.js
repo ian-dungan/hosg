@@ -72,42 +72,6 @@ class SimplexNoise {
     }
 }
 
-// Base Entity class for dynamic world objects (NPCs, enemies, items, etc.)
-function Entity(scene, position) {
-    this.scene = scene;
-
-    if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-        if (position instanceof BABYLON.Vector3) {
-            this.position = position.clone();
-        } else if (position && typeof position === "object" &&
-            "x" in position && "y" in position && "z" in position) {
-            this.position = new BABYLON.Vector3(position.x, position.y, position.z);
-        } else {
-            this.position = BABYLON.Vector3.Zero();
-        }
-    } else {
-        this.position = position || { x: 0, y: 0, z: 0 };
-    }
-
-    this.mesh = null;
-    this._isDisposed = false;
-}
-
-Entity.prototype.update = function (deltaTime) {
-    if (this.mesh && this.mesh.position && this.position &&
-        typeof this.mesh.position.copyFrom === "function") {
-        this.mesh.position.copyFrom(this.position);
-    }
-};
-
-Entity.prototype.dispose = function () {
-    this._isDisposed = true;
-    if (this.mesh && typeof this.mesh.dispose === "function") {
-        this.mesh.dispose();
-        this.mesh = null;
-    }
-};
-
 // World Class
 class World {
     // ... World implementation (omitted for brevity)
@@ -634,12 +598,45 @@ class World {
 
 // ============================================================================
 // Entity Base Class - Base for NPCs, Enemies, Items
+// Preserves all original functionality from function-style Entity
 // ============================================================================
 class Entity {
     constructor(scene, position) {
         this.scene = scene;
-        this.position = position ? new BABYLON.Vector3(position.x, position.y, position.z) : new BABYLON.Vector3(0, 0, 0);
+
+        // Better position handling (from original Entity)
+        if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
+            if (position instanceof BABYLON.Vector3) {
+                this.position = position.clone();
+            } else if (position && typeof position === "object" &&
+                "x" in position && "y" in position && "z" in position) {
+                this.position = new BABYLON.Vector3(position.x, position.y, position.z);
+            } else {
+                this.position = BABYLON.Vector3.Zero();
+            }
+        } else {
+            this.position = position || { x: 0, y: 0, z: 0 };
+        }
+
         this.mesh = null;
+        this._isDisposed = false;
+    }
+
+    // Update method - syncs mesh position with entity position
+    update(deltaTime) {
+        if (this.mesh && this.mesh.position && this.position &&
+            typeof this.mesh.position.copyFrom === "function") {
+            this.mesh.position.copyFrom(this.position);
+        }
+    }
+
+    // Dispose method - cleans up entity
+    dispose() {
+        this._isDisposed = true;
+        if (this.mesh && typeof this.mesh.dispose === "function") {
+            this.mesh.dispose();
+            this.mesh = null;
+        }
     }
 }
 
@@ -1019,4 +1016,14 @@ if (typeof module !== 'undefined' && module.exports) {
         Item,
         SimplexNoise
     };
+}
+
+// Make classes globally available in browser
+if (typeof window !== 'undefined') {
+    window.World = World;
+    window.Entity = Entity;
+    window.NPC = NPC;
+    window.Enemy = Enemy;
+    window.Item = Item;
+    window.SimplexNoise = SimplexNoise;
 }
