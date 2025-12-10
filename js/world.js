@@ -91,7 +91,7 @@ Enemy.prototype._resolveAssetKey = function (template) {
     if (!template) return CONFIG.ASSETS.CHARACTERS.wolf.model;
 
     // Accept common template fields and fall back to the configured wolf
-    return template.asset_key || template.asset || template.model || template.name || CONFIG.ASSETS.CHARACTERS.wolf.model;
+    return template.asset_key || template.asset || template.model || template.name || (CONFIG.ASSETS.CHARACTERS.wolf || {}).model || 'wolf';
 };
 
 Enemy.prototype._initMesh = function (assetName) {
@@ -190,6 +190,7 @@ Enemy.prototype._updateMovement = function (deltaTime) {
     } else if (this.state === "attack") {
         // Attack logic placeholder
     }
+};
 
 // World Class
 function World(scene) {
@@ -342,6 +343,26 @@ World.prototype.spawnEnemy = function (spawnData, template) {
 
     this.npcs.push(newEnemy);
     this.activeSpawns.get(spawnData.id).push(newEnemy);
+
+    return newEnemy;
+};
+
+World.prototype.update = function (deltaTime) {
+    this.spawnUpdate(deltaTime);
+
+    this.npcs = this.npcs.filter(function (npc) { return !npc.isDead; });
+    this.npcs.forEach(function (npc) { return npc.update(deltaTime); });
+
+    this.loots = this.loots.filter(function (loot) { return !loot.isDead; });
+    this.loots.forEach(function (loot) { return loot.update(deltaTime); });
+};
+
+World.prototype.dispose = function () {
+    this.npcs.forEach(function (npc) { return npc.dispose(); });
+    this.loots.forEach(function (loot) { return loot.dispose(); });
+    this.npcs.length = 0;
+    this.loots.length = 0;
+};
 
     return newEnemy;
 };

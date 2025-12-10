@@ -54,7 +54,7 @@ function AssetManager(scene) {
     var self = this;
     this.loadAll = function () { return AssetManager.prototype.loadAll.call(self); };
     this.loadAsset = function (key, assetData, category) {
-        return AssetManager.prototype.loadAsset.call(self, key, assetData, category);
+        return AssetManager.prototype.loadModel.call(self, key, assetData, category);
     };
     this.loadModel = function (key, assetData, category) {
         return AssetManager.prototype.loadModel.call(self, key, assetData, category);
@@ -68,12 +68,10 @@ AssetManager.prototype.loadAll = function () {
     var characters = MANIFEST_DATA.CHARACTERS || {};
     var environment = MANIFEST_DATA.ENVIRONMENT || {};
 
-    // Use whatever loader the runtime exposes (legacy callers expect
-    // loadAsset, newer code calls loadModel). Manual binding above guarantees the
-    // function exists even if detached from the instance.
-    var loadFn = (typeof this.loadAsset === 'function')
-        ? this.loadAsset
-        : this.loadModel;
+    // Always use the prototype implementation to avoid environments that mutate
+    // the instance helpers (some legacy browsers reported "Unexpected identifier"
+    // when patched helpers were shadowed).
+    var loadFn = AssetManager.prototype.loadModel.bind(this);
 
     // Load Character Models
     for (var key in characters) {
@@ -137,44 +135,6 @@ AssetManager.prototype.loadModel = function (key, assetData, category) {
         console.warn('[Assets] Missing model name for ' + category + ' asset ' + key + '. Skipping load.');
         return;
     }
-    
-    // Load a model directly (for NPCs, enemies, etc.)
-    async loadModel(path, options = {}) {
-        if (!path) {
-            console.warn('[Assets] No model path provided');
-            return null;
-        }
-        
-        try {
-            // Split path into directory and filename
-            const lastSlash = path.lastIndexOf('/');
-            const directory = lastSlash >= 0 ? path.substring(0, lastSlash + 1) : '';
-            const filename = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
-            
-            console.log(`[Assets] Loading model: ${path}`);
-            
-            const result = await BABYLON.SceneLoader.ImportMeshAsync(
-                '',
-                directory,
-                filename,
-                this.scene
-            );
-            
-            // Apply scaling if provided
-            if (options.scaling && result.meshes[0]) {
-                result.meshes[0].scaling = options.scaling;
-            }
-            
-            console.log(`[Assets] ✓ Model loaded: ${path} (${result.meshes.length} meshes)`);
-            return result;
-            
-        } catch (error) {
-            console.error(`[Assets] ✗ Failed to load model: ${path}`, error);
-            return null;
-        }
-    }
-    
-    // ========== PROCEDURAL FALLBACKS ==========
 
     var taskName = category + '_' + key;
     var basePath = this._resolveRootPath(safeData.path);
