@@ -303,6 +303,42 @@ class AssetManager {
         }
     }
     
+    // ========== PROCEDURAL FALLBACKS ==========
+
+    createProceduralMaterial(name = 'fallback', color = new BABYLON.Color3(0.5, 0.5, 0.5)) {
+        const mat = new BABYLON.StandardMaterial(name + '_mat', this.scene);
+        mat.diffuseColor = color;
+        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        mat.emissiveColor = color.scale(0.1); // Slight glow for visibility
+        return mat;
+    }
+
+    createProceduralTerrain(typeName) {
+        const mat = new BABYLON.StandardMaterial('proc_' + typeName, this.scene);
+        
+        const colors = {
+            grass: new BABYLON.Color3(0.3, 0.6, 0.3),
+            dirt: new BABYLON.Color3(0.4, 0.3, 0.2),
+            gravel: new BABYLON.Color3(0.5, 0.5, 0.5),
+            sand: new BABYLON.Color3(0.8, 0.7, 0.5)
+        };
+        
+        mat.diffuseColor = colors[typeName] || colors.grass;
+        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        
+        return mat;
+    }
+    
+    createProceduralSkybox() {
+        const skybox = BABYLON.MeshBuilder.CreateBox('skybox', { size: 1000 }, this.scene);
+        const skyMat = new BABYLON.StandardMaterial('skyMat', this.scene);
+        skyMat.backFaceCulling = false;
+        skyMat.diffuseColor = new BABYLON.Color3(0.5, 0.7, 0.9);
+        skyMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 0.9);
+        skybox.material = skyMat;
+        return skybox;
+    }
+
     dispose() {
         for (const key in this.assets) {
             const meshes = this.assets[key];
