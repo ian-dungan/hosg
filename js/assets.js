@@ -3,268 +3,139 @@
 // ===========================================================
 
 // ============================================================
-// CENTRALIZED ASSET PATH CONFIGURATION
-// EDIT THIS SECTION TO CONFIGURE ALL ASSET PATHS
-// This overrides any other asset path settings in the game
+// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.18 (ES5)
+// Converts the asset loader to ES5-compatible syntax so older
+// environments don't choke on class/bind usage while keeping all
+// existing loading stats, fallbacks, and manifest handling.
 // ============================================================
 
-const ASSET_PATHS = {
-    // Base directory (relative to index.html)
-    BASE: "assets/",
-    
-    // Subdirectories - edit these to match your structure
-    FOLDERS: {
-        PLAYER: "player/",
-        ENEMIES: "enemies/",
-        NPCS: "npcs/",
-        MODELS: "models/",
-        ENVIRONMENT: "environment/",
-        ANIMATIONS: "animations/",
-        SFX: "sfx/"
-    },
-    
-    // Player character models
-    PLAYER_MODELS: {
-        knight: "knight03.glb"  // Fixed: match actual filename (no dot)
-        // Add more: mage: "mage.01.glb"
-    },
-    
-    // Enemy models
-    ENEMY_MODELS: {
-        wolf: "wolf.glb"
-        // Add more: goblin: "goblin.glb"
-        //goblin: "goblin.glb"
-    },
-    
-    // NPC models (friendly characters)
-    NPC_MODELS: {
-        // Example: villager: "villager_01.glb"
-    },
-    
-    // Generic models (shared objects)
-    GENERIC_MODELS: {
-        // Example: tree: "tree_01.glb"
-    },
-    
-    // Environment textures (all in environment folder)
-    TEXTURES: {
-        sky_hdri: "DaySkyHDRI023B_4K_TONEMAPPED.jpg",
-        grass: "Grass004_2K-JPG_Color.jpg",
-        water_bump: "water_bump.jpg",
-        rain: "rain.jpg",
-        snowflake: "snowflake.jpg"
-    },
-    
-    // Helper functions to build full paths
-    getPlayerPath: function(modelKey) {
-        if (!this.PLAYER_MODELS[modelKey]) return null;
-        return this.BASE + this.FOLDERS.PLAYER + this.PLAYER_MODELS[modelKey];
-    },
-    
-    getEnemyPath: function(modelKey) {
-        if (!this.ENEMY_MODELS[modelKey]) return null;
-        return this.BASE + this.FOLDERS.ENEMIES + this.ENEMY_MODELS[modelKey];
-    },
-    
-    getNPCPath: function(modelKey) {
-        if (!this.NPC_MODELS[modelKey]) return null;
-        return this.BASE + this.FOLDERS.NPCS + this.NPC_MODELS[modelKey];
-    },
-    
-    getModelPath: function(modelKey) {
-        if (!this.GENERIC_MODELS[modelKey]) return null;
-        return this.BASE + this.FOLDERS.MODELS + this.GENERIC_MODELS[modelKey];
-    },
-    
-    getTexturePath: function(textureKey) {
-        if (!this.TEXTURES[textureKey]) return null;
-        return this.BASE + this.FOLDERS.ENVIRONMENT + this.TEXTURES[textureKey];
-    },
-    
-    // Get any asset path by category and key
-    getPath: function(category, key) {
-        switch(category) {
-            case 'player': return this.getPlayerPath(key);
-            case 'enemy': return this.getEnemyPath(key);
-            case 'npc': return this.getNPCPath(key);
-            case 'model': return this.getModelPath(key);
-            case 'texture': return this.getTexturePath(key);
-            default: 
-                console.warn('[AssetPaths] Unknown category:', category);
-                return null;
-        }
+// ==================== ASSET MANIFEST ====================
+// Safely retrieve MANIFEST_DATA from CONFIG.ASSETS
+function getManifestData() {
+    if (typeof CONFIG !== 'undefined' && CONFIG.ASSETS) {
+        return CONFIG.ASSETS;
     }
-};
+    // Safe fallback structure
+    return {
+        BASE_PATH: "assets/", // Changed fallback to relative
+        CHARACTERS: {},
+        ENVIRONMENT: {}
+    };
+}
 
-// Make globally available
-window.ASSET_PATHS = ASSET_PATHS;
+var MANIFEST_DATA = getManifestData();
 
-// ============================================================
-// ASSET MANAGER CLASS
-// Handles loading and caching of 3D models
-// ============================================================
+// ==================== ASSET MANAGER ====================
+function AssetManager(scene) {
+    this.scene = scene;
+    this.assets = {};
+    this.stats = {
+        requested: 0,
+        loaded: 0
+    };
 
-class AssetManager {
-    constructor(scene) {
-        this.scene = scene;
-        this.assets = {}; // Loaded assets cache
-        this.stats = { 
-            requested: 0, 
-            loaded: 0, 
-            failed: 0 
-        };
-        this.loader = new BABYLON.AssetsManager(scene);
-        
-        console.log('[Assets] Manager initialized');
-        console.log('[Assets] Base path:', ASSET_PATHS.BASE);
-    }
-
-    async loadAll() {
-        console.log('[Assets] Starting asset load...');
-        
-        // Load all player models
-        for (const key in ASSET_PATHS.PLAYER_MODELS) {
-            this.stats.requested++;
-            this.loadModel('player', key);
-        }
-        
-        // Load all enemy models
-        for (const key in ASSET_PATHS.ENEMY_MODELS) {
-            this.stats.requested++;
-            this.loadModel('enemy', key);
-        }
-        
-        // Load all NPC models
-        for (const key in ASSET_PATHS.NPC_MODELS) {
-            this.stats.requested++;
-            this.loadModel('npc', key);
-        }
-        
-        // Load all generic models
-        for (const key in ASSET_PATHS.GENERIC_MODELS) {
-            this.stats.requested++;
-            this.loadModel('model', key);
-        }
-        
-        return new Promise((resolve) => {
-            if (this.stats.requested === 0) {
-                console.log('[Assets] No assets to load');
-                resolve();
-                return;
+    // Guard against missing BABYLON or scene to avoid crashes in constrained contexts.
+    if (typeof BABYLON !== 'undefined' && scene) {
+        try {
+            this.loader = new BABYLON.AssetsManager(scene);
+            // Some constrained environments patch prototypes; make sure critical methods exist.
+            if (!this.loader.load || !this.loader.addMeshTask) {
+                throw new Error('AssetsManager incomplete');
             }
-            
-            this.loader.onFinish = (tasks) => {
-                console.log(`[Assets] Load complete. ${this.stats.loaded}/${this.stats.requested} succeeded, ${this.stats.failed} failed`);
-                resolve();
-            };
-            
-            this.loader.load();
-        });
+        } catch (err) {
+            console.warn('[Assets] Failed to create AssetsManager; running without loader.', err);
+            this.loader = null;
+        }
+    } else {
+        this.loader = null;
     }
-    
-    loadModel(category, key) {
-        const fullPath = ASSET_PATHS.getPath(category, key);
-        
-        if (!fullPath) {
-            console.error(`[Assets] Could not build path for ${category}.${key}`);
-            this.stats.failed++;
+
+    // Preserve method bindings manually for legacy callers that detach helpers.
+    var self = this;
+    this.loadAll = function () { return AssetManager.prototype.loadAll.call(self); };
+    this.loadAsset = function (key, assetData, category) {
+        return AssetManager.prototype.loadAsset.call(self, key, assetData, category);
+    };
+    this.loadModel = function (key, assetData, category) {
+        return AssetManager.prototype.loadModel.call(self, key, assetData, category);
+    };
+    this.printStats = function () { return AssetManager.prototype.printStats.call(self); };
+}
+
+AssetManager.prototype.loadAll = function () {
+    console.log('[Assets] Starting asset load...');
+
+    var characters = MANIFEST_DATA.CHARACTERS || {};
+    var environment = MANIFEST_DATA.ENVIRONMENT || {};
+
+    // Use whatever loader the runtime exposes (legacy callers expect
+    // loadAsset, newer code calls loadModel). Manual binding above guarantees the
+    // function exists even if detached from the instance.
+    var loadFn = (typeof this.loadAsset === 'function')
+        ? this.loadAsset
+        : this.loadModel;
+
+    // Load Character Models
+    for (var key in characters) {
+        var assetDataChar = characters[key];
+        this.stats.requested++;
+        loadFn(key, assetDataChar, 'characters');
+    }
+
+    // Load Environment Models
+    for (var envKey in environment) {
+        var assetDataEnv = environment[envKey];
+        this.stats.requested++;
+        loadFn(envKey, assetDataEnv, 'environment');
+    }
+
+    if (this.stats.requested === 0) {
+        console.log('[Assets] No assets defined to load.');
+        return;
+    }
+
+    var self = this;
+    return new Promise(function (resolve) {
+        if (!self.loader) {
+            console.warn('[Assets] Babylon AssetsManager unavailable; skipping load.');
+            resolve([]);
             return;
         }
-        
-        // Split path into directory and filename for Babylon loader
-        const lastSlash = fullPath.lastIndexOf('/');
-        const directory = fullPath.substring(0, lastSlash + 1);
-        const filename = fullPath.substring(lastSlash + 1);
-        
-        const taskName = `load_${category}_${key}`;
-        const task = this.loader.addMeshTask(taskName, "", directory, filename);
-        
-        task.onSuccess = (task) => {
-            this.stats.loaded++;
-            
-            // Cache by both key and filename
-            this.assets[key] = task.loadedMeshes;
-            this.assets[filename] = task.loadedMeshes;
-            
-            // Disable loaded meshes (they'll be cloned when needed)
-            task.loadedMeshes.forEach(mesh => {
-                mesh.setEnabled(false);
-                mesh.isPickable = true;
-            });
-            
-            console.log(`[Assets] ✓ Loaded ${category}:`, key);
+
+        self.loader.onFinish = function (tasks) {
+            console.log('[Assets] Finished loading ' + tasks.length + ' tasks.');
+            resolve(tasks);
         };
-        
-        task.onError = (task, message, exception) => {
-            this.stats.failed++;
-            console.error(`[Assets] ✗ Failed to load ${category}: ${key}`);
-            console.error(`[Assets]   Path: ${fullPath}`);
-            console.error(`[Assets]   Error:`, message);
+        self.loader.onError = function (task) {
+            console.warn('[Assets] Failed to load ' + task.name + '. Check the path: ' + task.url);
         };
+
+        // Start the loading process
+        self.loader.load();
+    }).then(function () {
+        self.printStats();
+    });
+};
+
+// Legacy compatibility: some callers still expect a loadAsset helper
+// that forwards to the mesh loader. Keep it as a thin wrapper to
+// prevent "loadAsset is not a function" crashes during bootstrap.
+AssetManager.prototype.loadAsset = function (key, assetData, category) {
+    return this.loadModel(key, assetData, category);
+};
+
+AssetManager.prototype.loadModel = function (key, assetData, category) {
+    if (!this.loader) {
+        console.warn('[Assets] Loader unavailable; cannot load ' + category + ' asset ' + key + '.');
+        return;
     }
-    
-    getAsset(key) {
-        return this.assets[key] || null;
-    }
-    
-    hasAsset(key) {
-        return !!this.assets[key];
-    }
-    
-    cloneAsset(key, newName) {
-        const asset = this.getAsset(key);
-        if (!asset) {
-            console.warn('[Assets] Cannot clone, asset not found:', key);
-            return null;
-        }
-        
-        const clonedMeshes = [];
-        asset.forEach(mesh => {
-            const cloned = mesh.clone(newName + "_" + mesh.name, null);
-            cloned.setEnabled(true);
-            clonedMeshes.push(cloned);
-        });
-        
-        return clonedMeshes;
-    }
-    
-    // Load a texture (for terrain, water, etc.)
-    loadTexture(path, options = {}) {
-        return new Promise((resolve, reject) => {
-            if (!path) {
-                console.warn('[Assets] No texture path provided');
-                resolve(null);
-                return;
-            }
-            
-            try {
-                const texture = new BABYLON.Texture(
-                    path, 
-                    this.scene,
-                    false,  // noMipmap = false (use mipmaps for better quality)
-                    true,   // invertY
-                    BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
-                    () => {
-                        // onLoad callback
-                        console.log(`[Assets] ✓ Texture loaded: ${path}`);
-                        resolve(texture);
-                    },
-                    () => {
-                        // onError callback
-                        console.warn(`[Assets] ✗ Failed to load texture: ${path}`);
-                        resolve(null); // Resolve with null instead of reject
-                    }
-                );
-                
-                // Apply scaling if provided
-                if (options.uScale) texture.uScale = options.uScale;
-                if (options.vScale) texture.vScale = options.vScale;
-                
-            } catch (error) {
-                console.error('[Assets] Error creating texture:', error);
-                resolve(null);
-            }
-        });
+
+    var safeData = assetData || {};
+    var modelName = safeData.model;
+
+    if (!modelName) {
+        console.warn('[Assets] Missing model name for ' + category + ' asset ' + key + '. Skipping load.');
+        return;
     }
     
     // Load a model directly (for NPCs, enemies, etc.)
@@ -305,51 +176,72 @@ class AssetManager {
     
     // ========== PROCEDURAL FALLBACKS ==========
 
-    createProceduralMaterial(name = 'fallback', color = new BABYLON.Color3(0.5, 0.5, 0.5)) {
-        const mat = new BABYLON.StandardMaterial(name + '_mat', this.scene);
-        mat.diffuseColor = color;
-        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-        mat.emissiveColor = color.scale(0.1); // Slight glow for visibility
-        return mat;
+    var taskName = category + '_' + key;
+    var basePath = this._resolveRootPath(safeData.path);
+
+    var task = this.loader.addMeshTask(taskName, "", basePath, modelName);
+    task.required = safeData.required || false;
+
+    var self = this;
+    task.onSuccess = function (taskResult) {
+        self.stats.loaded++;
+        // Store by task name
+        self.assets[taskName] = taskResult.loadedMeshes;
+        // Store by simple config key (e.g., 'knight') for easy Player/World lookup
+        self.assets[key] = taskResult.loadedMeshes;
+        // Also store by the exact model filename (e.g., 'Knight03.glb') for more explicit lookups
+        self.assets[modelName] = taskResult.loadedMeshes;
+    };
+
+    task.onError = function () {
+        self.assets[taskName] = null;
+        self.assets[key] = null;
+        self.assets[modelName] = null;
+    };
+};
+
+AssetManager.prototype._resolveRootPath = function (pathFromConfig) {
+    var basePath = MANIFEST_DATA.BASE_PATH || '';
+    var root = pathFromConfig || basePath;
+
+    var isAbsolute = /^https?:\/\//.test(root) || root.indexOf('/') === 0;
+    var alreadyHasBase = !isAbsolute && basePath && root.indexOf(basePath) === 0;
+
+    if (!isAbsolute && !alreadyHasBase && basePath) {
+        root = basePath + root;
     }
 
-    createProceduralTerrain(typeName) {
-        const mat = new BABYLON.StandardMaterial('proc_' + typeName, this.scene);
-        
-        const colors = {
-            grass: new BABYLON.Color3(0.3, 0.6, 0.3),
-            dirt: new BABYLON.Color3(0.4, 0.3, 0.2),
-            gravel: new BABYLON.Color3(0.5, 0.5, 0.5),
-            sand: new BABYLON.Color3(0.8, 0.7, 0.5)
-        };
-        
-        mat.diffuseColor = colors[typeName] || colors.grass;
-        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-        
-        return mat;
-    }
-    
-    createProceduralSkybox() {
-        const skybox = BABYLON.MeshBuilder.CreateBox('skybox', { size: 1000 }, this.scene);
-        const skyMat = new BABYLON.StandardMaterial('skyMat', this.scene);
-        skyMat.backFaceCulling = false;
-        skyMat.diffuseColor = new BABYLON.Color3(0.5, 0.7, 0.9);
-        skyMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 0.9);
-        skybox.material = skyMat;
-        return skybox;
+    if (root && root.charAt(root.length - 1) !== '/') {
+        root += '/';
     }
 
-    dispose() {
-        for (const key in this.assets) {
-            const meshes = this.assets[key];
-            if (Array.isArray(meshes)) {
-                meshes.forEach(mesh => mesh.dispose());
-            }
-        }
-        this.assets = {};
-        console.log('[Assets] Disposed');
-    }
-}
+    return root;
+};
+
+AssetManager.prototype.getAsset = function (name) {
+    return this.assets[name] || null;
+};
+
+// ========== STATS ==========
+AssetManager.prototype.getStats = function () {
+    var successRate = this.stats.requested > 0 ?
+        ((this.stats.loaded / this.stats.requested) * 100).toFixed(1) : 0;
+
+    return {
+        requested: this.stats.requested,
+        loaded: this.stats.loaded,
+        successRate: successRate + '%'
+    };
+};
+
+AssetManager.prototype.printStats = function () {
+    var stats = this.getStats();
+    console.log('=== Asset Loading Statistics ===');
+    console.log('Requested: ' + stats.requested);
+    console.log('Loaded: ' + stats.loaded);
+    console.log('Success Rate: ' + stats.successRate);
+    console.log('================================');
+};
 
 window.AssetManager = AssetManager;
 // Alias for backward compatibility with World.js
