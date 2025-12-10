@@ -121,7 +121,6 @@ Enemy.prototype._initMesh = function (assetName) {
         this.mesh.position.copyFrom(this.position);
         this.mesh.isVisible = true;
     }
-};
 
 Enemy.prototype._initBehavior = function () {
     this.moveTimer = 0;
@@ -136,11 +135,24 @@ Enemy.prototype.update = function (deltaTime) {
     if (this.scene.game.player) {
         this.target = this.scene.game.player;
     }
+    // PATCH END
 
-    if (this.target) {
-        this._updateMovement(deltaTime);
+    createLights() {
+        this.sunLight = new BABYLON.DirectionalLight('sunLight', new BABYLON.Vector3(-1, -2, -1), this.scene);
+        this.sunLight.intensity = 1.0;
+        this.sunLight.diffuse = new BABYLON.Color3(1, 0.95, 0.9);
+        this.sunLight.specular = new BABYLON.Color3(1, 0.95, 0.9);
+
+        this.sunLight.shadowEnabled = true;
+        this.shadowGenerator = new BABYLON.ShadowGenerator(1024, this.sunLight);
+        this.shadowGenerator.useBlurExponentialShadowMap = true;
+        this.shadowGenerator.blurKernel = 32;
+
+        this.ambientLight = new BABYLON.HemisphericLight('ambientLight', new BABYLON.Vector3(0, 1, 0), this.scene);
+        this.ambientLight.intensity = 0.5;
+        this.ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
+        this.ambientLight.specular = new BABYLON.Color3(0.1, 0.1, 0.1);
     }
-};
 
 Enemy.prototype._updateMovement = function (deltaTime) {
     if (!this.mesh || !this.target.mesh) return;
@@ -178,7 +190,6 @@ Enemy.prototype._updateMovement = function (deltaTime) {
     } else if (this.state === "attack") {
         // Attack logic placeholder
     }
-};
 
 // World Class
 function World(scene) {
@@ -352,8 +363,7 @@ World.prototype.dispose = function () {
     this.loots.length = 0;
 };
 
-// Ensure World, Entity, Character, and Enemy are globally accessible
-window.World = World;
-window.Entity = Entity;
-window.Character = Character;
-window.Enemy = Enemy;
+// Exports
+if (typeof module !== 'undefined') {
+    module.exports = { World, NPC, Enemy, Item, SimplexNoise };
+}

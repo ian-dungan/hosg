@@ -227,8 +227,6 @@ Player.prototype.handlePointerDown = function (evt) {
                 if (attackAbility && attackAbility.isReady()) {
                     attackAbility.execute(this, this.target);
                 }
-            } else {
-                this.target = null;
             }
         } else {
             this.target = null;
@@ -277,7 +275,6 @@ Player.prototype._updateMovement = function (deltaTime) {
             var targetAngle = Math.atan2(moveVector.x, moveVector.z);
             this.visualMesh.rotation.y = targetAngle;
         }
-    }
 
     // Simple velocity dampening to prevent sliding indefinitely
     var horizontalVelocity = new BABYLON.Vector3(velocity.x, 0, velocity.z);
@@ -386,3 +383,4 @@ Player.prototype._updateCameraPosition = function () {
 
 // Ensure the Player class is globally accessible
 window.Player = Player;
+console.log('[Player] Player class loaded');

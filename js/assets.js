@@ -1,3 +1,7 @@
+// ===========================================================
+// HEROES OF SHADY GROVE - ASSET MANAGER v2.0.0
+// ===========================================================
+
 // ============================================================
 // HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.18 (ES5)
 // Converts the asset loader to ES5-compatible syntax so older
@@ -133,6 +137,44 @@ AssetManager.prototype.loadModel = function (key, assetData, category) {
         console.warn('[Assets] Missing model name for ' + category + ' asset ' + key + '. Skipping load.');
         return;
     }
+    
+    // Load a model directly (for NPCs, enemies, etc.)
+    async loadModel(path, options = {}) {
+        if (!path) {
+            console.warn('[Assets] No model path provided');
+            return null;
+        }
+        
+        try {
+            // Split path into directory and filename
+            const lastSlash = path.lastIndexOf('/');
+            const directory = lastSlash >= 0 ? path.substring(0, lastSlash + 1) : '';
+            const filename = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+            
+            console.log(`[Assets] Loading model: ${path}`);
+            
+            const result = await BABYLON.SceneLoader.ImportMeshAsync(
+                '',
+                directory,
+                filename,
+                this.scene
+            );
+            
+            // Apply scaling if provided
+            if (options.scaling && result.meshes[0]) {
+                result.meshes[0].scaling = options.scaling;
+            }
+            
+            console.log(`[Assets] ✓ Model loaded: ${path} (${result.meshes.length} meshes)`);
+            return result;
+            
+        } catch (error) {
+            console.error(`[Assets] ✗ Failed to load model: ${path}`, error);
+            return null;
+        }
+    }
+    
+    // ========== PROCEDURAL FALLBACKS ==========
 
     var taskName = category + '_' + key;
     var basePath = this._resolveRootPath(safeData.path);
@@ -202,3 +244,5 @@ AssetManager.prototype.printStats = function () {
 };
 
 window.AssetManager = AssetManager;
+// Alias for backward compatibility with World.js
+window.AssetLoader = AssetManager;

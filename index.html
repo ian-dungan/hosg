@@ -1,23 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <button onclick="game.toggleMusic()" style="position:absolute;top:10px;right:10px;z-index:100;">
+  🔊 Music
+</button>
   <meta charset="UTF-8" />
   <title>Heroes of Shady Grove</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+  <!-- Physics engine (Cannon.js) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+  <!-- Babylon.js core + loaders + GUI -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
 
+  <!-- Supabase JS SDK (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
-    // Make Supabase config available before our own scripts
-    window.SUPABASE_CONFIG = {
-      url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
-      key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-    };
-  </script>
 
   <style>
     html, body {
@@ -226,5 +226,12 @@
     }
 </script>
 
+        console.log("[Bootstrap] Starting game...");
+        game.start();
+      } catch (err) {
+        console.error("[Bootstrap] Game failed to start:", err);
+      }
+    });
+  </script>
 </body>
 </html>
