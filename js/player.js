@@ -17,10 +17,10 @@ class Player {
         // Swimming
         this.isSwimming = false;
         this.swimSpeed = 3.5;          // Swimming speed
-        this.swimGravity = -5;         // Reduced gravity in water
-        this.buoyancy = 3.0;           // Upward force in water
+        this.swimGravity = -1;         // Reduced gravity in water
+        this.buoyancy = 0.5;           // Upward force in water
         this.waterLevel = CONFIG.WORLD.WATER_LEVEL || 0;
-        this.waterDrag = 0.95;         // Damping in water
+        this.waterDrag = 0.9;         // Damping in water
 
         // Collider dimensions (used for physics + ground detection)
         this.colliderHeight = 1.8;
