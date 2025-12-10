@@ -14,14 +14,14 @@
         CHARACTERS: {
             PLAYER: {
                 knight: {
-                    model: ASSET_PATHS.getPlayerPath('knight'),
+                    model: ASSET_PATHS.FOLDERS.PLAYER + ASSET_PATHS.PLAYER_MODELS.knight,
                     offset: { x: 0, y: -0.9, z: 0 },
                     scale: 1.0
                 }
             },
             ENEMIES: {
                 wolf: {
-                    model: ASSET_PATHS.getEnemyPath('wolf'),
+                    model: ASSET_PATHS.FOLDERS.ENEMIES + ASSET_PATHS.ENEMY_MODELS.wolf,
                     offset: { x: 0, y: -0.5, z: 0 },
                     scale: 1.0
                 }
@@ -42,10 +42,6 @@
         
         WATER: {
             bump: ASSET_PATHS.getTexturePath('water_bump')
-        },
-        
-        SKYBOX: {
-            texture: ASSET_PATHS.getTexturePath('sky_hdri')
         },
         
         SKYBOX: ASSET_PATHS.getTexturePath('sky_hdri'),

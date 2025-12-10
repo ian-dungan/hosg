@@ -240,3 +240,5 @@ class AssetManager {
 }
 
 window.AssetManager = AssetManager;
+// Alias for backward compatibility with World.js
+window.AssetLoader = AssetManager;

@@ -904,8 +904,26 @@ class Item extends Entity {
         this.mesh.isPickable = true;
         this.mesh.checkCollisions = false; // No collision for ground items
 
-        // Simple material based on type
-        const material = this.scene.assetLoader.createProceduralMaterial('default');
+        // Simple material based on type - FIXED
+        const material = new BABYLON.StandardMaterial(`item_mat_${this.id}`, this.scene);
+        // Color based on item type
+        switch(this.type) {
+            case 'weapon':
+                material.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.2); // Yellow
+                break;
+            case 'armor':
+                material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.8); // Blue
+                break;
+            case 'consumable':
+                material.diffuseColor = new BABYLON.Color3(0.2, 0.8, 0.2); // Green
+                break;
+            case 'gold':
+                material.diffuseColor = new BABYLON.Color3(1.0, 0.84, 0.0); // Gold
+                break;
+            default:
+                material.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7); // Gray
+        }
+        material.emissiveColor = material.diffuseColor.scale(0.2); // Slight glow
         this.mesh.material = material;
     }
 
