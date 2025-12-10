@@ -389,7 +389,7 @@ class World {
         BABYLON.VertexData.ComputeNormals(positions, this.terrain.getIndices(), normals);
         this.terrain.setVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
         this.terrain.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
-        this.terrain.createVertexData();
+        this.terrain.refreshBoundingInfo(); // Update bounding box after modifying vertices
     }
     
     // Helper function to get the actual height at a given X/Z coordinate
