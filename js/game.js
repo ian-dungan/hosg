@@ -101,7 +101,7 @@ class Game {
 
   loadMusic() {
     // Load music file from your tracks folder
-    const musicPath = "sfx/tracks/eldertide.mp3"; // Change filename as needed
+    const musicPath = "assets/sfx/tracks/eldertide.mp3"; 
     
     try {
       this.music = new BABYLON.Sound(
@@ -110,21 +110,33 @@ class Game {
         this.scene,
         () => {
           console.log("[Game] ✓ Music loaded");
+          // Attempt immediate playback
+          this.music.play();
         },
         {
           loop: true,
-          autoplay: true, // Don't autoplay (browser restrictions)
+          autoplay: true, 
           volume: this.musicVolume
         }
       );
       
-      // Add click listener to start music (browsers require user interaction)
-      document.addEventListener('click', () => {
+      // Add interaction listener to ensure music plays if autoplay was blocked
+      const resumeAudio = () => {
         if (this.music && !this.music.isPlaying) {
           this.music.play();
-          console.log("[Game] ♪ Music started");
+          console.log("[Game] ♪ Music started (user interaction)");
         }
-      }, { once: true });
+        // Also resume AudioContext if suspended
+        if (BABYLON.Engine.audioEngine.audioContext.state === 'suspended') {
+             BABYLON.Engine.audioEngine.audioContext.resume();
+        }
+        
+        document.removeEventListener('click', resumeAudio);
+        document.removeEventListener('keydown', resumeAudio);
+      };
+
+      document.addEventListener('click', resumeAudio);
+      document.addEventListener('keydown', resumeAudio);
       
     } catch (err) {
       console.warn("[Game] Music file not found or failed to load:", err);
