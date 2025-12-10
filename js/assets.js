@@ -25,7 +25,7 @@ const ASSET_PATHS = {
     
     // Player character models
     PLAYER_MODELS: {
-        knight: "knight.03.glb"
+        knight: "knight03.glb"  // Fixed: match actual filename (no dot)
         // Add more: mage: "mage.01.glb"
     },
     
