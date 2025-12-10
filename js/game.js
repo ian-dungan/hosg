@@ -113,7 +113,7 @@ class Game {
         },
         {
           loop: true,
-          autoplay: false, // Don't autoplay (browser restrictions)
+          autoplay: true, // Don't autoplay (browser restrictions)
           volume: this.musicVolume
         }
       );
