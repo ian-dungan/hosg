@@ -33,7 +33,6 @@ const ASSET_PATHS = {
     ENEMY_MODELS: {
         wolf: "wolf.glb"
         // Add more: goblin: "goblin.glb"
-    ENEMY_MODELS: {
         goblin: "goblin.glb"
     },
     
