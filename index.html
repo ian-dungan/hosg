@@ -15,13 +15,6 @@
 
   <!-- Supabase JS SDK (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
-    // Make Supabase config available before our own scripts
-    window.SUPABASE_CONFIG = {
-      url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
-      key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
-    };
-  </script>
 
   <style>
     html, body {
@@ -41,14 +34,28 @@
 <body>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Load your game scripts in whatever order you were using -->
+  <!-- Load game scripts in correct order -->
+  
+  <!-- 1. Core configuration -->
   <script src="js/core.js"></script>
+  
+  <!-- 2. Asset system (MUST load before compatibility shim) -->
   <script src="js/assets.js"></script>
+  
+  <!-- 3. Asset compatibility shim (bridges old ASSET_MANIFEST to new ASSET_PATHS) -->
   <script src="js/asset-compat.js"></script>
+  
+  <!-- 4. Support classes -->
+  <script src="js/ability.js"></script>
+  <script src="js/item.js"></script>
+  
+  <!-- 5. Game systems -->
   <script src="js/world.js"></script>
   <script src="js/player.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/network.js"></script>
+  
+  <!-- 6. Main game orchestrator -->
   <script src="js/game.js"></script>
 
   <script>
