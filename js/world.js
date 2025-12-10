@@ -260,7 +260,7 @@ class World {
                     subdivisions: this.options.segments,
                     maxHeight: this.options.maxHeight,
                     onReady: () => {
-                        this.generateHeightmap();
+                        // Heightmap loaded successfully - use it as-is
                         this.terrain.checkCollisions = true;
 
                         // Apply physics impostor
@@ -284,8 +284,9 @@ class World {
             this.scene
         );
         } else {
-            // No heightmap - create flat ground
-            console.log('[World] No heightmap found, creating flat ground');
+            // No heightmap - create ground with FIXED SEED procedural generation
+            // This gives you consistent hills/valleys every time (static world)
+            console.log('[World] No heightmap, using fixed-seed procedural terrain');
             this.terrain = BABYLON.MeshBuilder.CreateGround(
                 "terrain",
                 {
@@ -295,6 +296,10 @@ class World {
                 },
                 this.scene
             );
+            
+            // Generate static terrain using FIXED SEED
+            // Same seed = same terrain every time = static world
+            this.generateHeightmap();
             
             this.terrain.checkCollisions = true;
             
