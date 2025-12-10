@@ -318,21 +318,26 @@ class World {
             // Same seed = same terrain every time = static world
             this.generateHeightmap();
             
+            // CRITICAL: Update bounding info and mark for collision after modifying vertices
+            this.terrain.refreshBoundingInfo();
             this.terrain.checkCollisions = true;
             
-            // Apply physics impostor
-            if (this.scene.getPhysicsEngine()) {
-                this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                    this.terrain,
-                    BABYLON.PhysicsImpostor.MeshImpostor,
-                    { mass: 0, friction: 1.0, restitution: 0.0 },
-                    this.scene
-                );
-                console.log('[World] ✓ Terrain physics created and enabled');
-            }
-            
-            // Create collision barrier
-            this.createCollisionBarrier();
+            // Wait for Babylon to process vertex modifications before creating physics
+            // This ensures physics impostor gets the updated mesh geometry
+            setTimeout(() => {
+                if (this.scene.getPhysicsEngine()) {
+                    this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
+                        this.terrain,
+                        BABYLON.PhysicsImpostor.MeshImpostor,
+                        { mass: 0, friction: 1.0, restitution: 0.0 },
+                        this.scene
+                    );
+                    console.log('[World] ✓ Terrain physics created and enabled');
+                }
+                
+                // Collision barrier disabled (was causing teleporting issues)
+                this.createCollisionBarrier();
+            }, 10); // Small delay for mesh processing
             
             // Apply terrain material
             this.createTerrainMaterial();
@@ -344,6 +349,12 @@ class World {
     }
 
     createCollisionBarrier() {
+        // DISABLED: Collision barrier was causing players to teleport back on hills
+        // The main terrain physics impostor is sufficient for collision
+        console.log('[World] Collision barrier disabled - using main terrain physics only');
+        return;
+        
+        /* ORIGINAL CODE - DISABLED
         const BARRIER_OFFSET = -0.1; // Offset below the terrain surface
         
         // Clone terrain mesh
@@ -363,6 +374,7 @@ class World {
             this.scene
         );
         console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y`);
+        */
     }
 
     generateHeightmap() {
@@ -389,7 +401,7 @@ class World {
         BABYLON.VertexData.ComputeNormals(positions, this.terrain.getIndices(), normals);
         this.terrain.setVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
         this.terrain.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
-        this.terrain.refreshBoundingInfo(); // Update bounding box after modifying vertices
+        // Note: refreshBoundingInfo() called in createTerrain() after this function
     }
     
     // Helper function to get the actual height at a given X/Z coordinate
