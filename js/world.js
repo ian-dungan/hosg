@@ -178,9 +178,9 @@ class World {
     createLights() {
         // Sun light (directional)
         this.sunLight = new BABYLON.DirectionalLight('sunLight', new BABYLON.Vector3(-1, -2, -1), this.scene);
-        this.sunLight.intensity = 1.0;
+        this.sunLight.intensity = 0.7;  // REDUCED from 1.0 - less harsh sunlight
         this.sunLight.diffuse = new BABYLON.Color3(1, 0.95, 0.9);
-        this.sunLight.specular = new BABYLON.Color3(1, 0.95, 0.9);
+        this.sunLight.specular = new BABYLON.Color3(0.3, 0.3, 0.3);  // REDUCED from bright - less shiny highlights
 
         // Enable shadows
         this.sunLight.shadowEnabled = true;
@@ -190,7 +190,7 @@ class World {
 
         // Ambient light
         this.ambientLight = new BABYLON.HemisphericLight('ambientLight', new BABYLON.Vector3(0, 1, 0), this.scene);
-        this.ambientLight.intensity = 0.5;
+        this.ambientLight.intensity = 0.4;  // REDUCED from 0.5 - softer ambient fill
         this.ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
         this.ambientLight.specular = new BABYLON.Color3(0.1, 0.1, 0.1);
     }
@@ -414,6 +414,7 @@ class World {
 
         this.terrainMaterial = new BABYLON.StandardMaterial('terrainMat', this.scene);
         this.terrainMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.4); // Base color
+        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // LOW specular - less shiny, reduces bright spots
         this.terrain.material = this.terrainMaterial;
 
         const grassData = window.ASSET_MANIFEST?.TERRAIN?.GROUND?.grass;
