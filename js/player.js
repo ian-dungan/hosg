@@ -13,6 +13,14 @@ class Player {
         this.jumpForce = 8.5;          // Jump initial velocity (units/second)
         this.gravity = -18;            // Gravity acceleration (units/second^2)
         this.rotationSpeed = 0.1;
+        
+        // Swimming
+        this.isSwimming = false;
+        this.swimSpeed = 3.5;          // Swimming speed
+        this.swimGravity = -5;         // Reduced gravity in water
+        this.buoyancy = 3.0;           // Upward force in water
+        this.waterLevel = CONFIG.WORLD.WATER_LEVEL || 0;
+        this.waterDrag = 0.95;         // Damping in water
 
         // Collider dimensions (used for physics + ground detection)
         this.colliderHeight = 1.8;
@@ -630,7 +638,7 @@ class Player {
 
         // Animation selection
         if (hasMovement) {
-            if (this.input.run && this.animations.run) {
+            if (this.input.run && this.animations.run && !this.isSwimming) {
                 this.playAnimation('run');
             } else if (this.animations.walk) {
                 this.playAnimation('walk');
@@ -639,16 +647,49 @@ class Player {
             this.playAnimation('idle');
         }
 
-        // GRAVITY (apply before movement so vertical velocity is included in displacement)
-        if (!this.onGround) {
-            this.verticalVelocity += this.gravity * dt;
-        } else {
-            this.verticalVelocity = 0;
-            this._gravityLogCount = 0; // Reset counter when on ground
+        // CHECK IF IN WATER (check head position)
+        const headY = this.mesh.position.y + (this.colliderHeight / 4); // Upper part of body
+        const wasSwimming = this.isSwimming;
+        this.isSwimming = headY < this.waterLevel;
+        
+        // Log swimming state changes
+        if (this.isSwimming && !wasSwimming) {
+            console.log('[Player] Entered water - swimming');
+        } else if (!this.isSwimming && wasSwimming) {
+            console.log('[Player] Exited water - walking');
         }
 
-        // JUMP (must release and press again to queue another jump)
-        if (this.jumpQueued && this.onGround) {
+        // GRAVITY / BUOYANCY
+        if (this.isSwimming) {
+            // Swimming physics - buoyancy and reduced gravity
+            this.verticalVelocity += this.swimGravity * dt;
+            
+            // Apply buoyancy force to float toward surface
+            if (headY < this.waterLevel) {
+                this.verticalVelocity += this.buoyancy * dt;
+            }
+            
+            // Water drag
+            this.verticalVelocity *= this.waterDrag;
+            
+            // Allow swimming up/down with jump/crouch
+            if (this.input.jump) {
+                this.verticalVelocity = Math.min(this.verticalVelocity + 5 * dt, 3);
+            }
+            // Note: Add crouch key if you want to swim down
+            
+        } else {
+            // Normal gravity
+            if (!this.onGround) {
+                this.verticalVelocity += this.gravity * dt;
+            } else {
+                this.verticalVelocity = 0;
+                this._gravityLogCount = 0; // Reset counter when on ground
+            }
+        }
+
+        // JUMP (only works on ground, not while swimming)
+        if (this.jumpQueued && this.onGround && !this.isSwimming) {
             this.verticalVelocity = jumpSpeed;
             this.onGround = false;
             this.isOnGround = false; // For UI
@@ -656,8 +697,8 @@ class Player {
             console.log('[Player] JUMP! verticalVel=' + this.verticalVelocity);
         }
 
-        // Combine horizontal + vertical displacement into one collision move for stability
-        const speed = this.input.run ? runSpeed : walkSpeed;
+        // Combine horizontal + vertical displacement
+        const speed = this.isSwimming ? this.swimSpeed : (this.input.run ? runSpeed : walkSpeed);
         const displacement = hasMovement ? moveDir.scale(speed * dt) : BABYLON.Vector3.Zero();
         displacement.y = this.verticalVelocity * dt;
 
@@ -680,59 +721,66 @@ class Player {
         }
 
         // Debug logging (first 10 frames in air)
-        if (!this.onGround && (!this._gravityLogCount || this._gravityLogCount < 10)) {
+        if (!this.onGround && !this.isSwimming && (!this._gravityLogCount || this._gravityLogCount < 10)) {
             if (!this._gravityLogCount) this._gravityLogCount = 0;
             console.log(`[Player] IN AIR: verticalVel=${this.verticalVelocity.toFixed(3)}, y=${this.mesh.position.y.toFixed(2)}`);
             this._gravityLogCount++;
         }
 
-        // GROUND CHECK - Direct terrain height query (NO RAYCASTING!)
-        let groundY = 0;
-        const prevY = previousPosition.y;
-
-        // Determine terrain height under the player using fixed World method
-        if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
-            groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
-        } else {
-            // Fallback: assume flat ground at y=0
-            groundY = 0;
-        }
-
-        const desiredY = groundY + this.groundOffset;
-        const distanceToGround = this.mesh.position.y - desiredY;
-
-        // Start by assuming we're in the air
-        let grounded = false;
-
-        // 1) Direct contact or slight penetration → snap to ground
-        if (distanceToGround <= 0.02) {
-            this.mesh.position.y = desiredY;
-            grounded = true;
-        }
-        // 2) moveWithCollisions blocked vertical motion while we were falling
-        else if (this.mesh.position.y === prevY && this.verticalVelocity <= 0) {
-            this.mesh.position.y = desiredY;
-            grounded = true;
-        }
-        // 3) Slope-hover correction: very close to the ground and almost not moving vertically
-        else if (distanceToGround > 0 && distanceToGround < 0.15 && this.verticalVelocity <= 0.1) {
-            this.mesh.position.y = desiredY;
-            grounded = true;
-        }
-
-        if (grounded) {
-            this.onGround = true;
-            this.isOnGround = true; // For UI
-            this.verticalVelocity = 0;
-        } else {
+        // GROUND CHECK - Skip if swimming
+        if (this.isSwimming) {
             this.onGround = false;
-            this.isOnGround = false; // For UI
-        }
+            this.isOnGround = false;
+        } else {
+            // Direct terrain height query (NO RAYCASTING!)
+            let groundY = 0;
+            const prevY = previousPosition.y;
 
-        // Prevent upward velocity from persisting while grounded
-        if (this.onGround && this.verticalVelocity > 0) {
-            this.verticalVelocity = 0;
-        }
+            // Determine terrain height under the player using fixed World method
+            if (this.scene.world && typeof this.scene.world.getTerrainHeight === 'function') {
+                groundY = this.scene.world.getTerrainHeight(this.mesh.position.x, this.mesh.position.z);
+            } else {
+                // Fallback: assume flat ground at y=0
+                groundY = 0;
+            }
+
+            const desiredY = groundY + this.groundOffset;
+            const distanceToGround = this.mesh.position.y - desiredY;
+
+            // Start by assuming we're in the air
+            let grounded = false;
+
+            // 1) Direct contact or slight penetration → snap to ground
+            if (distanceToGround <= 0.02) {
+                this.mesh.position.y = desiredY;
+                grounded = true;
+            }
+            // 2) moveWithCollisions blocked vertical motion while we were falling
+            else if (this.mesh.position.y === prevY && this.verticalVelocity <= 0) {
+                this.mesh.position.y = desiredY;
+                grounded = true;
+            }
+            // 3) Slope-hover correction: very close to the ground and almost not moving vertically
+            else if (distanceToGround > 0 && distanceToGround < 0.15 && this.verticalVelocity <= 0.1) {
+                this.mesh.position.y = desiredY;
+                grounded = true;
+            }
+
+            if (grounded) {
+                this.onGround = true;
+                this.isOnGround = true; // For UI
+                this.verticalVelocity = 0;
+            } else {
+                this.onGround = false;
+                this.isOnGround = false; // For UI
+            }
+
+            // Prevent upward velocity from persisting while grounded
+            if (this.onGround && this.verticalVelocity > 0) {
+                this.verticalVelocity = 0;
+            }
+        } // End of swimming check
+        
         // Gamepad camera control (right stick) - INVERTED
         if (this.camera && this.gamepad.connected) {
             const lookSpeed = 0.75;

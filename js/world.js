@@ -493,6 +493,8 @@ class World {
         );
         this.water.position.y = this.options.waterLevel;
         this.water.isPickable = false;
+        this.water.checkCollisions = false; // CRITICAL: No collision with water
+        // No physics impostor on water!
 
         // Check for WaterMaterial and AssetLoader
         if (typeof BABYLON.WaterMaterial === 'undefined' || !this.assetLoader) {
