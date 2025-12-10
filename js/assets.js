@@ -237,25 +237,27 @@ class AssetManager {
             }
             
             try {
-                const texture = new BABYLON.Texture(path, this.scene, 
-                    true,  // noMipmap
-                    true,  // invertY
-                    BABYLON.Texture.TRILINEAR_SAMPLINGMODE
+                const texture = new BABYLON.Texture(
+                    path, 
+                    this.scene,
+                    false,  // noMipmap = false (use mipmaps for better quality)
+                    true,   // invertY
+                    BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+                    () => {
+                        // onLoad callback
+                        console.log(`[Assets] ✓ Texture loaded: ${path}`);
+                        resolve(texture);
+                    },
+                    () => {
+                        // onError callback
+                        console.warn(`[Assets] ✗ Failed to load texture: ${path}`);
+                        resolve(null); // Resolve with null instead of reject
+                    }
                 );
                 
                 // Apply scaling if provided
                 if (options.uScale) texture.uScale = options.uScale;
                 if (options.vScale) texture.vScale = options.vScale;
-                
-                texture.onLoadObservable.addOnce(() => {
-                    console.log(`[Assets] ✓ Texture loaded: ${path}`);
-                    resolve(texture);
-                });
-                
-                texture.onErrorObservable.addOnce(() => {
-                    console.warn(`[Assets] ✗ Failed to load texture: ${path}`);
-                    resolve(null); // Resolve with null instead of reject
-                });
                 
             } catch (error) {
                 console.error('[Assets] Error creating texture:', error);
