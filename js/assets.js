@@ -1,462 +1,242 @@
+// ===========================================================
+// HEROES OF SHADY GROVE - ASSET MANAGER v2.0.0
+// ===========================================================
+
 // ============================================================
-// HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.8
-// Combined manifest + loader in one file
+// CENTRALIZED ASSET PATH CONFIGURATION
+// EDIT THIS SECTION TO CONFIGURE ALL ASSET PATHS
+// This overrides any other asset path settings in the game
 // ============================================================
 
-// ==================== ASSET MANIFEST ====================
-const ASSET_MANIFEST = {
-    BASE_PATH: 'assets/',
+const ASSET_PATHS = {
+    // Base directory (relative to index.html)
+    BASE: "assets/",
     
-    CONFIG: {
-        USE_ASSETS: true,
-        FALLBACK_TO_PROCEDURAL: true,
-        LOG_LOADING: true,
-        CACHE_ASSETS: true,
-        TEXTURE_ANISOTROPY: 4,
-        GENERATE_MIPMAPS: true
+    // Subdirectories - edit these to match your structure
+    FOLDERS: {
+        PLAYER: "player/",
+        ENEMIES: "enemies/",
+        NPCS: "npcs/",
+        MODELS: "models/",
+        ENVIRONMENT: "environment/",
+        ANIMATIONS: "animations/",
+        SFX: "sfx/"
     },
     
-    // ==================== CHARACTER MODELS ====================
-    CHARACTERS: {
-        PLAYER: {
-            knight: {
-                model: 'player/character/knight03.glb',
-                scale: 1.0,
-                offset: { x: 0, y: -0.9, z: 0 }, // Position relative to physics body
-                required: true,
-                animations: {
-                    idle: 'Idle',
-                    walk: 'Walk',
-                    run: 'Run',
-                    jump: 'Jump',
-                    attack: 'Attack'
-                }
-            }
-        },
-        NPCS: {
-            merchant: {
-                model: 'npcs/merchant.glb',
-                scale: 1.0,
-                required: false
-            },
-            guard: {
-                model: 'npcs/guard.glb',
-                scale: 1.0,
-                required: false
-            }
-        },
-        ENEMIES: {
-            wolf: {
-                model: 'enemies/wolf.glb',
-                scale: 0.02,
-                required: false
-            },
-            goblin: {
-                model: 'enemies/goblin.glb',
-                scale: 1.0,
-                required: false
-            }
-        }
+    // Player character models
+    PLAYER_MODELS: {
+        knight: "knight.03.glb"
+        // Add more: mage: "mage.01.glb"
     },
     
-    TERRAIN: {
-        GROUND: {
-            grass: {
-                diffuse: 'textures/terrain/grass_diffuse.jpg',
-                normal: 'textures/terrain/grass_normal.jpg',
-                ao: 'textures/ground/grass/Grass004_2K-JPG_AmbientOcclusion.jpg',
-                scale: 50,
-                required: true
-            },
-            dirt: {
-                diffuse: 'textures/terrain/dirt_diffuse.jpg',
-                normal: 'textures/terrain/dirt_normal.jpg',
-                ao: 'textures/terrain/dirt_ao.jpg',
-                scale: 50,
-                required: false
-            },
-            gravel: {
-                diffuse: 'textures/terrain/gravel_diffuse.jpg',
-                normal: 'textures/terrain/gravel_normal.jpg',
-                scale: 50,
-                required: false
-            },
-            sand: {
-                diffuse: 'textures/terrain/sand_diffuse.jpg',
-                normal: 'textures/terrain/sand_normal.jpg',
-                scale: 50,
-                required: false
-            }
-        }
+    // Enemy models
+    ENEMY_MODELS: {
+        wolf: "wolf.glb"
+        // Add more: goblin: "goblin.glb"
     },
     
-    WATER: {
-        diffuse: 'textures/water/water_diffuse.jpg',
-        bump: 'textures/water/water_bump.png',
-        normal: 'textures/water/water_normal.png'
+    // NPC models (friendly characters)
+    NPC_MODELS: {
+        // Example: villager: "villager_01.glb"
     },
     
-    SKYBOX: {
-        default: {
-            px: 'textures/skybox/default/px.jpg',
-            nx: 'textures/skybox/default/nx.jpg',
-            py: 'textures/skybox/default/py.jpg',
-            ny: 'textures/skybox/default/ny.jpg',
-            pz: 'textures/skybox/default/pz.jpg',
-            nz: 'textures/skybox/default/nz.jpg'
-        }
+    // Generic models (shared objects)
+    GENERIC_MODELS: {
+        // Example: tree: "tree_01.glb"
     },
     
-    ENEMIES: {
-        wolf: {
-            model: 'enemies/wolf.glb',
-            texture: 'textures/enemies/wolf_diffuse.png',
-            animations: ['idle', 'walk', 'run', 'attack', 'die'],
-            scale: 1.0
-        },
-        goblin: {
-            model: 'models/enemies/goblin.glb',
-            texture: 'textures/enemies/goblin_diffuse.png',
-            animations: ['idle', 'walk', 'run', 'attack', 'die'],
-            scale: 0.8
+    // Environment textures (all in environment folder)
+    TEXTURES: {
+        sky_hdri: "DaySkyHDRI023B_4K_TONEMAPPED.jpg",
+        grass: "Grass004_2K-JPG_Color.jpg",
+        water_bump: "water_bump.jpg",
+        rain: "rain.jpg",
+        snowflake: "snowflake.jpg"
+    },
+    
+    // Helper functions to build full paths
+    getPlayerPath: function(modelKey) {
+        if (!this.PLAYER_MODELS[modelKey]) return null;
+        return this.BASE + this.FOLDERS.PLAYER + this.PLAYER_MODELS[modelKey];
+    },
+    
+    getEnemyPath: function(modelKey) {
+        if (!this.ENEMY_MODELS[modelKey]) return null;
+        return this.BASE + this.FOLDERS.ENEMIES + this.ENEMY_MODELS[modelKey];
+    },
+    
+    getNPCPath: function(modelKey) {
+        if (!this.NPC_MODELS[modelKey]) return null;
+        return this.BASE + this.FOLDERS.NPCS + this.NPC_MODELS[modelKey];
+    },
+    
+    getModelPath: function(modelKey) {
+        if (!this.GENERIC_MODELS[modelKey]) return null;
+        return this.BASE + this.FOLDERS.MODELS + this.GENERIC_MODELS[modelKey];
+    },
+    
+    getTexturePath: function(textureKey) {
+        if (!this.TEXTURES[textureKey]) return null;
+        return this.BASE + this.FOLDERS.ENVIRONMENT + this.TEXTURES[textureKey];
+    },
+    
+    // Get any asset path by category and key
+    getPath: function(category, key) {
+        switch(category) {
+            case 'player': return this.getPlayerPath(key);
+            case 'enemy': return this.getEnemyPath(key);
+            case 'npc': return this.getNPCPath(key);
+            case 'model': return this.getModelPath(key);
+            case 'texture': return this.getTexturePath(key);
+            default: 
+                console.warn('[AssetPaths] Unknown category:', category);
+                return null;
         }
     }
 };
 
-// ==================== ASSET LOADER ====================
-class AssetLoader {
+// Make globally available
+window.ASSET_PATHS = ASSET_PATHS;
+
+// ============================================================
+// ASSET MANAGER CLASS
+// Handles loading and caching of 3D models
+// ============================================================
+
+class AssetManager {
     constructor(scene) {
         this.scene = scene;
-        this.basePath = ASSET_MANIFEST.BASE_PATH;
-        this.config = ASSET_MANIFEST.CONFIG;
-        
-        this.loadedAssets = new Map();
-        this.loadingPromises = new Map();
-        this.failedAssets = new Set();
-        
-        this.stats = {
-            requested: 0,
-            loaded: 0,
-            failed: 0,
-            procedural: 0
+        this.assets = {}; // Loaded assets cache
+        this.stats = { 
+            requested: 0, 
+            loaded: 0, 
+            failed: 0 
         };
+        this.loader = new BABYLON.AssetsManager(scene);
+        
+        console.log('[Assets] Manager initialized');
+        console.log('[Assets] Base path:', ASSET_PATHS.BASE);
     }
-    
-    // ========== TEXTURE LOADING ==========
-    async loadTexture(path, options = {}) {
-        if (!this.config.USE_ASSETS) {
-            return null;
-        }
 
-        // FIX: Prevent double-prefixing (e.g., 'assets/assets/...')
-        let cleanPath = path;
-        if (cleanPath.startsWith(this.basePath)) {
-            cleanPath = cleanPath.substring(this.basePath.length);
+    async loadAll() {
+        console.log('[Assets] Starting asset load...');
+        
+        // Load all player models
+        for (const key in ASSET_PATHS.PLAYER_MODELS) {
+            this.stats.requested++;
+            this.loadModel('player', key);
         }
         
-        const fullPath = this.basePath + cleanPath;
-        const cacheKey = 'texture_' + fullPath;
-        
-        if (this.loadedAssets.has(cacheKey)) {
-            return this.loadedAssets.get(cacheKey);
+        // Load all enemy models
+        for (const key in ASSET_PATHS.ENEMY_MODELS) {
+            this.stats.requested++;
+            this.loadModel('enemy', key);
         }
         
-        if (this.loadingPromises.has(cacheKey)) {
-            return await this.loadingPromises.get(cacheKey);
+        // Load all NPC models
+        for (const key in ASSET_PATHS.NPC_MODELS) {
+            this.stats.requested++;
+            this.loadModel('npc', key);
         }
         
-        this.stats.requested++;
-        
-        const loadPromise = this._loadTextureInternal(fullPath, options);
-        this.loadingPromises.set(cacheKey, loadPromise);
-        
-        try {
-            const texture = await loadPromise;
-            if (texture) {
-                this.loadedAssets.set(cacheKey, texture);
-                this.stats.loaded++;
-                if (this.config.LOG_LOADING) {
-                    console.log(`[Assets] ✓ Loaded texture: ${path}`);
-                }
-            } else {
-                this.failedAssets.add(fullPath);
-                this.stats.failed++;
-                if (this.config.LOG_LOADING) {
-                    console.warn(`[Assets] ✗ Failed texture: ${path}`);
-                }
-            }
-            return texture;
-        } catch (error) {
-            this.failedAssets.add(fullPath);
-            this.stats.failed++;
-            if (this.config.LOG_LOADING) {
-                console.warn(`[Assets] ✗ Error loading ${path}:`, error.message);
-            }
-            return null;
-        } finally {
-            this.loadingPromises.delete(cacheKey);
+        // Load all generic models
+        for (const key in ASSET_PATHS.GENERIC_MODELS) {
+            this.stats.requested++;
+            this.loadModel('model', key);
         }
-    }
-    
-    _loadTextureInternal(fullPath, options = {}) {
+        
         return new Promise((resolve) => {
-            try {
-                const texture = new BABYLON.Texture(fullPath, this.scene, 
-                    this.config.GENERATE_MIPMAPS, 
-                    false, 
-                    BABYLON.Texture.BILINEAR_SAMPLINGMODE,
-                    () => resolve(texture),
-                    () => resolve(null)
-                );
-                
-                if (this.config.TEXTURE_ANISOTROPY > 0) {
-                    texture.anisotropicFilteringLevel = this.config.TEXTURE_ANISOTROPY;
-                }
-                
-                if (options.uScale) texture.uScale = options.uScale;
-                if (options.vScale) texture.vScale = options.vScale;
-            } catch (error) {
-                resolve(null);
+            if (this.stats.requested === 0) {
+                console.log('[Assets] No assets to load');
+                resolve();
+                return;
             }
-        });
-    }
-    
-    // ========== TERRAIN TEXTURES ==========
-    async loadTerrainTextures(terrainTypes = ['grass']) {
-        const result = {};
-        
-        for (const typeName of terrainTypes) {
-            const terrainData = ASSET_MANIFEST.TERRAIN.GROUND[typeName];
-            if (!terrainData) continue;
             
-            result[typeName] = {
-                diffuse: null,
-                normal: null,
-                ao: null,
-                scale: terrainData.scale || 50
+            this.loader.onFinish = (tasks) => {
+                console.log(`[Assets] Load complete. ${this.stats.loaded}/${this.stats.requested} succeeded, ${this.stats.failed} failed`);
+                resolve();
             };
             
-            if (terrainData.diffuse) {
-                result[typeName].diffuse = await this.loadTexture(terrainData.diffuse, {
-                    uScale: terrainData.scale,
-                    vScale: terrainData.scale
-                });
-            }
-            
-            if (terrainData.normal) {
-                result[typeName].normal = await this.loadTexture(terrainData.normal, {
-                    uScale: terrainData.scale,
-                    vScale: terrainData.scale
-                });
-            }
-            
-            if (terrainData.ao) {
-                result[typeName].ao = await this.loadTexture(terrainData.ao, {
-                    uScale: terrainData.scale,
-                    vScale: terrainData.scale
-                });
-            }
-            
-            // If required texture failed, create procedural
-            if (terrainData.required && !result[typeName].diffuse) {
-                if (this.config.FALLBACK_TO_PROCEDURAL) {
-                    result[typeName].procedural = this.createProceduralTerrain(typeName);
-                    this.stats.procedural++;
-                }
-            }
-        }
-        
-        return result;
-    }
-    
-    // ========== SKYBOX ==========
-    async loadSkybox(skyboxName = 'default') {
-        const skyboxData = ASSET_MANIFEST.SKYBOX[skyboxName];
-        if (!skyboxData) return null;
-        
-        const faces = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
-        const textures = [];
-        
-        for (const face of faces) {
-            const path = skyboxData[face];
-            if (!path) return null;
-            
-            // loadTexture is now safe against double-prefixing
-            const texture = await this.loadTexture(path); 
-            if (!texture) return null;
-            textures.push(texture);
-        }
-        
-        return new BABYLON.CubeTexture.CreateFromImages(textures, this.scene);
-    }
-    
-    // ========== 3D MODELS ==========
-    async loadModel(path, options = {}) {
-        if (!this.config.USE_ASSETS) {
-            return null;
-        }
-
-        // FIX: Prevent double-prefixing (e.g., 'assets/assets/...')
-        let cleanPath = path;
-        if (cleanPath.startsWith(this.basePath)) {
-            cleanPath = cleanPath.substring(this.basePath.length);
-        }
-        
-        const fullPath = this.basePath + cleanPath;
-        const cacheKey = 'model_' + fullPath;
-        
-        if (this.loadedAssets.has(cacheKey)) {
-            return this._createModelInstance(this.loadedAssets.get(cacheKey), options);
-        }
-        
-        if (this.loadingPromises.has(cacheKey)) {
-            const modelData = await this.loadingPromises.get(cacheKey);
-            return this._createModelInstance(modelData, options);
-        }
-        
-        this.stats.requested++;
-        
-        const loadPromise = this._loadModelInternal(fullPath, options);
-        this.loadingPromises.set(cacheKey, loadPromise);
-        
-        try {
-            const modelData = await loadPromise;
-            if (modelData) {
-                this.loadedAssets.set(cacheKey, modelData);
-                this.stats.loaded++;
-                if (this.config.LOG_LOADING) {
-                    console.log(`[Assets] ✓ Loaded model: ${path}`);
-                }
-                return this._createModelInstance(modelData, options);
-            } else {
-                this.failedAssets.add(fullPath);
-                this.stats.failed++;
-                if (this.config.LOG_LOADING) {
-                    console.warn(`[Assets] ✗ Failed model: ${path}`);
-                }
-                return null;
-            }
-        } catch (error) {
-            this.failedAssets.add(fullPath);
-            this.stats.failed++;
-            if (this.config.LOG_LOADING) {
-                console.warn(`[Assets] ✗ Error loading ${path}:`, error.message);
-            }
-            return null;
-        } finally {
-            this.loadingPromises.delete(cacheKey);
-        }
-    }
-    
-    async _loadModelInternal(fullPath, options = {}) {
-        const lastSlash = fullPath.lastIndexOf('/') + 1;
-        const rootUrl = fullPath.substring(0, lastSlash);
-        const fileName = fullPath.substring(lastSlash);
-
-        return new Promise((resolve) => {
-            BABYLON.SceneLoader.ImportMesh(
-                '',
-                rootUrl,
-                fileName,
-                this.scene,
-                (meshes, particleSystems, skeletons, animationGroups) => {
-                    meshes.forEach(mesh => mesh.setEnabled(false));
-                    resolve({ meshes, animationGroups, skeletons });
-                },
-                null,
-                (scene, message) => {
-                    console.warn(`[Assets] ✗ ImportMesh failed for ${fullPath}: ${message}`);
-                    resolve(null);
-                }
-            );
+            this.loader.load();
         });
     }
     
-    _createModelInstance(modelData, options = {}) {
-        if (!modelData || !modelData.meshes || modelData.meshes.length === 0) {
+    loadModel(category, key) {
+        const fullPath = ASSET_PATHS.getPath(category, key);
+        
+        if (!fullPath) {
+            console.error(`[Assets] Could not build path for ${category}.${key}`);
+            this.stats.failed++;
+            return;
+        }
+        
+        // Split path into directory and filename for Babylon loader
+        const lastSlash = fullPath.lastIndexOf('/');
+        const directory = fullPath.substring(0, lastSlash + 1);
+        const filename = fullPath.substring(lastSlash + 1);
+        
+        const taskName = `load_${category}_${key}`;
+        const task = this.loader.addMeshTask(taskName, "", directory, filename);
+        
+        task.onSuccess = (task) => {
+            this.stats.loaded++;
+            
+            // Cache by both key and filename
+            this.assets[key] = task.loadedMeshes;
+            this.assets[filename] = task.loadedMeshes;
+            
+            // Disable loaded meshes (they'll be cloned when needed)
+            task.loadedMeshes.forEach(mesh => {
+                mesh.setEnabled(false);
+                mesh.isPickable = true;
+            });
+            
+            console.log(`[Assets] ✓ Loaded ${category}:`, key);
+        };
+        
+        task.onError = (task, message, exception) => {
+            this.stats.failed++;
+            console.error(`[Assets] ✗ Failed to load ${category}: ${key}`);
+            console.error(`[Assets]   Path: ${fullPath}`);
+            console.error(`[Assets]   Error:`, message);
+        };
+    }
+    
+    getAsset(key) {
+        return this.assets[key] || null;
+    }
+    
+    hasAsset(key) {
+        return !!this.assets[key];
+    }
+    
+    cloneAsset(key, newName) {
+        const asset = this.getAsset(key);
+        if (!asset) {
+            console.warn('[Assets] Cannot clone, asset not found:', key);
             return null;
         }
         
-        const root = modelData.meshes[0].createInstance('instance_' + Date.now());
-        root.position = options.position || BABYLON.Vector3.Zero();
-        root.rotation = options.rotation || BABYLON.Vector3.Zero();
-        root.scaling = options.scaling || BABYLON.Vector3.One();
-        root.setEnabled(true);
+        const clonedMeshes = [];
+        asset.forEach(mesh => {
+            const cloned = mesh.clone(newName + "_" + mesh.name, null);
+            cloned.setEnabled(true);
+            clonedMeshes.push(cloned);
+        });
         
-        const instances = [root];
-        for (let i = 1; i < modelData.meshes.length; i++) {
-            const instance = modelData.meshes[i].clone();
-            instance.parent = root;
-            instance.setEnabled(true);
-            instances.push(instance);
+        return clonedMeshes;
+    }
+    
+    dispose() {
+        for (const key in this.assets) {
+            const meshes = this.assets[key];
+            if (Array.isArray(meshes)) {
+                meshes.forEach(mesh => mesh.dispose());
+            }
         }
-        
-        const animations = modelData.animationGroups ? 
-            modelData.animationGroups.map(ag => ag.clone()) : [];
-        
-        return { root, instances, animationGroups: animations };
-    }
-    
-    // ========== PROCEDURAL FALLBACKS ==========
-
-    createProceduralMaterial(name = 'fallback', color = new BABYLON.Color3(0.5, 0.5, 0.5)) {
-        const mat = new BABYLON.StandardMaterial(name + '_mat', this.scene);
-        mat.diffuseColor = color;
-        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-        mat.emissiveColor = color.scale(0.1); // Slight glow for visibility
-        return mat;
-    }
-
-    createProceduralTerrain(typeName) {
-        const mat = new BABYLON.StandardMaterial('proc_' + typeName, this.scene);
-        
-        const colors = {
-            grass: new BABYLON.Color3(0.3, 0.6, 0.3),
-            dirt: new BABYLON.Color3(0.4, 0.3, 0.2),
-            gravel: new BABYLON.Color3(0.5, 0.5, 0.5),
-            sand: new BABYLON.Color3(0.8, 0.7, 0.5)
-        };
-        
-        mat.diffuseColor = colors[typeName] || colors.grass;
-        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-        
-        return mat;
-    }
-    
-    createProceduralSkybox() {
-        const skybox = BABYLON.MeshBuilder.CreateBox('skybox', { size: 1000 }, this.scene);
-        const skyMat = new BABYLON.StandardMaterial('skyMat', this.scene);
-        skyMat.backFaceCulling = false;
-        skyMat.diffuseColor = new BABYLON.Color3(0.5, 0.7, 0.9);
-        skyMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 0.9);
-        skybox.material = skyMat;
-        return skybox;
-    }
-    
-    // ========== STATS ==========
-    getStats() {
-        const successRate = this.stats.requested > 0 ? 
-            ((this.stats.loaded / this.stats.requested) * 100).toFixed(1) : 0;
-        
-        return {
-            ...this.stats,
-            successRate: successRate + '%'
-        };
-    }
-    
-    printStats() {
-        const stats = this.getStats();
-        console.log('=== Asset Loading Statistics ===');
-        console.log(`Requested: ${stats.requested}`);
-        console.log(`Loaded: ${stats.loaded}`);
-        console.log(`Failed: ${stats.failed}`);
-        console.log(`Procedural: ${stats.procedural}`);
-        console.log(`Success Rate: ${stats.successRate}`);
+        this.assets = {};
+        console.log('[Assets] Disposed');
     }
 }
 
-// ========== EXPORT ==========
-window.ASSET_MANIFEST = ASSET_MANIFEST;
-window.AssetLoader = AssetLoader;
-
-console.log('[Assets] Asset system loaded (v1.0.8)');
+window.AssetManager = AssetManager;
