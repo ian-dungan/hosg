@@ -304,43 +304,49 @@ class World {
             // No heightmap - create ground with FIXED SEED procedural generation
             // This gives you consistent hills/valleys every time (static world)
             console.log('[World] No heightmap, using fixed-seed procedural terrain');
-            this.terrain = BABYLON.MeshBuilder.CreateGround(
+            
+            // Use CreateGroundFromHeightMap approach (async) - even though file doesn't exist
+            // This ensures proper timing for physics creation AFTER geometry modification
+            this.terrain = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
                 "terrain",
+                "assets/heightmaps/placeholder.png", // Doesn't need to exist - onReady fires anyway
                 {
                     width: this.options.size,
                     height: this.options.size,
-                    subdivisions: this.options.segments
+                    subdivisions: this.options.segments,
+                    maxHeight: this.options.maxHeight,
+                    onReady: () => {
+                        // Apply procedural heightmap NOW
+                        this.generateHeightmap();
+                        this.terrain.checkCollisions = true;
+                        this.terrain.isPickable = true; // Ensure raycasting works for getHeightAt
+
+                        // Create physics impostor AFTER geometry is modified
+                        if (this.scene.getPhysicsEngine()) {
+                            this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
+                                this.terrain,
+                                BABYLON.PhysicsImpostor.MeshImpostor,
+                                { mass: 0, friction: 1.0, restitution: 0.0 },
+                                this.scene
+                            );
+                            console.log('[World] ✓ Terrain physics created and enabled');
+                        }
+                        
+                        // NO collision barrier
+                        console.log('[World] Collision barrier disabled');
+
+                        // Apply terrain material
+                        this.createTerrainMaterial(); 
+                    }
                 },
                 this.scene
             );
-            
-            // Generate static terrain using FIXED SEED
-            // Same seed = same terrain every time = static world
-            this.generateHeightmap();
-            
-            // CRITICAL: Update bounding info and mark for collision after modifying vertices
-            this.terrain.refreshBoundingInfo();
-            this.terrain.checkCollisions = true;
-            
-            // Wait for Babylon to process vertex modifications before creating physics
-            // This ensures physics impostor gets the updated mesh geometry
-            setTimeout(() => {
-                if (this.scene.getPhysicsEngine()) {
-                    this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                        this.terrain,
-                        BABYLON.PhysicsImpostor.MeshImpostor,
-                        { mass: 0, friction: 1.0, restitution: 0.0 },
-                        this.scene
-                    );
-                    console.log('[World] ✓ Terrain physics created and enabled');
-                }
-                
-                // Collision barrier disabled (was causing teleporting issues)
-                this.createCollisionBarrier();
-            }, 10); // Small delay for mesh processing
-            
-            // Apply terrain material
+
+            // Apply material early (updated again in onReady)
             this.createTerrainMaterial();
+            this.terrain.receiveShadows = true;
+            this.terrain.isPickable = true; // Ensure raycasting works
+            this.terrain.metadata = { isTerrain: true, type: 'ground' };
         }
 
         // Common setup for both terrain types
@@ -413,6 +419,11 @@ class World {
         const pickInfo = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
         
         return pickInfo.hit ? pickInfo.pickedPoint.y : 0;
+    }
+    
+    // Alias for player.js compatibility
+    getTerrainHeight(x, z) {
+        return this.getHeightAt(x, z);
     }
 
     // FIX: Removed 'async' keyword and replaced 'await' with '.then()' to fix SyntaxError
