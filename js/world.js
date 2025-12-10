@@ -215,8 +215,14 @@ class World {
     }
 
     createSkybox() {
-        // Try to load custom HDRI skybox
-        const skyPath = 'assets/sky/DaySkyHDRI007B_1K_TONEMAPPED.jpg';
+        // Try to load custom HDRI skybox from ASSET_MANIFEST
+        let skyPath = 'assets/environment/DaySkyHDRI023B_4K_TONEMAPPED.jpg'; // Default fallback
+        
+        // Check if ASSET_MANIFEST exists and has skybox config
+        if (window.ASSET_MANIFEST && window.ASSET_MANIFEST.SKYBOX) {
+            skyPath = window.ASSET_MANIFEST.SKYBOX;
+            console.log('[World] Using skybox from ASSET_MANIFEST:', skyPath);
+        }
 
         try {
             // Use PhotoDome for 360° panoramic skybox
@@ -273,20 +279,27 @@ class World {
     }
 
     createTerrain() {
-        // Create a large ground
-        this.terrain = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
-            "terrain",
-            "assets/heightmaps/default_map.png", // Placeholder image
-            {
-                width: this.options.size,
-                height: this.options.size,
-                subdivisions: this.options.segments,
-                maxHeight: this.options.maxHeight,
-                onReady: () => {
-                    this.generateHeightmap();
-                    this.terrain.checkCollisions = true;
+        // Check if heightmap is available in ASSET_MANIFEST
+        let heightmapPath = null;
+        if (window.ASSET_MANIFEST && window.ASSET_MANIFEST.TERRAIN && window.ASSET_MANIFEST.TERRAIN.HEIGHTMAP) {
+            heightmapPath = window.ASSET_MANIFEST.TERRAIN.HEIGHTMAP;
+        }
+        
+        if (heightmapPath) {
+            // Create terrain from heightmap if available
+            this.terrain = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
+                "terrain",
+                heightmapPath,
+                {
+                    width: this.options.size,
+                    height: this.options.size,
+                    subdivisions: this.options.segments,
+                    maxHeight: this.options.maxHeight,
+                    onReady: () => {
+                        this.generateHeightmap();
+                        this.terrain.checkCollisions = true;
 
-                    // Apply physics impostor
+                        // Apply physics impostor
                     if (this.scene.getPhysicsEngine()) {
                         this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
                             this.terrain,
@@ -306,12 +319,41 @@ class World {
             },
             this.scene
         );
+        } else {
+            // No heightmap - create flat ground
+            console.log('[World] No heightmap found, creating flat ground');
+            this.terrain = BABYLON.MeshBuilder.CreateGround(
+                "terrain",
+                {
+                    width: this.options.size,
+                    height: this.options.size,
+                    subdivisions: this.options.segments
+                },
+                this.scene
+            );
+            
+            this.terrain.checkCollisions = true;
+            
+            // Apply physics impostor
+            if (this.scene.getPhysicsEngine()) {
+                this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    this.terrain,
+                    BABYLON.PhysicsImpostor.MeshImpostor,
+                    { mass: 0, friction: 1.0, restitution: 0.0 },
+                    this.scene
+                );
+                console.log('[World] ✓ Terrain physics created and enabled');
+            }
+            
+            // Create collision barrier
+            this.createCollisionBarrier();
+            
+            // Apply terrain material
+            this.createTerrainMaterial();
+        }
 
-        // Load and apply material
-        this.createTerrainMaterial();
+        // Common setup for both terrain types
         this.terrain.receiveShadows = true;
-
-        // Metadata for fast access
         this.terrain.metadata = { isTerrain: true, type: 'ground' };
     }
 
@@ -590,6 +632,17 @@ class World {
     dispose() { /* ... implementation omitted ... */ }
 }
 
+// ============================================================================
+// Entity Base Class - Base for NPCs, Enemies, Items
+// ============================================================================
+class Entity {
+    constructor(scene, position) {
+        this.scene = scene;
+        this.position = position ? new BABYLON.Vector3(position.x, position.y, position.z) : new BABYLON.Vector3(0, 0, 0);
+        this.mesh = null;
+    }
+}
+
 // NPC Class (inherits from Entity)
 class NPC extends Entity {
     // ... NPC implementation (omitted for brevity)
@@ -617,14 +670,22 @@ class NPC extends Entity {
         }, 5000 + Math.random() * 5000);
     }
     
-    // Fallback mesh creator
+    // Fallback mesh creator - FIXED to not use assetLoader
     createPlaceholderMesh() {
+        if (!this.scene) {
+            console.error('[NPC] Scene is null, cannot create placeholder mesh');
+            return;
+        }
+        
         this.mesh = BABYLON.MeshBuilder.CreateCylinder(`npc_placeholder_${this.id}`, { height: 1.8, diameter: 0.8 }, this.scene);
         this.mesh.position.copyFrom(this.position);
         this.mesh.metadata = { isNPC: true, id: this.id };
-        // Set material
-        const material = this.scene.assetLoader.createProceduralMaterial('npc');
+        
+        // Create simple material - FIXED
+        const material = new BABYLON.StandardMaterial(`npc_mat_${this.id}`, this.scene);
+        material.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.8); // Blue color for NPCs
         this.mesh.material = material;
+        
         // Enable shadows
         this.mesh.receiveShadows = true;
         if (this.scene.shadowGenerator) {
@@ -756,14 +817,22 @@ class Enemy extends NPC {
         }
     }
     
-    // Fallback mesh creator for enemy
+    // Fallback mesh creator for enemy - FIXED to not use assetLoader
     createPlaceholderMesh() {
+        if (!this.scene) {
+            console.error('[Enemy] Scene is null, cannot create placeholder mesh');
+            return;
+        }
+        
         this.mesh = BABYLON.MeshBuilder.CreateBox(`enemy_placeholder_${this.id}`, { width: 0.5, height: 1.2, depth: 0.5 }, this.scene);
         this.mesh.position.copyFrom(this.position);
         this.mesh.metadata = { isEnemy: true, id: this.id };
-        // Set material
-        const material = this.scene.assetLoader.createProceduralMaterial('enemy');
+        
+        // Create simple material - FIXED
+        const material = new BABYLON.StandardMaterial(`enemy_mat_${this.id}`, this.scene);
+        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2); // Red color for enemies
         this.mesh.material = material;
+        
         // Enable shadows
         this.mesh.receiveShadows = true;
         if (this.scene.shadowGenerator) {

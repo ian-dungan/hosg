@@ -48,6 +48,8 @@
             texture: ASSET_PATHS.getTexturePath('sky_hdri')
         },
         
+        SKYBOX: ASSET_PATHS.getTexturePath('sky_hdri'),
+        
         PARTICLES: {
             rain: ASSET_PATHS.getTexturePath('rain'),
             snow: ASSET_PATHS.getTexturePath('snowflake')
