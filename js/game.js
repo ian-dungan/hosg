@@ -34,6 +34,8 @@ class Game {
     this.player = null;
     this.ui = null;
     this.network = null;
+    this.music = null;
+    this.musicVolume = 0.3; // 30% volume by default
 
     this._lastFrameTime = performance.now();
     this._running = false;
@@ -90,8 +92,63 @@ class Game {
       console.warn("[Game] NetworkManager not defined.");
     }
 
+    // Load background music
+    this.loadMusic();
+
     // Start render loop
     this.start();
+  }
+
+  loadMusic() {
+    // Load music file from your tracks folder
+    const musicPath = "assets/sfx/tracks/background.mp3"; // Change filename as needed
+    
+    try {
+      this.music = new BABYLON.Sound(
+        "backgroundMusic",
+        musicPath,
+        this.scene,
+        () => {
+          console.log("[Game] ✓ Music loaded");
+        },
+        {
+          loop: true,
+          autoplay: false, // Don't autoplay (browser restrictions)
+          volume: this.musicVolume
+        }
+      );
+      
+      // Add click listener to start music (browsers require user interaction)
+      document.addEventListener('click', () => {
+        if (this.music && !this.music.isPlaying) {
+          this.music.play();
+          console.log("[Game] ♪ Music started");
+        }
+      }, { once: true });
+      
+    } catch (err) {
+      console.warn("[Game] Music file not found or failed to load:", err);
+    }
+  }
+
+  toggleMusic() {
+    if (!this.music) return;
+    
+    if (this.music.isPlaying) {
+      this.music.pause();
+      console.log("[Game] Music paused");
+    } else {
+      this.music.play();
+      console.log("[Game] Music playing");
+    }
+  }
+
+  setMusicVolume(volume) {
+    // volume: 0.0 to 1.0
+    this.musicVolume = Math.max(0, Math.min(1, volume));
+    if (this.music) {
+      this.music.setVolume(this.musicVolume);
+    }
   }
 
   start() {
