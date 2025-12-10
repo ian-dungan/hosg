@@ -227,6 +227,79 @@ class AssetManager {
         return clonedMeshes;
     }
     
+    // Load a texture (for terrain, water, etc.)
+    loadTexture(path, options = {}) {
+        return new Promise((resolve, reject) => {
+            if (!path) {
+                console.warn('[Assets] No texture path provided');
+                resolve(null);
+                return;
+            }
+            
+            try {
+                const texture = new BABYLON.Texture(path, this.scene, 
+                    true,  // noMipmap
+                    true,  // invertY
+                    BABYLON.Texture.TRILINEAR_SAMPLINGMODE
+                );
+                
+                // Apply scaling if provided
+                if (options.uScale) texture.uScale = options.uScale;
+                if (options.vScale) texture.vScale = options.vScale;
+                
+                texture.onLoadObservable.addOnce(() => {
+                    console.log(`[Assets] ✓ Texture loaded: ${path}`);
+                    resolve(texture);
+                });
+                
+                texture.onErrorObservable.addOnce(() => {
+                    console.warn(`[Assets] ✗ Failed to load texture: ${path}`);
+                    resolve(null); // Resolve with null instead of reject
+                });
+                
+            } catch (error) {
+                console.error('[Assets] Error creating texture:', error);
+                resolve(null);
+            }
+        });
+    }
+    
+    // Load a model directly (for NPCs, enemies, etc.)
+    async loadModel(path, options = {}) {
+        if (!path) {
+            console.warn('[Assets] No model path provided');
+            return null;
+        }
+        
+        try {
+            // Split path into directory and filename
+            const lastSlash = path.lastIndexOf('/');
+            const directory = lastSlash >= 0 ? path.substring(0, lastSlash + 1) : '';
+            const filename = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+            
+            console.log(`[Assets] Loading model: ${path}`);
+            
+            const result = await BABYLON.SceneLoader.ImportMeshAsync(
+                '',
+                directory,
+                filename,
+                this.scene
+            );
+            
+            // Apply scaling if provided
+            if (options.scaling && result.meshes[0]) {
+                result.meshes[0].scaling = options.scaling;
+            }
+            
+            console.log(`[Assets] ✓ Model loaded: ${path} (${result.meshes.length} meshes)`);
+            return result;
+            
+        } catch (error) {
+            console.error(`[Assets] ✗ Failed to load model: ${path}`, error);
+            return null;
+        }
+    }
+    
     dispose() {
         for (const key in this.assets) {
             const meshes = this.assets[key];
