@@ -101,7 +101,7 @@ class Game {
 
   loadMusic() {
     // Load music file from your tracks folder
-    const musicPath = "assets/sfx/tracks/background.mp3"; // Change filename as needed
+    const musicPath = "assets/sfx/tracks/eldertide.mp3"; // Change filename as needed
     
     try {
       this.music = new BABYLON.Sound(
