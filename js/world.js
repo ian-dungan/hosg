@@ -7,9 +7,17 @@ class SimplexNoise {
             [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]
         ];
 
+        // Proper seeded permutation table generation
         this.p = [];
         for (let i = 0; i < 256; i++) {
-            this.p[i] = Math.floor(this.lerp(seed, 0, 1) * 256);
+            this.p[i] = i;
+        }
+        
+        // Seed-based shuffle (Fisher-Yates)
+        const random = this.seededRandom(seed);
+        for (let i = 255; i > 0; i--) {
+            const j = Math.floor(random() * (i + 1));
+            [this.p[i], this.p[j]] = [this.p[j], this.p[i]];
         }
 
         // To remove the need for index wrapping, double the permutation table length
@@ -17,6 +25,15 @@ class SimplexNoise {
         for (let i = 0; i < 512; i++) {
             this.perm[i] = this.p[i & 255];
         }
+    }
+    
+    // Seeded random number generator (LCG - Linear Congruential Generator)
+    seededRandom(seed) {
+        let state = seed;
+        return function() {
+            state = (state * 1664525 + 1013904223) % 4294967296;
+            return state / 4294967296;
+        };
     }
 
     lerp(t, a, b) {
