@@ -121,7 +121,6 @@ Enemy.prototype._initMesh = function (assetName) {
         this.mesh.position.copyFrom(this.position);
         this.mesh.isVisible = true;
     }
-};
 
 Enemy.prototype._initBehavior = function () {
     this.moveTimer = 0;
@@ -136,11 +135,24 @@ Enemy.prototype.update = function (deltaTime) {
     if (this.scene.game.player) {
         this.target = this.scene.game.player;
     }
+    // PATCH END
 
-    if (this.target) {
-        this._updateMovement(deltaTime);
+    createLights() {
+        this.sunLight = new BABYLON.DirectionalLight('sunLight', new BABYLON.Vector3(-1, -2, -1), this.scene);
+        this.sunLight.intensity = 1.0;
+        this.sunLight.diffuse = new BABYLON.Color3(1, 0.95, 0.9);
+        this.sunLight.specular = new BABYLON.Color3(1, 0.95, 0.9);
+
+        this.sunLight.shadowEnabled = true;
+        this.shadowGenerator = new BABYLON.ShadowGenerator(1024, this.sunLight);
+        this.shadowGenerator.useBlurExponentialShadowMap = true;
+        this.shadowGenerator.blurKernel = 32;
+
+        this.ambientLight = new BABYLON.HemisphericLight('ambientLight', new BABYLON.Vector3(0, 1, 0), this.scene);
+        this.ambientLight.intensity = 0.5;
+        this.ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
+        this.ambientLight.specular = new BABYLON.Color3(0.1, 0.1, 0.1);
     }
-};
 
 Enemy.prototype._updateMovement = function (deltaTime) {
     if (!this.mesh || !this.target.mesh) return;
@@ -352,8 +364,27 @@ World.prototype.dispose = function () {
     this.loots.length = 0;
 };
 
-// Ensure World, Entity, Character, and Enemy are globally accessible
-window.World = World;
-window.Entity = Entity;
-window.Character = Character;
-window.Enemy = Enemy;
+    return newEnemy;
+};
+
+World.prototype.update = function (deltaTime) {
+    this.spawnUpdate(deltaTime);
+
+    this.npcs = this.npcs.filter(function (npc) { return !npc.isDead; });
+    this.npcs.forEach(function (npc) { return npc.update(deltaTime); });
+
+    this.loots = this.loots.filter(function (loot) { return !loot.isDead; });
+    this.loots.forEach(function (loot) { return loot.update(deltaTime); });
+};
+
+World.prototype.dispose = function () {
+    this.npcs.forEach(function (npc) { return npc.dispose(); });
+    this.loots.forEach(function (loot) { return loot.dispose(); });
+    this.npcs.length = 0;
+    this.loots.length = 0;
+};
+
+// Exports
+if (typeof module !== 'undefined') {
+    module.exports = { World, NPC, Enemy, Item, SimplexNoise };
+}

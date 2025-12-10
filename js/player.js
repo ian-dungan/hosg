@@ -277,7 +277,31 @@ Player.prototype._updateMovement = function (deltaTime) {
             var targetAngle = Math.atan2(moveVector.x, moveVector.z);
             this.visualMesh.rotation.y = targetAngle;
         }
+
+        this.visualMesh = rootMesh;
+    } else {
+        console.warn('[Player] Failed to load mesh for asset: ' + assetKey + '. AssetManager load failed or key is wrong.');
+        if (this.mesh) this.mesh.isVisible = true;
     }
+};
+
+// --- Input Handlers ---
+Player.prototype.handleKeyDown = function (event) {
+    this.keys[event.key.toLowerCase()] = true;
+};
+
+Player.prototype.handleKeyUp = function (event) {
+    this.keys[event.key.toLowerCase()] = false;
+};
+
+Player.prototype.handlePointerDown = function (evt) {
+    if (evt.button === 0) {
+        var pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+
+        if (pickResult.hit && pickResult.pickedMesh && pickResult.pickedMesh.parent) {
+            var targetEntity = this.scene.game.world.npcs.find(function (npc) {
+                return npc.mesh && npc.mesh === pickResult.pickedMesh.parent;
+            });
 
     // Simple velocity dampening to prevent sliding indefinitely
     var horizontalVelocity = new BABYLON.Vector3(velocity.x, 0, velocity.z);
@@ -386,3 +410,4 @@ Player.prototype._updateCameraPosition = function () {
 
 // Ensure the Player class is globally accessible
 window.Player = Player;
+console.log('[Player] Player class loaded');

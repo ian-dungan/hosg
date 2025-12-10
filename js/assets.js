@@ -1,3 +1,7 @@
+// ===========================================================
+// HEROES OF SHADY GROVE - ASSET MANAGER v2.0.0
+// ===========================================================
+
 // ============================================================
 // HEROES OF SHADY GROVE - COMPLETE ASSET SYSTEM v1.0.18 (ES5)
 // Converts the asset loader to ES5-compatible syntax so older
@@ -200,3 +204,5 @@ AssetManager.prototype.printStats = function () {
 };
 
 window.AssetManager = AssetManager;
+// Alias for backward compatibility with World.js
+window.AssetLoader = AssetManager;
