@@ -18,14 +18,33 @@ const CONFIG = {
     },
     WORLD: { 
         SKYBOX: {
-            PATH: null, 
+            PATH: null,
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
             LEVEL: 0.5
         },
         SPAWNS: [
-            // Placeholder for future NPC spawn data
+            {
+                id: 'spawn_wolf_hill',
+                npc_template_id: 'wolf',
+                position_x: 10,
+                position_y: 0,
+                position_z: 15,
+                spawn_radius: 12,
+                max_spawn: 2,
+                respawn_time_s: 15
+            },
+            {
+                id: 'spawn_goblin_camp',
+                npc_template_id: 'goblin',
+                position_x: -12,
+                position_y: 0,
+                position_z: -8,
+                spawn_radius: 10,
+                max_spawn: 3,
+                respawn_time_s: 12
+            }
         ]
     },
     ASSETS: {
@@ -33,24 +52,25 @@ const CONFIG = {
         BASE_PATH: "assets/", 
         
         CHARACTERS: {
-            knight: { 
-                model: 'Knight03.glb',
-                // Use relative path 'assets/player/character/'
-                path: '/hosg/assets/player/character/' 
+            knight: {
+                model: 'knight03.glb',
+                // Use relative path to the repository root
+                path: 'assets/player/character/'
+            },
+            goblin: {
+                model: 'wolf.glb',
+                // Placeholder goblin mesh uses the bundled wolf model until a dedicated goblin is added
+                path: 'assets/enemies/'
             },
             wolf: {
-                model: 'Wolf.glb',
-                // Use relative path 'assets/models/'
-                path: '/hosg/assets/models/'
+                model: 'wolf.glb',
+                // Use relative path to the repository root
+                path: 'assets/enemies/'
             }
         },
-        ENVIRONMENT: {
-            terrain_base: { 
-                model: 'FantasyTerrain.glb',
-                // Use relative path 'assets/environment/'
-                path: 'assets/environment/' 
-            }
-        },
+        // No environment meshes are currently available in the repository.
+        // Keep the object for future expansion but leave it empty to avoid 404s.
+        ENVIRONMENT: {},
 
         CLASSES: { 
             Warrior: { 
