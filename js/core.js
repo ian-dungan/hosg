@@ -5,7 +5,7 @@
 
 const CONFIG = {
     VERSION: '2.0.0',
-    DEBUG: true,
+    DEBUG: false,
     
     GAME: {
         FPS: 60,
