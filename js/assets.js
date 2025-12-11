@@ -31,8 +31,8 @@ const ASSET_PATHS = {
     
     // Enemy models
     ENEMY_MODELS: {
-        wolf: "wolf.glb"
-        // Add more: goblin: "goblin.glb"
+        wolf: "wolf.glb",
+        goblin: "goblin.glb"
     },
     
     // NPC models (friendly characters)

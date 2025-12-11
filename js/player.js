@@ -210,18 +210,17 @@ class Player {
     }
     
     async loadCharacterModel() {
-        if (!window.ASSET_MANIFEST || !window.ASSET_MANIFEST.CHARACTERS) {
-            console.warn('[Player] Asset manifest not found, skipping character model');
+        if (!window.ASSET_PATHS || !window.ASSET_PATHS.PLAYER_MODELS) {
+            console.warn('[Player] ASSET_PATHS not found, skipping character model');
             return;
         }
         
-        const characterConfig = window.ASSET_MANIFEST.CHARACTERS.PLAYER.knight;
-        if (!characterConfig) {
-            console.warn('[Player] Knight character config not found');
+        const modelPath = ASSET_PATHS.getPlayerPath('knight');
+        if (!modelPath) {
+            console.warn('[Player] Knight model path not found');
             return;
         }
         
-        const modelPath = window.ASSET_MANIFEST.BASE_PATH + characterConfig.model;
         console.log(`[Player] Loading character model: ${modelPath}`);
         
         try {

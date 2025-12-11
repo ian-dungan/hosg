@@ -212,13 +212,13 @@ class World {
     }
 
     createSkybox() {
-        // Try to load custom HDRI skybox from ASSET_MANIFEST
+        // Try to load custom HDRI skybox from ASSET_PATHS
         let skyPath = 'assets/environment/DaySkyHDRI023B_4K_TONEMAPPED.jpg'; // Default fallback
         
-        // Check if ASSET_MANIFEST exists and has skybox config
-        if (window.ASSET_MANIFEST && window.ASSET_MANIFEST.SKYBOX) {
-            skyPath = window.ASSET_MANIFEST.SKYBOX;
-            console.log('[World] Using skybox from ASSET_MANIFEST:', skyPath);
+        // Check if ASSET_PATHS exists and has skybox config
+        if (window.ASSET_PATHS && window.ASSET_PATHS.getTexturePath) {
+            skyPath = ASSET_PATHS.getTexturePath('sky_hdri');
+            console.log('[World] Using skybox from ASSET_PATHS:', skyPath);
         }
 
         try {
@@ -439,52 +439,29 @@ class World {
         this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // LOW specular - less shiny, reduces bright spots
         this.terrain.material = this.terrainMaterial;
 
-        const grassData = window.ASSET_MANIFEST?.TERRAIN?.GROUND?.grass;
-        if (!grassData) return;
+        // Load grass texture from ASSET_PATHS
+        if (!window.ASSET_PATHS || !this.assetLoader) return;
+        
+        const grassTexturePath = ASSET_PATHS.getTexturePath('grass');
+        if (!grassTexturePath) return;
         
         const loader = this.assetLoader;
 
-        // Chain the texture loads
-        loader.loadTexture(grassData.diffuse, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 })
+        // Load grass diffuse texture
+        loader.loadTexture(grassTexturePath, { uScale: 50, vScale: 50 })
             .then(diffuseTexture => {
                 if (diffuseTexture) {
                     this.terrainMaterial.diffuseTexture = diffuseTexture;
-                    console.log('[World] ✓ Grass color texture loaded');
-                }
-                
-                // Load normal map
-                if (grassData.normal) {
-                    return loader.loadTexture(grassData.normal, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 })
-                }
-                return null;
-            })
-            .then(normalTexture => {
-                if (normalTexture) {
-                    this.terrainMaterial.bumpTexture = normalTexture;
-                    console.log('[World] ✓ Grass normal texture loaded');
-                }
-                
-                // Load AO map
-                if (grassData.ao) {
-                    return loader.loadTexture(grassData.ao, { uScale: grassData.scale || 50, vScale: grassData.scale || 50 });
-                }
-                return null;
-            })
-            .then(aoTexture => {
-                if (aoTexture) {
-                    this.terrainMaterial.ambientTexture = aoTexture;
-                    console.log('[World] ✓ Grass AO texture loaded');
+                    console.log('[World] ✓ Grass texture loaded');
                 }
             })
             .catch(e => {
-                console.error('[World] Failed to load one or more terrain textures:', e);
+                console.error('[World] Failed to load grass texture:', e);
             });
     }
 
     // FIX: Removed 'async' keyword and replaced 'await' with '.then()' to fix SyntaxError
     createWater() {
-        const waterData = window.ASSET_MANIFEST?.WATER;
-
         // Create water plane
         this.water = BABYLON.MeshBuilder.CreateGround(
             "water",
@@ -528,19 +505,22 @@ class World {
             
             this.water.material = this.waterMaterial;
 
-            // Load water textures using .then()
-            if (waterData && waterData.bump) {
-                this.assetLoader.loadTexture(waterData.bump, { uScale: 5, vScale: 5 })
-                    .then(bumpTexture => {
-                        if (bumpTexture) {
-                            this.waterMaterial.bumpTexture = bumpTexture;
-                            this.waterMaterial.bumpTexture.level = 0.1;
-                            console.log('[World] ✓ Water bump texture loaded');
-                        }
-                    })
-                    .catch(e => {
-                        console.log('[World] Water bump texture not found, using smooth water:', e);
-                    });
+            // Load water bump texture from ASSET_PATHS if available
+            if (window.ASSET_PATHS && window.ASSET_PATHS.getTexturePath) {
+                const waterBumpPath = ASSET_PATHS.getTexturePath('water_bump');
+                if (waterBumpPath) {
+                    this.assetLoader.loadTexture(waterBumpPath, { uScale: 5, vScale: 5 })
+                        .then(bumpTexture => {
+                            if (bumpTexture) {
+                                this.waterMaterial.bumpTexture = bumpTexture;
+                                this.waterMaterial.bumpTexture.level = 0.1;
+                                console.log('[World] ✓ Water bump texture loaded');
+                            }
+                        })
+                        .catch(e => {
+                            console.log('[World] Water bump texture not found, using smooth water:', e);
+                        });
+                }
             }
 
         } catch (error) {
@@ -741,23 +721,25 @@ class NPC extends Entity {
     }
 
     async loadModel() {
-        if (!window.ASSET_MANIFEST || !window.ASSET_MANIFEST.CHARACTERS || !window.ASSET_MANIFEST.CHARACTERS.NPCS) {
-            console.warn(`[NPC] Asset manifest not found for ${this.assetKey}, using simple mesh`);
+        // NPCs not configured in ASSET_PATHS yet, use placeholder
+        if (!window.ASSET_PATHS || !window.ASSET_PATHS.NPC_MODELS || !window.ASSET_PATHS.NPC_MODELS[this.assetKey]) {
+            console.warn(`[NPC] No model configured for ${this.assetKey}, using simple mesh`);
             this.createPlaceholderMesh();
             return;
         }
 
-        const characterConfig = window.ASSET_MANIFEST.CHARACTERS.NPCS[this.assetKey];
-        if (!characterConfig) {
-            console.warn(`[NPC] Asset manifest not found for ${this.assetKey}, using simple mesh`);
+        const modelPath = ASSET_PATHS.getNPCPath(this.assetKey);
+        if (!modelPath) {
+            console.warn(`[NPC] Model path not found for ${this.assetKey}, using simple mesh`);
             this.createPlaceholderMesh();
             return;
         }
-
-        const modelPath = window.ASSET_MANIFEST.BASE_PATH + characterConfig.model;
         
         try {
-            const result = await this.scene.assetLoader.loadModel(modelPath, { name: this.name, scaling: new BABYLON.Vector3(characterConfig.scale, characterConfig.scale, characterConfig.scale) });
+            const result = await this.scene.assetLoader.loadModel(modelPath, { 
+                name: this.name, 
+                scaling: new BABYLON.Vector3(1.0, 1.0, 1.0) 
+            });
             
             this.mesh = result.root;
             this.mesh.position.copyFrom(this.position);
@@ -813,24 +795,25 @@ class Enemy extends NPC {
         // FIX: Ensure assetKey is a valid string, defaulting to a known fallback if undefined/empty
         this.assetKey = this.assetKey || 'wolf'; 
         
-        if (!window.ASSET_MANIFEST || !window.ASSET_MANIFEST.CHARACTERS || !window.ASSET_MANIFEST.CHARACTERS.ENEMIES) {
-            console.warn(`[Enemy] Asset manifest not fully loaded, skipping model for ${this.assetKey}`);
+        if (!window.ASSET_PATHS || !window.ASSET_PATHS.ENEMY_MODELS) {
+            console.warn(`[Enemy] ASSET_PATHS not loaded, skipping model for ${this.assetKey}`);
             this.createPlaceholderMesh();
             return;
         }
 
-        const characterConfig = window.ASSET_MANIFEST.CHARACTERS.ENEMIES[this.assetKey];
+        const modelPath = ASSET_PATHS.getEnemyPath(this.assetKey);
         
-        if (!characterConfig) {
-            console.warn(`[Enemy] Asset manifest not found for ${this.assetKey}, using simple mesh`);
+        if (!modelPath) {
+            console.warn(`[Enemy] Model not found for ${this.assetKey}, using simple mesh`);
             this.createPlaceholderMesh();
             return;
         }
-
-        const modelPath = window.ASSET_MANIFEST.BASE_PATH + characterConfig.model;
         
         try {
-            const result = await this.scene.assetLoader.loadModel(modelPath, { name: this.name, scaling: new BABYLON.Vector3(characterConfig.scale, characterConfig.scale, characterConfig.scale) });
+            const result = await this.scene.assetLoader.loadModel(modelPath, { 
+                name: this.name, 
+                scaling: new BABYLON.Vector3(1.0, 1.0, 1.0) 
+            });
             
             this.mesh = result.root;
             this.mesh.position.copyFrom(this.position);
