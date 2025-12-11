@@ -503,11 +503,6 @@ class World {
         const normals = [];
         // Create noise generator - NOW SAFE BECAUSE CLASS IS DEFINED
         const noiseGenerator = new SimplexNoise(this.options.seed);
-        
-        // Flatness configuration
-        const flatnessEnabled = true; // Set to false to disable flattening
-        const flatRadius = 150; // Radius of flat area from center
-        const flatTransition = 100; // Distance over which flatness transitions to normal
 
         for (let i = 0; i < positions.length; i += 3) {
             const x = positions[i];
@@ -520,25 +515,9 @@ class World {
             y += noiseGenerator.noise2D(x * 0.02, z * 0.02) * 0.25;
             y += noiseGenerator.noise2D(x * 0.04, z * 0.04) * 0.125;
             
-            // Calculate flatness factor based on distance from center
-            let flatnessFactor = 1.0; // 1.0 = full height, 0.0 = completely flat
-            
-            if (flatnessEnabled) {
-                // Distance from center (spawn point)
-                const distFromCenter = Math.sqrt(x * x + z * z);
-                
-                if (distFromCenter < flatRadius) {
-                    // Inside flat zone - very flat
-                    flatnessFactor = 0.2; // 20% of normal height
-                } else if (distFromCenter < flatRadius + flatTransition) {
-                    // Transition zone - gradual slope
-                    const t = (distFromCenter - flatRadius) / flatTransition;
-                    flatnessFactor = 0.2 + (t * 0.8); // Lerp from 0.2 to 1.0
-                }
-            }
-            
-            // Scale and clamp with flatness applied
-            positions[i + 1] = y * this.options.maxHeight * flatnessFactor;
+            // Scale and clamp
+            // Height controlled by maxHeight parameter (default 10)
+            positions[i + 1] = y * this.options.maxHeight;
         }
 
         BABYLON.VertexData.ComputeNormals(positions, this.terrain.getIndices(), normals);

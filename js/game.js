@@ -64,7 +64,7 @@ class Game {
       this.world = new World(this.scene, {
         size: CONFIG.WORLD.SIZE,
         segments: CONFIG.WORLD.TERRAIN_SIZE,
-        maxHeight: 20,
+        maxHeight: 10,  // Reduced from 20 for gentler hills (try 5-20)
         seed: CONFIG.WORLD.SEED || Math.random(),
         waterLevel: CONFIG.WORLD.WATER_LEVEL,
         onProgress: (message, percent) => {
