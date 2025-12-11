@@ -42,7 +42,7 @@ const ASSET_PATHS = {
     
     // Generic models (shared objects)
     GENERIC_MODELS: {
-        tree01: "tree01.gltf"
+        tree01: "tree01.glb"
         // Add more tree models as: tree02: "tree02.gltf", etc.
     },
     
