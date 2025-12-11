@@ -901,7 +901,13 @@ class NPC extends Entity {
                 scaling: new BABYLON.Vector3(1.0, 1.0, 1.0) 
             });
             
-            this.mesh = result.root;
+            if (!result || !result.meshes || result.meshes.length === 0) {
+                console.warn(`[NPC] No meshes in model for ${this.assetKey}, using simple mesh`);
+                this.createPlaceholderMesh();
+                return;
+            }
+            
+            this.mesh = result.meshes[0]; // Use first mesh, not result.root
             this.mesh.position.copyFrom(this.position);
             
             // Adjust scale if needed based on model bounds
@@ -975,7 +981,13 @@ class Enemy extends NPC {
                 scaling: new BABYLON.Vector3(1.0, 1.0, 1.0) 
             });
             
-            this.mesh = result.root;
+            if (!result || !result.meshes || result.meshes.length === 0) {
+                console.warn(`[Enemy] No meshes in model for ${this.assetKey}, using simple mesh`);
+                this.createPlaceholderMesh();
+                return;
+            }
+            
+            this.mesh = result.meshes[0]; // Use first mesh, not result.root
             this.mesh.position.copyFrom(this.position);
             
             // Adjust scale if needed based on model bounds
