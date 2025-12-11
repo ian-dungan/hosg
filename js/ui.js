@@ -213,5 +213,30 @@ class UIManager {
     createDebugInfo() { /* Implementation omitted for brevity */ }
     updateDebugInfo() { /* Implementation omitted for brevity */ }
     showMessage(text, duration) { /* Implementation omitted for brevity */ }
+    
+    // Combat UI methods
+    showCombatUI(show) {
+        // Simple implementation - just logs for now
+        // Could add target frame, combat log window, etc.
+        console.log(`[UI] Combat UI ${show ? 'shown' : 'hidden'}`);
+    }
+    
+    updateXPBar() {
+        // Update XP display
+        if (this.player && this.player.stats) {
+            console.log(`[UI] XP: ${this.player.stats.currentXP}/${this.player.stats.level * 100}`);
+        }
+    }
+    
+    updatePlayerStats() {
+        // Update stat displays after level up
+        console.log(`[UI] Stats updated`);
+    }
+    
+    updateCombatLog(entry) {
+        // Add to combat log
+        console.log(`[UI] ${entry}`);
+    }
+    
     dispose() { /* Implementation omitted for brevity */ }
 }

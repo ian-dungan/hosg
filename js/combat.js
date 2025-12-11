@@ -767,13 +767,17 @@ class CombatSystem {
                 strength: 8,
                 armor: 5,
                 magicResist: 5,
+                weaponDamage: 8,  // Added for enemy attacks
                 xpValue: 50
             };
         }
         
         return {
             maxHP: 100,
-            currentHP: 100
+            currentHP: 100,
+            strength: 10,
+            armor: 5,
+            weaponDamage: 5
         };
     }
     

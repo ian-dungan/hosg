@@ -1116,6 +1116,7 @@ class Enemy extends NPC {
     constructor(scene, position, id, type = 'wolf') {
         super(scene, position, id, type); // Call NPC constructor
         this.name = `Enemy ${id}`;
+        this.isEnemy = true; // CRITICAL: Mark as enemy immediately for combat system
         this.health = 50;
         this.maxHealth = 50;
         this.damage = 10;
