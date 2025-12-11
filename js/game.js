@@ -40,6 +40,8 @@ class Game {
     this.music = null;
     this.musicVolume = 0.3; // 30% volume by default
     this.combat = null; // Combat system
+    this.characterData = null; // Loaded from database
+    this.autoSaveInterval = null; // Auto-save timer
 
     this._lastFrameTime = performance.now();
     this._running = false;
@@ -47,6 +49,112 @@ class Game {
     window.addEventListener("resize", () => {
       this.engine.resize();
     });
+  }
+  
+  // =============================================
+  // AUTHENTICATION FLOW
+  // =============================================
+  
+  async startAuthFlow() {
+    console.log('[Game] Starting authentication flow...');
+    
+    // Check if Supabase service is available
+    if (!window.supabaseService) {
+      console.error('[Game] Supabase service not loaded!');
+      alert('Database connection failed. Please refresh the page.');
+      return;
+    }
+    
+    // Check if already has session
+    const hasSession = await window.supabaseService.loadSession();
+    
+    if (hasSession && window.supabaseService.isLoggedIn()) {
+      console.log('[Game] Session found, showing character select...');
+      this.showCharacterSelect();
+    } else {
+      console.log('[Game] No session, showing login screen...');
+      this.showLoginScreen();
+    }
+  }
+  
+  showLoginScreen() {
+    if (!window.authUI) {
+      console.error('[Game] AuthUI not loaded!');
+      return;
+    }
+    
+    window.authUI.showLoginScreen(() => {
+      // Login successful, show character select
+      this.showCharacterSelect();
+    });
+  }
+  
+  async showCharacterSelect() {
+    if (!window.authUI) {
+      console.error('[Game] AuthUI not loaded!');
+      return;
+    }
+    
+    await window.authUI.showCharacterSelect((character) => {
+      // Character selected, start game with this character
+      this.characterData = character;
+      console.log('[Game] Character selected:', character.name);
+      this.init();
+    });
+  }
+  
+  // =============================================
+  // AUTO-SAVE SYSTEM
+  // =============================================
+  
+  startAutoSave() {
+    // Save character every 30 seconds
+    this.autoSaveInterval = setInterval(() => {
+      this.saveCharacter();
+    }, 30000);
+    
+    console.log('[Game] Auto-save enabled (every 30 seconds)');
+  }
+  
+  async saveCharacter() {
+    if (!this.characterData || !window.supabaseService.hasCharacter()) return;
+    
+    if (!this.player || !this.player.mesh) return;
+    
+    try {
+      const characterData = {
+        level: this.player.level || 1,
+        position: {
+          x: this.player.mesh.position.x,
+          y: this.player.mesh.position.y,
+          z: this.player.mesh.position.z
+        },
+        rotation: this.player.mesh.rotation.y,
+        health: this.player.health || 100,
+        mana: this.player.mana || 50,
+        stamina: this.player.stamina || 100,
+        stats: {
+          xp: this.player.xp || 0,
+          gold: this.player.gold || 0,
+          strength: this.player.strength || 10,
+          agility: this.player.agility || 10,
+          intelligence: this.player.intelligence || 10
+        }
+      };
+      
+      await window.supabaseService.saveCharacter(characterData);
+      console.log('[Game] Character saved');
+      
+    } catch (error) {
+      console.error('[Game] Failed to save character:', error);
+    }
+  }
+  
+  stopAutoSave() {
+    if (this.autoSaveInterval) {
+      clearInterval(this.autoSaveInterval);
+      this.autoSaveInterval = null;
+    }
   }
   
   disableAllDebugVisualization() {
@@ -237,6 +345,36 @@ class Game {
       this.player = new Player(this.scene);
       this.scene.player = this.player; // Keep a scene reference
       await this.player.init();
+      
+      // Load character data from database if available
+      if (this.characterData) {
+        console.log('[Game] Loading character data:', this.characterData.name);
+        
+        // Set player position from database
+        if (this.characterData.position_x !== undefined) {
+          this.player.mesh.position.x = parseFloat(this.characterData.position_x);
+          this.player.mesh.position.y = parseFloat(this.characterData.position_y);
+          this.player.mesh.position.z = parseFloat(this.characterData.position_z);
+          this.player.mesh.rotation.y = parseFloat(this.characterData.rotation_y);
+          console.log('[Game] Player position loaded from database');
+        }
+        
+        // Set player stats
+        this.player.level = this.characterData.level || 1;
+        this.player.health = parseFloat(this.characterData.health) || 100;
+        this.player.mana = parseFloat(this.characterData.mana) || 50;
+        this.player.stamina = parseFloat(this.characterData.stamina) || 100;
+        
+        // Load stats from JSON
+        if (this.characterData.stats) {
+          const stats = this.characterData.stats;
+          this.player.xp = stats.xp || 0;
+          this.player.gold = stats.gold || 0;
+          this.player.strength = stats.strength || 10;
+          this.player.agility = stats.agility || 10;
+          this.player.intelligence = stats.intelligence || 10;
+        }
+      }
     } else {
       console.error("[Game] Player class not defined.");
     }
@@ -296,6 +434,16 @@ class Game {
       this.scene.meshes.forEach(mesh => this.hideDebugOnMesh(mesh));
       console.log('[Game] Debug cleanup complete');
     }, 1000);
+    
+    // Start auto-save system if character loaded
+    if (this.characterData) {
+      this.startAutoSave();
+      
+      // Save on page unload
+      window.addEventListener('beforeunload', () => {
+        this.saveCharacter();
+      });
+    }
 
     // Start render loop
     this.start();
