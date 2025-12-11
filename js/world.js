@@ -760,8 +760,11 @@ class World {
             
             console.log(`[World] Loading tree model: ${modelPath} at (${x.toFixed(1)}, ${groundY.toFixed(1)}, ${z.toFixed(1)})`);
             
+            // CONFIGURABLE: Base tree scale (change this to make all trees bigger/smaller)
+            const BASE_TREE_SCALE = 2.0; // 1.0 = original size, 2.0 = 2x bigger, 0.5 = half size
+            
             const result = await this.scene.assetLoader.loadModel(modelPath, {
-                scaling: new BABYLON.Vector3(1.0, 1.0, 1.0)
+                scaling: new BABYLON.Vector3(BASE_TREE_SCALE, BASE_TREE_SCALE, BASE_TREE_SCALE)
             });
             
             if (!result || !result.meshes || result.meshes.length === 0) {
@@ -802,8 +805,10 @@ class World {
             // Random rotation for variety
             tree.rotation.y = Math.random() * Math.PI * 2;
             
-            // Scale variation (90% - 110%)
-            const scaleVariation = 0.9 + Math.random() * 0.2;
+            // CONFIGURABLE: Random scale variation (makes each tree slightly different size)
+            const SCALE_VARIATION_MIN = 0.7;  // Minimum size multiplier (70% of base scale)
+            const SCALE_VARIATION_MAX = 1.3;  // Maximum size multiplier (130% of base scale)
+            const scaleVariation = SCALE_VARIATION_MIN + Math.random() * (SCALE_VARIATION_MAX - SCALE_VARIATION_MIN);
             tree.scaling.scaleInPlace(scaleVariation);
             
             // Enable collisions
