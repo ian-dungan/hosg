@@ -331,6 +331,39 @@ class Game {
           console.error("[Game] Inventory update error:", err);
         }
       }
+      
+      // Update WorldItems (loot on ground)
+      if (this.world && this.world.worldItems) {
+        try {
+          for (let i = this.world.worldItems.length - 1; i >= 0; i--) {
+            const worldItem = this.world.worldItems[i];
+            if (worldItem && typeof worldItem.update === 'function') {
+              worldItem.update(deltaTime);
+              
+              // Auto-pickup if player is close
+              if (this.player && this.player.mesh && this.player.inventory) {
+                const distance = BABYLON.Vector3.Distance(
+                  this.player.mesh.position,
+                  worldItem.mesh.position
+                );
+                
+                const pickupRange = 3.0; // units
+                if (distance < pickupRange) {
+                  // Pick up item
+                  const success = this.player.inventory.addItem(worldItem.itemData);
+                  if (success) {
+                    console.log(`[Game] Picked up: ${worldItem.itemData.name}`);
+                    worldItem.dispose();
+                    this.world.worldItems.splice(i, 1);
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error("[Game] WorldItems update error:", err);
+        }
+      }
 
       // Render scene
       try {

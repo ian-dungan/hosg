@@ -355,16 +355,75 @@ class CombatSystem {
         
         // Play death animation/effects
         if (target.mesh) {
-            // Fade out and remove
-            const fadeSpeed = 0.02;
-            const fadeInterval = setInterval(() => {
-                if (target.mesh && target.mesh.material) {
-                    target.mesh.material.alpha -= fadeSpeed;
-                    if (target.mesh.material.alpha <= 0) {
-                        clearInterval(fadeInterval);
-                        target.dispose();
-                    }
+            // Store original position
+            const startY = target.mesh.position.y;
+            const startRotation = target.mesh.rotation.clone();
+            
+            // Make sure material has alpha enabled
+            if (target.mesh.material) {
+                if (!target.mesh.material.hasAlpha) {
+                    target.mesh.material.alpha = 1.0;
+                    target.mesh.material.hasAlpha = true;
                 }
+            } else {
+                // Create simple material if none exists
+                target.mesh.material = new BABYLON.StandardMaterial('deathMat', this.scene);
+                target.mesh.material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+                target.mesh.material.alpha = 1.0;
+            }
+            
+            // Apply to all child meshes too
+            target.mesh.getChildMeshes().forEach(child => {
+                if (child.material) {
+                    if (!child.material.hasAlpha) {
+                        child.material.alpha = 1.0;
+                        child.material.hasAlpha = true;
+                    }
+                } else {
+                    child.material = new BABYLON.StandardMaterial('deathMat', this.scene);
+                    child.material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+                    child.material.alpha = 1.0;
+                }
+            });
+            
+            // Death animation: Fall and fade
+            let animTime = 0;
+            const animDuration = 2.0; // 2 seconds
+            const fadeInterval = setInterval(() => {
+                animTime += 0.016; // ~60fps
+                const progress = animTime / animDuration;
+                
+                if (progress >= 1.0 || !target.mesh) {
+                    clearInterval(fadeInterval);
+                    if (target.mesh) {
+                        target.mesh.dispose();
+                    }
+                    // Remove from world arrays
+                    if (this.game.world && target.isEnemy) {
+                        const index = this.game.world.enemies.indexOf(target);
+                        if (index > -1) {
+                            this.game.world.enemies.splice(index, 1);
+                        }
+                    }
+                    return;
+                }
+                
+                // Fall down
+                target.mesh.position.y = startY - (progress * 2); // Sink into ground
+                
+                // Tip over
+                target.mesh.rotation.z = startRotation.z + (progress * Math.PI / 2);
+                
+                // Fade out
+                const alpha = 1.0 - progress;
+                if (target.mesh.material) {
+                    target.mesh.material.alpha = alpha;
+                }
+                target.mesh.getChildMeshes().forEach(child => {
+                    if (child.material) {
+                        child.material.alpha = alpha;
+                    }
+                });
             }, 16);
         }
         

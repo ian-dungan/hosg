@@ -590,21 +590,9 @@ class Player {
         this.gamepad.lookX = Math.abs(gamepad.axes[2]) > deadzone ? gamepad.axes[2] : 0;
         this.gamepad.lookY = Math.abs(gamepad.axes[3]) > deadzone ? gamepad.axes[3] : 0;
         
-        // Buttons
-        // A button (0) - Jump
-        if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
-            this.input.jump = true;
-        }
-        
-        // B button (1) or triggers - Run
-        const runPressed = (gamepad.buttons[1] && gamepad.buttons[1].pressed) ||
-                          (gamepad.buttons[6] && gamepad.buttons[6].pressed) ||
-                          (gamepad.buttons[7] && gamepad.buttons[7].pressed);
-        this.input.run = runPressed;
-
-        // Track jump press/release so jump must be re-pressed after landing
-        const jumpPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
-        if (jumpPressed) {
+        // Buttons (Xbox controller layout)
+        // Y button (3) - Jump
+        if (gamepad.buttons[3] && gamepad.buttons[3].pressed) {
             if (!this.jumpHeld) {
                 this.queueJump();
             }
@@ -613,14 +601,88 @@ class Player {
             this.releaseJump();
         }
         
-        // X button (2) - Target next enemy (with debounce)
-        if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
-            if (!this.gamepad.targetButtonWasPressed) {
-                this.targetNext();
-                this.gamepad.targetButtonWasPressed = true;
+        // A button (0) - Confirm/Interact
+        if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+            if (!this.gamepad.aButtonWasPressed) {
+                this.handleConfirm();
+                this.gamepad.aButtonWasPressed = true;
             }
         } else {
-            this.gamepad.targetButtonWasPressed = false;
+            this.gamepad.aButtonWasPressed = false;
+        }
+        
+        // B button (1) - Cancel/Back or Run (hold)
+        const bPressed = gamepad.buttons[1] && gamepad.buttons[1].pressed;
+        if (bPressed) {
+            if (!this.gamepad.bButtonWasPressed) {
+                this.handleCancel();
+                this.gamepad.bButtonWasPressed = true;
+            }
+            this.input.run = true; // Also use as run when held
+        } else {
+            this.gamepad.bButtonWasPressed = false;
+            this.input.run = false;
+        }
+        
+        // X button (2) - Quick action (optional)
+        if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
+            if (!this.gamepad.xButtonWasPressed) {
+                // Could be used for quick loot or action
+                this.gamepad.xButtonWasPressed = true;
+            }
+        } else {
+            this.gamepad.xButtonWasPressed = false;
+        }
+        
+        // Start button (9) - Character Sheet/Inventory
+        if (gamepad.buttons[9] && gamepad.buttons[9].pressed) {
+            if (!this.gamepad.startButtonWasPressed) {
+                this.toggleCharacterSheet();
+                this.gamepad.startButtonWasPressed = true;
+            }
+        } else {
+            this.gamepad.startButtonWasPressed = false;
+        }
+        
+        // D-pad for targeting
+        // D-pad Up (12) - Target next
+        if (gamepad.buttons[12] && gamepad.buttons[12].pressed) {
+            if (!this.gamepad.dpadUpWasPressed) {
+                this.targetNext();
+                this.gamepad.dpadUpWasPressed = true;
+            }
+        } else {
+            this.gamepad.dpadUpWasPressed = false;
+        }
+        
+        // D-pad Down (13) - Target previous
+        if (gamepad.buttons[13] && gamepad.buttons[13].pressed) {
+            if (!this.gamepad.dpadDownWasPressed) {
+                this.targetPrevious();
+                this.gamepad.dpadDownWasPressed = true;
+            }
+        } else {
+            this.gamepad.dpadDownWasPressed = false;
+        }
+        
+        // D-pad Left (14) - Cycle targets left
+        if (gamepad.buttons[14] && gamepad.buttons[14].pressed) {
+            if (!this.gamepad.dpadLeftWasPressed) {
+                this.targetPrevious();
+                this.gamepad.dpadLeftWasPressed = true;
+            }
+        } else {
+            this.gamepad.dpadLeftWasPressed = false;
+        }
+        
+        // D-pad Right (15) - Cycle targets right
+        if (gamepad.buttons[15] && gamepad.buttons[15].pressed) {
+            if (!this.gamepad.dpadRightWasPressed) {
+                this.targetNext();
+                this.gamepad.dpadRightWasPressed = true;
+            }
+        } else {
+            this.gamepad.dpadRightWasPressed = false;
         }
     }
     
@@ -1045,13 +1107,100 @@ class Player {
         }
     }
     
-    // Target next enemy (Tab key)
+    // Target next enemy (Tab key or D-pad)
     targetNext() {
-        if (!this.scene.combat) return;
+        if (!this.scene.combat || !this.scene.world) return;
         
-        const nearestEnemy = this.scene.combat.findNearestEnemy();
-        if (nearestEnemy) {
-            this.scene.combat.setTarget(nearestEnemy);
+        // Get all targetable entities (enemies + NPCs)
+        const allEntities = [
+            ...this.scene.world.enemies.filter(e => !e.isDead && e.mesh),
+            ...this.scene.world.npcs.filter(n => n.mesh)
+        ];
+        
+        if (allEntities.length === 0) return;
+        
+        // Find current target index
+        let currentIndex = -1;
+        const currentTarget = this.scene.combat.currentTarget;
+        if (currentTarget) {
+            currentIndex = allEntities.findIndex(e => e.id === currentTarget.id);
+        }
+        
+        // Get next target (wrap around)
+        const nextIndex = (currentIndex + 1) % allEntities.length;
+        this.scene.combat.setTarget(allEntities[nextIndex]);
+    }
+    
+    // Target previous entity (D-pad)
+    targetPrevious() {
+        if (!this.scene.combat || !this.scene.world) return;
+        
+        // Get all targetable entities (enemies + NPCs)
+        const allEntities = [
+            ...this.scene.world.enemies.filter(e => !e.isDead && e.mesh),
+            ...this.scene.world.npcs.filter(n => n.mesh)
+        ];
+        
+        if (allEntities.length === 0) return;
+        
+        // Find current target index
+        let currentIndex = -1;
+        const currentTarget = this.scene.combat.currentTarget;
+        if (currentTarget) {
+            currentIndex = allEntities.findIndex(e => e.id === currentTarget.id);
+        }
+        
+        // Get previous target (wrap around)
+        const prevIndex = currentIndex <= 0 ? allEntities.length - 1 : currentIndex - 1;
+        this.scene.combat.setTarget(allEntities[prevIndex]);
+    }
+    
+    // Handle A button confirm
+    handleConfirm() {
+        // If target menu is open, execute selected action
+        if (this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
+            this.scene.ui.targetMenu.executeSelected();
+        }
+        // If target exists but no menu, open menu
+        else if (this.scene.combat && this.scene.combat.currentTarget) {
+            this.openTargetMenu();
+        }
+    }
+    
+    // Handle B button cancel
+    handleCancel() {
+        // Close target menu if open
+        if (this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
+            this.scene.ui.targetMenu.hide();
+        }
+        // Clear target if menu not open
+        else if (this.scene.combat && this.scene.combat.currentTarget) {
+            this.scene.combat.setTarget(null);
+        }
+    }
+    
+    // Open context menu for current target
+    openTargetMenu() {
+        if (!this.scene.ui || !this.scene.combat || !this.scene.combat.currentTarget) return;
+        
+        const target = this.scene.combat.currentTarget;
+        
+        // Create menu if it doesn't exist
+        if (!this.scene.ui.targetMenu) {
+            this.scene.ui.createTargetMenu();
+        }
+        
+        // Show menu with appropriate options
+        this.scene.ui.targetMenu.show(target);
+    }
+    
+    // Toggle character sheet/inventory (Start button)
+    toggleCharacterSheet() {
+        if (this.inventory) {
+            this.inventory.toggleInventory();
+        } else if (this.scene.ui) {
+            // Fallback: just log for now
+            console.log('[Player] Character sheet opened (inventory system not found)');
         }
     }
     
