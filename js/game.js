@@ -115,8 +115,10 @@ class Game {
       mesh.material.wireframe = false;
     }
     
-    // Hide meshes with debug names
+    // AGGRESSIVE: Hide meshes with debug names OR that look like debug shapes
     const name = (mesh.name || '').toLowerCase();
+    
+    // Hide by name patterns
     if (name.includes('collision') || 
         name.includes('collider') || 
         name.includes('hitbox') ||
@@ -126,9 +128,62 @@ class Game {
         name.includes('helper') ||
         name.includes('gizmo') ||
         name.includes('bounds') ||
-        name.includes('box')) {
+        name.includes('box') ||
+        name.includes('sphere') ||
+        name.includes('capsule') ||
+        name.includes('plane') ||
+        name.includes('line')) {
       mesh.isVisible = false;
       mesh.setEnabled(false);
+      return;
+    }
+    
+    // SUPER AGGRESSIVE: Hide any mesh that looks like a debug primitive
+    // Check if it's a simple primitive shape (box, sphere, plane, etc.)
+    if (mesh.getTotalVertices) {
+      const vertCount = mesh.getTotalVertices();
+      
+      // Common debug primitive vertex counts
+      const debugVertexCounts = [
+        24,   // Box
+        36,   // Box with more detail
+        8,    // Simple box
+        16,   // Low-poly sphere
+        32,   // Capsule
+        64,   // Medium sphere
+        4,    // Plane
+        6,    // Simple plane
+      ];
+      
+      // If it's a simple shape with a generic material, probably debug
+      if (debugVertexCounts.includes(vertCount)) {
+        if (!mesh.material || mesh.material.name.includes('default') || mesh.material.name.includes('mat')) {
+          // Check if it has simple color (not textured)
+          if (mesh.material && !mesh.material.diffuseTexture && !mesh.material.albedoTexture) {
+            mesh.isVisible = false;
+            mesh.setEnabled(false);
+            console.log(`[Game] Hiding debug-like mesh: ${mesh.name} (${vertCount} verts)`);
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  // CONTINUOUS debug cleanup - runs every frame
+  continuousDebugCleanup() {
+    if (!this.scene) return;
+    
+    // Every 60 frames (~1 second at 60fps), scan for new debug meshes
+    if (!this._cleanupFrameCount) this._cleanupFrameCount = 0;
+    this._cleanupFrameCount++;
+    
+    if (this._cleanupFrameCount % 60 === 0) {
+      this.scene.meshes.forEach(mesh => {
+        if (mesh && mesh.isVisible) {
+          this.hideDebugOnMesh(mesh);
+        }
+      });
     }
   }
 
@@ -150,7 +205,7 @@ class Game {
       this.world = new World(this.scene, {
         size: CONFIG.WORLD.SIZE,
         segments: CONFIG.WORLD.TERRAIN_SIZE,
-        maxHeight: 5,  // Reduced from 20 for gentler hills (try 5-20)
+        maxHeight: 5,  // Very gentle terrain
         seed: CONFIG.WORLD.SEED || Math.random(),
         waterLevel: CONFIG.WORLD.WATER_LEVEL,
         onProgress: (message, percent) => {
@@ -415,6 +470,9 @@ class Game {
           console.error("[Game] Combat update error:", err);
         }
       }
+      
+      // Continuous debug cleanup (every second)
+      this.continuousDebugCleanup();
 
       // Update Inventory System
       if (this.player && this.player.inventory && typeof this.player.inventory.update === "function") {

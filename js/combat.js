@@ -64,23 +64,17 @@ class CombatSystem {
             // Create floating name above target
             this.createFloatingName(entity);
             
-            // Check if entity is an enemy or NPC
+            // Log target
             if (entity.isEnemy) {
-                this.logCombat(`Targeted: ${entity.name} (Enemy)`);
+                this.logCombat(`Targeted: ${entity.name}`);
             } else {
-                this.logCombat(`Targeted: ${entity.name} (NPC)`);
+                this.logCombat(`Targeted: ${entity.name}`);
             }
             
-            // Automatically open context menu
-            if (this.game.ui && this.game.ui.targetMenu) {
-                this.game.ui.targetMenu.show(entity);
-            } else if (this.game.ui) {
-                this.game.ui.createTargetMenu();
-                this.game.ui.targetMenu.show(entity);
-            }
+            // NO AUTO-MENU - Player must press A button to open menu (WoW/FFXI style)
         } else {
-            // Close menu when target cleared
-            if (this.game.ui && this.game.ui.targetMenu) {
+            // Clear target - close menu if open
+            if (this.game.ui && this.game.ui.targetMenu && this.game.ui.targetMenu.isVisible) {
                 this.game.ui.targetMenu.hide();
             }
             this.logCombat('Target cleared');

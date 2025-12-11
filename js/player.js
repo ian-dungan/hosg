@@ -1118,52 +1118,46 @@ class Player {
         }
     }
     
-    // Target next enemy (Tab key or D-pad)
+    // Target next enemy (Tab key or D-pad) - WoW/FFXI style
     targetNext() {
         if (!this.scene.combat || !this.scene.world) return;
         
-        // Get all targetable entities (enemies + NPCs)
-        const allEntities = [
-            ...this.scene.world.enemies.filter(e => !e.isDead && e.mesh),
-            ...this.scene.world.npcs.filter(n => n.mesh)
-        ];
+        // Get all ENEMIES only (not NPCs) - like WoW/FFXI
+        const allEnemies = this.scene.world.enemies.filter(e => !e.isDead && e.mesh);
         
-        if (allEntities.length === 0) return;
+        if (allEnemies.length === 0) return;
         
         // Find current target index
         let currentIndex = -1;
         const currentTarget = this.scene.combat.currentTarget;
-        if (currentTarget) {
-            currentIndex = allEntities.findIndex(e => e.id === currentTarget.id);
+        if (currentTarget && currentTarget.isEnemy) {
+            currentIndex = allEnemies.findIndex(e => e.id === currentTarget.id);
         }
         
         // Get next target (wrap around)
-        const nextIndex = (currentIndex + 1) % allEntities.length;
-        this.scene.combat.setTarget(allEntities[nextIndex]);
+        const nextIndex = (currentIndex + 1) % allEnemies.length;
+        this.scene.combat.setTarget(allEnemies[nextIndex]);
     }
     
-    // Target previous entity (D-pad)
+    // Target previous enemy (D-pad) - WoW/FFXI style
     targetPrevious() {
         if (!this.scene.combat || !this.scene.world) return;
         
-        // Get all targetable entities (enemies + NPCs)
-        const allEntities = [
-            ...this.scene.world.enemies.filter(e => !e.isDead && e.mesh),
-            ...this.scene.world.npcs.filter(n => n.mesh)
-        ];
+        // Get all ENEMIES only (not NPCs) - like WoW/FFXI
+        const allEnemies = this.scene.world.enemies.filter(e => !e.isDead && e.mesh);
         
-        if (allEntities.length === 0) return;
+        if (allEnemies.length === 0) return;
         
         // Find current target index
         let currentIndex = -1;
         const currentTarget = this.scene.combat.currentTarget;
-        if (currentTarget) {
-            currentIndex = allEntities.findIndex(e => e.id === currentTarget.id);
+        if (currentTarget && currentTarget.isEnemy) {
+            currentIndex = allEnemies.findIndex(e => e.id === currentTarget.id);
         }
         
         // Get previous target (wrap around)
-        const prevIndex = currentIndex <= 0 ? allEntities.length - 1 : currentIndex - 1;
-        this.scene.combat.setTarget(allEntities[prevIndex]);
+        const prevIndex = currentIndex <= 0 ? allEnemies.length - 1 : currentIndex - 1;
+        this.scene.combat.setTarget(allEnemies[prevIndex]);
     }
     
     // Handle A button confirm
@@ -1171,6 +1165,13 @@ class Player {
         // If target menu is open, execute selected action
         if (this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
             this.scene.ui.targetMenu.executeSelected();
+        }
+        // If target exists but menu not open, open menu (WoW/FFXI style)
+        else if (this.scene.combat && this.scene.combat.currentTarget) {
+            if (!this.scene.ui.targetMenu) {
+                this.scene.ui.createTargetMenu();
+            }
+            this.scene.ui.targetMenu.show(this.scene.combat.currentTarget);
         }
     }
     
