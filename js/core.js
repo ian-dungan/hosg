@@ -38,7 +38,7 @@ const CONFIG = {
         CHUNK_SIZE: 32,
         TERRAIN_SIZE: 1024,
         WATER_LEVEL: 0,
-        SEED: 00012,  // Fixed seed for consistent terrain (change this for different landscapes)
+        SEED: 12345,  // Fixed seed for consistent terrain (change this for different landscapes)
         
         // Skybox configuration
         SKYBOX: {

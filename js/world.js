@@ -542,9 +542,156 @@ class World {
         this.createEnemies(20);
     }
 
-    createTrees(count) { /* ... implementation omitted ... */ }
-    createRocks(count) { /* ... implementation omitted ... */ }
-    createGrass(count) { /* ... implementation omitted ... */ }
+    createTrees(count) { 
+        const spawnRadius = Math.min(200, this.options.size * 0.4);
+        let spawned = 0;
+        let attempts = 0;
+        const maxAttempts = count * 5;
+        
+        while (spawned < count && attempts < maxAttempts) {
+            attempts++;
+            
+            // Random position
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const x = Math.sin(angle) * distance;
+            const z = Math.cos(angle) * distance;
+            
+            // Get terrain height
+            const groundY = this.getHeightAt(x, z);
+            
+            // Skip if underwater (with margin)
+            const waterY = this.options.waterLevel || 0;
+            if (groundY <= waterY + 1.0) continue;
+            
+            // Check slope (don't spawn on steep hills)
+            const slopeCheck = 2.0;
+            const y1 = this.getHeightAt(x + slopeCheck, z);
+            const y2 = this.getHeightAt(x - slopeCheck, z);
+            const y3 = this.getHeightAt(x, z + slopeCheck);
+            const y4 = this.getHeightAt(x, z - slopeCheck);
+            const maxSlope = Math.max(
+                Math.abs(y1 - groundY),
+                Math.abs(y2 - groundY),
+                Math.abs(y3 - groundY),
+                Math.abs(y4 - groundY)
+            );
+            if (maxSlope > 3.0) continue; // Too steep
+            
+            // Create tree
+            const tree = BABYLON.MeshBuilder.CreateCylinder("tree", {
+                diameterTop: 0.5,
+                diameterBottom: 0.8,
+                height: 6,
+                tessellation: 8
+            }, this.scene);
+            
+            tree.position = new BABYLON.Vector3(x, groundY + 3, z);
+            
+            const treeMaterial = new BABYLON.StandardMaterial("treeMat", this.scene);
+            treeMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.3, 0.2);
+            tree.material = treeMaterial;
+            
+            // Add foliage
+            const foliage = BABYLON.MeshBuilder.CreateSphere("foliage", {
+                diameter: 4,
+                segments: 8
+            }, this.scene);
+            foliage.parent = tree;
+            foliage.position.y = 2;
+            
+            const foliageMat = new BABYLON.StandardMaterial("foliageMat", this.scene);
+            foliageMat.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
+            foliage.material = foliageMat;
+            
+            tree.checkCollisions = true;
+            tree.metadata = { isTree: true };
+            
+            spawned++;
+        }
+        
+        console.log(`[World] Spawned ${spawned}/${count} trees (${attempts} attempts)`);
+    }
+    
+    createRocks(count) { 
+        const spawnRadius = Math.min(200, this.options.size * 0.4);
+        let spawned = 0;
+        let attempts = 0;
+        const maxAttempts = count * 5;
+        
+        while (spawned < count && attempts < maxAttempts) {
+            attempts++;
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const x = Math.sin(angle) * distance;
+            const z = Math.cos(angle) * distance;
+            
+            const groundY = this.getHeightAt(x, z);
+            
+            // Skip if underwater
+            const waterY = this.options.waterLevel || 0;
+            if (groundY <= waterY + 0.5) continue;
+            
+            // Create rock
+            const rockSize = 1 + Math.random() * 2;
+            const rock = BABYLON.MeshBuilder.CreateSphere("rock", {
+                diameter: rockSize,
+                segments: 6
+            }, this.scene);
+            
+            rock.position = new BABYLON.Vector3(x, groundY + rockSize / 2, z);
+            rock.scaling.y = 0.6; // Flatten slightly
+            
+            const rockMat = new BABYLON.StandardMaterial("rockMat", this.scene);
+            rockMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+            rock.material = rockMat;
+            
+            rock.checkCollisions = true;
+            rock.metadata = { isRock: true };
+            
+            spawned++;
+        }
+        
+        console.log(`[World] Spawned ${spawned}/${count} rocks (${attempts} attempts)`);
+    }
+    
+    createGrass(count) { 
+        const spawnRadius = Math.min(150, this.options.size * 0.3);
+        let spawned = 0;
+        
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const x = Math.sin(angle) * distance;
+            const z = Math.cos(angle) * distance;
+            
+            const groundY = this.getHeightAt(x, z);
+            
+            // Skip if underwater
+            const waterY = this.options.waterLevel || 0;
+            if (groundY <= waterY + 0.2) continue;
+            
+            // Create small grass tuft
+            const grass = BABYLON.MeshBuilder.CreatePlane("grass", {
+                width: 0.5,
+                height: 0.8
+            }, this.scene);
+            
+            grass.position = new BABYLON.Vector3(x, groundY + 0.4, z);
+            grass.rotation.y = Math.random() * Math.PI * 2;
+            grass.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
+            
+            const grassMat = new BABYLON.StandardMaterial("grassMat", this.scene);
+            grassMat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.3);
+            grassMat.backFaceCulling = false;
+            grass.material = grassMat;
+            
+            spawned++;
+        }
+        
+        console.log(`[World] Spawned ${spawned}/${count} grass tufts`);
+    }
     createNPCs(count) { 
         const spawnRadius = Math.min(80, this.options.size * 0.2);
         for (let i = 1; i <= count; i++) {
@@ -589,16 +736,16 @@ class World {
         }
     }
 
-    findDrySpot(x, z, attempts = 10, radius = 8, margin = 0.3) {
-        const waterY = this.water ? this.water.position.y : -Infinity;
-        // Fast path if we're already above the water line
+    findDrySpot(x, z, attempts = 20, radius = 15, margin = 1.0) {
+        const waterY = this.options.waterLevel || 0;
+        
+        // Check current position first
         const currentY = this.getHeightAt(x, z);
         if (currentY > waterY + margin) {
             return { x, z, y: currentY };
         }
 
-        let best = { x, z, y: currentY };
-
+        // Try to find dry spot nearby
         for (let i = 0; i < attempts; i++) {
             const angle = Math.random() * Math.PI * 2;
             const distance = Math.random() * radius;
@@ -606,16 +753,29 @@ class World {
             const newZ = z + Math.cos(angle) * distance;
             const newY = this.getHeightAt(newX, newZ);
 
+            // Found dry land!
             if (newY > waterY + margin) {
                 return { x: newX, z: newZ, y: newY };
             }
-            // Keep track of the highest spot
-            if (newY > best.y) {
-                best = { x: newX, z: newZ, y: newY };
+        }
+        
+        // Last resort: expand search much wider
+        for (let i = 0; i < attempts; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = radius + Math.random() * radius * 2;
+            const newX = x + Math.sin(angle) * distance;
+            const newZ = z + Math.cos(angle) * distance;
+            const newY = this.getHeightAt(newX, newZ);
+
+            if (newY > waterY + margin) {
+                return { x: newX, z: newZ, y: newY };
             }
         }
-        // Return the best spot found, even if it's wet (last resort)
-        return best;
+        
+        // CRITICAL: If still no dry spot, spawn at origin which should be dry
+        console.warn(`[World] Could not find dry spot near (${x.toFixed(1)}, ${z.toFixed(1)}), using origin`);
+        const originY = this.getHeightAt(0, 0);
+        return { x: 0, z: 0, y: Math.max(originY, waterY + margin + 1) };
     }
 
     setupEventListeners() { /* ... implementation omitted ... */ }
