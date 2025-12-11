@@ -305,13 +305,16 @@ class Game {
     // Load music file from your tracks folder
     const musicPath = "assets/sfx/tracks/background.mp3"; // Change filename as needed
     
+    console.log('[Game] Loading music from:', musicPath);
+    
     try {
       this.music = new BABYLON.Sound(
         "backgroundMusic",
         musicPath,
         this.scene,
         () => {
-          console.log("[Game] ✓ Music loaded");
+          console.log("[Game] ✓ Music loaded successfully");
+          console.log("[Game] Music ready state:", this.music.isReady);
           this.showMusicPrompt();
         },
         {
@@ -321,12 +324,22 @@ class Game {
         }
       );
       
+      // Check for errors
+      this.music.onEndedObservable.add(() => {
+        console.log('[Game] Music ended (loop should restart)');
+      });
+      
     } catch (err) {
-      console.warn("[Game] Music file not found or failed to load:", err);
+      console.error("[Game] ✗ Music file not found or failed to load:", err);
+      console.error("[Game] Make sure file exists at:", musicPath);
     }
   }
   
   showMusicPrompt() {
+    // Remove any existing prompt
+    const existing = document.getElementById('music-prompt');
+    if (existing) existing.remove();
+    
     const musicPrompt = document.createElement('div');
     musicPrompt.id = 'music-prompt';
     musicPrompt.style.cssText = `
@@ -342,31 +355,86 @@ class Game {
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       cursor: pointer;
       transition: all 0.3s;
+      animation: pulse 2s infinite;
     `;
     
+    // Add pulsing animation
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+    `;
+    document.head.appendChild(style);
+    
     musicPrompt.innerHTML = `
-      <div style="color: #ffd700; font-weight: bold; margin-bottom: 5px;">🎵 Click to Enable Music</div>
+      <div style="color: #ffd700; font-weight: bold; margin-bottom: 5px; font-size: 16px;">🎵 Click to Enable Music</div>
       <div style="color: #aaa; font-size: 12px;">Background music available</div>
     `;
     
     musicPrompt.addEventListener('mouseenter', () => {
       musicPrompt.style.transform = 'scale(1.05)';
+      musicPrompt.style.borderColor = '#ffed4e';
     });
     
     musicPrompt.addEventListener('mouseleave', () => {
       musicPrompt.style.transform = 'scale(1)';
+      musicPrompt.style.borderColor = '#ffd700';
     });
     
     musicPrompt.addEventListener('click', () => {
-      if (this.music) {
+      console.log('[Game] Music prompt clicked!');
+      
+      if (!this.music) {
+        console.error('[Game] Music object not loaded!');
+        musicPrompt.innerHTML = `
+          <div style="color: #ff4444; font-weight: bold;">❌ Music Failed to Load</div>
+          <div style="color: #aaa; font-size: 12px;">Check console for errors</div>
+        `;
+        return;
+      }
+      
+      if (!this.music.isReady) {
+        console.warn('[Game] Music not ready yet, waiting...');
+        musicPrompt.innerHTML = `
+          <div style="color: #ffaa00; font-weight: bold;">⏳ Loading...</div>
+          <div style="color: #aaa; font-size: 12px;">Please wait</div>
+        `;
+        
+        // Wait for music to be ready
+        const checkReady = setInterval(() => {
+          if (this.music && this.music.isReady) {
+            clearInterval(checkReady);
+            console.log('[Game] Music now ready!');
+            this.music.play();
+            console.log('[Game] ♪ Music started (volume:', this.musicVolume, ')');
+            musicPrompt.remove();
+            this.showMusicControls();
+          }
+        }, 100);
+        
+        return;
+      }
+      
+      try {
         this.music.play();
-        console.log('[Game] ♪ Music started');
+        console.log('[Game] ♪ Music playing!');
+        console.log('[Game] Music volume:', this.music.getVolume());
+        console.log('[Game] Music isPlaying:', this.music.isPlaying);
         musicPrompt.remove();
         this.showMusicControls();
+      } catch (err) {
+        console.error('[Game] Failed to play music:', err);
+        musicPrompt.innerHTML = `
+          <div style="color: #ff4444; font-weight: bold;">❌ Playback Failed</div>
+          <div style="color: #aaa; font-size: 12px;">Check browser console</div>
+        `;
       }
     });
     
     document.body.appendChild(musicPrompt);
+    console.log('[Game] Music prompt displayed - click it to start music');
   }
   
   showMusicControls() {
@@ -418,7 +486,10 @@ class Game {
   }
 
   toggleMusic() {
-    if (!this.music) return;
+    if (!this.music) {
+      console.warn("[Game] No music loaded");
+      return;
+    }
     
     if (this.music.isPlaying) {
       this.music.pause();
@@ -426,6 +497,18 @@ class Game {
     } else {
       this.music.play();
       console.log("[Game] Music playing");
+    }
+    
+    // Update controls if they exist
+    const toggleBtn = document.getElementById('music-toggle');
+    if (toggleBtn) {
+      if (this.music.isPlaying) {
+        toggleBtn.textContent = '🔊 Mute';
+        toggleBtn.style.background = '#4CAF50';
+      } else {
+        toggleBtn.textContent = '🔇 Unmute';
+        toggleBtn.style.background = '#f44336';
+      }
     }
   }
 

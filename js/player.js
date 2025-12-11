@@ -430,6 +430,16 @@ class Player {
                         this.useAbility(key);
                     }
                     break;
+                
+                // Music toggle (M key)
+                case 'm':
+                    if (isDown) {
+                        const game = this.scene.game;
+                        if (game && game.toggleMusic) {
+                            game.toggleMusic();
+                        }
+                    }
+                    break;
             }
         });
         
