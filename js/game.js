@@ -16,6 +16,9 @@ class Game {
     this.scene = new BABYLON.Scene(this.engine);
     this.scene.collisionsEnabled = true;
     this.scene.game = this; // Allow access to game from scene
+    
+    // CRITICAL: Disable ALL debug visualization globally
+    this.disableAllDebugVisualization();
 
     // Physics setup
     if (typeof CANNON !== "undefined") {
@@ -44,6 +47,89 @@ class Game {
     window.addEventListener("resize", () => {
       this.engine.resize();
     });
+  }
+  
+  disableAllDebugVisualization() {
+    // Disable debug layer
+    if (this.scene.debugLayer) {
+      this.scene.debugLayer.hide();
+    }
+    
+    // Disable ALL bounding boxes globally
+    this.scene.forceShowBoundingBoxes = false;
+    
+    // Disable utility layer (used for gizmos, etc)
+    if (BABYLON.UtilityLayerRenderer) {
+      const utilityLayer = BABYLON.UtilityLayerRenderer.DefaultUtilityLayer;
+      if (utilityLayer) {
+        utilityLayer.utilityLayerScene.autoClear = false;
+        utilityLayer.shouldRender = false;
+      }
+      
+      const keeperUtilityLayer = BABYLON.UtilityLayerRenderer.DefaultKeepDepthUtilityLayer;
+      if (keeperUtilityLayer) {
+        keeperUtilityLayer.utilityLayerScene.autoClear = false;
+        keeperUtilityLayer.shouldRender = false;
+      }
+    }
+    
+    // Disable any gizmo managers
+    if (this.scene._gizmoManager) {
+      this.scene._gizmoManager.dispose();
+      this.scene._gizmoManager = null;
+    }
+    
+    // Observer to hide debug visualization on ALL meshes (existing and new)
+    this.scene.onNewMeshAddedObservable.add((mesh) => {
+      this.hideDebugOnMesh(mesh);
+    });
+    
+    // Hide debug on all existing meshes
+    this.scene.meshes.forEach(mesh => {
+      this.hideDebugOnMesh(mesh);
+    });
+    
+    // Disable physics debug rendering if present
+    if (this.scene.physicsEnabled && this.scene.getPhysicsEngine()) {
+      const engine = this.scene.getPhysicsEngine();
+      if (engine.setDebugMode) {
+        engine.setDebugMode(0); // 0 = no debug
+      }
+    }
+    
+    console.log('[Game] All debug visualization disabled');
+  }
+  
+  hideDebugOnMesh(mesh) {
+    if (!mesh) return;
+    
+    // Hide all debug rendering options
+    mesh.showBoundingBox = false;
+    mesh.showSubMeshesBoundingBox = false;
+    mesh.renderOutline = false;
+    mesh.renderOverlay = false;
+    mesh.showEllipsoid = false;
+    
+    // Hide wireframe
+    if (mesh.material) {
+      mesh.material.wireframe = false;
+    }
+    
+    // Hide meshes with debug names
+    const name = (mesh.name || '').toLowerCase();
+    if (name.includes('collision') || 
+        name.includes('collider') || 
+        name.includes('hitbox') ||
+        name.includes('debug') ||
+        name.includes('physics') ||
+        name.includes('primitive') ||
+        name.includes('helper') ||
+        name.includes('gizmo') ||
+        name.includes('bounds') ||
+        name.includes('box')) {
+      mesh.isVisible = false;
+      mesh.setEnabled(false);
+    }
   }
 
   async init() {
@@ -136,6 +222,13 @@ class Game {
     // Hide loading screen
     this.updateLoadingScreen('Ready!', 100);
     setTimeout(() => this.hideLoadingScreen(), 500);
+    
+    // FINAL PASS: Hide all debug visualization on all meshes
+    setTimeout(() => {
+      console.log('[Game] Final debug cleanup pass...');
+      this.scene.meshes.forEach(mesh => this.hideDebugOnMesh(mesh));
+      console.log('[Game] Debug cleanup complete');
+    }, 1000);
 
     // Start render loop
     this.start();
