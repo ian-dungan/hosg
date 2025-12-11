@@ -5,7 +5,7 @@ class SupabaseService {
     constructor() {
         // Supabase configuration
         this.supabaseUrl = 'https://vaxfoafjjybwcxwhicla.supabase.co';
-        this.supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZheGZvYWZqanlid2N4d2hpY2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzM0MTk5MzksImV4cCI6MjA0ODk5NTkzOX0.yNFjt2zJp9r-wOHXm8YPHODOa5h98XEpYOtIz1vc1w0';
+        this.supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZheGZvYWZqanlid2N4d2hpY2xhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTQzODUsImV4cCI6MjA3OTM3MDM4NX0.jicdzNbleedqsvzmLZkNvGlIbjR8laXVasuKKRR-Hb4';
         
         this.client = null;
         this.currentSession = null;
