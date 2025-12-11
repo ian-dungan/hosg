@@ -39,10 +39,14 @@
   <!-- 1. Core configuration -->
   <script src="js/core.js"></script>
   
-  <!-- 2. Asset system -->
+  <!-- 2. Database and authentication -->
+  <script src="js/supabase.js"></script>
+  <script src="js/auth-ui.js"></script>
+  
+  <!-- 3. Asset system -->
   <script src="js/assets.js"></script>
   
-  <!-- 3. Support classes -->
+  <!-- 4. Support classes -->
   <script src="js/ability.js"></script>
   <script src="js/item.js"></script>
   <script src="js/combat.js"></script>
@@ -62,13 +66,12 @@
       try {
         console.log("[Bootstrap] Creating game...");
         const game = new Game("renderCanvas");
-        window.hosgGame = game;
+        window.game = game; // Changed from hosgGame to game for easier access
+        
+        console.log("[Bootstrap] Starting authentication flow...");
+        await game.startAuthFlow();
+        // Note: game.init() will be called after character selection
 
-        console.log("[Bootstrap] Initializing game...");
-        await game.init();
-
-        console.log("[Bootstrap] Starting game...");
-        game.start();
       } catch (err) {
         console.error("[Bootstrap] Game failed to start:", err);
       }
