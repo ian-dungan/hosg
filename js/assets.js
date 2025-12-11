@@ -43,7 +43,6 @@ const ASSET_PATHS = {
     // Generic models (shared objects)
     GENERIC_MODELS: {
         // Example: tree: "tree_01.glb"
-        tree: "tree_01.gltf"
     },
     
     // Environment textures (all in environment folder)

@@ -385,6 +385,17 @@ class Player {
                         kbInfo.event.preventDefault(); // Don't switch browser tabs
                     }
                     break;
+                
+                // Ability hotkeys
+                case '1':
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                    if (isDown) {
+                        this.useAbility(key);
+                    }
+                    break;
             }
         });
         
@@ -952,9 +963,59 @@ class Player {
         const mesh = pickInfo.pickedMesh;
         if (!mesh || !mesh.metadata) return;
         
-        // Check if clicked mesh is targetable
+        // Check if clicked mesh is targetable entity
         if (mesh.metadata.isEnemy || mesh.metadata.isNPC) {
-            this.setTarget(mesh);
+            // Find the actual entity from the mesh
+            const entity = this.findEntityFromMesh(mesh);
+            if (entity && this.scene.combat) {
+                this.scene.combat.setTarget(entity);
+            }
+        }
+    }
+    
+    findEntityFromMesh(mesh) {
+        // Search world for entity with this mesh
+        if (this.scene.world) {
+            for (const enemy of this.scene.world.enemies) {
+                if (enemy.mesh === mesh || (enemy.mesh && enemy.mesh.getChildMeshes().includes(mesh))) {
+                    return enemy;
+                }
+            }
+            for (const npc of this.scene.world.npcs) {
+                if (npc.mesh === mesh || (npc.mesh && npc.mesh.getChildMeshes().includes(mesh))) {
+                    return npc;
+                }
+            }
+        }
+        return null;
+    }
+    
+    // Use ability (called by hotkey)
+    useAbility(key) {
+        if (!this.scene.combat) return;
+        
+        // Map number keys to abilities
+        const abilityMap = {
+            '1': 'powerStrike', // Or 'fireball' for mage
+            '2': 'cleave',
+            '3': 'heal',
+            '4': null,
+            '5': null
+        };
+        
+        const abilityKey = abilityMap[key];
+        if (abilityKey) {
+            this.scene.combat.useAbility(this, abilityKey);
+        }
+    }
+    
+    // Target next enemy (Tab key)
+    targetNext() {
+        if (!this.scene.combat) return;
+        
+        const nearestEnemy = this.scene.combat.findNearestEnemy();
+        if (nearestEnemy) {
+            this.scene.combat.setTarget(nearestEnemy);
         }
     }
     

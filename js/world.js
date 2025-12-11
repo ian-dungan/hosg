@@ -1042,11 +1042,135 @@ class Enemy extends NPC {
         this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.6, 0);
     }
     
-    // ... rest of Enemy methods (omitted for brevity)
-    takeDamage(amount) { /* ... */ }
-    attack() { /* ... */ }
-    die(killer) { /* ... */ }
-    update(deltaTime) { /* ... */ }
+    // Enemy update - checks for player, attacks
+    update(deltaTime) {
+        if (!this.mesh || this.isDead) return;
+        
+        // Get combat system
+        const combat = this.scene.combat;
+        if (!combat) return;
+        
+        // Initialize stats if needed
+        if (!this.stats) {
+            this.stats = combat.getDefaultStats(this);
+            this.isEnemy = true; // Mark as enemy for combat system
+        }
+        
+        // Find player
+        const player = this.scene.player;
+        if (!player || !player.mesh) return;
+        
+        const distanceToPlayer = BABYLON.Vector3.Distance(
+            this.mesh.position,
+            player.mesh.position
+        );
+        
+        // State machine
+        switch (this.state) {
+            case 'idle':
+                // Check for player in detection range
+                if (distanceToPlayer < this.detectionRange) {
+                    this.enterCombat(player);
+                }
+                break;
+                
+            case 'chasing':
+                // Chase player
+                if (distanceToPlayer > combat.config.LEASH_RANGE) {
+                    // Too far, return home
+                    this.exitCombat();
+                } else if (distanceToPlayer <= this.attackRange) {
+                    // In range, attack!
+                    this.state = 'attacking';
+                } else {
+                    // Move toward player
+                    this.moveToward(player.mesh.position, deltaTime);
+                }
+                break;
+                
+            case 'attacking':
+                // Face player
+                this.faceTarget(player.mesh.position);
+                
+                // Check if still in range
+                if (distanceToPlayer > this.attackRange) {
+                    this.state = 'chasing';
+                } else {
+                    // Attack if cooldown ready
+                    const now = Date.now();
+                    if (!this.lastAttackTime || (now - this.lastAttackTime) > 2000) {
+                        this.performAttack(player);
+                        this.lastAttackTime = now;
+                    }
+                }
+                break;
+        }
+        
+        // Update position
+        this.position.copyFrom(this.mesh.position);
+    }
+    
+    enterCombat(target) {
+        this.state = 'chasing';
+        this.target = target;
+        this.inCombat = true;
+        console.log(`[Enemy] ${this.name} detected player!`);
+    }
+    
+    exitCombat() {
+        this.state = 'idle';
+        this.target = null;
+        this.inCombat = false;
+        
+        // Heal to full
+        if (this.stats) {
+            this.stats.currentHP = this.stats.maxHP;
+        }
+    }
+    
+    moveToward(targetPos, deltaTime) {
+        if (!this.mesh) return;
+        
+        const direction = targetPos.subtract(this.mesh.position);
+        direction.y = 0; // Don't move vertically
+        direction.normalize();
+        
+        const speed = 3.0;
+        const movement = direction.scale(speed * deltaTime);
+        
+        this.mesh.position.addInPlace(movement);
+        
+        // Face movement direction
+        if (direction.length() > 0) {
+            const angle = Math.atan2(direction.x, direction.z);
+            this.mesh.rotation.y = angle;
+        }
+    }
+    
+    faceTarget(targetPos) {
+        if (!this.mesh) return;
+        
+        const direction = targetPos.subtract(this.mesh.position);
+        const angle = Math.atan2(direction.x, direction.z);
+        this.mesh.rotation.y = angle;
+    }
+    
+    performAttack(target) {
+        const combat = this.scene.combat;
+        if (!combat) return;
+        
+        const damage = combat.calculateDamage(this, target);
+        combat.applyDamage(target, damage, this);
+        
+        console.log(`[Enemy] ${this.name} attacks for ${damage.amount}!`);
+    }
+    
+    dispose() {
+        if (this.targetHighlight) {
+            this.targetHighlight.dispose();
+        }
+        super.dispose();
+    }
 }
 
 // Item Class (inherits from Entity)

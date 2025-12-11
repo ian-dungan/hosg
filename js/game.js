@@ -36,6 +36,7 @@ class Game {
     this.network = null;
     this.music = null;
     this.musicVolume = 0.3; // 30% volume by default
+    this.combat = null; // Combat system
 
     this._lastFrameTime = performance.now();
     this._running = false;
@@ -82,6 +83,19 @@ class Game {
       this.ui.player = this.player; // Re-assign player after it's created
     } else {
       console.warn("[Game] UIManager not defined.");
+    }
+
+    // Initialize Combat System
+    if (typeof CombatSystem !== 'undefined') {
+      this.combat = new CombatSystem(this);
+      this.scene.combat = this.combat;
+      
+      // Initialize player stats
+      if (this.player) {
+        this.player.stats = this.combat.getDefaultStats(this.player);
+      }
+    } else {
+      console.warn("[Game] CombatSystem not defined.");
     }
 
     // Initialize Network
@@ -185,6 +199,15 @@ class Game {
           this.ui.update(deltaTime);
         } catch (err) {
           console.error("[Game] UI update error:", err);
+        }
+      }
+
+      // Update Combat System
+      if (this.combat && typeof this.combat.update === "function") {
+        try {
+          this.combat.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] Combat update error:", err);
         }
       }
 
