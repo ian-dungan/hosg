@@ -1172,8 +1172,11 @@ class Player {
     
     // Handle A button confirm
     handleConfirm() {
+        // Safety check - ensure UI exists
+        if (!this.scene.ui) return;
+        
         // If target menu is open, execute selected action
-        if (this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
+        if (this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
             this.scene.ui.targetMenu.executeSelected();
         }
         // If target exists but menu not open, open menu (WoW/FFXI style)
