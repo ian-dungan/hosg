@@ -1,31 +1,74 @@
 // ============================================================
-// HEROES OF SHADY GROVE - CONFIGURATION v1.0.25 (FINAL ASSET PATH + CONFIG FIXES)
-// Fix: Ensured all asset paths are relative to the index.html file.
-// Fix: Added missing MOVE_SPEED to PLAYER config.
+// HEROES OF SHADY GROVE - CONFIGURATION v2.0.0
+// Core configuration constants
 // ============================================================
 
 const CONFIG = {
+    VERSION: '2.0.0',
+    DEBUG: true,
+    
+    GAME: {
+        FPS: 60,
+        GRAVITY: 9.81,
+        PHYSICS_ENGINE: 'cannon'
+    },
+    
     PLAYER: {
-        INVENTORY_SIZE: 30, 
+        MOVE_SPEED: 0.15,
+        RUN_MULTIPLIER: 1.8,
+        JUMP_FORCE: 0.22,
         HEALTH: 100,
         MANA: 50,
         STAMINA: 100,
-        SPAWN_HEIGHT: 5,
-        MOVE_SPEED: 0.15 // Added missing config value
+        INVENTORY_SIZE: 20,
+        SPAWN_HEIGHT: 20,
+        
+        // Physics settings
+        MASS: 15,
+        FRICTION: 0.2,
+        LINEAR_DAMPING: 0.3,
+        ANGULAR_DAMPING: 0.99,
+        IMPULSE_STRENGTH: 150,
+        MAX_SPEED: 100,
+        ROTATION_LERP: 0.2
     },
-    GAME: {
-        GRAVITY: 9.81, 
-    },
-    WORLD: { 
+    
+    WORLD: {
+        SIZE: 1000,
+        CHUNK_SIZE: 32,
+        TERRAIN_SIZE: 1024,
+        WATER_LEVEL: 0,
+        SEED: 12345,  // Fixed seed for consistent terrain (change this for different landscapes)
+        
+        // Skybox configuration
         SKYBOX: {
-            PATH: null, 
+            PATH: null,
             SIZE: 512,
             EXPOSURE: 0.6,
             CONTRAST: 1.2,
             LEVEL: 0.5
         },
         SPAWNS: [
-            // Placeholder for future NPC spawn data
+            {
+                id: 'spawn_wolf_hill',
+                npc_template_id: 'wolf',
+                position_x: 10,
+                position_y: 0,
+                position_z: 15,
+                spawn_radius: 12,
+                max_spawn: 2,
+                respawn_time_s: 15
+            },
+            {
+                id: 'spawn_goblin_camp',
+                npc_template_id: 'goblin',
+                position_x: -12,
+                position_y: 0,
+                position_z: -8,
+                spawn_radius: 10,
+                max_spawn: 3,
+                respawn_time_s: 12
+            }
         ]
     },
     ASSETS: {
@@ -33,24 +76,25 @@ const CONFIG = {
         BASE_PATH: "assets/", 
         
         CHARACTERS: {
-            knight: { 
-                model: 'Knight03.glb',
-                // Use relative path 'assets/player/character/'
-                path: '/hosg/assets/player/character/' 
+            knight: {
+                model: 'knight03.glb',
+                // Use relative path to the repository root
+                path: 'assets/player/character/'
+            },
+            goblin: {
+                model: 'wolf.glb',
+                // Placeholder goblin mesh uses the bundled wolf model until a dedicated goblin is added
+                path: 'assets/enemies/'
             },
             wolf: {
-                model: 'Wolf.glb',
-                // Use relative path 'assets/models/'
-                path: '/hosg/assets/models/'
+                model: 'wolf.glb',
+                // Use relative path to the repository root
+                path: 'assets/enemies/'
             }
         },
-        ENVIRONMENT: {
-            terrain_base: { 
-                model: 'FantasyTerrain.glb',
-                // Use relative path 'assets/environment/'
-                path: 'assets/environment/' 
-            }
-        },
+        // No environment meshes are currently available in the repository.
+        // Keep the object for future expansion but leave it empty to avoid 404s.
+        ENVIRONMENT: {},
 
         CLASSES: { 
             Warrior: { 
@@ -94,6 +138,17 @@ const CONFIG = {
                 defaultAbility: 'Shoot'
             }
         }
+    },
+    
+    NETWORK: {
+        WS_URL: 'wss://hosg.onrender.com',
+        MAX_PLAYERS: 100,
+        TICK_RATE: 20
+    },
+    
+    SUPABASE: {
+        url: 'https://vaxfoafjjybwcxwhicla.supabase.co',
+        key: 'sb_publishable_zFmHKiJYok_bNJSjUL4DOA_h6XCC1YD'
     }
 };
 

@@ -1,133 +1,126 @@
 // ============================================================
-// HEROES OF SHADY GROVE - ITEM AND INVENTORY SYSTEM v1.0.10 (PATCHED)
-// Fix: Ensured Inventory.load() uses the passed itemTemplates argument.
+// HEROES OF SHADY GROVE - ITEM / INVENTORY / EQUIPMENT (ES5)
+// Converted to ES5 syntax for legacy browser compatibility.
 // ============================================================
 
-// Item Class
-class Item {
-    constructor(template, instanceId = null, quantity = 1) {
+(function () {
+    'use strict';
+
+    // ----------------- Item -----------------
+    function Item(template, instanceId, quantity) {
+        if (!template) template = {};
         this.id = instanceId || 'new-' + Math.random().toString(36).substring(7);
         this.templateId = template.id;
-        this.name = template.name;
+        this.name = template.name || 'Item';
         this.description = template.description || '';
-        this.quantity = quantity;
-        this.itemType = template.item_type; // e.g., 'Consumable', 'Weapon', 'Armor'
+        this.quantity = typeof quantity === 'number' ? quantity : 1;
+        this.itemType = template.item_type; // e.g., 'Consumable', 'Weapon'
         this.slot = template.equip_slot; // e.g., 'Head', 'Weapon_MainHand'
         this.rarity = template.rarity || 'Common';
-        this.effects = template.effects || {}; // { health_restore: 10 }
-        this.stats = template.stats || {}; // { attackPower: 5 }
+        this.effects = template.effects || {}; 
+        this.stats = template.stats || {}; 
     }
 
-    canStack(otherItem) {
-        return this.templateId === otherItem.templateId && this.itemType !== 'Weapon' && this.itemType !== 'Armor';
-    }
-}
+    Item.prototype.canStack = function (otherItem) {
+        return otherItem && this.templateId === otherItem.templateId && this.itemType !== 'Weapon' && this.itemType !== 'Armor';
+    };
 
-// Inventory Class
-class Inventory {
-    // Note: The constructor in player.js passes 'this' (the Player) as the only arg,
-    // so we keep the constructor simple. Capacity is pulled from CONFIG.
-    constructor(player) {
+    // ----------------- Inventory -----------------
+    function Inventory(player) {
         this.player = player;
-        this.slots = new Array(CONFIG.PLAYER.INVENTORY_SIZE).fill(null);
+        var size = 20;
+        if (typeof CONFIG !== 'undefined' && CONFIG.PLAYER && CONFIG.PLAYER.INVENTORY_SIZE) {
+            size = CONFIG.PLAYER.INVENTORY_SIZE;
+        }
+        this.slots = new Array(size);
+        for (var i = 0; i < size; i++) this.slots[i] = null;
     }
 
-    /**
-     * Loads item data fetched from the database into the inventory structure.
-     * @param {Array<Object>} itemRecords - Array of item records from hosg_character_items.
-     * @param {Map<number, Object>} itemTemplates - Map of all item templates (ID -> Template).
-     */
-    load(itemRecords, itemTemplates) { // <-- itemTemplates is the argument here
-        this.slots.fill(null); 
-        
-        itemRecords.forEach(itemRecord => {
-            // FIX: itemTemplates is guaranteed to be defined here, as Player.init passes it.
-            const template = itemTemplates.get(itemRecord.item_template_id);
-            
-            if (template) {
-                // Instantiate the Item object
-                const item = new Item(template, itemRecord.id, itemRecord.quantity);
-                
-                // Place the item in the correct slot
-                if (itemRecord.slot_index >= 0 && itemRecord.slot_index < this.slots.length) {
-                     this.slots[itemRecord.slot_index] = item;
-                } else {
-                    console.warn(`[Inventory] Item ${item.name} has invalid slot index ${itemRecord.slot_index}.`);
-                }
-            } else {
-                console.warn(`[Inventory] Could not find item template for ID ${itemRecord.item_template_id}. Skipping.`);
+    Inventory.prototype.load = function (itemRecords, itemTemplates) {
+        this.slots = this.slots.map(function () { return null; });
+        if (!itemRecords || !itemTemplates || typeof itemTemplates.get !== 'function') return;
+
+        for (var i = 0; i < itemRecords.length; i++) {
+            var itemRecord = itemRecords[i];
+            var template = itemTemplates.get(itemRecord.item_template_id);
+            if (!template) {
+                console.warn('[Inventory] Missing item template for id:', itemRecord.item_template_id);
+                continue;
             }
-        });
-        console.log(`[Inventory] Loaded ${itemRecords.length} items from database into inventory.`);
-    }
 
-    getSaveData() {
-        return this.slots
-            .map((item, index) => {
-                if (item) {
-                    return {
-                        item_template_id: item.templateId,
-                        quantity: item.quantity,
-                        slot_index: index,
-                        location_type: 'inventory'
-                    };
-                }
-                return null;
-            })
-            .filter(data => data !== null);
-    }
-}
+            var item = new Item(template, itemRecord.id, itemRecord.quantity);
+            if (itemRecord.slot_index >= 0 && itemRecord.slot_index < this.slots.length) {
+                this.slots[itemRecord.slot_index] = item;
+            } else {
+                console.warn('[Inventory] Invalid slot index for item', item.name, itemRecord.slot_index);
+            }
+        }
+    };
 
-// Equipment Class
-class Equipment {
-    constructor(player) {
+    Inventory.prototype.getSaveData = function () {
+        var data = [];
+        for (var i = 0; i < this.slots.length; i++) {
+            var item = this.slots[i];
+            if (item) {
+                data.push({
+                    item_template_id: item.templateId,
+                    quantity: item.quantity,
+                    slot_index: i,
+                    location_type: 'inventory'
+                });
+            }
+        }
+        return data;
+    };
+
+    // ----------------- Equipment -----------------
+    function Equipment(player) {
         this.player = player;
         this.slots = {}; // Key: slot name, Value: Item instance
     }
 
-    /**
-     * Loads equipped item data.
-     * @param {Array<Object>} equipmentRecords - Records from hosg_character_equipment.
-     * @param {Map<number, Object>} itemTemplates - Map of all item templates (ID -> Template).
-     */
-    load(equipmentRecords, itemTemplates) {
-        this.slots = {}; 
-        
-        equipmentRecords.forEach(equipRecord => {
-            const template = itemTemplates.get(equipRecord.item_template_id);
-            if (template) {
-                // Instance ID is generally not needed for equipped items, but we use it for consistency
-                const instanceId = equipRecord.id; 
-                // Quantity is always 1 for equipped items
-                const item = new Item(template, instanceId, 1);
-                
-                // Assuming 'equip_slot' is a field on the template
-                this.slots[template.equip_slot] = item; 
+    Equipment.prototype.load = function (equipmentRecords, itemTemplates) {
+        this.slots = {};
+        if (!equipmentRecords || !itemTemplates || typeof itemTemplates.get !== 'function') return;
+
+        for (var i = 0; i < equipmentRecords.length; i++) {
+            var equipRecord = equipmentRecords[i];
+            var template = itemTemplates.get(equipRecord.item_template_id);
+            if (!template) continue;
+
+            var instanceId = equipRecord.id;
+            var item = new Item(template, instanceId, 1);
+            if (template.equip_slot) {
+                this.slots[template.equip_slot] = item;
             }
-        });
-    }
+        }
+    };
 
-    equip(item) {
-        const slot = item.slot;
-        if (!slot) return null;
+    Equipment.prototype.equip = function (item) {
+        if (!item || !item.slot) return null;
+        var previous = this.slots[item.slot] || null;
+        this.slots[item.slot] = item;
+        return previous;
+    };
 
-        const previouslyEquipped = this.slots[slot] || null;
+    Equipment.prototype.getSaveData = function () {
+        var data = [];
+        for (var slot in this.slots) {
+            if (!Object.prototype.hasOwnProperty.call(this.slots, slot)) continue;
+            var item = this.slots[slot];
+            if (item) {
+                data.push({
+                    item_template_id: item.templateId,
+                    quantity: 1,
+                    equip_slot: item.slot
+                });
+            }
+        }
+        return data;
+    };
 
-        // Equip the new item
-        this.slots[slot] = item;
-        
-        // TODO: Re-calculate player stats here or in player.js after equipping
-        // This is a placeholder for future logic
-        // this.player.updateStatsFromEquipment(); 
-
-        return previouslyEquipped;
-    }
-    
-    getSaveData() {
-        return Object.values(this.slots).map(item => ({
-            item_template_id: item.templateId,
-            quantity: 1, 
-            equip_slot: item.slot
-        }));
-    }
-}
+    // Export globals
+    window.Item = Item;
+    window.Inventory = Inventory;
+    window.Equipment = Equipment;
+})();
