@@ -239,14 +239,14 @@ class Player {
             
             // CRITICAL: Position character model to align with physics box
             // Knight model needs to be centered and at the right height
-            const offset = characterConfig.offset || { x: 0, y: -0.9, z: 0 };
+            const offset = { x: 0, y: -0.9, z: 0 };  // Standard knight offset
             this.characterModel.position = new BABYLON.Vector3(offset.x, offset.y, offset.z);
             
             // NOTE: Don't rotate character model here - we rotate the parent mesh instead
             // If your model faces backward by default, add Math.PI to mesh rotation in update()
             
-            // Apply scale from config
-            const scale = characterConfig.scale || 1.0;
+            // Apply default scale
+            const scale = 1.0;
             this.characterModel.scaling = new BABYLON.Vector3(scale, scale, scale);
             
             // Make sure ALL child meshes are visible and don't have physics
@@ -269,18 +269,16 @@ class Player {
             if (result.animationGroups && result.animationGroups.length > 0) {
                 console.log(`[Player] Found ${result.animationGroups.length} animations`);
                 
-                const animConfig = characterConfig.animations || {};
-                
-                // Map animations
+                // Map animations by name
                 result.animationGroups.forEach(anim => {
                     const name = anim.name.toLowerCase();
-                    if (name.includes('idle') || name.includes(animConfig.idle?.toLowerCase())) {
+                    if (name.includes('idle')) {
                         this.animations.idle = anim;
-                    } else if (name.includes('walk') || name.includes(animConfig.walk?.toLowerCase())) {
+                    } else if (name.includes('walk')) {
                         this.animations.walk = anim;
-                    } else if (name.includes('run') || name.includes(animConfig.run?.toLowerCase())) {
+                    } else if (name.includes('run')) {
                         this.animations.run = anim;
-                    } else if (name.includes('jump') || name.includes(animConfig.jump?.toLowerCase())) {
+                    } else if (name.includes('jump')) {
                         this.animations.jump = anim;
                     }
                 });
