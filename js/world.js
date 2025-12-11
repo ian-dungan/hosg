@@ -1232,9 +1232,82 @@ class NPC extends Entity {
         }
     }
     
-    setupPhysics() { /* ... implementation omitted ... */ }
-    startWandering() { /* ... implementation omitted ... */ }
-    update(deltaTime) { /* ... implementation omitted ... */ }
+    setupPhysics() {
+        if (!this.mesh) return;
+        
+        // Snap NPC to terrain height
+        const world = this.scene.world || this.scene.game?.world;
+        if (world && world.getHeightAt) {
+            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
+            this.mesh.position.y = terrainY + 0.9; // Stand on terrain (half height of ellipsoid)
+            this.position.copyFrom(this.mesh.position);
+        }
+    }
+    
+    startWandering() {
+        // NPCs wander around their spawn point
+        this.state = 'wandering';
+        this.pickNewWanderTarget();
+    }
+    
+    pickNewWanderTarget() {
+        // Pick random point within walk radius
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * this.walkRadius;
+        
+        this.targetPosition = this.position.clone();
+        this.targetPosition.x += Math.sin(angle) * distance;
+        this.targetPosition.z += Math.cos(angle) * distance;
+        
+        // Snap target to terrain height
+        const world = this.scene.world || this.scene.game?.world;
+        if (world && world.getHeightAt) {
+            this.targetPosition.y = world.getHeightAt(this.targetPosition.x, this.targetPosition.z) + 0.9;
+        }
+    }
+    
+    update(deltaTime) {
+        if (!this.mesh || this.state !== 'wandering') return;
+        
+        if (!this.targetPosition) {
+            this.pickNewWanderTarget();
+            return;
+        }
+        
+        // Move toward target
+        const direction = this.targetPosition.subtract(this.mesh.position);
+        const distance = direction.length();
+        
+        if (distance < 0.5) {
+            // Reached target, pick new one after delay
+            this.state = 'idle';
+            setTimeout(() => {
+                if (this.state === 'idle') {
+                    this.state = 'wandering';
+                    this.pickNewWanderTarget();
+                }
+            }, 2000 + Math.random() * 3000);
+            return;
+        }
+        
+        direction.normalize();
+        const movement = direction.scale(this.moveSpeed * deltaTime);
+        this.mesh.position.addInPlace(movement);
+        
+        // CRITICAL: Snap to terrain height
+        const world = this.scene.world || this.scene.game?.world;
+        if (world && world.getHeightAt) {
+            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
+            this.mesh.position.y = terrainY + 0.9; // Stand on terrain
+        }
+        
+        // Face movement direction
+        const angle = Math.atan2(direction.x, direction.z);
+        this.mesh.rotation.y = angle;
+        
+        // Update entity position
+        this.position.copyFrom(this.mesh.position);
+    }
 }
 
 // Enemy Class (inherits from Entity, extends NPC for simple AI)
@@ -1427,6 +1500,16 @@ class Enemy extends NPC {
         // State machine
         switch (this.state) {
             case 'idle':
+                // Stop movement animations when idle
+                if (this.animations && this.animations.length > 0) {
+                    this.animations.forEach(anim => {
+                        if (anim.name.toLowerCase().includes('run') || 
+                            anim.name.toLowerCase().includes('walk')) {
+                            anim.pause();
+                        }
+                    });
+                }
+                
                 // Check for player in detection range
                 if (distanceToPlayer < this.detectionRange) {
                     this.enterCombat(player);
@@ -1450,6 +1533,16 @@ class Enemy extends NPC {
             case 'attacking':
                 // Face player
                 this.faceTarget(player.mesh.position);
+                
+                // Stop movement animation when attacking
+                if (this.animations && this.animations.length > 0) {
+                    this.animations.forEach(anim => {
+                        if (anim.name.toLowerCase().includes('run') || 
+                            anim.name.toLowerCase().includes('walk')) {
+                            anim.pause();
+                        }
+                    });
+                }
                 
                 // Check if still in range
                 if (distanceToPlayer > this.attackRange) {
@@ -1492,6 +1585,17 @@ class Enemy extends NPC {
         
         const direction = targetPos.subtract(this.mesh.position);
         direction.y = 0; // Don't move vertically
+        const distance = direction.length();
+        
+        // Only move if we're far enough away
+        if (distance < 0.1) {
+            // Stop animation when not moving
+            if (this.animations && this.animations.length > 0) {
+                this.animations.forEach(anim => anim.pause());
+            }
+            return;
+        }
+        
         direction.normalize();
         
         const speed = 3.0;
@@ -1499,10 +1603,35 @@ class Enemy extends NPC {
         
         this.mesh.position.addInPlace(movement);
         
+        // CRITICAL: Snap to terrain height (like player does)
+        const world = this.scene.world || this.scene.game?.world;
+        if (world && world.getHeightAt) {
+            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
+            this.mesh.position.y = terrainY + 0.6; // Stand on terrain (half height of ellipsoid)
+        }
+        
         // Face movement direction
         if (direction.length() > 0) {
             const angle = Math.atan2(direction.x, direction.z);
             this.mesh.rotation.y = angle;
+        }
+        
+        // Play run animation when moving
+        if (this.animations && this.animations.length > 0) {
+            // Find and play run/walk animation
+            let runAnim = this.animations.find(a => 
+                a.name.toLowerCase().includes('run') || 
+                a.name.toLowerCase().includes('walk')
+            );
+            
+            if (!runAnim) {
+                // If no specific run animation, use first one
+                runAnim = this.animations[0];
+            }
+            
+            if (runAnim && !runAnim.isPlaying) {
+                runAnim.start(true, 1.0); // Loop, normal speed
+            }
         }
     }
     
