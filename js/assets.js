@@ -44,7 +44,7 @@ const ASSET_PATHS = {
     GENERIC_MODELS: {
         tree_pine: "tree_pine.gltf",
         tree_oak: "tree_oak.gltf",
-        tree_birch: "tree_birch.gltf",
+        tree_birch: "tree01.gltf",
         rock: "rock.gltf"
         // Add your .gltf or .glb tree models here
     },
