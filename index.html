@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <button onclick="game.toggleMusic()" style="position:absolute;top:10px;right:10px;z-index:100;">
-  🔊 Music
-</button>
   <meta charset="UTF-8" />
   <title>Heroes of Shady Grove</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -37,87 +34,39 @@
 <body>
   <canvas id="renderCanvas"></canvas>
 
-<script src="js/core.js"></script>    <script src="js/assets.js"></script>   <script src="js/item.js"></script>     <script src="js/ability.js"></script>  <script src="js/world.js"></script>    <script src="js/player.js"></script>   <script src="js/ui.js"></script>       <script src="js/network.js"></script>  <script src="js/game.js"></script>     <script>
-  async function initializeGame() {
-    console.log("[Bootstrap] Starting game initialization sequence...");
-    
-    // 1. Setup Babylon.js Engine and Scene
-    const canvas = document.getElementById("renderCanvas");
-    if (!canvas) {
-        console.error("[Bootstrap] Canvas element 'renderCanvas' not found.");
-        return;
-    }
+  <!-- Load game scripts in correct order -->
+  
+  <!-- 1. Core configuration -->
+  <script src="js/core.js"></script>
+  
+  <!-- 2. Asset system (MUST load before compatibility shim) -->
+  <script src="js/assets.js"></script>
+  
+  <!-- 3. Asset compatibility shim (bridges old ASSET_MANIFEST to new ASSET_PATHS) -->
+  <script src="js/asset-compat.js"></script>
+  
+  <!-- 4. Support classes -->
+  <script src="js/ability.js"></script>
+  <script src="js/item.js"></script>
+  
+  <!-- 5. Game systems -->
+  <script src="js/world.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/network.js"></script>
+  
+  <!-- 6. Main game orchestrator -->
+  <script src="js/game.js"></script>
 
-    const engine = new BABYLON.Engine(canvas, true);
-    const scene = new BABYLON.Scene(engine);
-    
-    scene.collisionsEnabled = true;
-    scene.gravity = new BABYLON.Vector3(0, -CONFIG.GAME.GRAVITY, 0);
-    scene.enablePhysics(scene.gravity, new BABYLON.CannonJSPlugin());
+  <script>
+    window.addEventListener("DOMContentLoaded", async () => {
+      try {
+        console.log("[Bootstrap] Creating game...");
+        const game = new Game("renderCanvas");
+        window.hosgGame = game;
 
-    // 2. Instantiate Manager Classes
-    const uiManager = new UIManager(scene);
-    const networkManager = new NetworkManager(); 
-    
-    // 3. Template Loading Sequence
-    console.log("[Bootstrap] Loading templates from Network...");
-    const itemTemplates = new Map();
-    const skillTemplates = new Map();
-    const npcTemplates = new Map();
-    
-    const templatesLoaded = await networkManager.loadTemplates(itemTemplates, skillTemplates, npcTemplates);
-    
-    if (!templatesLoaded) {
-        console.error("[Bootstrap] Failed to load essential game templates. Halting.");
-        return;
-    }
-
-    // 4. Create Player and World *after* templates
-    const player = new Player(scene);
-    const world = new World(scene, player);
-    const game = new Game(engine, scene, world, player, uiManager);
-
-    // Make game object and templates globally accessible
-    scene.game = game; 
-    game.itemTemplates = itemTemplates;
-    game.skillTemplates = skillTemplates;
-    game.npcTemplates = npcTemplates;
-    
-    // 5. Asset Manager
-    const assetManager = new AssetManager(scene);
-    
-    // ATTACH ASSET MANAGER TO PLAYER/WORLD
-    player.assetManager = assetManager; 
-    world.assetManager = assetManager; 
-
-    // Load all visual assets (models, textures)
-    console.log("[Bootstrap] Loading all game assets (models, textures)...");
-    await assetManager.loadAll(); 
-    assetManager.printStats();
-    console.log("[Bootstrap] All assets loaded.");
-    
-    // 6. Final Setup and Initialization
-    player.applyDefaultClass('Warrior'); // Apply class before mesh init
-    player._initMesh(); // CRITICAL FIX: Initialize Player's VISUAL MESH *after* assets are loaded
-
-    game.init(); 
-    uiManager.init(); 
-
-    // 7. Build the World
-    world.createEnvironment(assetManager); 
-    
-    // 8. Start the Game
-    game.run(); 
-    console.log("[Bootstrap] Game started successfully.");
-
-    // Handle window resize events
-    window.addEventListener("resize", () => {
-      engine.resize();
-    });
-  }
-
-  initializeGame();
-</script>
+        console.log("[Bootstrap] Initializing game...");
+        await game.init();
 
         console.log("[Bootstrap] Starting game...");
         game.start();
