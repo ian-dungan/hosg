@@ -103,6 +103,18 @@ class Game {
   hideDebugOnMesh(mesh) {
     if (!mesh) return;
     
+    // CRITICAL: Don't hide actual game models (trees, enemies, NPCs, player)
+    if (mesh.metadata) {
+      if (mesh.metadata.isTree || mesh.metadata.isModel || 
+          mesh.metadata.isEnemy || mesh.metadata.isNPC || 
+          mesh.metadata.isPlayer) {
+        // This is a real game object, don't hide it!
+        mesh.isVisible = true;
+        mesh.setEnabled(true);
+        return;
+      }
+    }
+    
     // Hide all debug rendering options
     mesh.showBoundingBox = false;
     mesh.showSubMeshesBoundingBox = false;
@@ -139,8 +151,8 @@ class Game {
     }
     
     // SUPER AGGRESSIVE: Hide any mesh that looks like a debug primitive
-    // Check if it's a simple primitive shape (box, sphere, plane, etc.)
-    if (mesh.getTotalVertices) {
+    // BUT ONLY if it doesn't have model metadata
+    if (mesh.getTotalVertices && !mesh.metadata?.isModel) {
       const vertCount = mesh.getTotalVertices();
       
       // Common debug primitive vertex counts

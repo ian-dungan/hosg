@@ -42,8 +42,8 @@ const ASSET_PATHS = {
     
     // Generic models (shared objects)
     GENERIC_MODELS: {
-        tree01: "tree01.glb"
-        // Add more tree models as: tree02: "tree02.gltf", etc.
+        tree01: "tree01.glb"  // GLB (binary GLTF) format
+        // Add more: tree02: "tree02.glb", etc.
     },
     
     // Environment textures (all in environment folder)

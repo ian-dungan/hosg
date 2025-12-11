@@ -753,42 +753,61 @@ class World {
         try {
             const modelPath = ASSET_PATHS.getModelPath(treeType);
             if (!modelPath) {
+                console.warn('[World] No model path for tree type:', treeType);
                 this.createSimpleTree(x, groundY, z);
                 return;
             }
+            
+            console.log(`[World] Loading tree model: ${modelPath} at (${x.toFixed(1)}, ${groundY.toFixed(1)}, ${z.toFixed(1)})`);
             
             const result = await this.scene.assetLoader.loadModel(modelPath, {
                 scaling: new BABYLON.Vector3(1.0, 1.0, 1.0)
             });
             
             if (!result || !result.meshes || result.meshes.length === 0) {
+                console.warn('[World] No meshes in tree model result');
                 this.createSimpleTree(x, groundY, z);
                 return;
             }
             
+            console.log(`[World] Tree model loaded: ${result.meshes.length} meshes`);
+            
             const tree = result.meshes[0];
             tree.position = new BABYLON.Vector3(x, groundY, z);
+            
+            // CRITICAL: Ensure ALL tree meshes are visible and enabled
+            result.meshes.forEach((mesh, index) => {
+                if (!mesh) return;
+                
+                // Check for debug/collision meshes
+                const name = (mesh.name || '').toLowerCase();
+                if (name.includes('collision') || name.includes('collider') || name.includes('hitbox')) {
+                    mesh.isVisible = false;
+                    mesh.setEnabled(false);
+                    console.log(`[World] Hiding collision mesh: ${mesh.name}`);
+                    return;
+                }
+                
+                // Make sure tree is VISIBLE
+                mesh.isVisible = true;
+                mesh.setEnabled(true);
+                mesh.showBoundingBox = false;
+                
+                // Add tree metadata to prevent aggressive debug hiding
+                mesh.metadata = { isTree: true, isModel: true };
+                
+                console.log(`[World] Tree mesh ${index}: ${mesh.name}, visible: ${mesh.isVisible}, verts: ${mesh.getTotalVertices ? mesh.getTotalVertices() : '?'}`);
+            });
             
             // Random rotation for variety
             tree.rotation.y = Math.random() * Math.PI * 2;
             
-            // Random scale variation (90% - 110%)
+            // Scale variation (90% - 110%)
             const scaleVariation = 0.9 + Math.random() * 0.2;
             tree.scaling.scaleInPlace(scaleVariation);
             
             // Enable collisions
             tree.checkCollisions = true;
-            tree.metadata = { isTree: true };
-            
-            // Hide any debug meshes
-            result.meshes.forEach(mesh => {
-                if (!mesh) return;
-                const name = (mesh.name || '').toLowerCase();
-                if (name.includes('collision') || name.includes('collider')) {
-                    mesh.isVisible = false;
-                }
-                mesh.showBoundingBox = false;
-            });
             
             // Enable shadows if shadow generator exists
             if (this.scene.shadowGenerator) {
@@ -796,8 +815,10 @@ class World {
             }
             tree.receiveShadows = true;
             
+            console.log(`[World] ✓ Tree created at (${x.toFixed(1)}, ${groundY.toFixed(1)}, ${z.toFixed(1)}), scale: ${scaleVariation.toFixed(2)}`);
+            
         } catch (error) {
-            console.warn('[World] Failed to load tree model, using simple tree:', error);
+            console.error('[World] Failed to load tree model:', error);
             this.createSimpleTree(x, groundY, z);
         }
     }
