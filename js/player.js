@@ -644,30 +644,41 @@ class Player {
             this.gamepad.startButtonWasPressed = false;
         }
         
-        // D-pad for targeting
-        // D-pad Up (12) - Target next
+        // D-pad for menu navigation OR targeting
+        // Check if menu is open
+        const menuOpen = this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible;
+        
+        // D-pad Up (12) - Navigate menu up OR Target next
         if (gamepad.buttons[12] && gamepad.buttons[12].pressed) {
             if (!this.gamepad.dpadUpWasPressed) {
-                this.targetNext();
+                if (menuOpen) {
+                    this.scene.ui.targetMenu.moveSelection(-1); // Move up in menu
+                } else {
+                    this.targetNext();
+                }
                 this.gamepad.dpadUpWasPressed = true;
             }
         } else {
             this.gamepad.dpadUpWasPressed = false;
         }
         
-        // D-pad Down (13) - Target previous
+        // D-pad Down (13) - Navigate menu down OR Target previous
         if (gamepad.buttons[13] && gamepad.buttons[13].pressed) {
             if (!this.gamepad.dpadDownWasPressed) {
-                this.targetPrevious();
+                if (menuOpen) {
+                    this.scene.ui.targetMenu.moveSelection(1); // Move down in menu
+                } else {
+                    this.targetPrevious();
+                }
                 this.gamepad.dpadDownWasPressed = true;
             }
         } else {
             this.gamepad.dpadDownWasPressed = false;
         }
         
-        // D-pad Left (14) - Cycle targets left
+        // D-pad Left (14) - Cycle targets left (only if menu closed)
         if (gamepad.buttons[14] && gamepad.buttons[14].pressed) {
-            if (!this.gamepad.dpadLeftWasPressed) {
+            if (!this.gamepad.dpadLeftWasPressed && !menuOpen) {
                 this.targetPrevious();
                 this.gamepad.dpadLeftWasPressed = true;
             }
@@ -675,9 +686,9 @@ class Player {
             this.gamepad.dpadLeftWasPressed = false;
         }
         
-        // D-pad Right (15) - Cycle targets right
+        // D-pad Right (15) - Cycle targets right (only if menu closed)
         if (gamepad.buttons[15] && gamepad.buttons[15].pressed) {
-            if (!this.gamepad.dpadRightWasPressed) {
+            if (!this.gamepad.dpadRightWasPressed && !menuOpen) {
                 this.targetNext();
                 this.gamepad.dpadRightWasPressed = true;
             }
@@ -1161,19 +1172,19 @@ class Player {
         if (this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
             this.scene.ui.targetMenu.executeSelected();
         }
-        // If target exists but no menu, open menu
-        else if (this.scene.combat && this.scene.combat.currentTarget) {
-            this.openTargetMenu();
-        }
     }
     
     // Handle B button cancel
     handleCancel() {
-        // Close target menu if open
+        // Close target menu AND clear target
         if (this.scene.ui && this.scene.ui.targetMenu && this.scene.ui.targetMenu.isVisible) {
             this.scene.ui.targetMenu.hide();
+            // Also clear the target
+            if (this.scene.combat && this.scene.combat.currentTarget) {
+                this.scene.combat.setTarget(null);
+            }
         }
-        // Clear target if menu not open
+        // If menu already closed, just clear target
         else if (this.scene.combat && this.scene.combat.currentTarget) {
             this.scene.combat.setTarget(null);
         }

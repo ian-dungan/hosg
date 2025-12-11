@@ -43,10 +43,16 @@ class CombatSystem {
     setTarget(entity) {
         if (this.currentTarget === entity) return;
         
-        // Clear old target highlight
-        if (this.currentTarget && this.currentTarget.targetHighlight) {
-            this.currentTarget.targetHighlight.dispose();
-            this.currentTarget.targetHighlight = null;
+        // Clear old target highlight and name
+        if (this.currentTarget) {
+            if (this.currentTarget.targetHighlight) {
+                this.currentTarget.targetHighlight.dispose();
+                this.currentTarget.targetHighlight = null;
+            }
+            if (this.currentTarget.floatingName) {
+                this.currentTarget.floatingName.dispose();
+                this.currentTarget.floatingName = null;
+            }
         }
         
         this.currentTarget = entity;
@@ -55,22 +61,28 @@ class CombatSystem {
             // Create target highlight (different color for NPCs vs enemies)
             this.createTargetHighlight(entity);
             
+            // Create floating name above target
+            this.createFloatingName(entity);
+            
             // Check if entity is an enemy or NPC
             if (entity.isEnemy) {
                 this.logCombat(`Targeted: ${entity.name} (Enemy)`);
-                // Enter combat only for enemies
-                this.enterCombat();
             } else {
-                this.logCombat(`Targeted: ${entity.name} (NPC - Cannot Attack)`);
-                // Don't enter combat for NPCs
-                this.inCombat = false;
+                this.logCombat(`Targeted: ${entity.name} (NPC)`);
             }
             
-            // Update target frame UI
-            if (this.game.ui && this.game.ui.updateTargetFrame) {
-                this.game.ui.updateTargetFrame(entity);
+            // Automatically open context menu
+            if (this.game.ui && this.game.ui.targetMenu) {
+                this.game.ui.targetMenu.show(entity);
+            } else if (this.game.ui) {
+                this.game.ui.createTargetMenu();
+                this.game.ui.targetMenu.show(entity);
             }
         } else {
+            // Close menu when target cleared
+            if (this.game.ui && this.game.ui.targetMenu) {
+                this.game.ui.targetMenu.hide();
+            }
             this.logCombat('Target cleared');
         }
     }
@@ -108,6 +120,58 @@ class CombatSystem {
                 highlight.position.copyFrom(entity.mesh.position);
                 highlight.position.y = 0.1;
                 highlight.rotation.y += 0.02;
+            }
+        });
+    }
+    
+    createFloatingName(entity) {
+        if (!entity.mesh) return;
+        
+        // Create plane for text
+        const plane = BABYLON.MeshBuilder.CreatePlane('nameTag', {
+            width: 3,
+            height: 0.5
+        }, this.scene);
+        
+        // Position above entity's head
+        plane.position = entity.mesh.position.clone();
+        plane.position.y += 3; // Above head
+        plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // Always face camera
+        
+        // Create dynamic texture for text
+        const textureResolution = 512;
+        const dynamicTexture = new BABYLON.DynamicTexture('nameTexture', textureResolution, this.scene, false);
+        dynamicTexture.hasAlpha = true;
+        
+        // Draw text on texture
+        const ctx = dynamicTexture.getContext();
+        const font = 'bold 80px Arial';
+        dynamicTexture.drawText(
+            entity.name,
+            null, // x (center)
+            null, // y (center)
+            font,
+            entity.isEnemy ? '#ff4444' : '#44ff44', // Red for enemies, green for NPCs
+            'rgba(0, 0, 0, 0.7)', // Semi-transparent black background
+            true, // invertY
+            true  // update texture
+        );
+        
+        // Apply texture to plane
+        const material = new BABYLON.StandardMaterial('nameMaterial', this.scene);
+        material.diffuseTexture = dynamicTexture;
+        material.emissiveTexture = dynamicTexture;
+        material.opacityTexture = dynamicTexture;
+        material.backFaceCulling = false;
+        plane.material = material;
+        
+        entity.floatingName = plane;
+        
+        // Keep name above entity
+        this.scene.registerBeforeRender(() => {
+            if (plane && !plane.isDisposed() && entity.mesh) {
+                plane.position.copyFrom(entity.mesh.position);
+                plane.position.y += 3;
             }
         });
     }

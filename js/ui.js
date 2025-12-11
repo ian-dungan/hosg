@@ -397,38 +397,43 @@ class UIManager {
             selectedIndex: 0,
             options: [],
             container: null,
+            target: null,
             
             show: function(target) {
                 this.isVisible = true;
                 this.selectedIndex = 0;
+                this.target = target;
                 
                 // Determine available actions based on target type
                 this.options = [];
                 
                 if (target.isEnemy) {
-                    this.options.push({ label: 'Attack', action: 'attack' });
-                    this.options.push({ label: 'Consider', action: 'consider' });
+                    this.options.push({ label: 'Attack', action: 'attack', icon: '⚔️' });
+                    this.options.push({ label: 'Use Item', action: 'useItem', icon: '🧪' });
+                    this.options.push({ label: 'Consider', action: 'consider', icon: '🔍' });
                 } else {
                     // NPC
-                    this.options.push({ label: 'Talk', action: 'talk' });
-                    this.options.push({ label: 'Trade', action: 'trade' });
-                    this.options.push({ label: 'Consider', action: 'consider' });
+                    this.options.push({ label: 'Talk', action: 'talk', icon: '💬' });
+                    this.options.push({ label: 'Trade', action: 'trade', icon: '💰' });
+                    this.options.push({ label: 'Use Item', action: 'useItem', icon: '🧪' });
+                    this.options.push({ label: 'Consider', action: 'consider', icon: '🔍' });
                 }
                 
-                this.options.push({ label: 'Cancel', action: 'cancel' });
+                this.options.push({ label: 'Cancel', action: 'cancel', icon: '❌' });
                 
                 // Create or update UI
-                this.createUI(target);
+                this.createUI();
             },
             
             hide: function() {
                 this.isVisible = false;
+                this.target = null;
                 if (this.container) {
                     this.container.style.display = 'none';
                 }
             },
             
-            createUI: function(target) {
+            createUI: function() {
                 if (!this.container) {
                     // Create container
                     this.container = document.createElement('div');
@@ -441,8 +446,8 @@ class UIManager {
                         background: linear-gradient(135deg, rgba(20, 20, 40, 0.95) 0%, rgba(10, 10, 30, 0.98) 100%);
                         border: 3px solid #ffd700;
                         border-radius: 10px;
-                        padding: 20px;
-                        min-width: 200px;
+                        padding: 15px;
+                        min-width: 220px;
                         box-shadow: 0 8px 24px rgba(0,0,0,0.8);
                         z-index: 10001;
                         font-family: Arial, sans-serif;
@@ -451,23 +456,130 @@ class UIManager {
                 }
                 
                 // Clear and rebuild
-                this.container.innerHTML = `
-                    <div style="color: ${target.isEnemy ? '#ff4444' : '#44ff44'}; font-size: 18px; font-weight: bold; margin-bottom: 15px; text-align: center;">
-                        ${target.name}
-                    </div>
-                    <div id="menu-options"></div>
-                `;
+                this.container.innerHTML = '<div id="menu-options"></div>';
                 
                 const optionsContainer = this.container.querySelector('#menu-options');
                 
                 this.options.forEach((option, index) => {
                     const optionEl = document.createElement('div');
                     optionEl.className = 'menu-option';
+                    optionEl.dataset.index = index;
                     optionEl.style.cssText = `
-                        padding: 10px 15px;
+                        padding: 12px 20px;
                         margin: 5px 0;
-                        background: ${index === this.selectedIndex ? 'rgba(255, 215, 0, 0.3)' : 'rgba(255, 255, 255, 0.1)'};
-                        border: 2px solid ${index === this.selectedIndex ? '#ffd700' : 'transparent'};
+                        background: ${index === this.selectedIndex ? 'rgba(255, 215, 0, 0.4)' : 'rgba(255, 255, 255, 0.1)'};
+                        border: 2px solid ${index === this.selectedIndex ? '#ffd700' : 'rgba(255, 255, 255, 0.2)'};
+                        border-radius: 5px;
+                        color: white;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                        text-align: left;
+                        font-size: 16px;
+                        font-weight: ${index === this.selectedIndex ? 'bold' : 'normal'};
+                    `;
+                    optionEl.innerHTML = `${option.icon} ${option.label}`;
+                    
+                    optionEl.addEventListener('mouseenter', () => {
+                        this.selectedIndex = index;
+                        this.createUI();
+                    });
+                    
+                    optionEl.addEventListener('click', () => {
+                        this.executeSelected();
+                    });
+                    
+                    optionsContainer.appendChild(optionEl);
+                });
+                
+                this.container.style.display = 'block';
+            },
+            
+            moveSelection: function(direction) {
+                this.selectedIndex += direction;
+                
+                // Wrap around
+                if (this.selectedIndex < 0) {
+                    this.selectedIndex = this.options.length - 1;
+                }
+                if (this.selectedIndex >= this.options.length) {
+                    this.selectedIndex = 0;
+                }
+                
+                // Update visual
+                this.createUI();
+            },
+            
+            executeSelected: function() {
+                const selected = this.options[this.selectedIndex];
+                if (!selected) return;
+                
+                const game = window.game;
+                const combat = game?.combat;
+                const target = this.target || combat?.currentTarget;
+                
+                console.log(`[UI] Executing: ${selected.action} on ${target?.name}`);
+                
+                switch (selected.action) {
+                    case 'attack':
+                        if (target && target.isEnemy && combat) {
+                            combat.enterCombat();
+                            console.log('[UI] Entering combat with:', target.name);
+                        }
+                        break;
+                        
+                    case 'talk':
+                        console.log('[UI] Talking to:', target?.name);
+                        alert(`${target?.name} says: "Greetings, traveler!"`);
+                        break;
+                        
+                    case 'trade':
+                        console.log('[UI] Trading with:', target?.name);
+                        alert(`${target?.name} says: "What would you like to buy or sell?"`);
+                        break;
+                        
+                    case 'useItem':
+                        console.log('[UI] Using item on:', target?.name);
+                        if (game?.player?.inventory) {
+                            game.player.inventory.toggleInventory();
+                            alert('Select an item from your inventory to use.');
+                        } else {
+                            alert('Inventory system not available.');
+                        }
+                        break;
+                        
+                    case 'consider':
+                        if (target) {
+                            const level = target.stats?.level || 1;
+                            const hp = target.stats?.currentHP || target.health || 100;
+                            const maxHP = target.stats?.maxHP || target.maxHealth || 100;
+                            const hpPercent = Math.round((hp / maxHP) * 100);
+                            
+                            let assessment = '';
+                            if (target.isEnemy) {
+                                if (hpPercent >= 75) assessment = 'Strong and healthy.';
+                                else if (hpPercent >= 50) assessment = 'Wounded but dangerous.';
+                                else if (hpPercent >= 25) assessment = 'Severely wounded.';
+                                else assessment = 'Near death.';
+                            } else {
+                                assessment = 'Looks friendly.';
+                            }
+                            
+                            alert(`${target.name}\nLevel: ${level}\nHealth: ${hp}/${maxHP} (${hpPercent}%)\n\n${assessment}`);
+                        }
+                        break;
+                        
+                    case 'cancel':
+                        // Just close menu
+                        break;
+                }
+                
+                this.hide();
+            }
+        };
+        
+        // Store reference in UIManager
+        console.log('[UI] Target menu created');
+    }
                         border-radius: 5px;
                         color: white;
                         cursor: pointer;
