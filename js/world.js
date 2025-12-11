@@ -693,15 +693,14 @@ class World {
         // Check if we have tree models available
         const hasTreeModels = window.ASSET_PATHS && 
                              window.ASSET_PATHS.GENERIC_MODELS && 
-                             (window.ASSET_PATHS.GENERIC_MODELS.tree_pine ||
-                              window.ASSET_PATHS.GENERIC_MODELS.tree_oak ||
-                              window.ASSET_PATHS.GENERIC_MODELS.tree_birch);
+                             window.ASSET_PATHS.GENERIC_MODELS.tree01;
         
         const treeTypes = [];
         if (hasTreeModels) {
-            if (window.ASSET_PATHS.GENERIC_MODELS.tree_pine) treeTypes.push('tree_pine');
-            if (window.ASSET_PATHS.GENERIC_MODELS.tree_oak) treeTypes.push('tree_oak');
-            if (window.ASSET_PATHS.GENERIC_MODELS.tree_birch) treeTypes.push('tree_birch');
+            // Add all available tree models
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree01) treeTypes.push('tree01');
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree02) treeTypes.push('tree02');
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree03) treeTypes.push('tree03');
         }
         
         while (spawned < count && attempts < maxAttempts) {

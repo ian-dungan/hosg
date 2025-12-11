@@ -42,10 +42,8 @@ const ASSET_PATHS = {
     
     // Generic models (shared objects)
     GENERIC_MODELS: {
-        tree_pine: "tree01.gltf",
-        tree_oak: "tree01.gltf",
-        tree_birch: "tree01.gltf",
-        rock: "rock.gltf"
+        tree01: "tree01.gltf"
+        // Add more tree models as: tree02: "tree02.gltf", etc.
     },
     
     // Environment textures (all in environment folder)
@@ -298,6 +296,21 @@ class AssetManager {
             let result = null;
             let hadErrors = false;
             
+            // Suppress console errors during loading (texture 404s are expected)
+            const originalError = console.error;
+            const suppressedErrors = [];
+            console.error = function(...args) {
+                const msg = args.join(' ');
+                // Suppress texture and binary file 404 errors
+                if (msg.includes('Failed to load') || msg.includes('404') || 
+                    msg.includes('.jpg') || msg.includes('.png') || msg.includes('.bin') ||
+                    msg.includes('textures/') || msg.includes('Unable to load')) {
+                    suppressedErrors.push(msg);
+                    return; // Don't log these
+                }
+                originalError.apply(console, args); // Log other errors normally
+            };
+            
             try {
                 result = await BABYLON.SceneLoader.ImportMeshAsync(
                     '',
@@ -308,7 +321,11 @@ class AssetManager {
             } catch (error) {
                 // Check if we got partial results (meshes loaded but textures failed)
                 hadErrors = true;
-                console.warn(`[Assets] Model had loading errors, checking for partial results: ${path}`);
+                console.error = originalError; // Restore console.error
+                console.warn(`[Assets] Model had loading errors: ${path}`);
+                if (suppressedErrors.length > 0) {
+                    console.warn(`[Assets] Suppressed ${suppressedErrors.length} texture/resource errors`);
+                }
                 
                 // Even with errors, meshes might have loaded
                 // Check the scene for newly added meshes
@@ -327,9 +344,13 @@ class AssetManager {
                         animationGroups: []
                     };
                 } else {
+                    console.error = originalError; // Restore console.error
                     throw error; // Re-throw if we got nothing
                 }
             }
+            
+            // Restore console.error
+            console.error = originalError;
             
             if (!result || !result.meshes || result.meshes.length === 0) {
                 throw new Error('No meshes loaded');
@@ -356,6 +377,9 @@ class AssetManager {
                 console.log(`[Assets] ⚠ Model loaded with fallback materials: ${path} (${result.meshes.length} meshes)`);
             } else {
                 console.log(`[Assets] ✓ Model loaded: ${path} (${result.meshes.length} meshes)`);
+                if (suppressedErrors.length > 0) {
+                    console.log(`[Assets] Note: ${suppressedErrors.length} missing texture/resource warnings suppressed`);
+                }
             }
             return result;
             
