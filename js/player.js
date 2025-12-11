@@ -259,17 +259,30 @@ class Player {
                     name.includes('collider') || 
                     name.includes('hitbox') ||
                     name.includes('debug') ||
-                    name.includes('physics')) {
+                    name.includes('physics') ||
+                    name.includes('primitive') ||
+                    name.includes('helper') ||
+                    name.includes('gizmo')) {
                     mesh.isVisible = false;
                     mesh.isPickable = false;
+                    mesh.setEnabled(false);
                     console.log(`[Player] Hiding debug mesh: ${mesh.name}`);
                     return; // Skip further processing
                 }
                 
-                // Turn off debug rendering
+                // Turn off ALL debug rendering
                 mesh.showBoundingBox = false;
+                mesh.showSubMeshesBoundingBox = false;
+                mesh.renderOutline = false;
+                mesh.renderOverlay = false;
+                
                 if (mesh.ellipsoid) {
                     mesh.showEllipsoid = false;
+                }
+                
+                // Hide any wireframe
+                if (mesh.material) {
+                    mesh.material.wireframe = false;
                 }
                 
                 if (index > 0) { // Skip root

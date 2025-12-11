@@ -503,6 +503,11 @@ class World {
         const normals = [];
         // Create noise generator - NOW SAFE BECAUSE CLASS IS DEFINED
         const noiseGenerator = new SimplexNoise(this.options.seed);
+        
+        // Flatness configuration
+        const flatnessEnabled = true; // Set to false to disable flattening
+        const flatRadius = 150; // Radius of flat area from center
+        const flatTransition = 100; // Distance over which flatness transitions to normal
 
         for (let i = 0; i < positions.length; i += 3) {
             const x = positions[i];
@@ -515,8 +520,25 @@ class World {
             y += noiseGenerator.noise2D(x * 0.02, z * 0.02) * 0.25;
             y += noiseGenerator.noise2D(x * 0.04, z * 0.04) * 0.125;
             
-            // Scale and clamp
-            positions[i + 1] = y * this.options.maxHeight;
+            // Calculate flatness factor based on distance from center
+            let flatnessFactor = 1.0; // 1.0 = full height, 0.0 = completely flat
+            
+            if (flatnessEnabled) {
+                // Distance from center (spawn point)
+                const distFromCenter = Math.sqrt(x * x + z * z);
+                
+                if (distFromCenter < flatRadius) {
+                    // Inside flat zone - very flat
+                    flatnessFactor = 0.2; // 20% of normal height
+                } else if (distFromCenter < flatRadius + flatTransition) {
+                    // Transition zone - gradual slope
+                    const t = (distFromCenter - flatRadius) / flatTransition;
+                    flatnessFactor = 0.2 + (t * 0.8); // Lerp from 0.2 to 1.0
+                }
+            }
+            
+            // Scale and clamp with flatness applied
+            positions[i + 1] = y * this.options.maxHeight * flatnessFactor;
         }
 
         BABYLON.VertexData.ComputeNormals(positions, this.terrain.getIndices(), normals);
@@ -1148,20 +1170,38 @@ class NPC extends Entity {
                     name.includes('collider') || 
                     name.includes('hitbox') ||
                     name.includes('debug') ||
-                    name.includes('physics')) {
+                    name.includes('physics') ||
+                    name.includes('primitive') ||
+                    name.includes('helper') ||
+                    name.includes('gizmo')) {
                     mesh.isVisible = false;
                     mesh.isPickable = false;
+                    mesh.setEnabled(false);
                     console.log(`[NPC] Hiding debug mesh: ${mesh.name}`);
+                    return;
                 }
                 
-                // Turn off bounding box display
+                // Turn off ALL debug visualization
                 mesh.showBoundingBox = false;
+                mesh.showSubMeshesBoundingBox = false;
+                mesh.renderOutline = false;
+                mesh.renderOverlay = false;
                 
                 // Disable ellipsoid rendering
                 if (mesh.ellipsoid) {
                     mesh.showEllipsoid = false;
                 }
+                
+                // Hide any wireframe
+                if (mesh.material) {
+                    mesh.material.wireframe = false;
+                }
             });
+            
+            // Hide root if it's just a container
+            if (this.mesh.name && this.mesh.name.toLowerCase().includes('root')) {
+                this.mesh.isVisible = false;
+            }
             
             this.mesh.position.copyFrom(this.position);
             
@@ -1257,20 +1297,38 @@ class Enemy extends NPC {
                     name.includes('collider') || 
                     name.includes('hitbox') ||
                     name.includes('debug') ||
-                    name.includes('physics')) {
+                    name.includes('physics') ||
+                    name.includes('primitive') ||
+                    name.includes('helper') ||
+                    name.includes('gizmo')) {
                     mesh.isVisible = false;
                     mesh.isPickable = false;
+                    mesh.setEnabled(false); // Completely disable
                     console.log(`[Enemy] Hiding debug mesh: ${mesh.name}`);
+                    return; // Skip further processing
                 }
                 
-                // Turn off bounding box display
+                // Turn off ALL debug visualization
                 mesh.showBoundingBox = false;
+                mesh.showSubMeshesBoundingBox = false;
+                mesh.renderOutline = false;
+                mesh.renderOverlay = false;
                 
                 // Disable rendering of collision ellipsoids
                 if (mesh.ellipsoid) {
                     mesh.showEllipsoid = false;
                 }
+                
+                // Hide any wireframe
+                if (mesh.material) {
+                    mesh.material.wireframe = false;
+                }
             });
+            
+            // Also hide the root mesh if it's just a container
+            if (this.mesh.name && this.mesh.name.toLowerCase().includes('root')) {
+                this.mesh.isVisible = false; // Hide empty root
+            }
             
             // Position at spawn point (from findDrySpot)
             this.mesh.position.copyFrom(this.position);
