@@ -38,7 +38,7 @@ const CONFIG = {
         CHUNK_SIZE: 32,
         TERRAIN_SIZE: 256,  // Reduced from 1024 for faster loading (256x256 = 65k vertices vs 1M)
         WATER_LEVEL: 0,
-        SEED: 12345,  // Fixed seed for consistent terrain (change this for different landscapes)
+        SEED: 10000,  // Fixed seed for consistent terrain (change this for different landscapes)
         
         // Skybox configuration
         SKYBOX: {
