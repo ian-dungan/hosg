@@ -251,15 +251,30 @@ class World {
         }
 
         // Initialize
-        this.init();
+        if (options.onProgress) {
+            this.onProgress = options.onProgress;
+        }
     }
 
-    init() {
+    async init() {
+        this.reportProgress('Creating lights...', 10);
         this.createLights();
+        
+        this.reportProgress('Creating skybox...', 20);
         this.createSkybox();
+        
+        this.reportProgress('Generating terrain...', 30);
         this.createTerrain();
+        await this.delay(10); // Let rendering catch up
+        
+        this.reportProgress('Creating water...', 50);
         this.createWater();
-        this.populateWorld();
+        await this.delay(10);
+        
+        this.reportProgress('Populating world...', 60);
+        await this.populateWorld();
+        
+        this.reportProgress('Setting up physics...', 90);
         this.setupEventListeners();
 
         // Create terrain physics after short delay if needed
@@ -282,6 +297,7 @@ class World {
         // Wait a bit to ensure physics is fully stabilized
         setTimeout(() => {
             console.log('[World] ✅ World fully initialized, signaling player...');
+            this.reportProgress('Ready!', 100);
             const player = this.scene.player || this.scene.game?.player;
             if (player && typeof player.startAfterWorldReady === 'function') {
                 player.startAfterWorldReady();
@@ -633,13 +649,38 @@ class World {
         }
     }
 
-    populateWorld() {
-        // Simple procedural placement
-        this.createTrees(50);
-        this.createRocks(30);
-        this.createGrass(200);
-        this.createNPCs(10);
-        this.createEnemies(20);
+    async populateWorld() {
+        // Reduced initial spawns for faster loading
+        this.reportProgress('Spawning trees...', 65);
+        this.createTrees(20); // Reduced from 50
+        await this.delay(10);
+        
+        this.reportProgress('Spawning rocks...', 70);
+        this.createRocks(15); // Reduced from 30
+        await this.delay(10);
+        
+        this.reportProgress('Spawning grass...', 75);
+        this.createGrass(100); // Reduced from 200
+        await this.delay(10);
+        
+        this.reportProgress('Spawning NPCs...', 80);
+        this.createNPCs(5); // Reduced from 10
+        await this.delay(10);
+        
+        this.reportProgress('Spawning enemies...', 85);
+        this.createEnemies(10); // Reduced from 20
+        await this.delay(10);
+    }
+    
+    reportProgress(message, percent) {
+        console.log(`[World] ${message} (${percent}%)`);
+        if (this.onProgress) {
+            this.onProgress(message, percent);
+        }
+    }
+    
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     createTrees(count) { 

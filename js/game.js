@@ -49,25 +49,37 @@ class Game {
   async init() {
     console.log("[Game] Initializing...");
 
+    // Show loading screen
+    this.showLoadingScreen();
+
     // Basic lighting
     // The World class will handle complex lighting, but a quick light helps debug
     new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), this.scene);
 
     // Create World
     if (typeof World !== 'undefined') {
+      this.updateLoadingScreen('Creating world...', 5);
+      
       // Use config values for world creation
       this.world = new World(this.scene, {
         size: CONFIG.WORLD.SIZE,
         segments: CONFIG.WORLD.TERRAIN_SIZE,
         maxHeight: 20,
         seed: CONFIG.WORLD.SEED || Math.random(),
-        waterLevel: CONFIG.WORLD.WATER_LEVEL
+        waterLevel: CONFIG.WORLD.WATER_LEVEL,
+        onProgress: (message, percent) => {
+          this.updateLoadingScreen(message, percent);
+        }
       });
+      
+      // Wait for world to finish initializing
+      await this.world.init();
     } else {
       console.error("[Game] World class not defined.");
     }
 
     // Create Player
+    this.updateLoadingScreen('Creating player...', 92);
     if (typeof Player !== 'undefined') {
       this.player = new Player(this.scene);
       this.scene.player = this.player; // Keep a scene reference
@@ -77,6 +89,7 @@ class Game {
     }
 
     // Initialize UI
+    this.updateLoadingScreen('Initializing UI...', 94);
     if (typeof UIManager !== 'undefined') {
       this.ui = new UIManager(this);
       this.scene.ui = this.ui;
@@ -86,6 +99,7 @@ class Game {
     }
 
     // Initialize Combat System
+    this.updateLoadingScreen('Loading combat system...', 96);
     if (typeof CombatSystem !== 'undefined') {
       this.combat = new CombatSystem(this);
       this.scene.combat = this.combat;
@@ -99,6 +113,7 @@ class Game {
     }
 
     // Initialize Inventory System
+    this.updateLoadingScreen('Creating inventory...', 98);
     if (typeof InventoryManager !== 'undefined' && this.player) {
       this.player.inventory = new InventoryManager(this.player, this);
       this.player.inventory.createInventoryUI();
@@ -117,6 +132,10 @@ class Game {
 
     // Load background music
     this.loadMusic();
+
+    // Hide loading screen
+    this.updateLoadingScreen('Ready!', 100);
+    setTimeout(() => this.hideLoadingScreen(), 500);
 
     // Start render loop
     this.start();
@@ -279,6 +298,62 @@ class Game {
     if (this.engine) {
       this.engine.dispose();
       this.engine = null;
+    }
+  }
+  
+  // Loading screen methods
+  showLoadingScreen() {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.id = 'loading-screen';
+    loadingDiv.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      font-family: Arial, sans-serif;
+    `;
+    
+    loadingDiv.innerHTML = `
+      <h1 style="color: #ffd700; font-size: 48px; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">
+        Heroes of Shady Grove
+      </h1>
+      <div style="width: 400px; max-width: 80%; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 4px;">
+        <div id="loading-bar" style="width: 0%; height: 30px; background: linear-gradient(90deg, #4CAF50, #8BC34A); border-radius: 8px; transition: width 0.3s ease;"></div>
+      </div>
+      <p id="loading-text" style="color: #fff; margin-top: 20px; font-size: 18px;">Starting...</p>
+      <p id="loading-percent" style="color: #aaa; margin-top: 10px; font-size: 16px;">0%</p>
+    `;
+    
+    document.body.appendChild(loadingDiv);
+  }
+  
+  updateLoadingScreen(message, percent) {
+    const loadingBar = document.getElementById('loading-bar');
+    const loadingText = document.getElementById('loading-text');
+    const loadingPercent = document.getElementById('loading-percent');
+    
+    if (loadingBar) loadingBar.style.width = percent + '%';
+    if (loadingText) loadingText.textContent = message;
+    if (loadingPercent) loadingPercent.textContent = Math.round(percent) + '%';
+  }
+  
+  hideLoadingScreen() {
+    const loadingScreen = document.getElementById('loading-screen');
+    if (loadingScreen) {
+      loadingScreen.style.opacity = '0';
+      loadingScreen.style.transition = 'opacity 0.5s ease';
+      setTimeout(() => {
+        if (loadingScreen.parentNode) {
+          loadingScreen.parentNode.removeChild(loadingScreen);
+        }
+      }, 500);
     }
   }
 }
