@@ -42,11 +42,10 @@ const ASSET_PATHS = {
     
     // Generic models (shared objects)
     GENERIC_MODELS: {
-        tree_pine: "tree01.gltf",
-        tree_oak: "tree01.gltf",
-        tree_birch: "tree01.gltf",
+        tree_pine: "tree_pine.gltf",
+        tree_oak: "tree_oak.gltf",
+        tree_birch: "tree_birch.gltf",
         rock: "rock.gltf"
-        // Add your .gltf or .glb tree models here
     },
     
     // Environment textures (all in environment folder)
@@ -118,7 +117,18 @@ class AssetManager {
         };
         this.loader = new BABYLON.AssetsManager(scene);
         
-        console.log('[Assets] Manager initialized');
+        // Configure GLTF loader to be more lenient with missing resources
+        if (BABYLON.SceneLoader) {
+            BABYLON.SceneLoader.OnPluginActivatedObservable.add(function (plugin) {
+                if (plugin.name === "gltf") {
+                    plugin.validate = false; // Skip strict validation
+                    plugin.compileMaterials = true;
+                    plugin.compileShadowGenerators = false;
+                }
+            });
+        }
+        
+        console.log('[Assets] Manager initialized with lenient GLTF loading');
         console.log('[Assets] Base path:', ASSET_PATHS.BASE);
     }
 
@@ -285,19 +295,68 @@ class AssetManager {
             
             console.log(`[Assets] Loading model: ${path}`);
             
-            const result = await BABYLON.SceneLoader.ImportMeshAsync(
-                '',
-                directory,
-                filename,
-                this.scene
-            );
+            let result = null;
+            let hadErrors = false;
+            
+            try {
+                result = await BABYLON.SceneLoader.ImportMeshAsync(
+                    '',
+                    directory,
+                    filename,
+                    this.scene
+                );
+            } catch (error) {
+                // Check if we got partial results (meshes loaded but textures failed)
+                hadErrors = true;
+                console.warn(`[Assets] Model had loading errors, checking for partial results: ${path}`);
+                
+                // Even with errors, meshes might have loaded
+                // Check the scene for newly added meshes
+                const sceneMeshes = this.scene.meshes;
+                const modelMeshes = sceneMeshes.filter(m => 
+                    m.name && (m.name.includes(filename.replace('.gltf', '').replace('.glb', '')) || 
+                    m.metadata?.isFromFailedLoad)
+                );
+                
+                if (modelMeshes.length > 0) {
+                    console.warn(`[Assets] Recovered ${modelMeshes.length} meshes despite errors`);
+                    result = {
+                        meshes: modelMeshes,
+                        particleSystems: [],
+                        skeletons: [],
+                        animationGroups: []
+                    };
+                } else {
+                    throw error; // Re-throw if we got nothing
+                }
+            }
+            
+            if (!result || !result.meshes || result.meshes.length === 0) {
+                throw new Error('No meshes loaded');
+            }
+            
+            // Apply simple material if meshes have no material or material is broken
+            result.meshes.forEach(mesh => {
+                if (mesh) {
+                    if (!mesh.material || hadErrors) {
+                        const mat = new BABYLON.StandardMaterial(`fallback_${mesh.name}`, this.scene);
+                        mat.diffuseColor = new BABYLON.Color3(0.4, 0.6, 0.3); // Green for trees
+                        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+                        mesh.material = mat;
+                    }
+                }
+            });
             
             // Apply scaling if provided
             if (options.scaling && result.meshes[0]) {
                 result.meshes[0].scaling = options.scaling;
             }
             
-            console.log(`[Assets] ✓ Model loaded: ${path} (${result.meshes.length} meshes)`);
+            if (hadErrors) {
+                console.log(`[Assets] ⚠ Model loaded with fallback materials: ${path} (${result.meshes.length} meshes)`);
+            } else {
+                console.log(`[Assets] ✓ Model loaded: ${path} (${result.meshes.length} meshes)`);
+            }
             return result;
             
         } catch (error) {
