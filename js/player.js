@@ -251,6 +251,27 @@ class Player {
             
             // Make sure ALL child meshes are visible and don't have physics
             result.meshes.forEach((mesh, index) => {
+                if (!mesh) return;
+                
+                // Hide debug/collision meshes by name
+                const name = (mesh.name || '').toLowerCase();
+                if (name.includes('collision') || 
+                    name.includes('collider') || 
+                    name.includes('hitbox') ||
+                    name.includes('debug') ||
+                    name.includes('physics')) {
+                    mesh.isVisible = false;
+                    mesh.isPickable = false;
+                    console.log(`[Player] Hiding debug mesh: ${mesh.name}`);
+                    return; // Skip further processing
+                }
+                
+                // Turn off debug rendering
+                mesh.showBoundingBox = false;
+                if (mesh.ellipsoid) {
+                    mesh.showEllipsoid = false;
+                }
+                
                 if (index > 0) { // Skip root
                     mesh.isVisible = true;
                     mesh.visibility = 1;

@@ -1007,7 +1007,33 @@ class NPC extends Entity {
                 return;
             }
             
-            this.mesh = result.meshes[0]; // Use first mesh, not result.root
+            this.mesh = result.meshes[0]; // Use first mesh (root)
+            
+            // CRITICAL: Hide collision/debug meshes
+            result.meshes.forEach((mesh, index) => {
+                if (!mesh) return;
+                
+                // Hide debug meshes
+                const name = (mesh.name || '').toLowerCase();
+                if (name.includes('collision') || 
+                    name.includes('collider') || 
+                    name.includes('hitbox') ||
+                    name.includes('debug') ||
+                    name.includes('physics')) {
+                    mesh.isVisible = false;
+                    mesh.isPickable = false;
+                    console.log(`[NPC] Hiding debug mesh: ${mesh.name}`);
+                }
+                
+                // Turn off bounding box display
+                mesh.showBoundingBox = false;
+                
+                // Disable ellipsoid rendering
+                if (mesh.ellipsoid) {
+                    mesh.showEllipsoid = false;
+                }
+            });
+            
             this.mesh.position.copyFrom(this.position);
             
             // Adjust scale if needed based on model bounds
@@ -1017,9 +1043,12 @@ class NPC extends Entity {
             const finalScale = targetHeight / currentHeight;
             this.mesh.scaling.scaleInPlace(finalScale);
 
-            // Re-center model vertically so its feet are at y=0 (or ground level)
+            // Position feet on ground
             const offset = bounds.min.y * finalScale;
-            this.mesh.position.y -= offset;
+            this.mesh.position.y = this.position.y - offset;
+            
+            // CRITICAL: Update entity position to match mesh
+            this.position.copyFrom(this.mesh.position);
             
             this.mesh.metadata = { isNPC: true, id: this.id };
             this.mesh.checkCollisions = true;
@@ -1028,7 +1057,6 @@ class NPC extends Entity {
             
             // Store animations
             this.animations = result.animationGroups;
-            // TODO: Start idle animation
             
         } catch (e) {
             console.warn(`[NPC] Failed to load model for ${this.assetKey}, using simple mesh:`, e);
@@ -1087,7 +1115,34 @@ class Enemy extends NPC {
                 return;
             }
             
-            this.mesh = result.meshes[0]; // Use first mesh, not result.root
+            this.mesh = result.meshes[0]; // Use first mesh (root)
+            
+            // CRITICAL: Hide collision/debug meshes that come with models
+            result.meshes.forEach((mesh, index) => {
+                if (!mesh) return;
+                
+                // Hide meshes with collision/debug names
+                const name = (mesh.name || '').toLowerCase();
+                if (name.includes('collision') || 
+                    name.includes('collider') || 
+                    name.includes('hitbox') ||
+                    name.includes('debug') ||
+                    name.includes('physics')) {
+                    mesh.isVisible = false;
+                    mesh.isPickable = false;
+                    console.log(`[Enemy] Hiding debug mesh: ${mesh.name}`);
+                }
+                
+                // Turn off bounding box display
+                mesh.showBoundingBox = false;
+                
+                // Disable rendering of collision ellipsoids
+                if (mesh.ellipsoid) {
+                    mesh.showEllipsoid = false;
+                }
+            });
+            
+            // Position at spawn point (from findDrySpot)
             this.mesh.position.copyFrom(this.position);
             
             // Adjust scale if needed based on model bounds
@@ -1097,9 +1152,15 @@ class Enemy extends NPC {
             const finalScale = targetHeight / currentHeight;
             this.mesh.scaling.scaleInPlace(finalScale);
             
-            // Re-center model vertically so its feet are at y=0 (or ground level)
+            // CRITICAL: Position feet on ground
+            // The position Y should already be correct from findDrySpot
+            // Just adjust for model's origin point
             const offset = bounds.min.y * finalScale;
-            this.mesh.position.y -= offset;
+            this.mesh.position.y = this.position.y - offset;
+            
+            // CRITICAL: Update entity position to match mesh
+            // Otherwise Entity.update() will overwrite our positioning!
+            this.position.copyFrom(this.mesh.position);
 
             this.mesh.metadata = { isEnemy: true, id: this.id };
             this.mesh.checkCollisions = true;
@@ -1108,7 +1169,6 @@ class Enemy extends NPC {
 
             // Store animations
             this.animations = result.animationGroups;
-            // TODO: Start idle animation
             
         } catch (e) {
             console.warn(`[Enemy] Failed to load model for ${this.assetKey}, using simple mesh:`, e);
