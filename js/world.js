@@ -652,7 +652,7 @@ class World {
     async populateWorld() {
         // Reduced initial spawns for faster loading
         this.reportProgress('Spawning trees...', 65);
-        this.createTrees(20); // Reduced from 50
+        await this.createTrees(20); // Now async to support GLTF loading
         await this.delay(10);
         
         this.reportProgress('Spawning rocks...', 70);
@@ -683,11 +683,25 @@ class World {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    createTrees(count) { 
+    async createTrees(count) { 
         const spawnRadius = Math.min(200, this.options.size * 0.4);
         let spawned = 0;
         let attempts = 0;
         const maxAttempts = count * 5;
+        
+        // Check if we have tree models available
+        const hasTreeModels = window.ASSET_PATHS && 
+                             window.ASSET_PATHS.GENERIC_MODELS && 
+                             (window.ASSET_PATHS.GENERIC_MODELS.tree_pine ||
+                              window.ASSET_PATHS.GENERIC_MODELS.tree_oak ||
+                              window.ASSET_PATHS.GENERIC_MODELS.tree_birch);
+        
+        const treeTypes = [];
+        if (hasTreeModels) {
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree_pine) treeTypes.push('tree_pine');
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree_oak) treeTypes.push('tree_oak');
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree_birch) treeTypes.push('tree_birch');
+        }
         
         while (spawned < count && attempts < maxAttempts) {
             attempts++;
@@ -719,39 +733,110 @@ class World {
             );
             if (maxSlope > 3.0) continue; // Too steep
             
-            // Create tree
-            const tree = BABYLON.MeshBuilder.CreateCylinder("tree", {
-                diameterTop: 0.5,
-                diameterBottom: 0.8,
-                height: 6,
-                tessellation: 8
-            }, this.scene);
-            
-            tree.position = new BABYLON.Vector3(x, groundY + 3, z);
-            
-            const treeMaterial = new BABYLON.StandardMaterial("treeMat", this.scene);
-            treeMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.3, 0.2);
-            tree.material = treeMaterial;
-            
-            // Add foliage
-            const foliage = BABYLON.MeshBuilder.CreateSphere("foliage", {
-                diameter: 4,
-                segments: 8
-            }, this.scene);
-            foliage.parent = tree;
-            foliage.position.y = 2;
-            
-            const foliageMat = new BABYLON.StandardMaterial("foliageMat", this.scene);
-            foliageMat.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
-            foliage.material = foliageMat;
-            
-            tree.checkCollisions = true;
-            tree.metadata = { isTree: true };
+            // Create tree (either GLTF model or simple mesh)
+            if (hasTreeModels && treeTypes.length > 0) {
+                // Load GLTF tree model
+                const treeType = treeTypes[Math.floor(Math.random() * treeTypes.length)];
+                await this.createTreeModel(treeType, x, groundY, z);
+            } else {
+                // Fallback to simple tree mesh
+                this.createSimpleTree(x, groundY, z);
+            }
             
             spawned++;
         }
         
         console.log(`[World] Spawned ${spawned}/${count} trees (${attempts} attempts)`);
+    }
+    
+    async createTreeModel(treeType, x, groundY, z) {
+        try {
+            const modelPath = ASSET_PATHS.getModelPath(treeType);
+            if (!modelPath) {
+                this.createSimpleTree(x, groundY, z);
+                return;
+            }
+            
+            const result = await this.scene.assetLoader.loadModel(modelPath, {
+                scaling: new BABYLON.Vector3(1.0, 1.0, 1.0)
+            });
+            
+            if (!result || !result.meshes || result.meshes.length === 0) {
+                this.createSimpleTree(x, groundY, z);
+                return;
+            }
+            
+            const tree = result.meshes[0];
+            tree.position = new BABYLON.Vector3(x, groundY, z);
+            
+            // Random rotation for variety
+            tree.rotation.y = Math.random() * Math.PI * 2;
+            
+            // Random scale variation (90% - 110%)
+            const scaleVariation = 0.9 + Math.random() * 0.2;
+            tree.scaling.scaleInPlace(scaleVariation);
+            
+            // Enable collisions
+            tree.checkCollisions = true;
+            tree.metadata = { isTree: true };
+            
+            // Hide any debug meshes
+            result.meshes.forEach(mesh => {
+                if (!mesh) return;
+                const name = (mesh.name || '').toLowerCase();
+                if (name.includes('collision') || name.includes('collider')) {
+                    mesh.isVisible = false;
+                }
+                mesh.showBoundingBox = false;
+            });
+            
+            // Enable shadows if shadow generator exists
+            if (this.scene.shadowGenerator) {
+                this.scene.shadowGenerator.addShadowCaster(tree);
+            }
+            tree.receiveShadows = true;
+            
+        } catch (error) {
+            console.warn('[World] Failed to load tree model, using simple tree:', error);
+            this.createSimpleTree(x, groundY, z);
+        }
+    }
+    
+    createSimpleTree(x, groundY, z) {
+        // Create simple cylinder tree (fallback)
+        const tree = BABYLON.MeshBuilder.CreateCylinder("tree", {
+            diameterTop: 0.5,
+            diameterBottom: 0.8,
+            height: 6,
+            tessellation: 8
+        }, this.scene);
+        
+        tree.position = new BABYLON.Vector3(x, groundY + 3, z);
+        
+        const treeMaterial = new BABYLON.StandardMaterial("treeMat", this.scene);
+        treeMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.3, 0.2);
+        tree.material = treeMaterial;
+        
+        // Add foliage
+        const foliage = BABYLON.MeshBuilder.CreateSphere("foliage", {
+            diameter: 4,
+            segments: 8
+        }, this.scene);
+        foliage.parent = tree;
+        foliage.position.y = 2;
+        
+        const foliageMat = new BABYLON.StandardMaterial("foliageMat", this.scene);
+        foliageMat.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
+        foliage.material = foliageMat;
+        
+        tree.checkCollisions = true;
+        tree.metadata = { isTree: true };
+        
+        // Enable shadows if available
+        if (this.scene.shadowGenerator) {
+            this.scene.shadowGenerator.addShadowCaster(tree);
+        }
+        tree.receiveShadows = true;
     }
     
     createRocks(count) { 
