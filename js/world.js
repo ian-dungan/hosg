@@ -89,6 +89,105 @@ class SimplexNoise {
     }
 }
 
+// ============================================================================
+// WorldItem Class - Items that can be picked up from the ground
+// ============================================================================
+class WorldItem {
+    constructor(scene, position, itemData) {
+        this.scene = scene;
+        this.position = position;
+        this.itemData = itemData;
+        this.mesh = null;
+        
+        this.createMesh();
+        this.createSparkle();
+    }
+    
+    createMesh() {
+        // Create floating item mesh
+        this.mesh = BABYLON.MeshBuilder.CreateBox('worldItem', {
+            size: 0.5
+        }, this.scene);
+        
+        this.mesh.position = this.position.clone();
+        this.mesh.position.y += 0.5; // Float above ground
+        
+        // Material based on rarity
+        const mat = new BABYLON.StandardMaterial('itemMat', this.scene);
+        mat.emissiveColor = this.getRarityColor(this.itemData.rarity);
+        mat.alpha = 0.8;
+        this.mesh.material = mat;
+        
+        // Metadata
+        this.mesh.metadata = { isWorldItem: true, itemData: this.itemData };
+        
+        // Animate rotation and bob
+        this.startTime = Date.now();
+        this.scene.registerBeforeRender(() => {
+            if (!this.mesh || this.mesh.isDisposed()) return;
+            
+            const time = (Date.now() - this.startTime) / 1000;
+            this.mesh.rotation.y = time * 2;
+            this.mesh.position.y = this.position.y + 0.5 + Math.sin(time * 3) * 0.1;
+        });
+    }
+    
+    createSparkle() {
+        // Create particle sparkle effect
+        const particleSystem = new BABYLON.ParticleSystem('itemSparkle', 50, this.scene);
+        particleSystem.particleTexture = new BABYLON.Texture(
+            'https://www.babylonjs-playground.com/textures/flare.png',
+            this.scene
+        );
+        
+        particleSystem.emitter = this.mesh;
+        particleSystem.minEmitBox = new BABYLON.Vector3(-0.3, 0, -0.3);
+        particleSystem.maxEmitBox = new BABYLON.Vector3(0.3, 0.5, 0.3);
+        
+        const color = this.getRarityColor(this.itemData.rarity);
+        particleSystem.color1 = new BABYLON.Color4(color.r, color.g, color.b, 1);
+        particleSystem.color2 = new BABYLON.Color4(color.r * 0.5, color.g * 0.5, color.b * 0.5, 1);
+        particleSystem.colorDead = new BABYLON.Color4(0, 0, 0, 0);
+        
+        particleSystem.minSize = 0.05;
+        particleSystem.maxSize = 0.15;
+        particleSystem.minLifeTime = 0.5;
+        particleSystem.maxLifeTime = 1.5;
+        particleSystem.emitRate = 10;
+        
+        particleSystem.gravity = new BABYLON.Vector3(0, 2, 0);
+        particleSystem.direction1 = new BABYLON.Vector3(-0.5, 0.5, -0.5);
+        particleSystem.direction2 = new BABYLON.Vector3(0.5, 1, 0.5);
+        
+        particleSystem.minEmitPower = 0.5;
+        particleSystem.maxEmitPower = 1.5;
+        particleSystem.updateSpeed = 0.01;
+        
+        particleSystem.start();
+        this.particleSystem = particleSystem;
+    }
+    
+    getRarityColor(rarity) {
+        const colors = {
+            common: new BABYLON.Color3(0.6, 0.6, 0.6),
+            uncommon: new BABYLON.Color3(0, 1, 0),
+            rare: new BABYLON.Color3(0, 0.4, 1),
+            epic: new BABYLON.Color3(0.6, 0.2, 1),
+            legendary: new BABYLON.Color3(1, 0.5, 0)
+        };
+        return colors[rarity] || colors.common;
+    }
+    
+    dispose() {
+        if (this.particleSystem) {
+            this.particleSystem.dispose();
+        }
+        if (this.mesh) {
+            this.mesh.dispose();
+        }
+    }
+}
+
 // World Class
 class World {
     // ... World implementation (omitted for brevity)
@@ -118,6 +217,7 @@ class World {
         this.npcs = [];
         this.enemies = [];
         this.items = [];
+        this.worldItems = []; // Items on ground that can be picked up
 
         // Time and weather
         this.time = 0; // 0-24 hours

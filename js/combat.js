@@ -320,6 +320,9 @@ class CombatSystem {
         if (killer === this.game.player && target.isEnemy) {
             const xp = target.stats.xpValue || 50;
             this.awardExperience(killer, xp);
+            
+            // Drop loot
+            this.dropLoot(target);
         }
         
         // Play death animation/effects
@@ -772,6 +775,164 @@ class CombatSystem {
             maxHP: 100,
             currentHP: 100
         };
+    }
+    
+    // ========================================================================
+    // LOOT SYSTEM
+    // ========================================================================
+    
+    dropLoot(enemy) {
+        if (!enemy.mesh || !this.game.world) return;
+        
+        const lootTable = this.getLootTable(enemy.type || 'wolf');
+        
+        // Roll for each loot item
+        for (const lootEntry of lootTable) {
+            const roll = Math.random();
+            if (roll <= lootEntry.chance) {
+                // Drop this item
+                const quantity = Math.floor(
+                    lootEntry.minQuantity + Math.random() * (lootEntry.maxQuantity - lootEntry.minQuantity + 1)
+                );
+                
+                const itemData = {
+                    ...lootEntry.item,
+                    quantity: quantity
+                };
+                
+                // Create world item at enemy position
+                const dropPosition = enemy.mesh.position.clone();
+                dropPosition.x += (Math.random() - 0.5) * 2; // Spread items
+                dropPosition.z += (Math.random() - 0.5) * 2;
+                
+                const worldItem = new WorldItem(this.scene, dropPosition, itemData);
+                this.game.world.worldItems.push(worldItem);
+                
+                console.log(`[Combat] ${enemy.name} dropped ${quantity}x ${itemData.name}`);
+            }
+        }
+        
+        // Always drop some gold
+        const goldAmount = Math.floor(5 + Math.random() * 15);
+        if (this.game.player && this.game.player.inventory) {
+            this.game.player.inventory.gold += goldAmount;
+            this.game.player.inventory.updateUI();
+            this.logCombat(`+${goldAmount} gold`);
+        }
+    }
+    
+    getLootTable(enemyType) {
+        // Define loot tables for different enemy types
+        const tables = {
+            wolf: [
+                {
+                    item: {
+                        id: 'wolf_pelt',
+                        name: 'Wolf Pelt',
+                        icon: '🐺',
+                        type: 'material',
+                        rarity: 'common',
+                        description: 'A thick wolf pelt. Used in crafting.',
+                        value: 5,
+                        stackable: true
+                    },
+                    chance: 0.6, // 60%
+                    minQuantity: 1,
+                    maxQuantity: 2
+                },
+                {
+                    item: {
+                        id: 'wolf_fang',
+                        name: 'Wolf Fang',
+                        icon: '🦷',
+                        type: 'material',
+                        rarity: 'uncommon',
+                        description: 'A sharp wolf fang.',
+                        value: 10,
+                        stackable: true
+                    },
+                    chance: 0.3, // 30%
+                    minQuantity: 1,
+                    maxQuantity: 1
+                },
+                {
+                    item: {
+                        id: 'health_potion',
+                        name: 'Health Potion',
+                        icon: '🧪',
+                        type: 'consumable',
+                        rarity: 'common',
+                        description: 'Restores 50 HP.',
+                        value: 15,
+                        stackable: true,
+                        effect: 'heal',
+                        healAmount: 50
+                    },
+                    chance: 0.2, // 20%
+                    minQuantity: 1,
+                    maxQuantity: 1
+                }
+            ],
+            goblin: [
+                {
+                    item: {
+                        id: 'rusty_dagger',
+                        name: 'Rusty Dagger',
+                        icon: '🗡️',
+                        type: 'weapon',
+                        equipSlot: 'weapon',
+                        rarity: 'common',
+                        description: 'A worn dagger.',
+                        value: 20,
+                        stackable: false,
+                        stats: {
+                            weaponDamage: 5,
+                            strength: 2
+                        }
+                    },
+                    chance: 0.15, // 15%
+                    minQuantity: 1,
+                    maxQuantity: 1
+                },
+                {
+                    item: {
+                        id: 'leather_cap',
+                        name: 'Leather Cap',
+                        icon: '🧢',
+                        type: 'armor',
+                        equipSlot: 'head',
+                        rarity: 'common',
+                        description: 'Simple leather headwear.',
+                        value: 25,
+                        stackable: false,
+                        stats: {
+                            armor: 3,
+                            maxHP: 10
+                        }
+                    },
+                    chance: 0.1, // 10%
+                    minQuantity: 1,
+                    maxQuantity: 1
+                },
+                {
+                    item: {
+                        id: 'goblin_ear',
+                        name: 'Goblin Ear',
+                        icon: '👂',
+                        type: 'material',
+                        rarity: 'common',
+                        description: 'Proof of a goblin kill.',
+                        value: 3,
+                        stackable: true
+                    },
+                    chance: 0.7, // 70%
+                    minQuantity: 1,
+                    maxQuantity: 1
+                }
+            ]
+        };
+        
+        return tables[enemyType] || tables.wolf;
     }
     
     // ========================================================================

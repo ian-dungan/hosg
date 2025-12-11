@@ -98,6 +98,15 @@ class Game {
       console.warn("[Game] CombatSystem not defined.");
     }
 
+    // Initialize Inventory System
+    if (typeof InventoryManager !== 'undefined' && this.player) {
+      this.player.inventory = new InventoryManager(this.player, this);
+      this.player.inventory.createInventoryUI();
+      console.log("[Game] Inventory system initialized");
+    } else {
+      console.warn("[Game] InventoryManager not defined.");
+    }
+
     // Initialize Network
     if (typeof NetworkManager !== 'undefined') {
       this.network = new NetworkManager(this);
@@ -208,6 +217,15 @@ class Game {
           this.combat.update(deltaTime);
         } catch (err) {
           console.error("[Game] Combat update error:", err);
+        }
+      }
+
+      // Update Inventory System
+      if (this.player && this.player.inventory && typeof this.player.inventory.update === "function") {
+        try {
+          this.player.inventory.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] Inventory update error:", err);
         }
       }
 
