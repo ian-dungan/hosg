@@ -52,17 +52,24 @@ class CombatSystem {
         this.currentTarget = entity;
         
         if (entity) {
-            // Create target highlight
+            // Create target highlight (different color for NPCs vs enemies)
             this.createTargetHighlight(entity);
-            this.logCombat(`Targeted: ${entity.name}`);
+            
+            // Check if entity is an enemy or NPC
+            if (entity.isEnemy) {
+                this.logCombat(`Targeted: ${entity.name} (Enemy)`);
+                // Enter combat only for enemies
+                this.enterCombat();
+            } else {
+                this.logCombat(`Targeted: ${entity.name} (NPC - Cannot Attack)`);
+                // Don't enter combat for NPCs
+                this.inCombat = false;
+            }
             
             // Update target frame UI
             if (this.game.ui && this.game.ui.updateTargetFrame) {
                 this.game.ui.updateTargetFrame(entity);
             }
-            
-            // Enter combat
-            this.enterCombat();
         } else {
             this.logCombat('Target cleared');
         }
@@ -71,7 +78,7 @@ class CombatSystem {
     createTargetHighlight(entity) {
         if (!entity.mesh) return;
         
-        // Create red highlight ring under target
+        // Create highlight ring under target (red for enemies, green for NPCs)
         const highlight = BABYLON.MeshBuilder.CreateTorus('targetHighlight', {
             diameter: 2,
             thickness: 0.1,
@@ -83,6 +90,12 @@ class CombatSystem {
         highlight.rotation.x = Math.PI / 2;
         
         const mat = new BABYLON.StandardMaterial('targetMat', this.scene);
+        // Red for enemies, green for NPCs
+        if (entity.isEnemy) {
+            mat.emissiveColor = new BABYLON.Color3(1, 0, 0); // Red
+        } else {
+            mat.emissiveColor = new BABYLON.Color3(0, 1, 0); // Green
+        }
         mat.emissiveColor = new BABYLON.Color3(1, 0, 0);
         mat.alpha = 0.8;
         highlight.material = mat;
@@ -193,6 +206,11 @@ class CombatSystem {
         if (this.currentTarget.isDead) {
             this.setTarget(null);
             return;
+        }
+        
+        // CRITICAL: Only attack enemies, not NPCs
+        if (!this.currentTarget.isEnemy) {
+            return; // Can't attack NPCs
         }
         
         // Check range
@@ -511,6 +529,12 @@ class CombatSystem {
     executeAbility(attacker, ability) {
         switch (ability.type) {
             case 'damage':
+                // CRITICAL: Only damage enemies, not NPCs
+                if (!this.currentTarget || !this.currentTarget.isEnemy) {
+                    this.logCombat('Cannot attack NPCs');
+                    return;
+                }
+                
                 const damage = this.calculateAbilityDamage(attacker, this.currentTarget, ability);
                 this.applyDamage(this.currentTarget, damage, attacker);
                 

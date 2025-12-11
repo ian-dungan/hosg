@@ -949,10 +949,11 @@ class World {
             const enemyX = Math.sin(angle) * distance; 
             const enemyZ = Math.cos(angle) * distance; 
             
-            const drySpot = this.findDrySpot(enemyX, enemyZ, 20, 15, 1.0);
+            const drySpot = this.findDrySpot(enemyX, enemyZ, 30, 20, 2.0);
             
-            // CRITICAL: Add extra height to ensure enemies spawn ABOVE terrain
-            const position = new BABYLON.Vector3(drySpot.x, drySpot.y + 2.0, drySpot.z);
+            // CRITICAL: Add large height buffer to ensure enemies spawn ABOVE terrain
+            // Start at +5.0 units above ground, then adjust down after model loads
+            const position = new BABYLON.Vector3(drySpot.x, drySpot.y + 5.0, drySpot.z);
 
             // Cycle through available ENEMY types (wolf, goblin)
             const enemyTypes = ['wolf', 'goblin'];
@@ -1286,6 +1287,18 @@ class Enemy extends NPC {
             // Just adjust for model's origin point
             const offset = bounds.min.y * finalScale;
             this.mesh.position.y = this.position.y - offset;
+            
+            // CRITICAL SAFETY CHECK: Ensure we're NEVER below ground
+            // Get actual terrain height at this position
+            const world = this.scene.world || this.scene.game?.world;
+            if (world && world.getHeightAt) {
+                const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
+                const minY = terrainY + 1.0; // At least 1 unit above terrain
+                if (this.mesh.position.y < minY) {
+                    console.warn(`[Enemy] ${this.name} was at y=${this.mesh.position.y.toFixed(2)}, moving to y=${minY.toFixed(2)}`);
+                    this.mesh.position.y = minY;
+                }
+            }
             
             // CRITICAL: Update entity position to match mesh
             // Otherwise Entity.update() will overwrite our positioning!

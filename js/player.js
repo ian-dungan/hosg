@@ -995,11 +995,18 @@ class Player {
     }
     
     findEntityFromMesh(mesh) {
-        // Search world for ENEMIES ONLY (not NPCs) with this mesh
+        // Search world for ANY entity with this mesh (enemies AND NPCs)
         if (this.scene.world) {
+            // Check enemies first
             for (const enemy of this.scene.world.enemies) {
                 if (enemy.mesh === mesh || (enemy.mesh && enemy.mesh.getChildMeshes().includes(mesh))) {
                     return enemy;
+                }
+            }
+            // Also check NPCs (can target but not attack)
+            for (const npc of this.scene.world.npcs) {
+                if (npc.mesh === mesh || (npc.mesh && npc.mesh.getChildMeshes().includes(mesh))) {
+                    return npc;
                 }
             }
         }
