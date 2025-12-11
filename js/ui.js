@@ -216,9 +216,161 @@ class UIManager {
     
     // Combat UI methods
     showCombatUI(show) {
-        // Simple implementation - just logs for now
-        // Could add target frame, combat log window, etc.
-        console.log(`[UI] Combat UI ${show ? 'shown' : 'hidden'}`);
+        if (show && !this.combatUI) {
+            this.createCombatUI();
+        }
+        
+        if (this.combatUI) {
+            this.combatUI.style.display = show ? 'block' : 'none';
+        }
+    }
+    
+    createCombatUI() {
+        // Create combat UI container
+        this.combatUI = document.createElement('div');
+        this.combatUI.id = 'combat-ui';
+        this.combatUI.style.cssText = `
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 400px;
+            display: none;
+            z-index: 100;
+            font-family: Arial, sans-serif;
+        `;
+        
+        // Target frame
+        const targetFrame = document.createElement('div');
+        targetFrame.id = 'target-frame';
+        targetFrame.style.cssText = `
+            background: linear-gradient(135deg, rgba(139, 0, 0, 0.8) 0%, rgba(80, 0, 0, 0.9) 100%);
+            border: 2px solid #ff4444;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        `;
+        
+        targetFrame.innerHTML = `
+            <div style="color: #ff4444; font-size: 14px; font-weight: bold; margin-bottom: 8px;">
+                <span id="target-name">Enemy</span>
+                <span id="target-level" style="color: #ffd700; float: right;">Lvl 1</span>
+            </div>
+            <div style="background: rgba(0,0,0,0.3); border-radius: 4px; height: 24px; position: relative; overflow: hidden;">
+                <div id="target-hp-bar" style="background: linear-gradient(90deg, #ff0000, #cc0000); height: 100%; width: 100%; transition: width 0.3s ease;"></div>
+                <div id="target-hp-text" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 12px; font-weight: bold; text-shadow: 1px 1px 2px black;">
+                    100 / 100
+                </div>
+            </div>
+        `;
+        
+        this.combatUI.appendChild(targetFrame);
+        
+        // Ability bar
+        const abilityBar = document.createElement('div');
+        abilityBar.id = 'ability-bar';
+        abilityBar.style.cssText = `
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            justify-content: center;
+        `;
+        
+        // Create ability buttons
+        const abilities = [
+            { key: '1', name: 'Power Strike', cooldown: 3000, icon: '⚔️' },
+            { key: '2', name: 'Cleave', cooldown: 6000, icon: '💥' },
+            { key: '3', name: 'Heal', cooldown: 8000, icon: '💚' }
+        ];
+        
+        abilities.forEach(ability => {
+            const btn = document.createElement('div');
+            btn.id = `ability-${ability.key}`;
+            btn.className = 'ability-button';
+            btn.style.cssText = `
+                width: 50px;
+                height: 50px;
+                background: linear-gradient(135deg, rgba(40, 40, 60, 0.9) 0%, rgba(20, 20, 40, 0.95) 100%);
+                border: 2px solid #666;
+                border-radius: 6px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                position: relative;
+                transition: all 0.2s;
+            `;
+            
+            btn.innerHTML = `
+                <div style="font-size: 20px;">${ability.icon}</div>
+                <div style="font-size: 10px; color: #aaa; margin-top: 2px;">${ability.key}</div>
+                <div class="cooldown-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); border-radius: 4px; align-items: center; justify-content: center; color: white; font-size: 12px;"></div>
+            `;
+            
+            btn.addEventListener('mouseenter', () => {
+                if (!btn.classList.contains('on-cooldown')) {
+                    btn.style.borderColor = '#ffd700';
+                    btn.style.transform = 'scale(1.1)';
+                }
+            });
+            
+            btn.addEventListener('mouseleave', () => {
+                btn.style.borderColor = '#666';
+                btn.style.transform = 'scale(1)';
+            });
+            
+            abilityBar.appendChild(btn);
+        });
+        
+        this.combatUI.appendChild(abilityBar);
+        document.body.appendChild(this.combatUI);
+    }
+    
+    updateTargetFrame(target) {
+        if (!target || !target.stats) return;
+        
+        const nameEl = document.getElementById('target-name');
+        const levelEl = document.getElementById('target-level');
+        const hpBar = document.getElementById('target-hp-bar');
+        const hpText = document.getElementById('target-hp-text');
+        
+        if (nameEl) nameEl.textContent = target.name;
+        if (levelEl) levelEl.textContent = `Lvl ${target.stats.level || 1}`;
+        
+        if (hpBar && hpText) {
+            const hpPercent = (target.stats.currentHP / target.stats.maxHP) * 100;
+            hpBar.style.width = hpPercent + '%';
+            hpText.textContent = `${Math.floor(target.stats.currentHP)} / ${target.stats.maxHP}`;
+        }
+    }
+    
+    showAbilityCooldown(abilityKey, duration) {
+        const btn = document.getElementById(`ability-${abilityKey}`);
+        if (!btn) return;
+        
+        const overlay = btn.querySelector('.cooldown-overlay');
+        if (!overlay) return;
+        
+        btn.classList.add('on-cooldown');
+        btn.style.borderColor = '#333';
+        overlay.style.display = 'flex';
+        
+        const startTime = Date.now();
+        const interval = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const remaining = Math.max(0, duration - elapsed);
+            const seconds = Math.ceil(remaining / 1000);
+            
+            overlay.textContent = seconds > 0 ? seconds : '';
+            
+            if (remaining <= 0) {
+                clearInterval(interval);
+                btn.classList.remove('on-cooldown');
+                btn.style.borderColor = '#666';
+                overlay.style.display = 'none';
+            }
+        }, 100);
     }
     
     updateXPBar() {

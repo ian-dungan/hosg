@@ -56,6 +56,11 @@ class CombatSystem {
             this.createTargetHighlight(entity);
             this.logCombat(`Targeted: ${entity.name}`);
             
+            // Update target frame UI
+            if (this.game.ui && this.game.ui.updateTargetFrame) {
+                this.game.ui.updateTargetFrame(entity);
+            }
+            
             // Enter combat
             this.enterCombat();
         } else {
@@ -290,6 +295,11 @@ class CombatSystem {
         // Show damage number
         this.showDamageNumber(target, damage, damageInfo.isCrit, damageInfo.type);
         
+        // Update target frame
+        if (this.game.ui && this.game.ui.updateTargetFrame) {
+            this.game.ui.updateTargetFrame(target);
+        }
+        
         // Log
         const attackerName = attacker === this.game.player ? 'You' : attacker.name;
         const critText = damageInfo.isCrit ? ' (CRIT!)' : '';
@@ -483,6 +493,11 @@ class CombatSystem {
         stats.currentMana -= ability.manaCost;
         ability.lastUsed = now;
         this.globalCooldown = now + this.config.GLOBAL_COOLDOWN;
+        
+        // Show cooldown in UI
+        if (this.game.ui && this.game.ui.showAbilityCooldown && ability.hotkey) {
+            this.game.ui.showAbilityCooldown(ability.hotkey, ability.cooldown);
+        }
         
         // Execute ability effect
         this.executeAbility(attacker, ability);

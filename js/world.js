@@ -864,8 +864,10 @@ class World {
             const enemyX = Math.sin(angle) * distance; 
             const enemyZ = Math.cos(angle) * distance; 
             
-            const drySpot = this.findDrySpot(enemyX, enemyZ, 8, 8, 0.4);
-            const position = new BABYLON.Vector3(drySpot.x, drySpot.y, drySpot.z);
+            const drySpot = this.findDrySpot(enemyX, enemyZ, 20, 15, 1.0);
+            
+            // CRITICAL: Add extra height to ensure enemies spawn ABOVE terrain
+            const position = new BABYLON.Vector3(drySpot.x, drySpot.y + 2.0, drySpot.z);
 
             // Cycle through available ENEMY types (wolf, goblin)
             const enemyTypes = ['wolf', 'goblin'];

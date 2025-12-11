@@ -152,6 +152,7 @@ class Game {
         this.scene,
         () => {
           console.log("[Game] ✓ Music loaded");
+          this.showMusicPrompt();
         },
         {
           loop: true,
@@ -160,17 +161,100 @@ class Game {
         }
       );
       
-      // Add click listener to start music (browsers require user interaction)
-      document.addEventListener('click', () => {
-        if (this.music && !this.music.isPlaying) {
-          this.music.play();
-          console.log("[Game] ♪ Music started");
-        }
-      }, { once: true });
-      
     } catch (err) {
       console.warn("[Game] Music file not found or failed to load:", err);
     }
+  }
+  
+  showMusicPrompt() {
+    const musicPrompt = document.createElement('div');
+    musicPrompt.id = 'music-prompt';
+    musicPrompt.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border: 2px solid #ffd700;
+      border-radius: 8px;
+      padding: 15px 20px;
+      z-index: 10000;
+      font-family: Arial, sans-serif;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      cursor: pointer;
+      transition: all 0.3s;
+    `;
+    
+    musicPrompt.innerHTML = `
+      <div style="color: #ffd700; font-weight: bold; margin-bottom: 5px;">🎵 Click to Enable Music</div>
+      <div style="color: #aaa; font-size: 12px;">Background music available</div>
+    `;
+    
+    musicPrompt.addEventListener('mouseenter', () => {
+      musicPrompt.style.transform = 'scale(1.05)';
+    });
+    
+    musicPrompt.addEventListener('mouseleave', () => {
+      musicPrompt.style.transform = 'scale(1)';
+    });
+    
+    musicPrompt.addEventListener('click', () => {
+      if (this.music) {
+        this.music.play();
+        console.log('[Game] ♪ Music started');
+        musicPrompt.remove();
+        this.showMusicControls();
+      }
+    });
+    
+    document.body.appendChild(musicPrompt);
+  }
+  
+  showMusicControls() {
+    const controls = document.createElement('div');
+    controls.id = 'music-controls';
+    controls.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.7);
+      border: 1px solid #666;
+      border-radius: 6px;
+      padding: 8px 12px;
+      z-index: 10000;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    `;
+    
+    controls.innerHTML = `
+      <button id="music-toggle" style="background: #4CAF50; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">🔊 Mute</button>
+      <input type="range" id="music-volume" min="0" max="100" value="30" style="width: 80px;">
+    `;
+    
+    document.body.appendChild(controls);
+    
+    const toggleBtn = document.getElementById('music-toggle');
+    const volumeSlider = document.getElementById('music-volume');
+    
+    toggleBtn.addEventListener('click', () => {
+      if (this.music.isPlaying) {
+        this.music.pause();
+        toggleBtn.textContent = '🔇 Unmute';
+        toggleBtn.style.background = '#f44336';
+      } else {
+        this.music.play();
+        toggleBtn.textContent = '🔊 Mute';
+        toggleBtn.style.background = '#4CAF50';
+      }
+    });
+    
+    volumeSlider.addEventListener('input', (e) => {
+      const volume = e.target.value / 100;
+      this.musicVolume = volume;
+      if (this.music) {
+        this.music.setVolume(volume);
+      }
+    });
   }
 
   toggleMusic() {
