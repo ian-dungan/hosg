@@ -57,7 +57,7 @@ const CONFIG = {
     },
     
     NETWORK: {
-        WS_URL: 'wss://hosg.onrender.com',
+        WS_URL: 'wss://hosg-u1hc.onrender.com',
         MAX_PLAYERS: 100,
         TICK_RATE: 20
     },
