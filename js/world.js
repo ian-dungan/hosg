@@ -807,7 +807,7 @@ class World {
             
             // CONFIGURABLE: Random scale variation (makes each tree slightly different size)
             const SCALE_VARIATION_MIN = 0.7;  // Minimum size multiplier (70% of base scale)
-            const SCALE_VARIATION_MAX = 7.0;  // Maximum size multiplier (130% of base scale)
+            const SCALE_VARIATION_MAX = 1.3;  // Maximum size multiplier (130% of base scale)
             const scaleVariation = SCALE_VARIATION_MIN + Math.random() * (SCALE_VARIATION_MAX - SCALE_VARIATION_MIN);
             tree.scaling.scaleInPlace(scaleVariation);
             
@@ -1561,6 +1561,13 @@ class Enemy extends NPC {
                     }
                 }
                 break;
+        }
+        
+        // CRITICAL: Snap enemy to terrain height every frame
+        const world = this.scene.world || this.scene.game?.world;
+        if (world && world.getHeightAt) {
+            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
+            this.mesh.position.y = terrainY + 0.9; // Stand on terrain (half height of enemy)
         }
         
         // Update position

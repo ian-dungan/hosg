@@ -1048,7 +1048,7 @@ class Player {
         }, this.scene);
         
         this.targetHighlight.position = this.currentTarget.position.clone();
-        this.targetHighlight.position.y = 0.1; // Just above ground
+        this.targetHighlight.position.y = this.currentTarget.position.y + 0.1; // Just above target's feet
         this.targetHighlight.rotation.x = Math.PI / 2;
         
         // Red glow material
@@ -1069,6 +1069,7 @@ class Player {
             
             // Follow target
             this.targetHighlight.position.x = this.currentTarget.position.x;
+            this.targetHighlight.position.y = this.currentTarget.position.y + 0.1;
             this.targetHighlight.position.z = this.currentTarget.position.z;
         });
     }
