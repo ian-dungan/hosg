@@ -813,17 +813,39 @@ class InventoryManager {
             
             // Save current inventory items
             const itemsToSave = [];
-            this.slots.forEach((item, index) => {
+            
+            for (let index = 0; index < this.slots.length; index++) {
+                const item = this.slots[index];
                 if (item) {
+                    let templateId = item.id;
+                    
+                    // If id is a string code (like 'goblin_ear'), look up the template ID
+                    if (typeof templateId === 'string') {
+                        const { data: template } = await window.supabaseService.client
+                            .from('hosg_item_templates')
+                            .select('id')
+                            .eq('code', templateId)
+                            .single();
+                        
+                        if (template) {
+                            templateId = template.id;
+                            // Update item to have numeric ID for future saves
+                            item.id = templateId;
+                        } else {
+                            console.warn(`[Inventory] Item template not found for code: ${templateId}`);
+                            continue; // Skip this item
+                        }
+                    }
+                    
                     itemsToSave.push({
                         character_id: characterId,
-                        item_template_id: item.id,
+                        item_template_id: templateId,
                         quantity: item.quantity || 1,
                         slot_index: index,
                         location_type: 'inventory'
                     });
                 }
-            });
+            }
             
             if (itemsToSave.length > 0) {
                 const { error } = await window.supabaseService.client
@@ -914,15 +936,36 @@ class InventoryManager {
             
             // Save current equipment
             const equipmentToSave = [];
-            Object.entries(this.equipment).forEach(([slot, item]) => {
+            
+            for (const [slot, item] of Object.entries(this.equipment)) {
                 if (item) {
+                    let templateId = item.id;
+                    
+                    // If id is a string code (like 'rusty_sword'), look up the template ID
+                    if (typeof templateId === 'string') {
+                        const { data: template } = await window.supabaseService.client
+                            .from('hosg_item_templates')
+                            .select('id')
+                            .eq('code', templateId)
+                            .single();
+                        
+                        if (template) {
+                            templateId = template.id;
+                            // Update item to have numeric ID for future saves
+                            item.id = templateId;
+                        } else {
+                            console.warn(`[Inventory] Equipment template not found for code: ${templateId}`);
+                            continue; // Skip this item
+                        }
+                    }
+                    
                     equipmentToSave.push({
                         character_id: characterId,
-                        item_template_id: item.id,
+                        item_template_id: templateId,
                         equip_slot: slot
                     });
                 }
-            });
+            }
             
             if (equipmentToSave.length > 0) {
                 const { error } = await window.supabaseService.client
