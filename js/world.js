@@ -62,10 +62,14 @@ class AnimatedEntity extends Entity {
                 this.characterModel = modelInstance.root;
                 this.mesh = modelInstance.root;
                 
+                // Apply offset if provided (relative to current position)
                 if (options.offset) {
-                    this.characterModel.position = new BABYLON.Vector3(
-                        options.offset.x || 0, options.offset.y || 0, options.offset.z || 0
-                    );
+                    this.mesh.position.x += options.offset.x || 0;
+                    this.mesh.position.y += options.offset.y || 0;
+                    this.mesh.position.z += options.offset.z || 0;
+                } else {
+                    // Ensure mesh is at the correct position
+                    this.mesh.position.copyFrom(this.position);
                 }
                 
                 if (modelInstance.animationGroups && modelInstance.animationGroups.length > 0) {
@@ -203,7 +207,12 @@ class World {
         this.createSkybox();
         this.createTerrain();
         this.createWater();
-        this.populateWorld();
+        
+        // Populate world asynchronously but don't block init
+        this.populateWorld().then(() => {
+            console.log('[World] Population complete');
+        });
+        
         this.setupEventListeners();
         
         // CRITICAL: Signal player that world is ready
@@ -670,7 +679,7 @@ class World {
         }
     }
 
-    populateWorld() {
+    async populateWorld() {
         // Define static landmark positions for consistent world
         this.landmarks = [
             // Town Center
@@ -698,9 +707,9 @@ class World {
         // Create landmarks
         this.createLandmarks();
         
-        // NPCs, enemies, items still placed (for gameplay)
-        this.createNPCs(10);
-        this.createEnemies(20);
+        // NPCs, enemies, items - await these to ensure they're positioned correctly
+        await this.createNPCs(10);
+        await this.createEnemies(20);
         this.createItems(30);
         
         console.log('[World] Static world with', this.landmarks.length, 'landmarks created');
@@ -1046,43 +1055,63 @@ class World {
         }
     }
 
-    createNPCs(count) {
+    async createNPCs(count) {
         const types = ['villager', 'merchant', 'guard'];
         
         for (let i = 0; i < count; i++) {
             const type = types[i % types.length];
+            const terrainPos = this.getRandomPositionOnTerrain();
             
             const npc = new NPC(this.scene, {
                 name: `${type.charAt(0).toUpperCase() + type.slice(1)} ${Math.floor(i / types.length) + 1}`,
                 npcType: type,
-                position: this.getRandomPositionOnTerrain(),
+                position: terrainPos,
                 health: 100,
                 speed: 0.05 + Math.random() * 0.05,
                 dialogue: [`Hello, I'm a ${type}!`]
             });
             
+            // Wait for init to complete before adding
+            await npc.init();
+            
+            // Ensure mesh is positioned correctly on terrain
+            if (npc.mesh) {
+                npc.mesh.position.copyFrom(terrainPos);
+            }
+            
             // Add to NPCs array
             this.npcs.push(npc);
         }
+        console.log(`[World] Created ${count} NPCs`);
     }
 
-    createEnemies(count) {
+    async createEnemies(count) {
         for (let i = 0; i < count; i++) {
             // 60% wolves, 40% goblins
             const isWolf = Math.random() < 0.6;
+            const terrainPos = this.getRandomPositionOnTerrain();
             
             const enemy = new Enemy(this.scene, {
                 name: isWolf ? `Wolf ${i + 1}` : `Goblin ${i + 1}`,
                 enemyType: isWolf ? 'wolf' : 'goblin',
-                position: this.getRandomPositionOnTerrain(),
+                position: terrainPos,
                 health: isWolf ? 40 : 60,
                 damage: isWolf ? 8 : 12,
                 speed: isWolf ? 0.12 : 0.08
             });
             
+            // Wait for init to complete before adding
+            await enemy.init();
+            
+            // Ensure mesh is positioned correctly on terrain
+            if (enemy.mesh) {
+                enemy.mesh.position.copyFrom(terrainPos);
+            }
+            
             // Add to enemies array
             this.enemies.push(enemy);
         }
+        console.log(`[World] Created ${count} enemies`);
     }
 
     createItems(count) {
@@ -1576,9 +1605,6 @@ class NPC extends AnimatedEntity {
         this.walkRadius = options.walkRadius || 10;
         this.idleTime = 0;
         this.maxIdleTime = 3; // seconds
-        
-        // Initialize
-        this.init();
     }
 
     async init() {
@@ -1794,9 +1820,6 @@ class Enemy extends AnimatedEntity {
         this.target = null;
         this.attackCooldown = 0;
         this.attackRate = options.attackRate || 1.0; // attacks per second
-        
-        // Initialize
-        this.init();
     }
 
     async init() {
