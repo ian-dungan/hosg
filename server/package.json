@@ -1,0 +1,24 @@
+{
+  "name": "hosg-multiplayer-server",
+  "version": "1.0.0",
+  "description": "WebSocket multiplayer server for Heroes of Shady Grove",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "keywords": [
+    "websocket",
+    "multiplayer",
+    "game-server",
+    "mmorpg"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
