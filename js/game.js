@@ -42,6 +42,7 @@ class Game {
     this.combat = null; // Combat system
     this.characterData = null; // Loaded from database
     this.autoSaveInterval = null; // Auto-save timer
+    this._isSaving = false; // Prevent overlapping saves
 
     this._lastFrameTime = performance.now();
     this._running = false;
@@ -108,18 +109,32 @@ class Game {
   // =============================================
   
   startAutoSave() {
-    // Save character every 30 seconds
+    // Save character every 60 seconds (less aggressive)
     this.autoSaveInterval = setInterval(() => {
       this.saveCharacter();
-    }, 30000);
+    }, 60000); // Changed from 30s to 60s
     
-    console.log('[Game] Auto-save enabled (every 30 seconds)');
+    // Also save on visibility change (tab switch)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.saveCharacter();
+      }
+    });
+    
+    console.log('[Game] Auto-save enabled (every 60 seconds)');
   }
   
   async saveCharacter() {
-    if (!this.characterData || !window.supabaseService.hasCharacter()) return;
+    // Prevent overlapping saves
+    if (this._isSaving) {
+      console.log('[Game] Save already in progress, skipping...');
+      return;
+    }
     
+    if (!this.characterData || !window.supabaseService.hasCharacter()) return;
     if (!this.player || !this.player.mesh) return;
+    
+    this._isSaving = true;
     
     try {
       // Save character position and stats
@@ -144,19 +159,64 @@ class Game {
         }
       };
       
-      await window.supabaseService.saveCharacter(characterData);
+      // Save with retry logic
+      await this.saveWithRetry(() => window.supabaseService.saveCharacter(characterData), 'character');
       
-      // Save inventory and equipment
+      // Add delay between saves to avoid overwhelming the connection
+      await this.delay(500);
+      
+      // Save inventory and equipment separately with delays
       if (this.player.inventory) {
-        await this.player.inventory.saveToDatabase();
-        await this.player.inventory.saveEquipmentToDatabase();
+        try {
+          await this.saveWithRetry(() => this.player.inventory.saveToDatabase(), 'inventory');
+          await this.delay(500);
+          await this.saveWithRetry(() => this.player.inventory.saveEquipmentToDatabase(), 'equipment');
+        } catch (error) {
+          console.warn('[Game] Inventory/equipment save failed:', error.message);
+          // Don't fail entire save if inventory fails
+        }
       }
       
       console.log('[Game] ✓ Character, inventory, and equipment saved');
       
     } catch (error) {
-      console.error('[Game] Failed to save character:', error);
+      console.error('[Game] Failed to save character:', error.message);
+      // Show user-friendly message
+      if (this.ui && this.ui.addChatMessage) {
+        this.ui.addChatMessage('Auto-save failed - will retry', 'error');
+      }
+    } finally {
+      this._isSaving = false;
     }
+  }
+  
+  // Retry helper with exponential backoff
+  async saveWithRetry(saveFunction, label, maxRetries = 3) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await saveFunction();
+        if (attempt > 0) {
+          console.log(`[Game] ${label} saved on retry ${attempt + 1}`);
+        }
+        return; // Success!
+      } catch (error) {
+        const isLastAttempt = attempt === maxRetries - 1;
+        
+        if (isLastAttempt) {
+          // Final attempt failed
+          throw new Error(`${label} save failed after ${maxRetries} attempts: ${error.message}`);
+        }
+        
+        // Wait before retry (exponential backoff: 1s, 2s, 4s)
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.warn(`[Game] ${label} save failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${waitTime}ms...`);
+        await this.delay(waitTime);
+      }
+    }
+  }
+  
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
   
   stopAutoSave() {

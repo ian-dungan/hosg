@@ -44,7 +44,7 @@ class GMCommands {
         
         // TODO: Add is_gm column to hosg_accounts table
         // For now, enable for specific usernames
-        const gmUsernames = ['admin', 'gm', 'ian', 'test001']; // Add your username here!
+        const gmUsernames = ['admin', 'gm', 'ian']; // Add your username here!
         
         if (gmUsernames.includes(account.username.toLowerCase())) {
             this.enabled = true;
@@ -286,6 +286,7 @@ EDITING:
 DATABASE:
   /save                         - Save selected entity to DB
   /save all                     - Save all spawns to DB
+  /save character               - Manually save your character
   /delete                       - Delete selected entity
   
 VISUAL:
@@ -416,13 +417,29 @@ HOTKEYS:
     }
     
     async cmdSave(args) {
+        // /save character - save player character
+        if (args.length > 0 && args[0].toLowerCase() === 'character') {
+            if (this.game.saveCharacter) {
+                this.showMessage('Saving character...', 'info');
+                try {
+                    await this.game.saveCharacter();
+                    this.showMessage('✓ Character saved successfully', 'success');
+                } catch (error) {
+                    this.showMessage('✗ Character save failed: ' + error.message, 'error');
+                }
+            }
+            return;
+        }
+        
+        // /save all - save all spawns
         if (args.length > 0 && args[0].toLowerCase() === 'all') {
             await this.saveAllSpawns();
             return;
         }
         
+        // /save - save selected entity
         if (!this.selectedEntity) {
-            this.showMessage('No entity selected', 'error');
+            this.showMessage('Usage: /save [character|all] or select an entity first', 'error');
             return;
         }
         
