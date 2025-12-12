@@ -36,9 +36,10 @@ const ASSET_PATHS = {
     },
     
     // NPC models (friendly characters)
-    NPC_MODELS: {
-        // Example: villager: "villager_01.glb"
-    },
+NPC_MODELS: {
+    merchant: "crusader.glb",    // Your merchant model filename
+    guard: "knight.glb"           // Your guard model filename
+},
     
     // Generic models (shared objects)
     GENERIC_MODELS: {
