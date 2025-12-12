@@ -5,7 +5,7 @@
 
 const CONFIG = {
     VERSION: '2.0.0',
-    DEBUG: false,
+    DEBUG: true,
     
     GAME: {
         FPS: 60,
@@ -38,7 +38,7 @@ const CONFIG = {
         CHUNK_SIZE: 32,
         TERRAIN_SIZE: 256,  // Reduced from 1024 for faster loading (256x256 = 65k vertices vs 1M)
         WATER_LEVEL: 0,
-        SEED: 10000,  // Fixed seed for consistent terrain (change this for different landscapes)
+        SEED: 12345,  // Fixed seed for consistent terrain (change this for different landscapes)
         
         // Skybox configuration
         SKYBOX: {
@@ -57,7 +57,7 @@ const CONFIG = {
     },
     
     NETWORK: {
-        WS_URL: 'wss://hosg-u1hc.onrender.com/',
+        WS_URL: 'wss://hosg.onrender.com',
         MAX_PLAYERS: 100,
         TICK_RATE: 20
     },

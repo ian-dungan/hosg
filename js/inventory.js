@@ -792,6 +792,213 @@ class InventoryManager {
     }
     
     // ========================================================================
+    // DATABASE PERSISTENCE
+    // ========================================================================
+    
+    async saveToDatabase() {
+        if (!window.supabaseService || !window.supabaseService.currentCharacter) {
+            console.warn('[Inventory] Cannot save - no database connection');
+            return false;
+        }
+        
+        try {
+            const characterId = window.supabaseService.currentCharacter.id;
+            
+            // First, delete all existing inventory items for this character
+            await window.supabaseService.client
+                .from('hosg_character_items')
+                .delete()
+                .eq('character_id', characterId)
+                .eq('location_type', 'inventory');
+            
+            // Save current inventory items
+            const itemsToSave = [];
+            this.slots.forEach((item, index) => {
+                if (item) {
+                    itemsToSave.push({
+                        character_id: characterId,
+                        item_template_id: item.id,
+                        quantity: item.quantity || 1,
+                        slot_index: index,
+                        location_type: 'inventory'
+                    });
+                }
+            });
+            
+            if (itemsToSave.length > 0) {
+                const { error } = await window.supabaseService.client
+                    .from('hosg_character_items')
+                    .insert(itemsToSave);
+                
+                if (error) throw error;
+            }
+            
+            console.log(`[Inventory] ✓ Saved ${itemsToSave.length} items to database`);
+            return true;
+            
+        } catch (error) {
+            console.error('[Inventory] Failed to save:', error);
+            return false;
+        }
+    }
+    
+    async loadFromDatabase() {
+        if (!window.supabaseService || !window.supabaseService.currentCharacter) {
+            console.warn('[Inventory] Cannot load - no database connection');
+            return false;
+        }
+        
+        try {
+            const characterId = window.supabaseService.currentCharacter.id;
+            
+            // Load inventory items
+            const { data: items, error } = await window.supabaseService.client
+                .from('hosg_character_items')
+                .select('*, hosg_item_templates(*)')
+                .eq('character_id', characterId)
+                .eq('location_type', 'inventory')
+                .order('slot_index');
+            
+            if (error) throw error;
+            
+            // Clear current inventory
+            this.slots = new Array(this.config.INVENTORY_SLOTS).fill(null);
+            
+            // Load items into slots
+            if (items && items.length > 0) {
+                items.forEach(dbItem => {
+                    const template = dbItem.hosg_item_templates;
+                    if (template && dbItem.slot_index < this.config.INVENTORY_SLOTS) {
+                        this.slots[dbItem.slot_index] = {
+                            id: template.id,
+                            code: template.code,
+                            name: template.name,
+                            description: template.description,
+                            type: template.item_type,
+                            equipSlot: template.equip_slot,
+                            rarity: template.rarity,
+                            quantity: dbItem.quantity,
+                            stats: template.stats || {},
+                            effects: template.effects || {}
+                        };
+                    }
+                });
+                
+                console.log(`[Inventory] ✓ Loaded ${items.length} items from database`);
+            }
+            
+            // Update UI
+            this.updateUI();
+            return true;
+            
+        } catch (error) {
+            console.error('[Inventory] Failed to load:', error);
+            return false;
+        }
+    }
+    
+    async saveEquipmentToDatabase() {
+        if (!window.supabaseService || !window.supabaseService.currentCharacter) {
+            console.warn('[Inventory] Cannot save equipment - no database connection');
+            return false;
+        }
+        
+        try {
+            const characterId = window.supabaseService.currentCharacter.id;
+            
+            // Delete existing equipment
+            await window.supabaseService.client
+                .from('hosg_character_equipment')
+                .delete()
+                .eq('character_id', characterId);
+            
+            // Save current equipment
+            const equipmentToSave = [];
+            Object.entries(this.equipment).forEach(([slot, item]) => {
+                if (item) {
+                    equipmentToSave.push({
+                        character_id: characterId,
+                        item_template_id: item.id,
+                        equip_slot: slot
+                    });
+                }
+            });
+            
+            if (equipmentToSave.length > 0) {
+                const { error } = await window.supabaseService.client
+                    .from('hosg_character_equipment')
+                    .insert(equipmentToSave);
+                
+                if (error) throw error;
+            }
+            
+            console.log(`[Inventory] ✓ Saved ${equipmentToSave.length} equipped items to database`);
+            return true;
+            
+        } catch (error) {
+            console.error('[Inventory] Failed to save equipment:', error);
+            return false;
+        }
+    }
+    
+    async loadEquipmentFromDatabase() {
+        if (!window.supabaseService || !window.supabaseService.currentCharacter) {
+            console.warn('[Inventory] Cannot load equipment - no database connection');
+            return false;
+        }
+        
+        try {
+            const characterId = window.supabaseService.currentCharacter.id;
+            
+            // Load equipment
+            const { data: items, error } = await window.supabaseService.client
+                .from('hosg_character_equipment')
+                .select('*, hosg_item_templates(*)')
+                .eq('character_id', characterId);
+            
+            if (error) throw error;
+            
+            // Clear current equipment
+            Object.keys(this.equipment).forEach(slot => {
+                this.equipment[slot] = null;
+            });
+            
+            // Load equipment into slots
+            if (items && items.length > 0) {
+                items.forEach(dbItem => {
+                    const template = dbItem.hosg_item_templates;
+                    if (template && this.equipment.hasOwnProperty(dbItem.equip_slot)) {
+                        this.equipment[dbItem.equip_slot] = {
+                            id: template.id,
+                            code: template.code,
+                            name: template.name,
+                            description: template.description,
+                            type: template.item_type,
+                            equipSlot: template.equip_slot,
+                            rarity: template.rarity,
+                            stats: template.stats || {},
+                            effects: template.effects || {}
+                        };
+                    }
+                });
+                
+                console.log(`[Inventory] ✓ Loaded ${items.length} equipped items from database`);
+                
+                // Recalculate stats with new equipment
+                this.applyEquipmentStats();
+            }
+            
+            // Update UI
+            this.updateUI();
+            return true;
+            
+        } catch (error) {
+            console.error('[Inventory] Failed to load equipment:', error);
+            return false;
+        }
+    }
+    
+    // ========================================================================
     // UPDATE LOOP
     // ========================================================================
     
