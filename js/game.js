@@ -398,6 +398,18 @@ class Game {
       console.warn("[Game] UIManager not defined.");
     }
 
+    // Initialize GM Commands (admin tools)
+    if (typeof GMCommands !== 'undefined') {
+      try {
+        this.gmCommands = new GMCommands(this);
+        console.log("[Game] GM Commands initialized");
+      } catch (err) {
+        console.error("[Game] GM Commands initialization failed:", err);
+      }
+    } else {
+      console.log("[Game] GMCommands not available");
+    }
+
     // Initialize Combat System
     this.updateLoadingScreen('Loading combat system...', 96);
     if (typeof CombatSystem !== 'undefined') {
@@ -791,6 +803,15 @@ class Game {
         }
       }
 
+      // Update GM Commands
+      if (this.gmCommands && typeof this.gmCommands.update === "function") {
+        try {
+          this.gmCommands.update();
+        } catch (err) {
+          console.error("[Game] GM Commands update error:", err);
+        }
+      }
+
       // Render scene
       try {
         this.scene.render();
@@ -821,6 +842,11 @@ class Game {
     if (this.ui) {
       this.ui.dispose();
       this.ui = null;
+    }
+    
+    if (this.gmCommands) {
+      this.gmCommands.dispose();
+      this.gmCommands = null;
     }
     
     if (this.player) {

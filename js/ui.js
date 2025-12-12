@@ -15,6 +15,13 @@ class UIManager {
         this.minimap = null;
         this.minimapDots = [];
         this.playerDot = null; 
+        
+        // Chat system
+        this.chatLog = [];
+        this.maxChatMessages = 10;
+        this.chatContainer = null;
+        this.chatInput = null;
+        this.chatInputActive = false;
 
         this._init();
     }
@@ -22,6 +29,7 @@ class UIManager {
     _init() {
         this.createHUD();
         this.createMinimap();
+        this.createChat();
         if (CONFIG.DEBUG) {
             this.createDebugInfo();
         }
@@ -582,7 +590,252 @@ class UIManager {
         console.log('[UI] Target menu created');
     }
     
+    // ==================== CHAT SYSTEM ====================
+    
+    createChat() {
+        // Chat log container (bottom-left)
+        this.chatContainer = new BABYLON.GUI.StackPanel("chatLog");
+        this.chatContainer.width = "400px";
+        this.chatContainer.height = "250px";
+        this.chatContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        this.chatContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        this.chatContainer.left = "10px";
+        this.chatContainer.top = "-10px";
+        this.chatContainer.isVertical = true;
+        this.chatContainer.spacing = 2;
+        this.gui.addControl(this.chatContainer);
+        
+        // Setup keyboard listener for Enter key
+        this.setupChatInput();
+        
+        console.log('[UI] Chat system created - Press ENTER to chat');
+    }
+    
+    setupChatInput() {
+        const self = this;
+        
+        // Listen for Enter key to open chat
+        window.addEventListener('keydown', (e) => {
+            // Don't process if already typing or if Alt/Ctrl/Cmd pressed
+            if (this.chatInputActive || e.altKey || e.ctrlKey || e.metaKey) return;
+            
+            // Enter key - open chat
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.openChatInput();
+            }
+        });
+    }
+    
+    openChatInput() {
+        if (this.chatInputActive) return;
+        
+        this.chatInputActive = true;
+        
+        // Create HTML input overlay
+        const inputDiv = document.createElement('div');
+        inputDiv.id = 'chatInputOverlay';
+        inputDiv.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 400px;
+            z-index: 1000;
+        `;
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'chatInput';
+        input.placeholder = 'Type message or /command...';
+        input.style.cssText = `
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border: 2px solid #00ff00;
+            border-radius: 5px;
+            outline: none;
+            font-family: monospace;
+        `;
+        
+        inputDiv.appendChild(input);
+        document.body.appendChild(inputDiv);
+        
+        // Focus input
+        setTimeout(() => input.focus(), 10);
+        
+        const self = this;
+        
+        // Handle input submission
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const message = input.value.trim();
+                
+                if (message) {
+                    this.handleChatMessage(message);
+                }
+                
+                this.closeChatInput();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.closeChatInput();
+            }
+        });
+        
+        // Handle click outside to close
+        input.addEventListener('blur', () => {
+            setTimeout(() => this.closeChatInput(), 100);
+        });
+    }
+    
+    closeChatInput() {
+        this.chatInputActive = false;
+        
+        const inputDiv = document.getElementById('chatInputOverlay');
+        if (inputDiv) {
+            inputDiv.remove();
+        }
+    }
+    
+    handleChatMessage(message) {
+        // Check if it's a GM command
+        if (message.startsWith('/')) {
+            // Try GM commands first
+            if (this.game.gmCommands && this.game.gmCommands.enabled) {
+                this.game.gmCommands.executeCommand(message);
+            } else {
+                this.addChatMessage('[System] GM commands not available', 'error');
+            }
+        } else {
+            // Regular chat message
+            // Send to network if available
+            if (this.game.network && this.game.network.connected) {
+                this.game.network.sendChat(message);
+                this.addChatMessage('[You] ' + message, 'player');
+            } else {
+                // Local message if not connected
+                this.addChatMessage('[Local] ' + message, 'local');
+            }
+        }
+    }
+    
+    addChatMessage(text, type = 'info') {
+        // Remove oldest message if at limit
+        if (this.chatLog.length >= this.maxChatMessages) {
+            const oldestMsg = this.chatLog.shift();
+            if (oldestMsg.control) {
+                this.chatContainer.removeControl(oldestMsg.control);
+            }
+        }
+        
+        // Determine color based on type
+        let color = 'white';
+        switch(type) {
+            case 'error':
+                color = '#ff4444';
+                break;
+            case 'success':
+                color = '#44ff44';
+                break;
+            case 'info':
+                color = '#44ffff';
+                break;
+            case 'gm':
+                color = '#ffaa00';
+                break;
+            case 'player':
+                color = '#aaaaff';
+                break;
+            case 'system':
+                color = '#ffff44';
+                break;
+            case 'local':
+                color = '#888888';
+                break;
+        }
+        
+        // Create message text block
+        const msgText = new BABYLON.GUI.TextBlock();
+        msgText.text = text;
+        msgText.color = color;
+        msgText.fontSize = 14;
+        msgText.height = "20px";
+        msgText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        msgText.textWrapping = true;
+        msgText.resizeToFit = true;
+        
+        // Add to container
+        this.chatContainer.addControl(msgText);
+        
+        // Store in log
+        this.chatLog.push({
+            text: text,
+            type: type,
+            control: msgText,
+            timestamp: Date.now()
+        });
+        
+        // Auto-fade after 10 seconds
+        setTimeout(() => {
+            if (msgText.alpha) {
+                msgText.alpha = 0.3;
+            }
+        }, 10000);
+        
+        console.log('[Chat]', text);
+    }
+    
+    showMessage(text, duration = 3000, type = 'info') {
+        // Show message in chat
+        this.addChatMessage(text, type);
+        
+        // Also show as center screen notification if important
+        if (type === 'error' || type === 'success' || type === 'gm') {
+            this.showNotification(text, duration, type);
+        }
+    }
+    
+    showNotification(text, duration, type) {
+        // Create notification (center-top)
+        const notification = new BABYLON.GUI.TextBlock();
+        notification.text = text;
+        notification.fontSize = 18;
+        notification.color = type === 'error' ? '#ff4444' : type === 'success' ? '#44ff44' : '#ffaa00';
+        notification.height = "40px";
+        notification.width = "600px";
+        notification.top = "100px";
+        notification.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+        notification.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+        notification.shadowColor = "black";
+        notification.shadowBlur = 4;
+        notification.shadowOffsetX = 2;
+        notification.shadowOffsetY = 2;
+        
+        this.gui.addControl(notification);
+        
+        // Fade out and remove
+        setTimeout(() => {
+            const fadeInterval = setInterval(() => {
+                notification.alpha -= 0.05;
+                if (notification.alpha <= 0) {
+                    clearInterval(fadeInterval);
+                    this.gui.removeControl(notification);
+                }
+            }, 50);
+        }, duration - 1000);
+    }
+    
+    // ==================== END CHAT SYSTEM ====================
+    
     dispose() {
+        // Clean up chat
+        this.closeChatInput();
+        if (this.chatContainer) {
+            this.gui.removeControl(this.chatContainer);
+        }
+        
         // Clean up UI elements
         if (this.targetMenu && this.targetMenu.container) {
             this.targetMenu.container.remove();
