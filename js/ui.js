@@ -440,14 +440,14 @@ class UIManager {
                     this.container.id = 'target-menu';
                     this.container.style.cssText = `
                         position: fixed;
-                        top: 50%;
-                        left: 50%;
-                        transform: translate(-50%, -50%);
+                        bottom: 20px;
+                        right: 20px;
                         background: linear-gradient(135deg, rgba(20, 20, 40, 0.95) 0%, rgba(10, 10, 30, 0.98) 100%);
                         border: 3px solid #ffd700;
                         border-radius: 10px;
                         padding: 15px;
                         min-width: 220px;
+                        max-width: 280px;
                         box-shadow: 0 8px 24px rgba(0,0,0,0.8);
                         z-index: 10001;
                         font-family: Arial, sans-serif;
