@@ -1,52 +1,6 @@
 // network.js
-// Supabase + WebSocket networking
+// WebSocket networking for multiplayer
 
-//
-// Supabase wrapper
-//
-function SupabaseService(config) {
-  this.config = config || {};
-  this.client = null;
-  this._init();
-}
-
-SupabaseService.prototype._init = function () {
-  if (typeof window === "undefined") return;
-
-  // Prefer explicit SUPABASE_CONFIG first, then CONFIG.SUPABASE if available
-  var globalConfig = window.SUPABASE_CONFIG || (typeof CONFIG !== "undefined" ? CONFIG.SUPABASE : null);
-  if (globalConfig) {
-    for (var k in globalConfig) {
-      if (Object.prototype.hasOwnProperty.call(globalConfig, k)) {
-        this.config[k] = globalConfig[k];
-      }
-    }
-  }
-
-  if (!window.supabase || typeof window.supabase.createClient !== "function") {
-    console.warn("[Supabase] supabase-js CDN script not loaded; client not initialized.");
-    return;
-  }
-
-  if (!this.config.url || !this.config.key) {
-    console.warn("[Supabase] Missing URL or key; client not initialized.");
-    return;
-  }
-
-  try {
-    this.client = window.supabase.createClient(this.config.url, this.config.key);
-    console.log("[Supabase] Client initialized");
-  } catch (err) {
-    console.error("[Supabase] Failed to create client:", err);
-    this.client = null;
-  }
-};
-
-SupabaseService.prototype.getClient = function () {
-  return this.client;
-};
-
-var supabaseService = new SupabaseService();
 
 //
 // Network Manager

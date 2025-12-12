@@ -580,97 +580,11 @@ class UIManager {
         // Store reference in UIManager
         console.log('[UI] Target menu created');
     }
-                        border-radius: 5px;
-                        color: white;
-                        cursor: pointer;
-                        transition: all 0.2s;
-                        text-align: center;
-                        font-size: 16px;
-                    `;
-                    optionEl.textContent = option.label;
-                    
-                    optionEl.addEventListener('mouseenter', () => {
-                        this.selectedIndex = index;
-                        this.createUI(target);
-                    });
-                    
-                    optionEl.addEventListener('click', () => {
-                        this.executeSelected();
-                    });
-                    
-                    optionsContainer.appendChild(optionEl);
-                });
-                
-                this.container.style.display = 'block';
-            },
-            
-            moveSelection: function(direction) {
-                this.selectedIndex += direction;
-                if (this.selectedIndex < 0) this.selectedIndex = this.options.length - 1;
-                if (this.selectedIndex >= this.options.length) this.selectedIndex = 0;
-                
-                // Update UI
-                const menuOptions = this.container.querySelectorAll('.menu-option');
-                menuOptions.forEach((el, index) => {
-                    if (index === this.selectedIndex) {
-                        el.style.background = 'rgba(255, 215, 0, 0.3)';
-                        el.style.borderColor = '#ffd700';
-                    } else {
-                        el.style.background = 'rgba(255, 255, 255, 0.1)';
-                        el.style.borderColor = 'transparent';
-                    }
-                });
-            },
-            
-            executeSelected: function() {
-                const selected = this.options[this.selectedIndex];
-                if (!selected) return;
-                
-                const game = window.game || (this.container && this.container.game);
-                const combat = game?.combat;
-                const target = combat?.currentTarget;
-                
-                switch (selected.action) {
-                    case 'attack':
-                        if (target && target.isEnemy && combat) {
-                            combat.enterCombat();
-                            console.log('[UI] Attacking:', target.name);
-                        }
-                        break;
-                        
-                    case 'talk':
-                        console.log('[UI] Talking to:', target?.name);
-                        // TODO: Open dialogue system
-                        alert(`${target?.name} says: "Hello, adventurer!"`);
-                        break;
-                        
-                    case 'trade':
-                        console.log('[UI] Trading with:', target?.name);
-                        // TODO: Open trade window
-                        alert(`${target?.name} says: "What would you like to trade?"`);
-                        break;
-                        
-                    case 'consider':
-                        if (target) {
-                            const level = target.stats?.level || 1;
-                            const hp = target.stats?.currentHP || target.health || 100;
-                            const maxHP = target.stats?.maxHP || target.maxHealth || 100;
-                            alert(`${target.name}\nLevel: ${level}\nHealth: ${hp}/${maxHP}`);
-                        }
-                        break;
-                        
-                    case 'cancel':
-                        // Just close menu
-                        break;
-                }
-                
-                this.hide();
-            }
-        };
-        
-        // Store reference in UIManager
-        this.targetMenu.container.game = this.game;
-    }
     
-    dispose() { /* Implementation omitted for brevity */ }
+    dispose() {
+        // Clean up UI elements
+        if (this.targetMenu && this.targetMenu.container) {
+            this.targetMenu.container.remove();
+        }
+    }
 }
