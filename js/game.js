@@ -122,6 +122,7 @@ class Game {
     if (!this.player || !this.player.mesh) return;
     
     try {
+      // Save character position and stats
       const characterData = {
         level: this.player.level || 1,
         position: {
@@ -135,15 +136,23 @@ class Game {
         stamina: this.player.stamina || 100,
         stats: {
           xp: this.player.xp || 0,
-          gold: this.player.gold || 0,
+          gold: this.player.inventory ? this.player.inventory.gold : 0,
           strength: this.player.strength || 10,
           agility: this.player.agility || 10,
-          intelligence: this.player.intelligence || 10
+          intelligence: this.player.intelligence || 10,
+          deaths: this.player.deaths || 0
         }
       };
       
       await window.supabaseService.saveCharacter(characterData);
-      console.log('[Game] Character saved');
+      
+      // Save inventory and equipment
+      if (this.player.inventory) {
+        await this.player.inventory.saveToDatabase();
+        await this.player.inventory.saveEquipmentToDatabase();
+      }
+      
+      console.log('[Game] ✓ Character, inventory, and equipment saved');
       
     } catch (error) {
       console.error('[Game] Failed to save character:', error);
@@ -409,6 +418,19 @@ class Game {
       this.player.inventory = new InventoryManager(this.player, this);
       this.player.inventory.createInventoryUI();
       console.log("[Game] Inventory system initialized");
+      
+      // Load inventory and equipment from database if character data exists
+      if (this.characterData) {
+        console.log('[Game] Loading inventory from database...');
+        await this.player.inventory.loadFromDatabase();
+        await this.player.inventory.loadEquipmentFromDatabase();
+        
+        // Load gold from character stats
+        if (this.characterData.stats && this.characterData.stats.gold !== undefined) {
+          this.player.inventory.gold = this.characterData.stats.gold;
+          this.player.inventory.updateUI();
+        }
+      }
     } else {
       console.warn("[Game] InventoryManager not defined.");
     }
@@ -417,6 +439,7 @@ class Game {
     if (typeof NetworkManager !== 'undefined') {
       this.network = new NetworkManager(this);
       this.network.connect();
+      console.log("[Game] Multiplayer enabled");
     } else {
       console.warn("[Game] NetworkManager not defined.");
     }
@@ -756,6 +779,15 @@ class Game {
           }
         } catch (err) {
           console.error("[Game] WorldItems update error:", err);
+        }
+      }
+
+      // Update Network (send position updates)
+      if (this.network && typeof this.network.update === "function") {
+        try {
+          this.network.update(deltaTime);
+        } catch (err) {
+          console.error("[Game] Network update error:", err);
         }
       }
 
