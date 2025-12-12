@@ -231,10 +231,11 @@ class UIManager {
         this.combatUI.id = 'combat-ui';
         this.combatUI.style.cssText = `
             position: fixed;
-            top: 80px;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
             width: 400px;
+            max-width: 90vw;
             display: none;
             z-index: 100;
             font-family: Arial, sans-serif;

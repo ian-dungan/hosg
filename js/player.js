@@ -463,12 +463,31 @@ class Player {
     setupTouchControls(canvas) {
         console.log('[Player] ✓ Touch controls enabled (mobile)');
 
-        let joystickTouchId = null;
-        let joystickStartX = 0;
-        let joystickStartY = 0;
+        // Movement joystick (bottom left)
+        let moveTouchId = null;
+        let moveStartX = 0;
+        let moveStartY = 0;
+
+        // Camera look (bottom right)
+        let lookTouchId = null;
+        let lookLastX = 0;
+        let lookLastY = 0;
 
         const DEADZONE = 20;
         const RUNZONE  = 80;
+        const CAMERA_SENSITIVITY = 0.003;
+
+        // Define invisible touch zones
+        const ZONE_HEIGHT = window.innerHeight * 0.4; // Bottom 40% of screen
+        const ZONE_Y_START = window.innerHeight - ZONE_HEIGHT;
+        
+        const isInMoveZone = (x, y) => {
+            return x < window.innerWidth * 0.5 && y > ZONE_Y_START;
+        };
+        
+        const isInLookZone = (x, y) => {
+            return x >= window.innerWidth * 0.5 && y > ZONE_Y_START;
+        };
 
         const resetDirections = () => {
             this.input.forward  = false;
@@ -478,9 +497,9 @@ class Player {
             this.input.run      = false;
         };
 
-        const updateFromTouch = (x, y) => {
-            const dx = x - joystickStartX;
-            const dy = y - joystickStartY;
+        const updateMoveFromTouch = (x, y) => {
+            const dx = x - moveStartX;
+            const dy = y - moveStartY;
 
             resetDirections();
 
@@ -501,6 +520,29 @@ class Player {
             this.input.run = dist > RUNZONE;
         };
 
+        const updateLookFromTouch = (x, y) => {
+            if (lookLastX === 0 && lookLastY === 0) {
+                lookLastX = x;
+                lookLastY = y;
+                return;
+            }
+
+            const dx = x - lookLastX;
+            const dy = y - lookLastY;
+
+            // Rotate camera horizontally
+            if (this.camera) {
+                this.camera.alpha -= dx * CAMERA_SENSITIVITY;
+                
+                // Adjust vertical angle (beta) with limits
+                const newBeta = this.camera.beta - dy * CAMERA_SENSITIVITY;
+                this.camera.beta = Math.max(0.1, Math.min(Math.PI / 2 - 0.1, newBeta));
+            }
+
+            lookLastX = x;
+            lookLastY = y;
+        };
+
         const onTouchStart = (evt) => {
             if (!evt.changedTouches || evt.changedTouches.length === 0) return;
 
@@ -509,18 +551,18 @@ class Player {
                 const x = t.clientX;
                 const y = t.clientY;
 
-                if (x < window.innerWidth * 0.5) {
-                    if (joystickTouchId === null) {
-                        joystickTouchId = t.identifier;
-                        joystickStartX = x;
-                        joystickStartY = y;
-                        updateFromTouch(x, y);
-                    }
-                } else {
-                    if (!this.jumpHeld) {
-                        this.queueJump();
-                        this.jumpHeld = true;
-                    }
+                // Check if in movement zone (bottom left)
+                if (isInMoveZone(x, y) && moveTouchId === null) {
+                    moveTouchId = t.identifier;
+                    moveStartX = x;
+                    moveStartY = y;
+                    updateMoveFromTouch(x, y);
+                }
+                // Check if in look zone (bottom right)
+                else if (isInLookZone(x, y) && lookTouchId === null) {
+                    lookTouchId = t.identifier;
+                    lookLastX = x;
+                    lookLastY = y;
                 }
             }
 
@@ -528,14 +570,18 @@ class Player {
         };
 
         const onTouchMove = (evt) => {
-            if (joystickTouchId === null) return;
             if (!evt.changedTouches) return;
 
             for (let i = 0; i < evt.changedTouches.length; i++) {
                 const t = evt.changedTouches[i];
-                if (t.identifier === joystickTouchId) {
-                    updateFromTouch(t.clientX, t.clientY);
-                    break;
+                
+                // Update movement
+                if (t.identifier === moveTouchId) {
+                    updateMoveFromTouch(t.clientX, t.clientY);
+                }
+                // Update camera look
+                else if (t.identifier === lookTouchId) {
+                    updateLookFromTouch(t.clientX, t.clientY);
                 }
             }
 
@@ -547,14 +593,19 @@ class Player {
 
             for (let i = 0; i < evt.changedTouches.length; i++) {
                 const t = evt.changedTouches[i];
-                if (t.identifier === joystickTouchId) {
-                    joystickTouchId = null;
+                
+                // Movement ended
+                if (t.identifier === moveTouchId) {
+                    moveTouchId = null;
                     resetDirections();
-                    break;
+                }
+                // Look ended
+                else if (t.identifier === lookTouchId) {
+                    lookTouchId = null;
+                    lookLastX = 0;
+                    lookLastY = 0;
                 }
             }
-
-            this.releaseJump();
 
             evt.preventDefault();
         };
