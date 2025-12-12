@@ -404,6 +404,238 @@ class SupabaseService {
     }
     
     // =============================================
+    // NPC & ENEMY SPAWNS
+    // =============================================
+    
+    async getNPCSpawns(zoneId = 1) {
+        try {
+            const { data, error } = await this.client
+                .from('hosg_npc_spawns')
+                .select(`
+                    *,
+                    template:hosg_npc_templates(*)
+                `)
+                .eq('zone_id', zoneId);
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Loaded', data?.length || 0, 'NPC spawns for zone', zoneId);
+            return data || [];
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to load NPC spawns:', error);
+            return [];
+        }
+    }
+    
+    async getEnemySpawns(zoneId = 1) {
+        try {
+            // Enemies are NPCs with faction 'hostile'
+            const { data, error } = await this.client
+                .from('hosg_npc_spawns')
+                .select(`
+                    *,
+                    template:hosg_npc_templates(*)
+                `)
+                .eq('zone_id', zoneId)
+                .eq('template.faction', 'hostile');
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Loaded', data?.length || 0, 'enemy spawns for zone', zoneId);
+            return data || [];
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to load enemy spawns:', error);
+            return [];
+        }
+    }
+    
+    async getFriendlyNPCSpawns(zoneId = 1) {
+        try {
+            // Friendly NPCs
+            const { data, error } = await this.client
+                .from('hosg_npc_spawns')
+                .select(`
+                    *,
+                    template:hosg_npc_templates(*)
+                `)
+                .eq('zone_id', zoneId)
+                .eq('template.faction', 'friendly');
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Loaded', data?.length || 0, 'friendly NPC spawns for zone', zoneId);
+            return data || [];
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to load friendly NPC spawns:', error);
+            return [];
+        }
+    }
+    
+    // =============================================
+    // INVENTORY & ITEMS
+    // =============================================
+    
+    async getCharacterInventory() {
+        if (!this.currentCharacter) {
+            console.warn('[SupabaseService] No character selected');
+            return [];
+        }
+        
+        try {
+            const { data, error } = await this.client
+                .from('hosg_character_items')
+                .select(`
+                    *,
+                    template:hosg_item_templates(*)
+                `)
+                .eq('character_id', this.currentCharacter.id)
+                .eq('location_type', 'inventory')
+                .order('slot_index');
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Loaded', data?.length || 0, 'inventory items');
+            return data || [];
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to load inventory:', error);
+            return [];
+        }
+    }
+    
+    async saveInventory(inventoryData) {
+        if (!this.currentCharacter) throw new Error('No character selected');
+        
+        try {
+            // Delete existing inventory
+            await this.client
+                .from('hosg_character_items')
+                .delete()
+                .eq('character_id', this.currentCharacter.id)
+                .eq('location_type', 'inventory');
+            
+            // Insert new inventory
+            if (inventoryData.length > 0) {
+                const itemsToInsert = inventoryData.map(item => ({
+                    character_id: this.currentCharacter.id,
+                    item_template_id: item.item_template_id,
+                    quantity: item.quantity,
+                    slot_index: item.slot_index,
+                    location_type: 'inventory'
+                }));
+                
+                const { error } = await this.client
+                    .from('hosg_character_items')
+                    .insert(itemsToInsert);
+                
+                if (error) throw error;
+            }
+            
+            console.log('[SupabaseService] ✓ Inventory saved');
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to save inventory:', error);
+            throw error;
+        }
+    }
+    
+    // =============================================
+    // QUESTS
+    // =============================================
+    
+    async getCharacterQuests() {
+        if (!this.currentCharacter) return [];
+        
+        try {
+            const { data, error } = await this.client
+                .from('hosg_character_quests')
+                .select(`
+                    *,
+                    template:hosg_quest_templates(*)
+                `)
+                .eq('character_id', this.currentCharacter.id);
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Loaded', data?.length || 0, 'quests');
+            return data || [];
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to load quests:', error);
+            return [];
+        }
+    }
+    
+    async startQuest(questId) {
+        if (!this.currentCharacter) throw new Error('No character selected');
+        
+        try {
+            const { data, error } = await this.client
+                .from('hosg_character_quests')
+                .insert({
+                    character_id: this.currentCharacter.id,
+                    quest_id: questId,
+                    status: 'active',
+                    progress: {}
+                })
+                .select(`
+                    *,
+                    template:hosg_quest_templates(*)
+                `)
+                .single();
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Quest started:', data.template.name);
+            return data;
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to start quest:', error);
+            throw error;
+        }
+    }
+    
+    async updateQuestProgress(questId, progress) {
+        try {
+            const { error } = await this.client
+                .from('hosg_character_quests')
+                .update({ progress })
+                .eq('id', questId);
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Quest progress updated');
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to update quest progress:', error);
+            throw error;
+        }
+    }
+    
+    async completeQuest(questId) {
+        try {
+            const { error } = await this.client
+                .from('hosg_character_quests')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString()
+                })
+                .eq('id', questId);
+            
+            if (error) throw error;
+            
+            console.log('[SupabaseService] ✓ Quest completed');
+            
+        } catch (error) {
+            console.error('[SupabaseService] Failed to complete quest:', error);
+            throw error;
+        }
+    }
+    
+    // =============================================
     // UTILITIES
     // =============================================
     

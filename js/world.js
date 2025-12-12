@@ -651,6 +651,22 @@ class World {
     }
 
     async populateWorld() {
+        // Try to load from database first
+        const useDatabase = window.supabaseService && window.supabaseService.client;
+        
+        if (useDatabase) {
+            console.log('[World] 🗄️ Loading world from database...');
+            await this.loadFromDatabase();
+        }
+        
+        // Fall back to procedural generation if database didn't populate enough entities
+        const needMoreNPCs = this.npcs.length < 3;
+        const needMoreEnemies = this.enemies.length < 5;
+        
+        if (needMoreNPCs || needMoreEnemies) {
+            console.log('[World] 🎲 Using procedural generation for remaining entities');
+        }
+        
         // Reduced initial spawns for faster loading
         this.reportProgress('Spawning trees...', 65);
         await this.createTrees(20); // Now async to support GLTF loading
@@ -665,12 +681,127 @@ class World {
         await this.delay(10);
         
         this.reportProgress('Spawning NPCs...', 80);
-        this.createNPCs(5); // Reduced from 10
+        if (needMoreNPCs) {
+            this.createNPCs(5); // Procedural fallback
+        }
         await this.delay(10);
         
         this.reportProgress('Spawning enemies...', 85);
-        this.createEnemies(10); // Reduced from 20
+        if (needMoreEnemies) {
+            this.createEnemies(10); // Procedural fallback
+        }
         await this.delay(10);
+    }
+    
+    async loadFromDatabase() {
+        if (!window.supabaseService || !window.supabaseService.client) {
+            console.log('[World] Supabase not available, skipping database load');
+            return;
+        }
+        
+        try {
+            // Load friendly NPCs
+            this.reportProgress('Loading NPCs from database...', 60);
+            const friendlyNPCs = await window.supabaseService.getFriendlyNPCSpawns(1);
+            
+            for (const spawn of friendlyNPCs) {
+                const template = spawn.template;
+                if (!template) continue;
+                
+                // Parse stats
+                const stats = typeof template.stats === 'string' ? 
+                    JSON.parse(template.stats) : template.stats;
+                
+                // Create position at spawn point
+                const terrainY = this.getHeightAt(spawn.position_x, spawn.position_z);
+                const position = new BABYLON.Vector3(
+                    spawn.position_x,
+                    terrainY || spawn.position_y,
+                    spawn.position_z
+                );
+                
+                // Create NPC with database data
+                const npc = new NPC(
+                    this.scene,
+                    position,
+                    spawn.id,
+                    template.code, // 'merchant', 'guard', etc.
+                    {
+                        name: template.name,
+                        level: template.level,
+                        health: stats.health || 100,
+                        faction: template.faction
+                    }
+                );
+                
+                this.npcs.push(npc);
+            }
+            
+            console.log(`[World] ✓ Loaded ${friendlyNPCs.length} friendly NPCs from database`);
+            
+            // Load enemies
+            this.reportProgress('Loading enemies from database...', 65);
+            const enemies = await window.supabaseService.getEnemySpawns(1);
+            
+            for (const spawn of enemies) {
+                const template = spawn.template;
+                if (!template) continue;
+                
+                // Parse stats
+                const stats = typeof template.stats === 'string' ? 
+                    JSON.parse(template.stats) : template.stats;
+                
+                // Parse loot table
+                const lootTable = typeof template.loot_table === 'string' ?
+                    JSON.parse(template.loot_table) : template.loot_table;
+                
+                // Spawn multiple enemies if max_spawn > 1
+                const spawnCount = spawn.max_spawn || 1;
+                const spawnRadius = spawn.spawn_radius || 0;
+                
+                for (let i = 0; i < spawnCount; i++) {
+                    // Randomize position within spawn radius
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * spawnRadius;
+                    const offsetX = Math.sin(angle) * distance;
+                    const offsetZ = Math.cos(angle) * distance;
+                    
+                    const x = spawn.position_x + offsetX;
+                    const z = spawn.position_z + offsetZ;
+                    const terrainY = this.getHeightAt(x, z);
+                    
+                    const position = new BABYLON.Vector3(
+                        x,
+                        terrainY + 5.0, // Height buffer
+                        z
+                    );
+                    
+                    // Create enemy with database data
+                    const enemy = new Enemy(
+                        this.scene,
+                        position,
+                        `${spawn.id}_${i}`,
+                        template.code, // 'wolf', 'goblin', etc.
+                        {
+                            name: template.name,
+                            level: template.level,
+                            health: stats.health || 50,
+                            attack: stats.attack || 10,
+                            defense: stats.defense || 5,
+                            lootTable: lootTable
+                        }
+                    );
+                    
+                    this.enemies.push(enemy);
+                }
+            }
+            
+            console.log(`[World] ✓ Loaded ${this.enemies.length} enemies from database`);
+            
+        } catch (error) {
+            console.error('[World] Error loading from database:', error);
+            console.log('[World] Will use procedural generation instead');
+        }
     }
     
     reportProgress(message, percent) {
