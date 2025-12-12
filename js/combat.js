@@ -402,6 +402,12 @@ class CombatSystem {
         const killerName = killer === this.game.player ? 'You' : killer.name;
         this.logCombat(`💀 ${killerName} defeated ${target.name}!`);
         
+        // Handle player death
+        if (target === this.game.player) {
+            this.handlePlayerDeath(killer);
+            return;
+        }
+        
         // Award XP if player killed enemy
         if (killer === this.game.player && target.isEnemy) {
             const xp = target.stats.xpValue || 50;
@@ -488,6 +494,148 @@ class CombatSystem {
         // Clear target if it was our target
         if (this.currentTarget === target) {
             this.setTarget(null);
+        }
+    }
+    
+    // ========================================================================
+    // PLAYER DEATH SYSTEM
+    // ========================================================================
+    
+    handlePlayerDeath(killer) {
+        const player = this.game.player;
+        
+        console.log('[Combat] 💀 Player died!');
+        this.logCombat(`💀 You have been slain by ${killer.name}!`);
+        
+        // Track death count
+        if (!player.deaths) player.deaths = 0;
+        player.deaths++;
+        
+        // Calculate penalties
+        const goldLoss = Math.floor(player.inventory.gold * 0.1); // Lose 10% gold
+        const xpLoss = Math.floor(player.stats.currentXP * 0.05); // Lose 5% XP
+        
+        // Apply penalties
+        if (goldLoss > 0) {
+            player.inventory.gold = Math.max(0, player.inventory.gold - goldLoss);
+            this.logCombat(`⚠️ Lost ${goldLoss} gold`);
+        }
+        
+        if (xpLoss > 0) {
+            player.stats.currentXP = Math.max(0, player.stats.currentXP - xpLoss);
+            this.logCombat(`⚠️ Lost ${xpLoss} XP`);
+        }
+        
+        // Show death screen
+        this.showDeathScreen(goldLoss, xpLoss);
+        
+        // Respawn after delay
+        setTimeout(() => {
+            this.respawnPlayer();
+        }, 5000); // 5 second delay
+    }
+    
+    showDeathScreen(goldLost, xpLost) {
+        // Create death overlay
+        const deathScreen = document.createElement('div');
+        deathScreen.id = 'death-screen';
+        deathScreen.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 90000;
+            font-family: Arial, sans-serif;
+            animation: fadeIn 1s;
+        `;
+        
+        deathScreen.innerHTML = `
+            <style>
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+            </style>
+            <div style="text-align: center;">
+                <h1 style="
+                    color: #ff4444;
+                    font-size: 72px;
+                    margin: 0 0 20px 0;
+                    text-shadow: 0 0 20px rgba(255, 68, 68, 0.8);
+                ">YOU DIED</h1>
+                
+                <div style="color: #aaa; font-size: 20px; margin-bottom: 30px;">
+                    Death comes for us all...
+                </div>
+                
+                <div style="
+                    background: rgba(0, 0, 0, 0.5);
+                    border: 2px solid #666;
+                    border-radius: 10px;
+                    padding: 20px 40px;
+                    margin-bottom: 30px;
+                ">
+                    <div style="color: #ff6666; font-size: 18px; margin-bottom: 10px;">
+                        ⚠️ Death Penalties:
+                    </div>
+                    <div style="color: #ffd700; font-size: 16px;">
+                        Lost ${goldLost} gold
+                    </div>
+                    <div style="color: #88aaff; font-size: 16px;">
+                        Lost ${xpLost} XP
+                    </div>
+                </div>
+                
+                <div style="color: #888; font-size: 16px;">
+                    Respawning in 5 seconds...
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(deathScreen);
+        
+        // Remove after respawn
+        setTimeout(() => {
+            deathScreen.remove();
+        }, 5000);
+    }
+    
+    respawnPlayer() {
+        const player = this.game.player;
+        
+        console.log('[Combat] ⚕️ Respawning player...');
+        
+        // Restore HP/mana/stamina
+        player.stats.currentHP = player.stats.maxHP;
+        player.stats.currentMP = player.stats.maxMP;
+        player.stamina = 100;
+        
+        // Respawn at safe location (0, 5, 0)
+        player.mesh.position.set(0, 5, 0);
+        player.mesh.rotation.y = 0;
+        
+        // Clear combat state
+        player.isDead = false;
+        player.inCombat = false;
+        
+        // Update UI
+        if (this.game.ui) {
+            this.game.ui.updateHealthBar();
+            this.game.ui.updateManaBar();
+            player.inventory.updateUI();
+        }
+        
+        this.logCombat('⚕️ You have respawned at a safe location');
+        
+        // Save character after death/respawn
+        if (this.game.saveCharacter) {
+            this.game.saveCharacter();
         }
     }
     
