@@ -44,7 +44,7 @@ class GMCommands {
         
         // TODO: Add is_gm column to hosg_accounts table
         // For now, enable for specific usernames
-        const gmUsernames = ['admin', 'gm', 'ian']; // Add your username here!
+        const gmUsernames = ['admin', 'gm', 'ian', 'user01']; // Add your username here!
         
         if (gmUsernames.includes(account.username.toLowerCase())) {
             this.enabled = true;
