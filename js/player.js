@@ -79,6 +79,22 @@ class Player {
         // Internal flags
         this._waitingLogged = false;
         
+        // Mobile joystick UI (visible controls for mobile)
+        this.mobileUI = {
+            enabled: false,
+            joystickBase: null,
+            joystickStick: null,
+            actionButtons: [],
+            joystickActive: false,
+            joystickRadius: 60,
+            joystickMaxDistance: 40
+        };
+        
+        // Detect mobile and create UI
+        if (this.isMobile()) {
+            this.createMobileUI();
+        }
+        
         console.log('[Player] Player created');
     }
 
@@ -629,6 +645,212 @@ class Player {
         });
         
         console.log('[Player] ✓ Gamepad support enabled');
+    }
+    
+    // Mobile detection
+    isMobile() {
+        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+        if (/android/i.test(userAgent)) return true;
+        if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) return true;
+        if ('ontouchstart' in window && window.innerWidth < 1024) return true;
+        return false;
+    }
+    
+    // Create mobile joystick UI
+    createMobileUI() {
+        const container = document.createElement('div');
+        container.id = 'mobileJoystick';
+        container.style.cssText = `
+            position: fixed;
+            bottom: 80px;
+            left: 80px;
+            width: ${this.mobileUI.joystickRadius * 2}px;
+            height: ${this.mobileUI.joystickRadius * 2}px;
+            z-index: 1000;
+            pointer-events: auto;
+        `;
+        
+        const base = document.createElement('div');
+        base.style.cssText = `
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            border: 3px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        `;
+        
+        const stick = document.createElement('div');
+        stick.style.cssText = `
+            position: absolute;
+            width: 50%;
+            height: 50%;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            top: 25%;
+            left: 25%;
+            transition: all 0.05s;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+        `;
+        
+        container.appendChild(base);
+        container.appendChild(stick);
+        document.body.appendChild(container);
+        
+        this.mobileUI.joystickBase = base;
+        this.mobileUI.joystickStick = stick;
+        this.mobileUI.container = container;
+        
+        this.createActionButtons();
+        this.setupJoystickHandlers();
+        this.mobileUI.enabled = true;
+        
+        console.log('[Player] Mobile UI created');
+    }
+    
+    createActionButtons() {
+        const container = document.createElement('div');
+        container.id = 'mobileActions';
+        container.style.cssText = `
+            position: fixed;
+            bottom: 60px;
+            right: 40px;
+            z-index: 1000;
+        `;
+        
+        const jumpBtn = this.createButton('↑', 'Jump');
+        jumpBtn.style.bottom = '80px';
+        jumpBtn.style.right = '0';
+        jumpBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            this.queueJump();
+        });
+        
+        const attackBtn = this.createButton('⚔', 'Attack');
+        attackBtn.style.bottom = '0';
+        attackBtn.style.right = '0';
+        
+        container.appendChild(jumpBtn);
+        container.appendChild(attackBtn);
+        document.body.appendChild(container);
+        
+        this.mobileUI.actionButtons.push(jumpBtn, attackBtn);
+    }
+    
+    createButton(text, label) {
+        const btn = document.createElement('button');
+        btn.innerHTML = text;
+        btn.title = label;
+        btn.style.cssText = `
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        `;
+        
+        btn.addEventListener('touchstart', () => {
+            btn.style.background = 'rgba(255, 255, 255, 0.6)';
+            btn.style.transform = 'scale(0.95)';
+        });
+        
+        btn.addEventListener('touchend', () => {
+            btn.style.background = 'rgba(255, 255, 255, 0.3)';
+            btn.style.transform = 'scale(1)';
+        });
+        
+        return btn;
+    }
+    
+    setupJoystickHandlers() {
+        const container = this.mobileUI.container;
+        
+        container.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 0) return;
+            
+            const touch = e.touches[0];
+            this.mobileUI.joystickActive = true;
+            
+            const rect = container.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            
+            this.updateJoystick(touch.clientX - centerX, touch.clientY - centerY);
+        }, { passive: false });
+        
+        container.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!this.mobileUI.joystickActive || e.touches.length === 0) return;
+            
+            const touch = e.touches[0];
+            const rect = container.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            
+            this.updateJoystick(touch.clientX - centerX, touch.clientY - centerY);
+        }, { passive: false });
+        
+        container.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            this.mobileUI.joystickActive = false;
+            this.mobileUI.joystickStick.style.left = '25%';
+            this.mobileUI.joystickStick.style.top = '25%';
+            
+            this.input.forward = false;
+            this.input.backward = false;
+            this.input.left = false;
+            this.input.right = false;
+            this.input.run = false;
+        }, { passive: false });
+    }
+    
+    updateJoystick(deltaX, deltaY) {
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        const angle = Math.atan2(deltaY, deltaX);
+        
+        const clampedDistance = Math.min(distance, this.mobileUI.joystickMaxDistance);
+        
+        const stickX = Math.cos(angle) * clampedDistance;
+        const stickY = Math.sin(angle) * clampedDistance;
+        
+        const percentX = 25 + (stickX / this.mobileUI.joystickRadius) * 50;
+        const percentY = 25 + (stickY / this.mobileUI.joystickRadius) * 50;
+        
+        this.mobileUI.joystickStick.style.left = percentX + '%';
+        this.mobileUI.joystickStick.style.top = percentY + '%';
+        
+        if (distance > 5) {
+            const normalizedX = stickX / this.mobileUI.joystickMaxDistance;
+            const normalizedY = stickY / this.mobileUI.joystickMaxDistance;
+            
+            this.input.forward = false;
+            this.input.backward = false;
+            this.input.left = false;
+            this.input.right = false;
+            
+            if (Math.abs(normalizedY) > 0.2) {
+                if (normalizedY < 0) this.input.forward = true;
+                else this.input.backward = true;
+            }
+            
+            if (Math.abs(normalizedX) > 0.2) {
+                if (normalizedX < 0) this.input.left = true;
+                else this.input.right = true;
+            }
+            
+            this.input.run = distance > (this.mobileUI.joystickMaxDistance * 0.7);
+        }
     }
     
     updateGamepad() {
@@ -1287,6 +1509,14 @@ class Player {
         }
         if (this.camera) {
             this.camera.dispose();
+        }
+        
+        // Dispose mobile UI
+        if (this.mobileUI.container) {
+            this.mobileUI.container.remove();
+        }
+        if (document.getElementById('mobileActions')) {
+            document.getElementById('mobileActions').remove();
         }
     }
 }

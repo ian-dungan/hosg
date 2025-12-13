@@ -21,6 +21,14 @@ class GMCommands {
         this.commandHistory = [];
         this.historyIndex = -1;
         
+        // God mode and special powers
+        this.godMode = false;
+        this.flyMode = false;
+        this.noclipMode = false;
+        this.speedMultiplier = 1.0;
+        this.originalSpeed = null;
+        this.flyControlsActive = false;
+        
         this.init();
     }
     
@@ -42,11 +50,8 @@ class GMCommands {
         
         const account = window.supabaseService.currentAccount;
         
-        // TODO: Add is_gm column to hosg_accounts table
-        // For now, enable for specific usernames
-        const gmUsernames = ['admin', 'gm', 'ian', 'user01']; // Add your username here!
-        
-        if (gmUsernames.includes(account.username.toLowerCase())) {
+        // Use database is_gm column
+        if (account.is_gm === true) {
             this.enabled = true;
             console.log('[GM] ✓ GM mode enabled for', account.username);
             this.showWelcomeMessage();
@@ -251,6 +256,45 @@ class GMCommands {
                 this.toggleGrid();
                 break;
                 
+            case '/kill':
+                this.cmdKill(args);
+                break;
+                
+            case '/god':
+            case '/invincible':
+                this.cmdGod();
+                break;
+                
+            case '/heal':
+                this.cmdHeal(args);
+                break;
+                
+            case '/setstat':
+                this.cmdSetStat(args);
+                break;
+                
+            case '/givexp':
+            case '/addxp':
+                this.cmdGiveXP(args);
+                break;
+                
+            case '/setlevel':
+            case '/level':
+                this.cmdSetLevel(args);
+                break;
+                
+            case '/speed':
+                this.cmdSpeed(args);
+                break;
+                
+            case '/fly':
+                this.cmdFly();
+                break;
+                
+            case '/noclip':
+                this.cmdNoclip();
+                break;
+                
             default:
                 this.showMessage(`Unknown command: ${command}. Type /help for available commands.`, 'error');
         }
@@ -260,7 +304,7 @@ class GMCommands {
     
     showHelp() {
         const helpText = `
-🛠️ GM COMMANDS:
+🛠️ GM COMMANDS V2.0:
   
 SPAWNING:
   /spawn <type> [x] [y] [z]     - Spawn entity at position
@@ -268,9 +312,20 @@ SPAWNING:
               /spawn goblin 50 2 -30
               /spawn merchant
   
+PLAYER MODIFICATION:
+  /god                          - Toggle invincibility
+  /heal [target]                - Restore health
+  /kill <target|nearest>        - Instant kill
+  /setstat <stat> <value>       - Modify stats
+  /givexp <amount>              - Add experience
+  /setlevel <level>             - Set character level
+  /speed <multiplier>           - Adjust movement speed
+  
 MOVEMENT:
   /tp <x> <y> <z>               - Teleport to coordinates
   /move <x> <y> <z>             - Move selected entity
+  /fly                          - Toggle fly mode
+  /noclip                       - Toggle collision
   
 SELECTION:
   /select <id|nearest>          - Select entity
@@ -861,6 +916,24 @@ HOTKEYS:
         if (this.selectionBox && this.selectedEntity) {
             this.selectionBox.position.copyFrom(this.selectedEntity.position);
         }
+        
+        // Fly controls
+        if (this.flyControlsActive && this.game.player && this.game.player.mesh) {
+            const speed = 0.5;
+            const scene = this.game.scene;
+            
+            // Check for Space (up) and Shift (down)
+            if (scene.actionManager) {
+                // Space = up
+                if (scene.actionManager.isKeyDown(' ')) {
+                    this.game.player.mesh.position.y += speed;
+                }
+                // Shift = down
+                if (scene.actionManager.isKeyDown('Shift')) {
+                    this.game.player.mesh.position.y -= speed;
+                }
+            }
+        }
     }
     
     // ==================== UTILITIES ====================
@@ -871,6 +944,293 @@ HOTKEYS:
         if (this.game.ui && this.game.ui.showMessage) {
             this.game.ui.showMessage(message, 3000, type);
         }
+    }
+    
+    // ==================== NEW COMMANDS ====================
+    
+    cmdKill(args) {
+        let target = this.selectedEntity;
+        
+        if (args.length > 0 && args[0].toLowerCase() === 'nearest') {
+            target = this.findNearestEnemy();
+        }
+        
+        if (!target) {
+            this.showMessage('No target selected. Click an entity or use "/kill nearest"', 'error');
+            return;
+        }
+        
+        if (!target.isAlive) {
+            this.showMessage(`${target.name} is already dead`, 'error');
+            return;
+        }
+        
+        target.health = 0;
+        target.isAlive = false;
+        
+        if (target.mesh) {
+            target.mesh.setEnabled(false);
+        }
+        
+        if (this.game.combat && this.game.combat.handleEntityDeath) {
+            this.game.combat.handleEntityDeath(target);
+        }
+        
+        this.showMessage(`✓ Killed ${target.name}`, 'success');
+        console.log(`[GM] Killed ${target.name}`);
+    }
+    
+    cmdGod() {
+        this.godMode = !this.godMode;
+        
+        if (this.godMode) {
+            this.showMessage('✓ God mode ENABLED - You are invincible!', 'success');
+            
+            if (this.game.player) {
+                this.game.player.isInvincible = true;
+                this.game.player.maxHealth = 999999;
+                this.game.player.health = 999999;
+                this.game.player.maxMana = 999999;
+                this.game.player.mana = 999999;
+                this.game.player.maxStamina = 999999;
+                this.game.player.stamina = 999999;
+            }
+        } else {
+            this.showMessage('✗ God mode DISABLED', 'info');
+            
+            if (this.game.player) {
+                this.game.player.isInvincible = false;
+                this.game.player.maxHealth = 100;
+                this.game.player.health = 100;
+                this.game.player.maxMana = 50;
+                this.game.player.mana = 50;
+                this.game.player.maxStamina = 100;
+                this.game.player.stamina = 100;
+            }
+        }
+        
+        console.log(`[GM] God mode: ${this.godMode}`);
+    }
+    
+    cmdHeal(args) {
+        let target = this.game.player;
+        
+        if (args.length > 0 && args[0].toLowerCase() === 'target') {
+            target = this.selectedEntity;
+        }
+        
+        if (!target) {
+            this.showMessage('No target to heal', 'error');
+            return;
+        }
+        
+        target.health = target.maxHealth || 100;
+        
+        if (target.mana !== undefined) {
+            target.mana = target.maxMana || 50;
+        }
+        
+        if (target.stamina !== undefined) {
+            target.stamina = target.maxStamina || 100;
+        }
+        
+        this.showMessage(`✓ Healed ${target.name || 'self'} to full`, 'success');
+        console.log(`[GM] Healed ${target.name || 'player'}`);
+    }
+    
+    cmdSetStat(args) {
+        if (args.length < 2) {
+            this.showMessage('Usage: /setstat <stat> <value>', 'error');
+            this.showMessage('Stats: health, mana, stamina, strength, agility, intelligence', 'info');
+            return;
+        }
+        
+        const stat = args[0].toLowerCase();
+        const value = parseFloat(args[1]);
+        
+        if (isNaN(value)) {
+            this.showMessage('Value must be a number', 'error');
+            return;
+        }
+        
+        const player = this.game.player;
+        if (!player) return;
+        
+        switch(stat) {
+            case 'health':
+            case 'hp':
+                player.health = value;
+                player.maxHealth = value;
+                break;
+            case 'mana':
+            case 'mp':
+                player.mana = value;
+                player.maxMana = value;
+                break;
+            case 'stamina':
+            case 'st':
+                player.stamina = value;
+                player.maxStamina = value;
+                break;
+            case 'strength':
+            case 'str':
+                player.strength = value;
+                break;
+            case 'agility':
+            case 'agi':
+                player.agility = value;
+                break;
+            case 'intelligence':
+            case 'int':
+                player.intelligence = value;
+                break;
+            default:
+                this.showMessage(`Unknown stat: ${stat}`, 'error');
+                return;
+        }
+        
+        this.showMessage(`✓ Set ${stat} to ${value}`, 'success');
+        console.log(`[GM] Set ${stat} = ${value}`);
+    }
+    
+    cmdGiveXP(args) {
+        if (args.length === 0) {
+            this.showMessage('Usage: /givexp <amount>', 'error');
+            return;
+        }
+        
+        const amount = parseInt(args[0]);
+        
+        if (isNaN(amount)) {
+            this.showMessage('Amount must be a number', 'error');
+            return;
+        }
+        
+        if (this.game.player) {
+            this.game.player.xp = (this.game.player.xp || 0) + amount;
+            this.showMessage(`✓ Added ${amount} XP`, 'success');
+            console.log(`[GM] Added ${amount} XP`);
+        }
+    }
+    
+    cmdSetLevel(args) {
+        if (args.length === 0) {
+            this.showMessage('Usage: /setlevel <level>', 'error');
+            return;
+        }
+        
+        const level = parseInt(args[0]);
+        
+        if (isNaN(level) || level < 1 || level > 100) {
+            this.showMessage('Level must be between 1 and 100', 'error');
+            return;
+        }
+        
+        if (this.game.player) {
+            this.game.player.level = level;
+            this.showMessage(`✓ Set level to ${level}`, 'success');
+            console.log(`[GM] Set level = ${level}`);
+        }
+    }
+    
+    cmdSpeed(args) {
+        if (args.length === 0) {
+            this.showMessage(`Current speed: ${this.speedMultiplier.toFixed(1)}x`, 'info');
+            return;
+        }
+        
+        const multiplier = parseFloat(args[0]);
+        
+        if (isNaN(multiplier) || multiplier <= 0 || multiplier > 10) {
+            this.showMessage('Multiplier must be between 0.1 and 10', 'error');
+            return;
+        }
+        
+        if (this.originalSpeed === null && this.game.player) {
+            this.originalSpeed = this.game.player.speed || 5.5;
+        }
+        
+        this.speedMultiplier = multiplier;
+        
+        if (this.game.player) {
+            this.game.player.speed = this.originalSpeed * multiplier;
+        }
+        
+        this.showMessage(`✓ Speed set to ${multiplier}x`, 'success');
+        console.log(`[GM] Speed = ${multiplier}x`);
+    }
+    
+    cmdFly() {
+        this.flyMode = !this.flyMode;
+        
+        if (this.flyMode) {
+            this.showMessage('✓ Fly mode ENABLED - Space=up, Shift=down', 'success');
+            
+            if (this.game.player && this.game.player.mesh && this.game.player.mesh.physicsImpostor) {
+                this.game.player.mesh.physicsImpostor.setGravityFactor(0);
+                this.game.player.mesh.physicsImpostor.setLinearVelocity(BABYLON.Vector3.Zero());
+            }
+            
+            this.flyControlsActive = true;
+        } else {
+            this.showMessage('✗ Fly mode DISABLED', 'info');
+            
+            if (this.game.player && this.game.player.mesh && this.game.player.mesh.physicsImpostor) {
+                this.game.player.mesh.physicsImpostor.setGravityFactor(1);
+            }
+            
+            this.flyControlsActive = false;
+        }
+        
+        console.log(`[GM] Fly mode: ${this.flyMode}`);
+    }
+    
+    cmdNoclip() {
+        this.noclipMode = !this.noclipMode;
+        
+        if (this.noclipMode) {
+            this.showMessage('✓ Noclip ENABLED - Walk through walls!', 'success');
+            
+            if (this.game.player && this.game.player.mesh) {
+                this.game.player.mesh.checkCollisions = false;
+                
+                if (this.game.player.mesh.physicsImpostor) {
+                    this.game.player.mesh.physicsImpostor.dispose();
+                    this.game.player.mesh.physicsImpostor = null;
+                }
+            }
+        } else {
+            this.showMessage('✗ Noclip DISABLED', 'info');
+            
+            if (this.game.player && this.game.player.mesh) {
+                this.game.player.mesh.checkCollisions = true;
+            }
+        }
+        
+        console.log(`[GM] Noclip: ${this.noclipMode}`);
+    }
+    
+    findNearestEnemy() {
+        if (!this.game.world || !this.game.player) return null;
+        
+        let nearest = null;
+        let nearestDistance = Infinity;
+        
+        this.game.world.enemies.forEach(enemy => {
+            if (enemy.isAlive && enemy.mesh) {
+                const distance = BABYLON.Vector3.Distance(
+                    this.game.player.mesh.position,
+                    enemy.mesh.position
+                );
+                
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = enemy;
+                }
+            }
+        });
+        
+        return nearest;
     }
     
     dispose() {

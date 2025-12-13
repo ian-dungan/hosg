@@ -1,2004 +1,761 @@
-// Simplex Noise for terrain generation - MOVED TO TOP TO FIX INITIALIZATION ERROR
-class SimplexNoise {
-    constructor(seed = Math.random()) {
-        this.grad3 = [
-            [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
-            [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
-            [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]
-        ];
-
-        // Proper seeded permutation table generation
-        this.p = [];
-        for (let i = 0; i < 256; i++) {
-            this.p[i] = i;
-        }
-        
-        // Seed-based shuffle (Fisher-Yates)
-        const random = this.seededRandom(seed);
-        for (let i = 255; i > 0; i--) {
-            const j = Math.floor(random() * (i + 1));
-            [this.p[i], this.p[j]] = [this.p[j], this.p[i]];
-        }
-
-        // To remove the need for index wrapping, double the permutation table length
-        this.perm = new Array(512);
-        for (let i = 0; i < 512; i++) {
-            this.perm[i] = this.p[i & 255];
-        }
-    }
-    
-    // Seeded random number generator (LCG - Linear Congruential Generator)
-    seededRandom(seed) {
-        let state = seed;
-        return function() {
-            state = (state * 1664525 + 1013904223) % 4294967296;
-            return state / 4294967296;
-        };
-    }
-
-    lerp(t, a, b) {
-        return a + t * (b - a);
-    }
-
-    dot(g, x, y) {
-        return g[0] * x + g[1] * y;
-    }
-
-    noise2D(xin, yin) {
-        const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
-        let s = (xin + yin) * F2;
-        const i = Math.floor(xin + s);
-        const j = Math.floor(yin + s);
-
-        const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
-        const t = (i + j) * G2;
-        const X0 = i - t;
-        const Y0 = j - t;
-        const x0 = xin - X0;
-        const y0 = yin - Y0;
-
-        let i1, j1;
-        if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
-
-        const x1 = x0 - i1 + G2;
-        const y1 = y0 - j1 + G2;
-        const x2 = x0 - 1.0 + 2.0 * G2;
-        const y2 = y0 - 1.0 + 2.0 * G2;
-
-        const ii = i & 255;
-        const jj = j & 255;
-        const gi0 = this.perm[ii + this.perm[jj]] % 12;
-        const gi1 = this.perm[ii + i1 + this.perm[jj + j1]] % 12;
-        const gi2 = this.perm[ii + 1 + this.perm[jj + 1]] % 12;
-
-        let n0, n1, n2;
-
-        let t0 = 0.5 - x0 * x0 - y0 * y0;
-        if (t0 < 0) n0 = 0.0;
-        else { t0 *= t0; n0 = t0 * t0 * this.dot(this.grad3[gi0], x0, y0); }
-
-        let t1 = 0.5 - x1 * x1 - y1 * y1;
-        if (t1 < 0) n1 = 0.0;
-        else { t1 *= t1; n1 = t1 * t1 * this.dot(this.grad3[gi1], x1, y1); }
-
-        let t2 = 0.5 - x2 * x2 - y2 * y2;
-        if (t2 < 0) n2 = 0.0;
-        else { t2 *= t2; n2 = t2 * t2 * this.dot(this.grad3[gi2], x2, y2); }
-
-        return 70.0 * (n0 + n1 + n2);
-    }
-}
-
 // ============================================================================
-// WorldItem Class - Items that can be picked up from the ground
+// HEROES OF SHADY GROVE - WORLD MANAGER v3.0.0
+// Complete database-driven world with proper NPC/enemy placement
 // ============================================================================
-class WorldItem {
-    constructor(scene, position, itemData) {
-        this.scene = scene;
-        this.position = position;
-        this.itemData = itemData;
-        this.mesh = null;
-        
-        this.createMesh();
-        this.createSparkle();
-    }
-    
-    createMesh() {
-        // Create floating item mesh
-        this.mesh = BABYLON.MeshBuilder.CreateBox('worldItem', {
-            size: 0.5
-        }, this.scene);
-        
-        this.mesh.position = this.position.clone();
-        this.mesh.position.y += 0.5; // Float above ground
-        
-        // Material based on rarity
-        const mat = new BABYLON.StandardMaterial('itemMat', this.scene);
-        mat.emissiveColor = this.getRarityColor(this.itemData.rarity);
-        mat.alpha = 0.8;
-        this.mesh.material = mat;
-        
-        // Metadata
-        this.mesh.metadata = { isWorldItem: true, itemData: this.itemData };
-        
-        // Animate rotation and bob
-        this.startTime = Date.now();
-        this.scene.registerBeforeRender(() => {
-            if (!this.mesh || this.mesh.isDisposed()) return;
-            
-            const time = (Date.now() - this.startTime) / 1000;
-            this.mesh.rotation.y = time * 2;
-            this.mesh.position.y = this.position.y + 0.5 + Math.sin(time * 3) * 0.1;
-        });
-    }
-    
-    createSparkle() {
-        // Create particle sparkle effect
-        const particleSystem = new BABYLON.ParticleSystem('itemSparkle', 50, this.scene);
-        particleSystem.particleTexture = new BABYLON.Texture(
-            'https://www.babylonjs-playground.com/textures/flare.png',
-            this.scene
-        );
-        
-        particleSystem.emitter = this.mesh;
-        particleSystem.minEmitBox = new BABYLON.Vector3(-0.3, 0, -0.3);
-        particleSystem.maxEmitBox = new BABYLON.Vector3(0.3, 0.5, 0.3);
-        
-        const color = this.getRarityColor(this.itemData.rarity);
-        particleSystem.color1 = new BABYLON.Color4(color.r, color.g, color.b, 1);
-        particleSystem.color2 = new BABYLON.Color4(color.r * 0.5, color.g * 0.5, color.b * 0.5, 1);
-        particleSystem.colorDead = new BABYLON.Color4(0, 0, 0, 0);
-        
-        particleSystem.minSize = 0.05;
-        particleSystem.maxSize = 0.15;
-        particleSystem.minLifeTime = 0.5;
-        particleSystem.maxLifeTime = 1.5;
-        particleSystem.emitRate = 10;
-        
-        particleSystem.gravity = new BABYLON.Vector3(0, 2, 0);
-        particleSystem.direction1 = new BABYLON.Vector3(-0.5, 0.5, -0.5);
-        particleSystem.direction2 = new BABYLON.Vector3(0.5, 1, 0.5);
-        
-        particleSystem.minEmitPower = 0.5;
-        particleSystem.maxEmitPower = 1.5;
-        particleSystem.updateSpeed = 0.01;
-        
-        particleSystem.start();
-        this.particleSystem = particleSystem;
-    }
-    
-    getRarityColor(rarity) {
-        const colors = {
-            common: new BABYLON.Color3(0.6, 0.6, 0.6),
-            uncommon: new BABYLON.Color3(0, 1, 0),
-            rare: new BABYLON.Color3(0, 0.4, 1),
-            epic: new BABYLON.Color3(0.6, 0.2, 1),
-            legendary: new BABYLON.Color3(1, 0.5, 0)
-        };
-        return colors[rarity] || colors.common;
-    }
-    
-    dispose() {
-        if (this.particleSystem) {
-            this.particleSystem.dispose();
-        }
-        if (this.mesh) {
-            this.mesh.dispose();
-        }
-    }
-}
 
-// World Class
 class World {
-    // ... World implementation (omitted for brevity)
     constructor(scene, options = {}) {
         this.scene = scene;
-        this.options = {
-            size: options.size || 1000,
-            segments: options.segments || 100,
-            maxHeight: options.maxHeight || 20,
-            seed: options.seed || Math.random(),
-            waterLevel: options.waterLevel || 0.2,
-            ...options
-        };
-
-        // Terrain
-        this.terrain = null;
-        this.terrainMaterial = null;
+        this.game = scene.game;
+        
+        // Configuration
+        this.size = options.size || CONFIG.WORLD.SIZE;
+        this.segments = options.segments || CONFIG.WORLD.TERRAIN_SIZE;
+        this.maxHeight = options.maxHeight || 5;
+        this.seed = options.seed || CONFIG.WORLD.SEED;
+        this.waterLevel = options.waterLevel || CONFIG.WORLD.WATER_LEVEL;
+        this.onProgress = options.onProgress || (() => {});
+        
+        // World elements
+        this.ground = null;
         this.water = null;
-        this.waterMaterial = null;
         this.skybox = null;
-
-        // Environment
-        this.trees = [];
-        this.rocks = [];
-        this.grass = [];
-        this.buildings = [];
+        this.heightMap = null;
+        
+        // NPCs and Enemies
         this.npcs = [];
         this.enemies = [];
-        this.items = [];
-        this.worldItems = []; // Items on ground that can be picked up
-
-        // Time and weather
-        this.time = 0; // 0-24 hours
-        this.day = 1;
-        this.weather = 'clear'; // clear, rain, snow, storm
-        this.weatherIntensity = 0; // 0-1
-        this.weatherTargetIntensity = 0;
-        this.weatherTransitionSpeed = 0.1;
-
-        // Lighting
-        this.sunLight = null;
-        this.ambientLight = null;
-        this.shadowGenerator = null;
-
-        // Physics
-        this.gravity = new BABYLON.Vector3(0, -9.81, 0);
-
-        // Shared asset loader to cache models/textures across entities
-        this.assetLoader = (typeof AssetLoader !== 'undefined') ? new AssetLoader(this.scene) : null;
-        if (this.scene) {
-            this.scene.world = this;
-            if (this.scene.game) {
-                this.scene.game.world = this;
-            }
-
-            // Make available to anything with a reference to the scene
-            this.scene.assetLoader = this.assetLoader;
-            if (this.scene.game) {
-                this.scene.game.assetLoader = this.assetLoader;
-            }
-        }
-
-        // Initialize
-        if (options.onProgress) {
-            this.onProgress = options.onProgress;
-        }
+        this.allEntities = new Map(); // id -> entity
+        
+        // Spawn data from database
+        this.npcTemplates = new Map(); // id -> template
+        this.spawnPoints = []; // All spawn points from database
+        this.spawnedEntities = new Map(); // spawn_id -> entity array
+        
+        // Respawn management
+        this.respawnQueue = [];
+        this.respawnCheckInterval = 1000; // Check every second
+        this.lastRespawnCheck = 0;
+        
+        console.log('[World] Initializing...');
     }
-
+    
     async init() {
-        this.reportProgress('Creating lights...', 10);
-        this.createLights();
-        
-        this.reportProgress('Creating skybox...', 20);
-        this.createSkybox();
-        
-        this.reportProgress('Generating terrain...', 30);
-        this.createTerrain();
-        await this.delay(10); // Let rendering catch up
-        
-        this.reportProgress('Creating water...', 50);
-        this.createWater();
-        await this.delay(10);
-        
-        this.reportProgress('Populating world...', 60);
-        await this.populateWorld();
-        
-        this.reportProgress('Setting up physics...', 90);
-        this.setupEventListeners();
-
-        // Create terrain physics after short delay if needed
-        // This ensures Babylon has processed vertex modifications
-        if (this.needsPhysics && this.terrain) {
-            setTimeout(() => {
-                if (this.scene.getPhysicsEngine()) {
-                    this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                        this.terrain,
-                        BABYLON.PhysicsImpostor.MeshImpostor,
-                        { mass: 0, friction: 1.0, restitution: 0.0 },
-                        this.scene
-                    );
-                    console.log('[World] ✓ Terrain physics created and enabled');
-                }
-            }, 100);
-        }
-
-        // CRITICAL: Signal player that world is ready
-        // Wait a bit to ensure physics is fully stabilized
-        setTimeout(() => {
-            console.log('[World] ✅ World fully initialized, signaling player...');
-            this.reportProgress('Ready!', 100);
-            const player = this.scene.player || this.scene.game?.player;
-            if (player && typeof player.startAfterWorldReady === 'function') {
-                player.startAfterWorldReady();
-            } else {
-                console.warn('[World] Player not found or startAfterWorldReady not available');
-            }
-        }, 500); // 500ms delay to ensure physics is stable
-    }
-
-    createLights() {
-        // Sun light (directional)
-        this.sunLight = new BABYLON.DirectionalLight('sunLight', new BABYLON.Vector3(-1, -2, -1), this.scene);
-        this.sunLight.intensity = 0.7;  // REDUCED from 1.0 - less harsh sunlight
-        this.sunLight.diffuse = new BABYLON.Color3(1, 0.95, 0.9);
-        this.sunLight.specular = new BABYLON.Color3(0.3, 0.3, 0.3);  // REDUCED from bright - less shiny highlights
-
-        // Enable shadows
-        this.sunLight.shadowEnabled = true;
-        this.shadowGenerator = new BABYLON.ShadowGenerator(1024, this.sunLight);
-        this.shadowGenerator.useBlurExponentialShadowMap = true;
-        this.shadowGenerator.blurKernel = 32;
-
-        // Ambient light
-        this.ambientLight = new BABYLON.HemisphericLight('ambientLight', new BABYLON.Vector3(0, 1, 0), this.scene);
-        this.ambientLight.intensity = 0.4;  // REDUCED from 0.5 - softer ambient fill
-        this.ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
-        this.ambientLight.specular = new BABYLON.Color3(0.1, 0.1, 0.1);
-    }
-
-    createSkybox() {
-        // Try to load custom HDRI skybox from ASSET_PATHS
-        let skyPath = 'assets/environment/DaySkyHDRI023B_4K_TONEMAPPED.jpg'; // Default fallback
-        
-        // Check if ASSET_PATHS exists and has skybox config
-        if (window.ASSET_PATHS && window.ASSET_PATHS.getTexturePath) {
-            skyPath = ASSET_PATHS.getTexturePath('sky_hdri');
-            console.log('[World] Using skybox from ASSET_PATHS:', skyPath);
-        }
-
         try {
-            // Use PhotoDome for 360° panoramic skybox
-            this.skybox = new BABYLON.PhotoDome(
-                "skyDome",
-                skyPath,
-                {
-                    resolution: 32,
-                    size: 5000,
-                    useDirectMapping: false
-                },
-                this.scene
-            );
-
-            console.log('[World] ✓ Custom HDRI skybox loaded');
-
-            // Set scene clear color to match sky
-            this.scene.clearColor = new BABYLON.Color4(0.5, 0.7, 0.9, 1.0);
-
-        } catch (e) {
-            console.warn('[World] Failed to load HDRI skybox, using fallback:', e);
-
-            // Fallback: Create simple box skybox
-            this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
-            const skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
-            skyboxMaterial.backFaceCulling = false;
-            skyboxMaterial.disableLighting = true;
-
-            // Try gradient texture
-            let skyTexture = null;
-            try {
-                if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
-                    skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", 
-                        new BABYLON.Color3(0.1, 0.2, 0.4), 
-                        new BABYLON.Color3(0.45, 0.65, 0.9), 
-                        300, 
-                        this.scene
-                    );
-                    skyboxMaterial.emissiveTexture = skyTexture;
-                } else {
-                    skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-                    skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-                    skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-                }
-            } catch (error) {
-                console.warn('[World] Failed to create gradient texture, using flat color:', error);
-                // Fallback to flat color
-                skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-                skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-                skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
-            }
-            this.skybox.material = skyboxMaterial;
-        }
-    }
-
-    createTerrain() {
-        // Check if heightmap is available in ASSET_MANIFEST
-        let heightmapPath = null;
-        if (window.ASSET_MANIFEST && window.ASSET_MANIFEST.TERRAIN && window.ASSET_MANIFEST.TERRAIN.HEIGHTMAP) {
-            heightmapPath = window.ASSET_MANIFEST.TERRAIN.HEIGHTMAP;
-        }
-        
-        if (heightmapPath) {
-            // Create terrain from heightmap if available
-            this.terrain = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
-                "terrain",
-                heightmapPath,
-                {
-                    width: this.options.size,
-                    height: this.options.size,
-                    subdivisions: this.options.segments,
-                    maxHeight: this.options.maxHeight,
-                    onReady: () => {
-                        // Heightmap loaded successfully - use it as-is
-                        this.terrain.checkCollisions = true;
-
-                        // Apply physics impostor
-                    if (this.scene.getPhysicsEngine()) {
-                        this.terrain.physicsImpostor = new BABYLON.PhysicsImpostor(
-                            this.terrain,
-                            BABYLON.PhysicsImpostor.MeshImpostor,
-                            { mass: 0, friction: 1.0, restitution: 0.0 },
-                            this.scene
-                        );
-                        console.log('[World] ✓ Terrain physics created and enabled');
-                    }
-                    
-                    // Create collision barrier
-                    this.createCollisionBarrier();
-
-                    // Apply terrain material asynchronously (FIX: Called from the sync callback)
-                    this.createTerrainMaterial(); 
-                }
-            },
-            this.scene
-        );
-        } else {
-            // No heightmap - create ground with FIXED SEED procedural generation
-            console.log('[World] No heightmap, using fixed-seed procedural terrain');
+            // Create terrain
+            this.onProgress('Generating terrain...', 10);
+            await this.createTerrain();
             
-            // Create flat ground first (synchronous)
-            this.terrain = BABYLON.MeshBuilder.CreateGround(
-                "terrain",
-                {
-                    width: this.options.size,
-                    height: this.options.size,
-                    subdivisions: this.options.segments
-                },
-                this.scene
-            );
+            // Create skybox
+            this.onProgress('Creating sky...', 30);
+            this.createSkybox();
             
-            // Apply procedural heightmap immediately
-            this.generateHeightmap();
+            // Create water
+            this.onProgress('Adding water...', 40);
+            this.createWater();
             
-            // Set properties
-            this.terrain.checkCollisions = true;
-            this.terrain.isPickable = true;
-            this.terrain.receiveShadows = true;
-            this.terrain.metadata = { isTerrain: true, type: 'ground' };
-            
-            // Apply material
-            this.createTerrainMaterial();
-            
-            // Physics will be created in init() after a delay
-            // This ensures Babylon has processed the vertex modifications
-            this.needsPhysics = true;
-        }
-
-        // Common setup for both terrain types
-        this.terrain.receiveShadows = true;
-        this.terrain.metadata = { isTerrain: true, type: 'ground' };
-    }
-
-    createCollisionBarrier() {
-        // DISABLED: Collision barrier was causing players to teleport back on hills
-        // The main terrain physics impostor is sufficient for collision
-        console.log('[World] Collision barrier disabled - using main terrain physics only');
-        return;
-        
-        /* ORIGINAL CODE - DISABLED
-        const BARRIER_OFFSET = -0.1; // Offset below the terrain surface
-        
-        // Clone terrain mesh
-        this.collisionBarrier = this.terrain.clone("collisionBarrier");
-        this.collisionBarrier.position.y += BARRIER_OFFSET;
-        
-        // Make it invisible and non-pickable
-        this.collisionBarrier.isVisible = false;
-        this.collisionBarrier.isPickable = false;
-        
-        // Ensure kinematic and physics actors collide
-        this.collisionBarrier.checkCollisions = true;
-        this.collisionBarrier.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.collisionBarrier,
-            BABYLON.PhysicsImpostor.MeshImpostor,
-            { mass: 0, friction: 1.0, restitution: 0.0 },
-            this.scene
-        );
-        console.log(`[World] ✓ Collision barrier cloned from terrain and offset ${BARRIER_OFFSET}y`);
-        */
-    }
-
-    generateHeightmap() {
-        const positions = this.terrain.getVerticesData(BABYLON.VertexBuffer.PositionKind);
-        const normals = [];
-        // Create noise generator - NOW SAFE BECAUSE CLASS IS DEFINED
-        const noiseGenerator = new SimplexNoise(this.options.seed);
-
-        for (let i = 0; i < positions.length; i += 3) {
-            const x = positions[i];
-            const z = positions[i + 2];
-
-            // Apply noise (multiple octaves for detail)
-            let y = 0;
-            y += noiseGenerator.noise2D(x * 0.005, z * 0.005) * 1;
-            y += noiseGenerator.noise2D(x * 0.01, z * 0.01) * 0.5;
-            y += noiseGenerator.noise2D(x * 0.02, z * 0.02) * 0.25;
-            y += noiseGenerator.noise2D(x * 0.04, z * 0.04) * 0.125;
-            
-            // Scale and clamp
-            // Height controlled by maxHeight parameter (default 10)
-            positions[i + 1] = y * this.options.maxHeight;
-        }
-
-        BABYLON.VertexData.ComputeNormals(positions, this.terrain.getIndices(), normals);
-        this.terrain.setVerticesData(BABYLON.VertexBuffer.PositionKind, positions);
-        this.terrain.setVerticesData(BABYLON.VertexBuffer.NormalKind, normals);
-        // Note: refreshBoundingInfo() called in createTerrain() after this function
-    }
-    
-    // Helper function to get the actual height at a given X/Z coordinate
-    getHeightAt(x, z) {
-        if (!this.terrain) return 0;
-        
-        // Use a raycast from high up to hit the ground
-        const ray = new BABYLON.Ray(new BABYLON.Vector3(x, this.options.maxHeight * 2, z), BABYLON.Vector3.Down());
-        const pickInfo = this.scene.pickWithRay(ray, (mesh) => mesh === this.terrain);
-        
-        return pickInfo.hit ? pickInfo.pickedPoint.y : 0;
-    }
-    
-    // Alias for player.js compatibility
-    getTerrainHeight(x, z) {
-        return this.getHeightAt(x, z);
-    }
-
-    // FIX: Removed 'async' keyword and replaced 'await' with '.then()' to fix SyntaxError
-    createTerrainMaterial() {
-        if (!this.assetLoader) {
-            console.warn('[World] AssetLoader not available, using simple green material');
-            this.terrain.material = new BABYLON.StandardMaterial('basicTerrain', this.scene);
-            this.terrain.material.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.4);
-            return;
-        }
-
-        this.terrainMaterial = new BABYLON.StandardMaterial('terrainMat', this.scene);
-        this.terrainMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.4); // Base color
-        this.terrainMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // LOW specular - less shiny, reduces bright spots
-        this.terrain.material = this.terrainMaterial;
-
-        // Load grass texture from ASSET_PATHS
-        if (!window.ASSET_PATHS || !this.assetLoader) return;
-        
-        const grassTexturePath = ASSET_PATHS.getTexturePath('grass');
-        if (!grassTexturePath) return;
-        
-        const loader = this.assetLoader;
-
-        // Load grass diffuse texture
-        loader.loadTexture(grassTexturePath, { uScale: 50, vScale: 50 })
-            .then(diffuseTexture => {
-                if (diffuseTexture) {
-                    this.terrainMaterial.diffuseTexture = diffuseTexture;
-                    console.log('[World] ✓ Grass texture loaded');
-                }
-            })
-            .catch(e => {
-                console.error('[World] Failed to load grass texture:', e);
-            });
-    }
-
-    // FIX: Removed 'async' keyword and replaced 'await' with '.then()' to fix SyntaxError
-    createWater() {
-        // Create water plane
-        this.water = BABYLON.MeshBuilder.CreateGround(
-            "water",
-            { width: this.options.size * 1.5, height: this.options.size * 1.5, subdivisions: 1 },
-            this.scene
-        );
-        this.water.position.y = this.options.waterLevel;
-        this.water.isPickable = false;
-        this.water.checkCollisions = false; // CRITICAL: No collision with water
-        // No physics impostor on water!
-
-        // Check for WaterMaterial and AssetLoader
-        if (typeof BABYLON.WaterMaterial === 'undefined' || !this.assetLoader) {
-            console.log('[World] WaterMaterial not found, using basic material');
-            this.waterMaterial = new BABYLON.StandardMaterial('basicWater', this.scene);
-            this.waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.9);
-            this.waterMaterial.alpha = 0.7;
-            this.water.material = this.waterMaterial;
-            return;
-        }
-
-        // Use WaterMaterial if available
-        try {
-            this.waterMaterial = new BABYLON.WaterMaterial("waterMat", this.scene, new BABYLON.Vector2(512, 512));
-            this.waterMaterial.backFaceCulling = true; // Water should only be visible from above
-            this.waterMaterial.waterColor = new BABYLON.Color3(0.1, 0.5, 0.9);
-            this.waterMaterial.waterColorLevel = 0.1;
-            this.waterMaterial.fresnelLevel = 1.0;
-            this.waterMaterial.waveHeight = 0.3;
-            this.waterMaterial.waveLength = 0.1;
-
-            // Reflect terrain
-            this.waterMaterial.reflectionTexture = new BABYLON.MirrorTexture("reflection", 1024, this.scene, true);
-            this.waterMaterial.reflectionTexture.mirrorPlane = new BABYLON.Plane(0, -1, 0, this.options.waterLevel);
-            this.waterMaterial.reflectionTexture.renderList.push(this.skybox);
-            this.waterMaterial.reflectionTexture.renderList.push(this.terrain);
-            
-            // Refraction (if transparent)
-            this.waterMaterial.refractionTexture = new BABYLON.RenderTargetTexture("refraction", 1024, this.scene, true);
-            this.waterMaterial.refractionTexture.renderList.push(this.terrain);
-            
-            this.water.material = this.waterMaterial;
-
-            // Load water bump texture from ASSET_PATHS if available
-            if (window.ASSET_PATHS && window.ASSET_PATHS.getTexturePath) {
-                const waterBumpPath = ASSET_PATHS.getTexturePath('water_bump');
-                if (waterBumpPath) {
-                    this.assetLoader.loadTexture(waterBumpPath, { uScale: 5, vScale: 5 })
-                        .then(bumpTexture => {
-                            if (bumpTexture) {
-                                this.waterMaterial.bumpTexture = bumpTexture;
-                                this.waterMaterial.bumpTexture.level = 0.1;
-                                console.log('[World] ✓ Water bump texture loaded');
-                            }
-                        })
-                        .catch(e => {
-                            console.log('[World] Water bump texture not found, using smooth water:', e);
-                        });
-                }
-            }
-
-        } catch (error) {
-            console.error('[World] Error creating WaterMaterial:', error);
-            // Fallback to basic material again if WaterMaterial throws an internal error
-            this.waterMaterial = new BABYLON.StandardMaterial('basicWater', this.scene);
-            this.waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.9);
-            this.waterMaterial.alpha = 0.7;
-            this.water.material = this.waterMaterial;
-        }
-    }
-
-    async populateWorld() {
-        // Try to load from database first
-        const useDatabase = window.supabaseService && window.supabaseService.client;
-        
-        if (useDatabase) {
-            console.log('[World] 🗄️ Loading world from database...');
+            // Load NPC templates and spawns from database
+            this.onProgress('Loading world data...', 50);
             await this.loadFromDatabase();
+            
+            // Spawn all NPCs and enemies
+            this.onProgress('Populating world...', 70);
+            await this.populateWorld();
+            
+            // Setup lighting
+            this.onProgress('Setting up lighting...', 90);
+            this.setupLighting();
+            
+            this.onProgress('World ready!', 100);
+            console.log('[World] ✓ Initialized');
+            console.log(`[World] NPCs: ${this.npcs.length}, Enemies: ${this.enemies.length}`);
+            
+        } catch (error) {
+            console.error('[World] Initialization failed:', error);
+            throw error;
         }
-        
-        // Fall back to procedural generation if database didn't populate enough entities
-        const needMoreNPCs = this.npcs.length < 3;
-        const needMoreEnemies = this.enemies.length < 5;
-        
-        if (needMoreNPCs || needMoreEnemies) {
-            console.log('[World] 🎲 Using procedural generation for remaining entities');
-        }
-        
-        // Reduced initial spawns for faster loading
-        this.reportProgress('Spawning trees...', 65);
-        await this.createTrees(20); // Now async to support GLTF loading
-        await this.delay(10);
-        
-        this.reportProgress('Spawning rocks...', 70);
-        this.createRocks(15); // Reduced from 30
-        await this.delay(10);
-        
-        this.reportProgress('Spawning grass...', 75);
-        this.createGrass(100); // Reduced from 200
-        await this.delay(10);
-        
-        this.reportProgress('Spawning NPCs...', 80);
-        if (needMoreNPCs) {
-            this.createNPCs(5); // Procedural fallback
-        }
-        await this.delay(10);
-        
-        this.reportProgress('Spawning enemies...', 85);
-        if (needMoreEnemies) {
-            this.createEnemies(10); // Procedural fallback
-        }
-        await this.delay(10);
     }
+    
+    // ==================== DATABASE LOADING ====================
     
     async loadFromDatabase() {
         if (!window.supabaseService || !window.supabaseService.client) {
-            console.log('[World] Supabase not available, skipping database load');
+            console.warn('[World] Supabase not available, using procedural generation');
             return;
         }
         
         try {
-            // Load friendly NPCs
-            this.reportProgress('Loading NPCs from database...', 60);
-            const friendlyNPCs = await window.supabaseService.getFriendlyNPCSpawns(1);
+            // Load NPC templates
+            const { data: templates, error: templatesError } = await window.supabaseService.client
+                .from('hosg_npc_templates')
+                .select('*');
             
-            for (const spawn of friendlyNPCs) {
-                const template = spawn.template;
-                if (!template) continue;
-                
-                // Parse stats
-                const stats = typeof template.stats === 'string' ? 
-                    JSON.parse(template.stats) : template.stats;
-                
-                // Create position at spawn point
-                const terrainY = this.getHeightAt(spawn.position_x, spawn.position_z);
-                const position = new BABYLON.Vector3(
-                    spawn.position_x,
-                    terrainY || spawn.position_y,
-                    spawn.position_z
-                );
-                
-                // Create NPC with database data
-                const npc = new NPC(
-                    this.scene,
-                    position,
-                    spawn.id,
-                    template.code, // 'merchant', 'guard', etc.
-                    {
-                        name: template.name,
-                        level: template.level,
-                        health: stats.health || 100,
-                        faction: template.faction
-                    }
-                );
-                
-                this.npcs.push(npc);
+            if (templatesError) throw templatesError;
+            
+            if (templates) {
+                templates.forEach(template => {
+                    this.npcTemplates.set(template.id, template);
+                });
+                console.log(`[World] ✓ Loaded ${templates.length} NPC templates`);
             }
             
-            console.log(`[World] ✓ Loaded ${friendlyNPCs.length} friendly NPCs from database`);
+            // Load spawn points
+            const { data: spawns, error: spawnsError } = await window.supabaseService.client
+                .from('hosg_npc_spawns')
+                .select('*')
+                .eq('zone_id', 1); // Load all zones, or filter by current zone
             
-            // Load enemies
-            this.reportProgress('Loading enemies from database...', 65);
-            const enemies = await window.supabaseService.getEnemySpawns(1);
+            if (spawnsError) throw spawnsError;
             
-            for (const spawn of enemies) {
-                const template = spawn.template;
-                if (!template) continue;
-                
-                // Parse stats
-                const stats = typeof template.stats === 'string' ? 
-                    JSON.parse(template.stats) : template.stats;
-                
-                // Parse loot table
-                const lootTable = typeof template.loot_table === 'string' ?
-                    JSON.parse(template.loot_table) : template.loot_table;
-                
-                // Spawn multiple enemies if max_spawn > 1
-                const spawnCount = spawn.max_spawn || 1;
-                const spawnRadius = spawn.spawn_radius || 0;
-                
-                for (let i = 0; i < spawnCount; i++) {
-                    // Randomize position within spawn radius
-                    const angle = Math.random() * Math.PI * 2;
-                    const distance = Math.random() * spawnRadius;
-                    const offsetX = Math.sin(angle) * distance;
-                    const offsetZ = Math.cos(angle) * distance;
-                    
-                    const x = spawn.position_x + offsetX;
-                    const z = spawn.position_z + offsetZ;
-                    const terrainY = this.getHeightAt(x, z);
-                    
-                    const position = new BABYLON.Vector3(
-                        x,
-                        terrainY + 5.0, // Height buffer
-                        z
-                    );
-                    
-                    // Create enemy with database data
-                    const enemy = new Enemy(
-                        this.scene,
-                        position,
-                        `${spawn.id}_${i}`,
-                        template.code, // 'wolf', 'goblin', etc.
-                        {
-                            name: template.name,
-                            level: template.level,
-                            health: stats.health || 50,
-                            attack: stats.attack || 10,
-                            defense: stats.defense || 5,
-                            lootTable: lootTable
-                        }
-                    );
-                    
-                    this.enemies.push(enemy);
-                }
+            if (spawns) {
+                this.spawnPoints = spawns;
+                console.log(`[World] ✓ Loaded ${spawns.length} spawn points`);
             }
-            
-            console.log(`[World] ✓ Loaded ${this.enemies.length} enemies from database`);
             
         } catch (error) {
-            console.error('[World] Error loading from database:', error);
-            console.log('[World] Will use procedural generation instead');
+            console.error('[World] Database load failed:', error);
+            console.warn('[World] Continuing with procedural generation');
         }
     }
     
-    reportProgress(message, percent) {
-        console.log(`[World] ${message} (${percent}%)`);
-        if (this.onProgress) {
-            this.onProgress(message, percent);
-        }
-    }
+    // ==================== WORLD POPULATION ====================
     
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    async createTrees(count) { 
-        const spawnRadius = Math.min(200, this.options.size * 0.4);
-        let spawned = 0;
-        let attempts = 0;
-        const maxAttempts = count * 5;
-        
-        // Check if we have tree models available
-        const hasTreeModels = window.ASSET_PATHS && 
-                             window.ASSET_PATHS.GENERIC_MODELS && 
-                             window.ASSET_PATHS.GENERIC_MODELS.tree01;
-        
-        const treeTypes = [];
-        if (hasTreeModels) {
-            // Add all available tree models
-            if (window.ASSET_PATHS.GENERIC_MODELS.tree01) treeTypes.push('tree01');
-            if (window.ASSET_PATHS.GENERIC_MODELS.tree02) treeTypes.push('tree02');
-            if (window.ASSET_PATHS.GENERIC_MODELS.tree03) treeTypes.push('tree03');
-        }
-        
-        while (spawned < count && attempts < maxAttempts) {
-            attempts++;
-            
-            // Random position
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * spawnRadius;
-            const x = Math.sin(angle) * distance;
-            const z = Math.cos(angle) * distance;
-            
-            // Get terrain height
-            const groundY = this.getHeightAt(x, z);
-            
-            // Skip if underwater (with margin)
-            const waterY = this.options.waterLevel || 0;
-            if (groundY <= waterY + 1.0) continue;
-            
-            // Check slope (don't spawn on steep hills)
-            const slopeCheck = 2.0;
-            const y1 = this.getHeightAt(x + slopeCheck, z);
-            const y2 = this.getHeightAt(x - slopeCheck, z);
-            const y3 = this.getHeightAt(x, z + slopeCheck);
-            const y4 = this.getHeightAt(x, z - slopeCheck);
-            const maxSlope = Math.max(
-                Math.abs(y1 - groundY),
-                Math.abs(y2 - groundY),
-                Math.abs(y3 - groundY),
-                Math.abs(y4 - groundY)
-            );
-            if (maxSlope > 3.0) continue; // Too steep
-            
-            // Create tree (either GLTF model or simple mesh)
-            if (hasTreeModels && treeTypes.length > 0) {
-                // Load GLTF tree model
-                const treeType = treeTypes[Math.floor(Math.random() * treeTypes.length)];
-                await this.createTreeModel(treeType, x, groundY, z);
-            } else {
-                // Fallback to simple tree mesh
-                this.createSimpleTree(x, groundY, z);
+    async populateWorld() {
+        // Spawn from database if available
+        if (this.spawnPoints.length > 0) {
+            for (const spawn of this.spawnPoints) {
+                await this.createSpawn(spawn);
             }
-            
-            spawned++;
-        }
-        
-        console.log(`[World] Spawned ${spawned}/${count} trees (${attempts} attempts)`);
-    }
-    
-    async createTreeModel(treeType, x, groundY, z) {
-        try {
-            const modelPath = ASSET_PATHS.getModelPath(treeType);
-            if (!modelPath) {
-                console.warn('[World] No model path for tree type:', treeType);
-                this.createSimpleTree(x, groundY, z);
-                return;
-            }
-            
-            console.log(`[World] Loading tree model: ${modelPath} at (${x.toFixed(1)}, ${groundY.toFixed(1)}, ${z.toFixed(1)})`);
-            
-            // CONFIGURABLE: Base tree scale (change this to make all trees bigger/smaller)
-            const BASE_TREE_SCALE = 2.0; // 1.0 = original size, 2.0 = 2x bigger, 0.5 = half size
-            
-            const result = await this.scene.assetLoader.loadModel(modelPath, {
-                scaling: new BABYLON.Vector3(BASE_TREE_SCALE, BASE_TREE_SCALE, BASE_TREE_SCALE)
-            });
-            
-            if (!result || !result.meshes || result.meshes.length === 0) {
-                console.warn('[World] No meshes in tree model result');
-                this.createSimpleTree(x, groundY, z);
-                return;
-            }
-            
-            console.log(`[World] Tree model loaded: ${result.meshes.length} meshes`);
-            
-            const tree = result.meshes[0];
-            tree.position = new BABYLON.Vector3(x, groundY, z);
-            
-            // CRITICAL: Ensure ALL tree meshes are visible and enabled
-            result.meshes.forEach((mesh, index) => {
-                if (!mesh) return;
-                
-                // Check for debug/collision meshes
-                const name = (mesh.name || '').toLowerCase();
-                if (name.includes('collision') || name.includes('collider') || name.includes('hitbox')) {
-                    mesh.isVisible = false;
-                    mesh.setEnabled(false);
-                    console.log(`[World] Hiding collision mesh: ${mesh.name}`);
-                    return;
-                }
-                
-                // Make sure tree is VISIBLE
-                mesh.isVisible = true;
-                mesh.setEnabled(true);
-                mesh.showBoundingBox = false;
-                
-                // Add tree metadata to prevent aggressive debug hiding
-                mesh.metadata = { isTree: true, isModel: true };
-                
-                console.log(`[World] Tree mesh ${index}: ${mesh.name}, visible: ${mesh.isVisible}, verts: ${mesh.getTotalVertices ? mesh.getTotalVertices() : '?'}`);
-            });
-            
-            // Random rotation for variety
-            tree.rotation.y = Math.random() * Math.PI * 2;
-            
-            // CONFIGURABLE: Random scale variation (makes each tree slightly different size)
-            const SCALE_VARIATION_MIN = 0.7;  // Minimum size multiplier (70% of base scale)
-            const SCALE_VARIATION_MAX = 10.3;  // Maximum size multiplier (130% of base scale)
-            const scaleVariation = SCALE_VARIATION_MIN + Math.random() * (SCALE_VARIATION_MAX - SCALE_VARIATION_MIN);
-            tree.scaling.scaleInPlace(scaleVariation);
-            
-            // Enable collisions
-            tree.checkCollisions = true;
-            
-            // Enable shadows if shadow generator exists
-            if (this.scene.shadowGenerator) {
-                this.scene.shadowGenerator.addShadowCaster(tree);
-            }
-            tree.receiveShadows = true;
-            
-            console.log(`[World] ✓ Tree created at (${x.toFixed(1)}, ${groundY.toFixed(1)}, ${z.toFixed(1)}), scale: ${scaleVariation.toFixed(2)}`);
-            
-        } catch (error) {
-            console.error('[World] Failed to load tree model:', error);
-            this.createSimpleTree(x, groundY, z);
-        }
-    }
-    
-    createSimpleTree(x, groundY, z) {
-        // Create simple cylinder tree (fallback)
-        const tree = BABYLON.MeshBuilder.CreateCylinder("tree", {
-            diameterTop: 0.5,
-            diameterBottom: 0.8,
-            height: 6,
-            tessellation: 8
-        }, this.scene);
-        
-        tree.position = new BABYLON.Vector3(x, groundY + 3, z);
-        
-        const treeMaterial = new BABYLON.StandardMaterial("treeMat", this.scene);
-        treeMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.3, 0.2);
-        tree.material = treeMaterial;
-        
-        // Add foliage
-        const foliage = BABYLON.MeshBuilder.CreateSphere("foliage", {
-            diameter: 4,
-            segments: 8
-        }, this.scene);
-        foliage.parent = tree;
-        foliage.position.y = 2;
-        
-        const foliageMat = new BABYLON.StandardMaterial("foliageMat", this.scene);
-        foliageMat.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.2);
-        foliage.material = foliageMat;
-        
-        tree.checkCollisions = true;
-        tree.metadata = { isTree: true };
-        
-        // Enable shadows if available
-        if (this.scene.shadowGenerator) {
-            this.scene.shadowGenerator.addShadowCaster(tree);
-        }
-        tree.receiveShadows = true;
-    }
-    
-    createRocks(count) { 
-        const spawnRadius = Math.min(200, this.options.size * 0.4);
-        let spawned = 0;
-        let attempts = 0;
-        const maxAttempts = count * 5;
-        
-        while (spawned < count && attempts < maxAttempts) {
-            attempts++;
-            
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * spawnRadius;
-            const x = Math.sin(angle) * distance;
-            const z = Math.cos(angle) * distance;
-            
-            const groundY = this.getHeightAt(x, z);
-            
-            // Skip if underwater
-            const waterY = this.options.waterLevel || 0;
-            if (groundY <= waterY + 0.5) continue;
-            
-            // Create rock
-            const rockSize = 1 + Math.random() * 2;
-            const rock = BABYLON.MeshBuilder.CreateSphere("rock", {
-                diameter: rockSize,
-                segments: 6
-            }, this.scene);
-            
-            rock.position = new BABYLON.Vector3(x, groundY + rockSize / 2, z);
-            rock.scaling.y = 0.6; // Flatten slightly
-            
-            const rockMat = new BABYLON.StandardMaterial("rockMat", this.scene);
-            rockMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-            rock.material = rockMat;
-            
-            rock.checkCollisions = true;
-            rock.metadata = { isRock: true };
-            
-            spawned++;
-        }
-        
-        console.log(`[World] Spawned ${spawned}/${count} rocks (${attempts} attempts)`);
-    }
-    
-    createGrass(count) { 
-        const spawnRadius = Math.min(150, this.options.size * 0.3);
-        let spawned = 0;
-        
-        for (let i = 0; i < count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * spawnRadius;
-            const x = Math.sin(angle) * distance;
-            const z = Math.cos(angle) * distance;
-            
-            const groundY = this.getHeightAt(x, z);
-            
-            // Skip if underwater
-            const waterY = this.options.waterLevel || 0;
-            if (groundY <= waterY + 0.2) continue;
-            
-            // Create small grass tuft
-            const grass = BABYLON.MeshBuilder.CreatePlane("grass", {
-                width: 0.5,
-                height: 0.8
-            }, this.scene);
-            
-            grass.position = new BABYLON.Vector3(x, groundY + 0.4, z);
-            grass.rotation.y = Math.random() * Math.PI * 2;
-            grass.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
-            
-            const grassMat = new BABYLON.StandardMaterial("grassMat", this.scene);
-            grassMat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.3);
-            grassMat.backFaceCulling = false;
-            grass.material = grassMat;
-            
-            spawned++;
-        }
-        
-        console.log(`[World] Spawned ${spawned}/${count} grass tufts`);
-    }
-    createNPCs(count) { 
-        const spawnRadius = Math.min(80, this.options.size * 0.2);
-        for (let i = 1; i <= count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * spawnRadius;
-            const npcX = Math.sin(angle) * distance;
-            const npcZ = Math.cos(angle) * distance;
-
-            const drySpot = this.findDrySpot(npcX, npcZ, 8, 8, 0.4);
-
-            const position = new BABYLON.Vector3(drySpot.x, drySpot.y, drySpot.z);
-            
-            // Cycle through available NPC types
-            const npcTypes = ['merchant', 'guard'];
-            const type = npcTypes[(i - 1) % npcTypes.length]; 
-
-            const npc = new NPC(this.scene, position, i, type);
-            this.npcs.push(npc);
-        }
-    }
-
-    createEnemies(count) { 
-        // Keep enemies close to the playable spawn so they are easy to find 
-        const spawnRadius = Math.min(80, this.options.size * 0.2); 
-        for (let i = 1; i <= count; i++) { 
-            // Bias positions toward the center of the map 
-            const angle = Math.random() * Math.PI * 2; 
-            const distance = Math.random() * spawnRadius; 
-            const enemyX = Math.sin(angle) * distance; 
-            const enemyZ = Math.cos(angle) * distance; 
-            
-            const drySpot = this.findDrySpot(enemyX, enemyZ, 30, 20, 2.0);
-            
-            // CRITICAL: Add large height buffer to ensure enemies spawn ABOVE terrain
-            // Start at +5.0 units above ground, then adjust down after model loads
-            const position = new BABYLON.Vector3(drySpot.x, drySpot.y + 5.0, drySpot.z);
-
-            // Cycle through available ENEMY types (wolf, goblin)
-            const enemyTypes = ['wolf', 'goblin'];
-            const type = enemyTypes[(i - 1) % enemyTypes.length];
-
-            // Use the determined type
-            const enemy = new Enemy(this.scene, position, i, type);
-            this.enemies.push(enemy);
-        }
-    }
-
-    findDrySpot(x, z, attempts = 20, radius = 15, margin = 1.0) {
-        const waterY = this.options.waterLevel || 0;
-        
-        // Check current position first
-        const currentY = this.getHeightAt(x, z);
-        if (currentY > waterY + margin) {
-            return { x, z, y: currentY };
-        }
-
-        // Try to find dry spot nearby
-        for (let i = 0; i < attempts; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = Math.random() * radius;
-            const newX = x + Math.sin(angle) * distance;
-            const newZ = z + Math.cos(angle) * distance;
-            const newY = this.getHeightAt(newX, newZ);
-
-            // Found dry land!
-            if (newY > waterY + margin) {
-                return { x: newX, z: newZ, y: newY };
-            }
-        }
-        
-        // Last resort: expand search much wider
-        for (let i = 0; i < attempts; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = radius + Math.random() * radius * 2;
-            const newX = x + Math.sin(angle) * distance;
-            const newZ = z + Math.cos(angle) * distance;
-            const newY = this.getHeightAt(newX, newZ);
-
-            if (newY > waterY + margin) {
-                return { x: newX, z: newZ, y: newY };
-            }
-        }
-        
-        // CRITICAL: If still no dry spot, spawn at origin which should be dry
-        console.warn(`[World] Could not find dry spot near (${x.toFixed(1)}, ${z.toFixed(1)}), using origin`);
-        const originY = this.getHeightAt(0, 0);
-        return { x: 0, z: 0, y: Math.max(originY, waterY + margin + 1) };
-    }
-
-    setupEventListeners() { /* ... implementation omitted ... */ }
-    update(deltaTime) { /* ... implementation omitted ... */ }
-    dispose() { /* ... implementation omitted ... */ }
-}
-
-// ============================================================================
-// Entity Base Class - Base for NPCs, Enemies, Items
-// Preserves all original functionality from function-style Entity
-// ============================================================================
-class Entity {
-    constructor(scene, position) {
-        this.scene = scene;
-
-        // Better position handling (from original Entity)
-        if (typeof BABYLON !== "undefined" && BABYLON.Vector3) {
-            if (position instanceof BABYLON.Vector3) {
-                this.position = position.clone();
-            } else if (position && typeof position === "object" &&
-                "x" in position && "y" in position && "z" in position) {
-                this.position = new BABYLON.Vector3(position.x, position.y, position.z);
-            } else {
-                this.position = BABYLON.Vector3.Zero();
-            }
+            console.log(`[World] ✓ Spawned ${this.npcs.length} NPCs and ${this.enemies.length} enemies from database`);
         } else {
-            this.position = position || { x: 0, y: 0, z: 0 };
+            // Fallback to procedural generation
+            console.warn('[World] No database spawns, using procedural generation');
+            this.createProceduralSpawns();
         }
-
-        this.mesh = null;
-        this._isDisposed = false;
-    }
-
-    // Update method - syncs mesh position with entity position
-    update(deltaTime) {
-        if (this.mesh && this.mesh.position && this.position &&
-            typeof this.mesh.position.copyFrom === "function") {
-            this.mesh.position.copyFrom(this.position);
-        }
-    }
-
-    // Dispose method - cleans up entity
-    dispose() {
-        this._isDisposed = true;
-        if (this.mesh && typeof this.mesh.dispose === "function") {
-            this.mesh.dispose();
-            this.mesh = null;
-        }
-    }
-}
-
-// NPC Class (inherits from Entity)
-class NPC extends Entity {
-    // ... NPC implementation (omitted for brevity)
-    constructor(scene, position, id, type = 'default') {
-        super(scene, position);
-        this.id = id;
-        this.type = type;
-        this.assetKey = type;
-        this.name = `NPC ${id}`;
-        this.state = 'idle'; // idle, wandering, interacting
-        this.walkRadius = 20;
-        this.moveSpeed = 1.0;
-        this.targetPosition = null;
-
-        this.init();
-        console.log(`${this.name} is idling`);
-    }
-
-    async init() {
-        await this.loadModel();
-        this.setupPhysics();
-        // Start wandering after a short delay
-        setTimeout(() => {
-            this.startWandering();
-        }, 5000 + Math.random() * 5000);
     }
     
-    // Fallback mesh creator - FIXED to not use assetLoader
-    createPlaceholderMesh() {
-        if (!this.scene) {
-            console.error('[NPC] Scene is null, cannot create placeholder mesh');
+    async createSpawn(spawnData) {
+        const template = this.npcTemplates.get(spawnData.npc_template_id);
+        if (!template) {
+            console.warn(`[World] Template not found: ${spawnData.npc_template_id}`);
             return;
         }
         
-        this.mesh = BABYLON.MeshBuilder.CreateCylinder(`npc_placeholder_${this.id}`, { height: 1.8, diameter: 0.8 }, this.scene);
-        this.mesh.position.copyFrom(this.position);
-        this.mesh.metadata = { isNPC: true, id: this.id };
+        const spawnArray = [];
+        const maxSpawn = spawnData.max_spawn || 1;
+        const spawnRadius = parseFloat(spawnData.spawn_radius) || 0;
         
-        // Create simple material - FIXED
-        const material = new BABYLON.StandardMaterial(`npc_mat_${this.id}`, this.scene);
-        material.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.8); // Blue color for NPCs
-        this.mesh.material = material;
-        
-        // Enable shadows
-        this.mesh.receiveShadows = true;
-        if (this.scene.shadowGenerator) {
-            this.scene.shadowGenerator.addShadowCaster(this.mesh);
-        }
-        this.mesh.checkCollisions = true;
-        this.mesh.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
-        this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
-    }
-
-    async loadModel() {
-        // NPCs not configured in ASSET_PATHS yet, use placeholder
-        if (!window.ASSET_PATHS || !window.ASSET_PATHS.NPC_MODELS || !window.ASSET_PATHS.NPC_MODELS[this.assetKey]) {
-            console.warn(`[NPC] No model configured for ${this.assetKey}, using simple mesh`);
-            this.createPlaceholderMesh();
-            return;
-        }
-
-        const modelPath = ASSET_PATHS.getNPCPath(this.assetKey);
-        if (!modelPath) {
-            console.warn(`[NPC] Model path not found for ${this.assetKey}, using simple mesh`);
-            this.createPlaceholderMesh();
-            return;
-        }
-        
-        try {
-            const result = await this.scene.assetLoader.loadModel(modelPath, { 
-                name: this.name, 
-                scaling: new BABYLON.Vector3(1.0, 1.0, 1.0) 
-            });
+        for (let i = 0; i < maxSpawn; i++) {
+            // Calculate spawn position
+            let x = parseFloat(spawnData.position_x);
+            let z = parseFloat(spawnData.position_z);
             
-            if (!result || !result.meshes || result.meshes.length === 0) {
-                console.warn(`[NPC] No meshes in model for ${this.assetKey}, using simple mesh`);
-                this.createPlaceholderMesh();
-                return;
+            // Add randomness within spawn radius
+            if (spawnRadius > 0) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * spawnRadius;
+                x += Math.cos(angle) * distance;
+                z += Math.sin(angle) * distance;
             }
             
-            this.mesh = result.meshes[0]; // Use first mesh (root)
+            // Get terrain height and add offset
+            const y = this.getHeightAt(x, z) + 0.9; // Half height of entity
             
-            // CRITICAL: Hide collision/debug meshes
-            result.meshes.forEach((mesh, index) => {
-                if (!mesh) return;
-                
-                // Hide debug meshes
-                const name = (mesh.name || '').toLowerCase();
-                if (name.includes('collision') || 
-                    name.includes('collider') || 
-                    name.includes('hitbox') ||
-                    name.includes('debug') ||
-                    name.includes('physics') ||
-                    name.includes('primitive') ||
-                    name.includes('helper') ||
-                    name.includes('gizmo')) {
-                    mesh.isVisible = false;
-                    mesh.isPickable = false;
-                    mesh.setEnabled(false);
-                    console.log(`[NPC] Hiding debug mesh: ${mesh.name}`);
-                    return;
-                }
-                
-                // Turn off ALL debug visualization
-                mesh.showBoundingBox = false;
-                mesh.showSubMeshesBoundingBox = false;
-                mesh.renderOutline = false;
-                mesh.renderOverlay = false;
-                
-                // Disable ellipsoid rendering
-                if (mesh.ellipsoid) {
-                    mesh.showEllipsoid = false;
-                }
-                
-                // Hide any wireframe
-                if (mesh.material) {
-                    mesh.material.wireframe = false;
-                }
-            });
+            const position = new BABYLON.Vector3(x, y, z);
             
-            // Hide root if it's just a container
-            if (this.mesh.name && this.mesh.name.toLowerCase().includes('root')) {
-                this.mesh.isVisible = false;
+            // Create entity based on faction
+            let entity;
+            if (template.faction === 'hostile') {
+                entity = await this.createEnemy(template, position, spawnData);
+            } else {
+                entity = await this.createNPC(template, position, spawnData);
             }
             
-            this.mesh.position.copyFrom(this.position);
-            
-            // Adjust scale if needed based on model bounds
-            const bounds = this.mesh.getHierarchyBoundingVectors(true);
-            const currentHeight = Math.max(0.001, bounds.max.y - bounds.min.y);
-            const targetHeight = 1.8;
-            const finalScale = targetHeight / currentHeight;
-            this.mesh.scaling.scaleInPlace(finalScale);
-
-            // Position feet on ground
-            const offset = bounds.min.y * finalScale;
-            this.mesh.position.y = this.position.y - offset;
-            
-            // CRITICAL: Update entity position to match mesh
-            this.position.copyFrom(this.mesh.position);
-            
-            this.mesh.metadata = { isNPC: true, id: this.id };
-            this.mesh.checkCollisions = true;
-            this.mesh.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
-            this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
-            
-            // Store animations
-            this.animations = result.animationGroups;
-            
-        } catch (e) {
-            console.warn(`[NPC] Failed to load model for ${this.assetKey}, using simple mesh:`, e);
-            this.createPlaceholderMesh();
-        }
-    }
-    
-    setupPhysics() {
-        if (!this.mesh) return;
-        
-        // Snap NPC to terrain height
-        const world = this.scene.world || this.scene.game?.world;
-        if (world && world.getHeightAt) {
-            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
-            this.mesh.position.y = terrainY + 0.9; // Stand on terrain (half height of ellipsoid)
-            this.position.copyFrom(this.mesh.position);
-        }
-    }
-    
-    startWandering() {
-        // NPCs wander around their spawn point
-        this.state = 'wandering';
-        this.pickNewWanderTarget();
-    }
-    
-    pickNewWanderTarget() {
-        // Pick random point within walk radius
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * this.walkRadius;
-        
-        this.targetPosition = this.position.clone();
-        this.targetPosition.x += Math.sin(angle) * distance;
-        this.targetPosition.z += Math.cos(angle) * distance;
-        
-        // Snap target to terrain height
-        const world = this.scene.world || this.scene.game?.world;
-        if (world && world.getHeightAt) {
-            this.targetPosition.y = world.getHeightAt(this.targetPosition.x, this.targetPosition.z) + 0.9;
-        }
-    }
-    
-    update(deltaTime) {
-        if (!this.mesh || this.state !== 'wandering') return;
-        
-        if (!this.targetPosition) {
-            this.pickNewWanderTarget();
-            return;
-        }
-        
-        // Move toward target
-        const direction = this.targetPosition.subtract(this.mesh.position);
-        const distance = direction.length();
-        
-        if (distance < 0.5) {
-            // Reached target, pick new one after delay
-            this.state = 'idle';
-            setTimeout(() => {
-                if (this.state === 'idle') {
-                    this.state = 'wandering';
-                    this.pickNewWanderTarget();
-                }
-            }, 2000 + Math.random() * 3000);
-            return;
-        }
-        
-        direction.normalize();
-        const movement = direction.scale(this.moveSpeed * deltaTime);
-        this.mesh.position.addInPlace(movement);
-        
-        // CRITICAL: Snap to terrain height
-        const world = this.scene.world || this.scene.game?.world;
-        if (world && world.getHeightAt) {
-            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
-            this.mesh.position.y = terrainY + 0.9; // Stand on terrain
-        }
-        
-        // Face movement direction
-        const angle = Math.atan2(direction.x, direction.z);
-        this.mesh.rotation.y = angle;
-        
-        // Update entity position
-        this.position.copyFrom(this.mesh.position);
-    }
-}
-
-// Enemy Class (inherits from Entity, extends NPC for simple AI)
-class Enemy extends NPC {
-    // ... Enemy implementation (omitted for brevity)
-    constructor(scene, position, id, type = 'wolf') {
-        super(scene, position, id, type); // Call NPC constructor
-        this.name = `Enemy ${id}`;
-        this.isEnemy = true; // CRITICAL: Mark as enemy immediately for combat system
-        this.health = 50;
-        this.maxHealth = 50;
-        this.damage = 10;
-        this.detectionRange = 25;
-        this.attackRange = 2;
-        this.state = 'idle'; // idle, chasing, attacking
-        this.target = null; // The player or another enemy
-    }
-
-    // FIX: Add a defensive check to handle assets that fail to load
-    async loadModel() {
-        // FIX: Ensure assetKey is a valid string, defaulting to a known fallback if undefined/empty
-        this.assetKey = this.assetKey || 'wolf'; 
-        
-        if (!window.ASSET_PATHS || !window.ASSET_PATHS.ENEMY_MODELS) {
-            console.warn(`[Enemy] ASSET_PATHS not loaded, skipping model for ${this.assetKey}`);
-            this.createPlaceholderMesh();
-            return;
-        }
-
-        const modelPath = ASSET_PATHS.getEnemyPath(this.assetKey);
-        
-        if (!modelPath) {
-            console.warn(`[Enemy] Model not found for ${this.assetKey}, using simple mesh`);
-            this.createPlaceholderMesh();
-            return;
-        }
-        
-        try {
-            const result = await this.scene.assetLoader.loadModel(modelPath, { 
-                name: this.name, 
-                scaling: new BABYLON.Vector3(1.0, 1.0, 1.0) 
-            });
-            
-            if (!result || !result.meshes || result.meshes.length === 0) {
-                console.warn(`[Enemy] No meshes in model for ${this.assetKey}, using simple mesh`);
-                this.createPlaceholderMesh();
-                return;
-            }
-            
-            this.mesh = result.meshes[0]; // Use first mesh (root)
-            
-            // CRITICAL: Hide collision/debug meshes that come with models
-            result.meshes.forEach((mesh, index) => {
-                if (!mesh) return;
-                
-                // Hide meshes with collision/debug names
-                const name = (mesh.name || '').toLowerCase();
-                if (name.includes('collision') || 
-                    name.includes('collider') || 
-                    name.includes('hitbox') ||
-                    name.includes('debug') ||
-                    name.includes('physics') ||
-                    name.includes('primitive') ||
-                    name.includes('helper') ||
-                    name.includes('gizmo')) {
-                    mesh.isVisible = false;
-                    mesh.isPickable = false;
-                    mesh.setEnabled(false); // Completely disable
-                    console.log(`[Enemy] Hiding debug mesh: ${mesh.name}`);
-                    return; // Skip further processing
-                }
-                
-                // Turn off ALL debug visualization
-                mesh.showBoundingBox = false;
-                mesh.showSubMeshesBoundingBox = false;
-                mesh.renderOutline = false;
-                mesh.renderOverlay = false;
-                
-                // Disable rendering of collision ellipsoids
-                if (mesh.ellipsoid) {
-                    mesh.showEllipsoid = false;
-                }
-                
-                // Hide any wireframe
-                if (mesh.material) {
-                    mesh.material.wireframe = false;
-                }
-            });
-            
-            // Also hide the root mesh if it's just a container
-            if (this.mesh.name && this.mesh.name.toLowerCase().includes('root')) {
-                this.mesh.isVisible = false; // Hide empty root
-            }
-            
-            // Position at spawn point (from findDrySpot)
-            this.mesh.position.copyFrom(this.position);
-            
-            // Adjust scale if needed based on model bounds
-            const bounds = this.mesh.getHierarchyBoundingVectors(true);
-            const currentHeight = Math.max(0.001, bounds.max.y - bounds.min.y);
-            const targetHeight = 1.2; // Enemies are shorter
-            const finalScale = targetHeight / currentHeight;
-            this.mesh.scaling.scaleInPlace(finalScale);
-            
-            // CRITICAL: Position feet on ground
-            // The position Y should already be correct from findDrySpot
-            // Just adjust for model's origin point
-            const offset = bounds.min.y * finalScale;
-            this.mesh.position.y = this.position.y - offset;
-            
-            // CRITICAL SAFETY CHECK: Ensure we're NEVER below ground
-            // Get actual terrain height at this position
-            const world = this.scene.world || this.scene.game?.world;
-            if (world && world.getHeightAt) {
-                const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
-                const minY = terrainY + 1.0; // At least 1 unit above terrain
-                if (this.mesh.position.y < minY) {
-                    console.warn(`[Enemy] ${this.name} was at y=${this.mesh.position.y.toFixed(2)}, moving to y=${minY.toFixed(2)}`);
-                    this.mesh.position.y = minY;
-                }
-            }
-            
-            // CRITICAL: Update entity position to match mesh
-            // Otherwise Entity.update() will overwrite our positioning!
-            this.position.copyFrom(this.mesh.position);
-
-            this.mesh.metadata = { isEnemy: true, id: this.id };
-            this.mesh.checkCollisions = true;
-            this.mesh.ellipsoid = new BABYLON.Vector3(0.3, 0.6, 0.3);
-            this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.6, 0);
-
-            // Store animations
-            this.animations = result.animationGroups;
-            
-        } catch (e) {
-            console.warn(`[Enemy] Failed to load model for ${this.assetKey}, using simple mesh:`, e);
-            this.createPlaceholderMesh();
-        }
-    }
-    
-    // Fallback mesh creator for enemy - FIXED to not use assetLoader
-    createPlaceholderMesh() {
-        if (!this.scene) {
-            console.error('[Enemy] Scene is null, cannot create placeholder mesh');
-            return;
-        }
-        
-        this.mesh = BABYLON.MeshBuilder.CreateBox(`enemy_placeholder_${this.id}`, { width: 0.5, height: 1.2, depth: 0.5 }, this.scene);
-        this.mesh.position.copyFrom(this.position);
-        this.mesh.metadata = { isEnemy: true, id: this.id };
-        
-        // Create simple material - FIXED
-        const material = new BABYLON.StandardMaterial(`enemy_mat_${this.id}`, this.scene);
-        material.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.2); // Red color for enemies
-        this.mesh.material = material;
-        
-        // Enable shadows
-        this.mesh.receiveShadows = true;
-        if (this.scene.shadowGenerator) {
-            this.scene.shadowGenerator.addShadowCaster(this.mesh);
-        }
-        this.mesh.checkCollisions = true;
-        this.mesh.ellipsoid = new BABYLON.Vector3(0.3, 0.6, 0.3);
-        this.mesh.ellipsoidOffset = new BABYLON.Vector3(0, 0.6, 0);
-    }
-    
-    // Enemy update - checks for player, attacks
-    update(deltaTime) {
-        if (!this.mesh || this.isDead) return;
-        
-        // Get combat system
-        const combat = this.scene.combat;
-        if (!combat) return;
-        
-        // Initialize stats if needed
-        if (!this.stats) {
-            this.stats = combat.getDefaultStats(this);
-            this.isEnemy = true; // Mark as enemy for combat system
-        }
-        
-        // Find player
-        const player = this.scene.player;
-        if (!player || !player.mesh) return;
-        
-        const distanceToPlayer = BABYLON.Vector3.Distance(
-            this.mesh.position,
-            player.mesh.position
-        );
-        
-        // State machine
-        switch (this.state) {
-            case 'idle':
-                // Stop movement animations when idle
-                if (this.animations && this.animations.length > 0) {
-                    this.animations.forEach(anim => {
-                        if (anim.name.toLowerCase().includes('run') || 
-                            anim.name.toLowerCase().includes('walk')) {
-                            anim.pause();
-                        }
-                    });
-                }
-                
-                // Check for player in detection range
-                if (distanceToPlayer < this.detectionRange) {
-                    this.enterCombat(player);
-                }
-                break;
-                
-            case 'chasing':
-                // Chase player
-                if (distanceToPlayer > combat.config.LEASH_RANGE) {
-                    // Too far, return home
-                    this.exitCombat();
-                } else if (distanceToPlayer <= this.attackRange) {
-                    // In range, attack!
-                    this.state = 'attacking';
-                } else {
-                    // Move toward player
-                    this.moveToward(player.mesh.position, deltaTime);
-                }
-                break;
-                
-            case 'attacking':
-                // Face player
-                this.faceTarget(player.mesh.position);
-                
-                // Stop movement animation when attacking
-                if (this.animations && this.animations.length > 0) {
-                    this.animations.forEach(anim => {
-                        if (anim.name.toLowerCase().includes('run') || 
-                            anim.name.toLowerCase().includes('walk')) {
-                            anim.pause();
-                        }
-                    });
-                }
-                
-                // Check if still in range
-                if (distanceToPlayer > this.attackRange) {
-                    this.state = 'chasing';
-                } else {
-                    // Attack if cooldown ready
-                    const now = Date.now();
-                    if (!this.lastAttackTime || (now - this.lastAttackTime) > 2000) {
-                        this.performAttack(player);
-                        this.lastAttackTime = now;
-                    }
-                }
-                break;
-        }
-        
-        // CRITICAL: Snap enemy to terrain height every frame
-        const world = this.scene.world || this.scene.game?.world;
-        if (world && world.getHeightAt) {
-            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
-            this.mesh.position.y = terrainY + 0.9; // Stand on terrain (half height of enemy)
-        }
-        
-        // Update position
-        this.position.copyFrom(this.mesh.position);
-    }
-    
-    enterCombat(target) {
-        this.state = 'chasing';
-        this.target = target;
-        this.inCombat = true;
-        console.log(`[Enemy] ${this.name} detected player!`);
-    }
-    
-    exitCombat() {
-        this.state = 'idle';
-        this.target = null;
-        this.inCombat = false;
-        
-        // Heal to full
-        if (this.stats) {
-            this.stats.currentHP = this.stats.maxHP;
-        }
-    }
-    
-    moveToward(targetPos, deltaTime) {
-        if (!this.mesh) return;
-        
-        const direction = targetPos.subtract(this.mesh.position);
-        direction.y = 0; // Don't move vertically
-        const distance = direction.length();
-        
-        // Only move if we're far enough away
-        if (distance < 0.1) {
-            // Stop animation when not moving
-            if (this.animations && this.animations.length > 0) {
-                this.animations.forEach(anim => anim.pause());
-            }
-            return;
-        }
-        
-        direction.normalize();
-        
-        const speed = 3.0;
-        const movement = direction.scale(speed * deltaTime);
-        
-        this.mesh.position.addInPlace(movement);
-        
-        // CRITICAL: Snap to terrain height (like player does)
-        const world = this.scene.world || this.scene.game?.world;
-        if (world && world.getHeightAt) {
-            const terrainY = world.getHeightAt(this.mesh.position.x, this.mesh.position.z);
-            this.mesh.position.y = terrainY + 0.6; // Stand on terrain (half height of ellipsoid)
-        }
-        
-        // Face movement direction
-        if (direction.length() > 0) {
-            const angle = Math.atan2(direction.x, direction.z);
-            this.mesh.rotation.y = angle;
-        }
-        
-        // Play run animation when moving
-        if (this.animations && this.animations.length > 0) {
-            // Find and play run/walk animation
-            let runAnim = this.animations.find(a => 
-                a.name.toLowerCase().includes('run') || 
-                a.name.toLowerCase().includes('walk')
-            );
-            
-            if (!runAnim) {
-                // If no specific run animation, use first one
-                runAnim = this.animations[0];
-            }
-            
-            if (runAnim && !runAnim.isPlaying) {
-                runAnim.start(true, 1.0); // Loop, normal speed
+            if (entity) {
+                spawnArray.push(entity);
             }
         }
-    }
-    
-    faceTarget(targetPos) {
-        if (!this.mesh) return;
         
-        const direction = targetPos.subtract(this.mesh.position);
-        const angle = Math.atan2(direction.x, direction.z);
-        this.mesh.rotation.y = angle;
-    }
-    
-    performAttack(target) {
-        const combat = this.scene.combat;
-        if (!combat) return;
-        
-        const damage = combat.calculateDamage(this, target);
-        combat.applyDamage(target, damage, this);
-        
-        console.log(`[Enemy] ${this.name} attacks for ${damage.amount}!`);
-    }
-    
-    dispose() {
-        if (this.targetHighlight) {
-            this.targetHighlight.dispose();
-        }
-        super.dispose();
-    }
-}
-
-// Item Class (inherits from Entity)
-class Item extends Entity {
-    // ... Item implementation (omitted for brevity)
-    constructor(scene, options) {
-        super(scene, options.position);
-        this.type = options.type; // weapon, armor, consumable, material
-        this.id = options.id || BABYLON.Tools.RandomId();
-        this.name = options.name || 'Unknown Item';
-        this.description = options.description || '';
-        this.icon = options.icon || 'default';
-        this.value = options.value || 1;
-        this.quantity = options.quantity || 1;
-        this.stackable = options.stackable || false;
-        
-        // Item-specific properties
-        this.equipSlot = options.equipSlot || null;
-        this.stats = options.stats || {};
-        this.damage = options.damage || 0;
-        this.attackSpeed = options.attackSpeed || 0;
-        this.defense = options.defense || 0;
-        this.effect = options.effect || null;
-        this.cooldown = options.cooldown || 0;
-
-        this.init();
-    }
-
-    init() {
-        this.createMesh();
-        this.setupPhysics();
-    }
-
-    createMesh() {
-        // Create a simple item mesh based on type
-        switch (this.type) {
-            case 'weapon':
-                this.mesh = BABYLON.MeshBuilder.CreateBox(`item_${this.id}`, { width: 0.3, height: 1.0, depth: 0.1 }, this.scene);
-                break;
-            case 'armor':
-                this.mesh = BABYLON.MeshBuilder.CreateBox(`item_${this.id}`, { size: 0.5 }, this.scene);
-                break;
-            case 'consumable':
-                this.mesh = BABYLON.MeshBuilder.CreateSphere(`item_${this.id}`, { diameter: 0.3 }, this.scene);
-                break;
-            case 'gold':
-                this.mesh = BABYLON.MeshBuilder.CreateDisc(`item_${this.id}`, { radius: 0.2, tessellation: 32 }, this.scene);
-                this.mesh.rotation.x = Math.PI / 2; // Lie flat
-                break;
-            default:
-                this.mesh = BABYLON.MeshBuilder.CreateBox(`item_${this.id}`, { size: 0.2 }, this.scene);
-                break;
-        }
-
-        this.mesh.position.copyFrom(this.position);
-        this.mesh.metadata = { isItem: true, type: this.type, id: this.id, data: this };
-        this.mesh.isPickable = true;
-        this.mesh.checkCollisions = false; // No collision for ground items
-
-        // Simple material based on type - FIXED
-        const material = new BABYLON.StandardMaterial(`item_mat_${this.id}`, this.scene);
-        // Color based on item type
-        switch(this.type) {
-            case 'weapon':
-                material.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.2); // Yellow
-                break;
-            case 'armor':
-                material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.8); // Blue
-                break;
-            case 'consumable':
-                material.diffuseColor = new BABYLON.Color3(0.2, 0.8, 0.2); // Green
-                break;
-            case 'gold':
-                material.diffuseColor = new BABYLON.Color3(1.0, 0.84, 0.0); // Gold
-                break;
-            default:
-                material.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7); // Gray
-        }
-        material.emissiveColor = material.diffuseColor.scale(0.2); // Slight glow
-        this.mesh.material = material;
-    }
-
-    setupPhysics() {
-        if (!this.scene.getPhysicsEngine()) return;
-        
-        // Use a simple sphere impostor for easy pickup/interaction
-        const impostorType = this.type === 'gold' ? BABYLON.PhysicsImpostor.BoxImpostor : BABYLON.PhysicsImpostor.SphereImpostor;
-        
-        this.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-            this.mesh,
-            impostorType,
-            { mass: this.type === 'gold' ? 0.1 : 1, friction: 0.5, restitution: 0.1 },
-            this.scene
-        );
-    }
-    
-    // Called when player touches the item
-    collect(collector) {
-        // In a real game, this would add to the collector's inventory
-        console.log(`[Item] ${collector.name} collected ${this.name} (x${this.quantity})`);
-        if (this.scene.audio) {
-            this.scene.audio.playSound('item_pickup');
-        }
-        // Remove from scene
-        this.dispose();
-        return true;
-    }
-
-    use(user) {
-        // Apply item effects based on type
-        switch (this.type) {
-            case 'consumable':
-                // Example: restore health
-                // user.health = Math.min(user.maxHealth, user.health + 20);
-                // this.quantity--;
-                return true;
-            case 'weapon':
-            case 'armor':
-                // user.equip(this);
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    serialize() {
-        return {
-            type: this.type,
-            id: this.id,
-            name: this.name,
-            description: this.description,
-            icon: this.icon,
-            value: this.value,
-            quantity: this.quantity,
-            stackable: this.stackable,
-            position: {
-                x: this.position.x,
-                y: this.position.y,
-                z: this.position.z
-            },
-            // Item-specific properties
-            equipSlot: this.equipSlot,
-            stats: this.stats,
-            damage: this.damage,
-            attackSpeed: this.attackSpeed,
-            defense: this.defense,
-            effect: this.effect,
-            cooldown: this.cooldown
-        };
-    }
-
-    static deserialize(data, scene) {
-        if (!data) return null;
-
-        return new Item(scene, {
-            type: data.type,
-            id: data.id,
-            name: data.name,
-            description: data.description,
-            icon: data.icon,
-            value: data.value,
-            quantity: data.quantity,
-            stackable: data.stackable,
-            position: new BABYLON.Vector3(
-                data.position.x,
-                data.position.y,
-                data.position.z
-            ),
-            // Item-specific properties
-            equipSlot: data.equipSlot,
-            stats: data.stats,
-            damage: data.damage,
-            attackSpeed: data.attackSpeed,
-            defense: data.defense,
-            effect: data.effect,
-            cooldown: data.cooldown
+        // Store spawn data for respawning
+        this.spawnedEntities.set(spawnData.id, {
+            spawn: spawnData,
+            template: template,
+            entities: spawnArray
         });
     }
+    
+    async createEnemy(template, position, spawnData) {
+        const enemyId = `enemy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Create enemy mesh
+        const mesh = BABYLON.MeshBuilder.CreateCapsule(enemyId, {
+            height: 1.8,
+            radius: 0.4
+        }, this.scene);
+        
+        // CRITICAL: Set position BEFORE enabling physics
+        mesh.position.copyFrom(position);
+        
+        // Material based on level/type
+        const mat = new BABYLON.StandardMaterial(`enemyMat_${enemyId}`, this.scene);
+        const hue = (template.level || 1) * 30;  // Different color per level
+        mat.diffuseColor = BABYLON.Color3.FromHSV(hue, 0.8, 0.6);
+        mat.emissiveColor = BABYLON.Color3.FromHSV(hue, 0.8, 0.2);
+        mesh.material = mat;
+        
+        // Create enemy object
+        const enemy = {
+            id: enemyId,
+            mesh: mesh,
+            name: template.name,
+            level: template.level,
+            type: template.code,
+            faction: template.faction,
+            stats: template.stats || {},
+            spawnData: spawnData,
+            spawnPosition: position.clone(),
+            spawnRadius: parseFloat(spawnData.spawn_radius) || 15,
+            isAlive: true,
+            maxHealth: (template.stats && template.stats.health) || 100,
+            health: (template.stats && template.stats.health) || 100,
+            damage: (template.stats && template.stats.attack) || 10,
+            defense: (template.stats && template.stats.defense) || 0,
+            lootTable: template.loot_table || {},
+            aiProfile: template.ai_profile || 'aggressive'
+        };
+        
+        // Store reference in mesh
+        mesh.entityData = enemy;
+        mesh.isPickable = true;
+        
+        // Initialize AI if available
+        if (window.EnemyAI) {
+            enemy.ai = new EnemyAI(enemy);
+        } else {
+            console.warn('[World] EnemyAI not available for', enemy.name);
+        }
+        
+        // Add to world
+        this.enemies.push(enemy);
+        this.allEntities.set(enemyId, enemy);
+        
+        // Create nameplate
+        this.createNameplate(mesh, enemy.name, enemy.level, 'red');
+        
+        console.log(`[World] ✓ Spawned enemy: ${enemy.name} (Lv.${enemy.level}) at`, position.toString());
+        
+        return enemy;
+    }
+    
+    async createNPC(template, position, spawnData) {
+        const npcId = `npc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Create NPC mesh
+        const mesh = BABYLON.MeshBuilder.CreateCapsule(npcId, {
+            height: 1.8,
+            radius: 0.4
+        }, this.scene);
+        
+        // CRITICAL: Set position BEFORE enabling physics
+        mesh.position.copyFrom(position);
+        
+        // Friendly NPC material (green-ish)
+        const mat = new BABYLON.StandardMaterial(`npcMat_${npcId}`, this.scene);
+        mat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.3);
+        mat.emissiveColor = new BABYLON.Color3(0.1, 0.2, 0.1);
+        mesh.material = mat;
+        
+        // Create NPC object
+        const npc = {
+            id: npcId,
+            mesh: mesh,
+            name: template.name,
+            level: template.level,
+            type: template.code,
+            faction: template.faction,
+            stats: template.stats || {},
+            spawnData: spawnData,
+            spawnPosition: position.clone(),
+            isAlive: true,
+            maxHealth: (template.stats && template.stats.health) || 150,
+            health: (template.stats && template.stats.health) || 150
+        };
+        
+        // Store reference in mesh
+        mesh.entityData = npc;
+        mesh.isPickable = true;
+        
+        // Add to world
+        this.npcs.push(npc);
+        this.allEntities.set(npcId, npc);
+        
+        // Create nameplate
+        this.createNameplate(mesh, npc.name, npc.level, 'green');
+        
+        console.log(`[World] ✓ Spawned NPC: ${npc.name} (Lv.${npc.level}) at`, position.toString());
+        
+        return npc;
+    }
+    
+    createNameplate(mesh, name, level, color) {
+        // Create plane for nameplate
+        const plane = BABYLON.MeshBuilder.CreatePlane(
+            `nameplate_${mesh.name}`,
+            { width: 2, height: 0.4 },
+            this.scene
+        );
+        
+        plane.parent = mesh;
+        plane.position.y = 1.2;
+        plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+        
+        // Create dynamic texture
+        const texture = new BABYLON.DynamicTexture(
+            `nameplateTexture_${mesh.name}`,
+            { width: 512, height: 128 },
+            this.scene,
+            false
+        );
+        
+        const mat = new BABYLON.StandardMaterial(`nameplateMat_${mesh.name}`, this.scene);
+        mat.diffuseTexture = texture;
+        mat.emissiveTexture = texture;
+        mat.opacityTexture = texture;
+        mat.backFaceCulling = false;
+        plane.material = mat;
+        
+        // Draw text
+        const ctx = texture.getContext();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, 512, 128);
+        
+        ctx.font = 'bold 40px Arial';
+        ctx.fillStyle = color || 'white';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${name} (Lv.${level})`, 256, 75);
+        
+        texture.update();
+        
+        return plane;
+    }
+    
+    createProceduralSpawns() {
+        console.log('[World] Creating procedural spawns (fallback)');
+        
+        // Create some wolves in a circle around spawn
+        for (let i = 0; i < 8; i++) {
+            const angle = (Math.PI * 2 / 8) * i;
+            const distance = 50;
+            const x = Math.cos(angle) * distance;
+            const z = Math.sin(angle) * distance;
+            const y = this.getHeightAt(x, z) + 0.9;
+            
+            this.createProceduralEnemy('wolf', new BABYLON.Vector3(x, y, z), 3);
+        }
+        
+        // Create some merchants in town
+        const merchantPositions = [
+            new BABYLON.Vector3(10, 0, 10),
+            new BABYLON.Vector3(-10, 0, 10),
+            new BABYLON.Vector3(10, 0, -10),
+            new BABYLON.Vector3(-10, 0, -10)
+        ];
+        
+        merchantPositions.forEach((pos, i) => {
+            pos.y = this.getHeightAt(pos.x, pos.z) + 0.9;
+            this.createProceduralNPC('merchant', pos, 5);
+        });
+    }
+    
+    createProceduralEnemy(type, position, level) {
+        const template = {
+            id: 999,
+            code: type,
+            name: type.charAt(0).toUpperCase() + type.slice(1),
+            level: level,
+            faction: 'hostile',
+            stats: {
+                health: 40 + (level * 10),
+                attack: 8 + (level * 2),
+                defense: 2 + level,
+                speed: 1.0,
+                aggro_range: 15
+            },
+            ai_profile: 'aggressive',
+            loot_table: {}
+        };
+        
+        const spawnData = {
+            id: 999,
+            npc_template_id: 999,
+            zone_id: 1,
+            position_x: position.x,
+            position_y: position.y,
+            position_z: position.z,
+            respawn_seconds: 120,
+            max_spawn: 1,
+            spawn_radius: 0
+        };
+        
+        return this.createEnemy(template, position, spawnData);
+    }
+    
+    createProceduralNPC(type, position, level) {
+        const template = {
+            id: 998,
+            code: type,
+            name: type.charAt(0).toUpperCase() + type.slice(1),
+            level: level,
+            faction: 'friendly',
+            stats: {
+                health: 150,
+                defense: 5
+            }
+        };
+        
+        const spawnData = {
+            id: 998,
+            npc_template_id: 998,
+            zone_id: 1,
+            position_x: position.x,
+            position_y: position.y,
+            position_z: position.z,
+            respawn_seconds: 0,
+            max_spawn: 1,
+            spawn_radius: 0
+        };
+        
+        return this.createNPC(template, position, spawnData);
+    }
+    
+    // ==================== TERRAIN GENERATION ====================
+    
+    async createTerrain() {
+        // Create ground mesh
+        this.ground = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
+            'ground',
+            'data:image/png;base64,' + this.generateHeightMapDataURL(),
+            {
+                width: this.size,
+                height: this.size,
+                subdivisions: this.segments,
+                minHeight: 0,
+                maxHeight: this.maxHeight,
+                onReady: (mesh) => {
+                    console.log('[World] ✓ Terrain generated');
+                }
+            },
+            this.scene
+        );
+        
+        this.ground.checkCollisions = true;
+        this.ground.isPickable = true;
+        
+        // Apply grass texture if available
+        const grassTexture = ASSET_PATHS.getTexturePath('grass');
+        if (grassTexture && this.scene.game.assetManager) {
+            const texture = await this.scene.game.assetManager.loadTexture(grassTexture, {
+                uScale: CONFIG.WORLD.GROUND.TILE_SCALE,
+                vScale: CONFIG.WORLD.GROUND.TILE_SCALE
+            });
+            
+            if (texture) {
+                const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
+                mat.diffuseTexture = texture;
+                mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+                this.ground.material = mat;
+            } else {
+                this.applyDefaultGroundMaterial();
+            }
+        } else {
+            this.applyDefaultGroundMaterial();
+        }
+        
+        // Store height map for later use
+        this.cacheHeightMap();
+    }
+    
+    applyDefaultGroundMaterial() {
+        const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
+        mat.diffuseColor = new BABYLON.Color3(0.3, 0.5, 0.2); // Grass green
+        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        this.ground.material = mat;
+    }
+    
+    generateHeightMapDataURL() {
+        // Create a simple procedural height map using noise
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        
+        const imageData = ctx.createImageData(size, size);
+        const data = imageData.data;
+        
+        // Simple noise-based terrain
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const i = (y * size + x) * 4;
+                
+                // Multiple octaves of noise
+                const nx = x / size;
+                const ny = y / size;
+                
+                let height = 0;
+                height += this.noise(nx * 2, ny * 2) * 0.5;
+                height += this.noise(nx * 4, ny * 4) * 0.25;
+                height += this.noise(nx * 8, ny * 8) * 0.125;
+                
+                // Normalize to 0-255
+                const value = Math.floor((height + 1) * 127.5);
+                
+                data[i] = value;
+                data[i + 1] = value;
+                data[i + 2] = value;
+                data[i + 3] = 255;
+            }
+        }
+        
+        ctx.putImageData(imageData, 0, 0);
+        return canvas.toDataURL().split(',')[1];
+    }
+    
+    noise(x, y) {
+        // Simple hash-based noise
+        const seed = this.seed || 12345;
+        const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453123;
+        return (n - Math.floor(n)) * 2 - 1;
+    }
+    
+    cacheHeightMap() {
+        // Cache height map for fast lookups
+        this.heightMap = {};
+        console.log('[World] Height map cached');
+    }
+    
+    getHeightAt(x, z) {
+        if (!this.ground) return 0;
+        
+        // Use Babylon's built-in height retrieval
+        const height = this.ground.getHeightAtCoordinates(x, z);
+        return height !== null ? height : 0;
+    }
+    
+    // ==================== SKYBOX ====================
+    
+    createSkybox() {
+        const skybox = BABYLON.MeshBuilder.CreateBox(
+            'skybox',
+            { size: CONFIG.WORLD.SKYBOX.SIZE },
+            this.scene
+        );
+        
+        const skyboxMat = new BABYLON.StandardMaterial('skyboxMat', this.scene);
+        skyboxMat.backFaceCulling = false;
+        skyboxMat.disableLighting = true;
+        
+        // Try to load HDRI sky texture
+        const skyTexture = ASSET_PATHS.getTexturePath('sky_hdri');
+        if (skyTexture) {
+            const hdrTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(
+                skyTexture,
+                this.scene
+            );
+            hdrTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+            skyboxMat.reflectionTexture = hdrTexture;
+        } else {
+            // Fallback to solid color
+            skyboxMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 1.0);
+        }
+        
+        skybox.material = skyboxMat;
+        skybox.infiniteDistance = true;
+        
+        this.skybox = skybox;
+        console.log('[World] ✓ Skybox created');
+    }
+    
+    // ==================== WATER ====================
+    
+    createWater() {
+        if (this.waterLevel <= 0) return;
+        
+        this.water = BABYLON.MeshBuilder.CreateGround(
+            'water',
+            { width: this.size, height: this.size },
+            this.scene
+        );
+        
+        this.water.position.y = this.waterLevel;
+        
+        const waterMat = new BABYLON.StandardMaterial('waterMat', this.scene);
+        waterMat.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.6);
+        waterMat.specularColor = new BABYLON.Color3(1, 1, 1);
+        waterMat.alpha = 0.7;
+        
+        this.water.material = waterMat;
+        console.log('[World] ✓ Water created at y =', this.waterLevel);
+    }
+    
+    // ==================== LIGHTING ====================
+    
+    setupLighting() {
+        // Main directional light (sun)
+        const sun = new BABYLON.DirectionalLight(
+            'sun',
+            new BABYLON.Vector3(-1, -2, -1),
+            this.scene
+        );
+        sun.intensity = 0.8;
+        sun.diffuse = new BABYLON.Color3(1, 0.95, 0.9);
+        sun.specular = new BABYLON.Color3(1, 1, 1);
+        
+        // Ambient light
+        const ambient = new BABYLON.HemisphericLight(
+            'ambient',
+            new BABYLON.Vector3(0, 1, 0),
+            this.scene
+        );
+        ambient.intensity = 0.4;
+        ambient.diffuse = new BABYLON.Color3(0.8, 0.8, 1.0);
+        ambient.groundColor = new BABYLON.Color3(0.3, 0.3, 0.2);
+        
+        console.log('[World] ✓ Lighting setup complete');
+    }
+    
+    // ==================== UPDATE LOOP ====================
+    
+    update(deltaTime) {
+        // Update enemies
+        for (let i = 0; i < this.enemies.length; i++) {
+            const enemy = this.enemies[i];
+            
+            if (enemy.isAlive) {
+                // Update AI
+                if (enemy.ai && enemy.ai.update) {
+                    enemy.ai.update(deltaTime);
+                }
+                
+                // CRITICAL: Keep enemies on ground
+                if (enemy.mesh) {
+                    const groundY = this.getHeightAt(enemy.mesh.position.x, enemy.mesh.position.z);
+                    enemy.mesh.position.y = groundY + 0.9; // Half height
+                }
+            } else {
+                // Handle dead enemy
+                if (enemy.mesh && !enemy.mesh.isDisposed()) {
+                    // Schedule respawn if applicable
+                    if (enemy.spawnData && enemy.spawnData.respawn_seconds > 0) {
+                        this.scheduleRespawn(enemy);
+                    }
+                }
+            }
+        }
+        
+        // Update NPCs (keep them on ground)
+        for (let i = 0; i < this.npcs.length; i++) {
+            const npc = this.npcs[i];
+            if (npc.mesh && npc.isAlive) {
+                const groundY = this.getHeightAt(npc.mesh.position.x, npc.mesh.position.z);
+                npc.mesh.position.y = groundY + 0.9;
+            }
+        }
+        
+        // Handle respawns
+        this.handleRespawns(deltaTime);
+    }
+    
+    // ==================== RESPAWN SYSTEM ====================
+    
+    scheduleRespawn(entity) {
+        if (!entity.spawnData || entity.spawnData.respawn_seconds <= 0) return;
+        
+        const respawnTime = Date.now() + (entity.spawnData.respawn_seconds * 1000);
+        
+        this.respawnQueue.push({
+            entity: entity,
+            respawnTime: respawnTime,
+            spawnData: entity.spawnData,
+            template: this.npcTemplates.get(entity.spawnData.npc_template_id)
+        });
+        
+        // Remove entity mesh
+        if (entity.mesh) {
+            entity.mesh.dispose();
+            entity.mesh = null;
+        }
+        
+        console.log(`[World] Scheduled respawn for ${entity.name} in ${entity.spawnData.respawn_seconds}s`);
+    }
+    
+    handleRespawns(deltaTime) {
+        const now = Date.now();
+        
+        for (let i = this.respawnQueue.length - 1; i >= 0; i--) {
+            const respawn = this.respawnQueue[i];
+            
+            if (now >= respawn.respawnTime) {
+                // Respawn the entity
+                this.createSpawn(respawn.spawnData);
+                
+                // Remove from queue
+                this.respawnQueue.splice(i, 1);
+                
+                console.log(`[World] ✓ Respawned ${respawn.template.name}`);
+            }
+        }
+    }
+    
+    // ==================== ENTITY MANAGEMENT ====================
+    
+    getEntityById(id) {
+        return this.allEntities.get(id);
+    }
+    
+    getEntityByMesh(mesh) {
+        if (!mesh) return null;
+        return mesh.entityData || null;
+    }
+    
+    getNearbyEnemies(position, radius) {
+        return this.enemies.filter(enemy => {
+            if (!enemy.mesh || !enemy.isAlive) return false;
+            const distance = BABYLON.Vector3.Distance(position, enemy.mesh.position);
+            return distance <= radius;
+        });
+    }
+    
+    getNearbyNPCs(position, radius) {
+        return this.npcs.filter(npc => {
+            if (!npc.mesh || !npc.isAlive) return false;
+            const distance = BABYLON.Vector3.Distance(position, npc.mesh.position);
+            return distance <= radius;
+        });
+    }
+    
+    // ==================== CLEANUP ====================
+    
+    dispose() {
+        // Dispose enemies
+        this.enemies.forEach(enemy => {
+            if (enemy.ai) enemy.ai.dispose();
+            if (enemy.mesh) enemy.mesh.dispose();
+        });
+        
+        // Dispose NPCs
+        this.npcs.forEach(npc => {
+            if (npc.mesh) npc.mesh.dispose();
+        });
+        
+        // Dispose world elements
+        if (this.ground) this.ground.dispose();
+        if (this.water) this.water.dispose();
+        if (this.skybox) this.skybox.dispose();
+        
+        console.log('[World] ✓ Disposed');
+    }
 }
 
-// Export for Node.js/CommonJS
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        World,
-        NPC,
-        Enemy,
-        Item,
-        SimplexNoise
-    };
-}
-
-// Make classes globally available in browser
-if (typeof window !== 'undefined') {
-    window.World = World;
-    window.Entity = Entity;
-    window.NPC = NPC;
-    window.Enemy = Enemy;
-    window.Item = Item;
-    window.SimplexNoise = SimplexNoise;
-}
+window.World = World;
+console.log('[World] v3.0.0 loaded - Database-driven with AI');

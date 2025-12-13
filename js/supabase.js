@@ -222,8 +222,9 @@ class SupabaseService {
             
             this.currentSession = session;
             this.currentAccount = account;
+            this.isGM = account.is_gm || false; // Store GM status for easy access
             
-            console.log('[SupabaseService] ✓ Session restored:', account.username);
+            console.log('[SupabaseService] ✓ Session restored:', account.username, `(GM: ${this.isGM})`);
             return true;
             
         } catch (error) {
