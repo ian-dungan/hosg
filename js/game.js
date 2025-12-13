@@ -881,7 +881,7 @@ class Game {
     });
 
     if (this.ui) {
-      this.ui.showMessage("Welcome to Heroes of Shady Grove!", 3000);
+      this.ui.showMessage("Welcome to Heroes of Shady Grove!", 10000);
     }
   }
 

@@ -539,30 +539,39 @@ class UIManager {
                         break;
                         
                     case 'talk':
+                        if (target && game?.ui) {
+                            game.ui.addChatMessage(`[${target.name}] "Greetings, traveler!"`, 'npc');
+                        }
                         console.log('[UI] Talking to:', target?.name);
-                        alert(`${target?.name} says: "Greetings, traveler!"`);
                         break;
                         
                     case 'trade':
+                        if (target && game?.ui) {
+                            game.ui.addChatMessage(`[${target.name}] "What would you like to buy or sell?"`, 'npc');
+                            game.ui.addChatMessage('[System] Trade system coming soon!', 'system');
+                        }
                         console.log('[UI] Trading with:', target?.name);
-                        alert(`${target?.name} says: "What would you like to buy or sell?"`);
                         break;
                         
                     case 'useItem':
                         console.log('[UI] Using item on:', target?.name);
                         if (game?.player?.inventory) {
                             game.player.inventory.toggleInventory();
-                            alert('Select an item from your inventory to use.');
+                            if (game?.ui) {
+                                game.ui.addChatMessage('[System] Select an item from your inventory to use.', 'system');
+                            }
                         } else {
-                            alert('Inventory system not available.');
+                            if (game?.ui) {
+                                game.ui.addChatMessage('[System] Inventory system not available.', 'error');
+                            }
                         }
                         break;
                         
                     case 'consider':
-                        if (target) {
-                            const level = target.stats?.level || 1;
-                            const hp = target.stats?.currentHP || target.health || 100;
-                            const maxHP = target.stats?.maxHP || target.maxHealth || 100;
+                        if (target && game?.ui) {
+                            const level = target.level || 1;
+                            const hp = target.health || 100;
+                            const maxHP = target.maxHealth || 100;
                             const hpPercent = Math.round((hp / maxHP) * 100);
                             
                             let assessment = '';
@@ -575,7 +584,8 @@ class UIManager {
                                 assessment = 'Looks friendly.';
                             }
                             
-                            alert(`${target.name}\nLevel: ${level}\nHealth: ${hp}/${maxHP} (${hpPercent}%)\n\n${assessment}`);
+                            game.ui.addChatMessage(`[Consider] ${target.name} - Level ${level}`, 'consider');
+                            game.ui.addChatMessage(`[Consider] Health: ${hp}/${maxHP} (${hpPercent}%) - ${assessment}`, 'consider');
                         }
                         break;
                         
@@ -596,15 +606,21 @@ class UIManager {
     
     createChat() {
         // Chat log container (bottom-left)
+        // Chat log container (bottom-left, shows last 10 messages)
         this.chatContainer = new BABYLON.GUI.StackPanel("chatLog");
-        this.chatContainer.width = "400px";
-        this.chatContainer.height = "250px";
+        this.chatContainer.width = "500px";
+        this.chatContainer.height = "220px"; // Fits ~10 lines at 20px each + spacing
         this.chatContainer.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
         this.chatContainer.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
         this.chatContainer.left = "10px";
         this.chatContainer.top = "-10px";
         this.chatContainer.isVertical = true;
         this.chatContainer.spacing = 2;
+        this.chatContainer.background = "rgba(0, 0, 0, 0.3)"; // Subtle background
+        this.chatContainer.paddingLeft = "5px";
+        this.chatContainer.paddingRight = "5px";
+        this.chatContainer.paddingTop = "5px";
+        this.chatContainer.paddingBottom = "5px";
         this.gui.addControl(this.chatContainer);
         
         // Setup keyboard listener for Enter key
@@ -723,7 +739,7 @@ class UIManager {
         }
     }
     
-    addChatMessage(text, type = 'info') {
+    addChatMessage(text, type = 'info', temporary = false, duration = 10000) {
         // Remove oldest message if at limit
         if (this.chatLog.length >= this.maxChatMessages) {
             const oldestMsg = this.chatLog.shift();
@@ -756,6 +772,15 @@ class UIManager {
             case 'local':
                 color = '#888888';
                 break;
+            case 'npc':
+                color = '#88ff88';
+                break;
+            case 'consider':
+                color = '#ffaa88';
+                break;
+            case 'welcome':
+                color = '#ffdd44';
+                break;
         }
         
         // Create message text block
@@ -772,26 +797,44 @@ class UIManager {
         this.chatContainer.addControl(msgText);
         
         // Store in log
-        this.chatLog.push({
+        const logEntry = {
             text: text,
             type: type,
             control: msgText,
             timestamp: Date.now()
-        });
+        };
+        this.chatLog.push(logEntry);
         
-        // Auto-fade after 10 seconds
-        setTimeout(() => {
-            if (msgText.alpha) {
-                msgText.alpha = 0.3;
-            }
-        }, 10000);
+        // If temporary, fade and remove after duration
+        if (temporary) {
+            setTimeout(() => {
+                const fadeInterval = setInterval(() => {
+                    if (msgText.alpha > 0) {
+                        msgText.alpha -= 0.05;
+                    } else {
+                        clearInterval(fadeInterval);
+                        // Remove from chat
+                        this.chatContainer.removeControl(msgText);
+                        // Remove from log
+                        const index = this.chatLog.indexOf(logEntry);
+                        if (index > -1) {
+                            this.chatLog.splice(index, 1);
+                        }
+                    }
+                }, 50);
+            }, duration);
+        }
         
         console.log('[Chat]', text);
     }
     
     showMessage(text, duration = 3000, type = 'info') {
+        // Welcome messages should be temporary (auto-remove after duration)
+        const isTemporary = (text.toLowerCase().includes('welcome'));
+        const messageType = isTemporary ? 'welcome' : type;
+        
         // Show message in chat
-        this.addChatMessage(text, type);
+        this.addChatMessage(text, messageType, isTemporary, duration);
         
         // Also show as center screen notification if important
         if (type === 'error' || type === 'success' || type === 'gm') {

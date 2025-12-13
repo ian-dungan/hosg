@@ -1428,42 +1428,129 @@ class Player {
     targetNext() {
         if (!this.scene.combat || !this.scene.world) return;
         
-        // Get all ENEMIES only (not NPCs) - like WoW/FFXI
-        const allEnemies = this.scene.world.enemies.filter(e => !e.isDead && e.mesh);
+        // Get all targetable entities (enemies AND NPCs)
+        const allEntities = [
+            ...this.scene.world.enemies.filter(e => e.isAlive && e.mesh),
+            ...this.scene.world.npcs.filter(n => n.isAlive && n.mesh)
+        ];
         
-        if (allEnemies.length === 0) return;
+        if (allEntities.length === 0) return;
         
-        // Find current target index
-        let currentIndex = -1;
+        // Get camera forward direction
+        const camera = this.scene.activeCamera;
+        const cameraForward = camera.getForwardRay().direction;
+        const playerPos = this.mesh.position;
+        
+        // Filter to entities in front of camera and sort by distance
+        const entitiesInFront = allEntities
+            .map(entity => {
+                const entityPos = entity.mesh.position;
+                const toEntity = entityPos.subtract(playerPos);
+                const distance = toEntity.length();
+                
+                // Normalize direction to entity
+                const directionToEntity = toEntity.normalize();
+                
+                // Dot product with camera forward (1 = directly ahead, -1 = behind)
+                const dotProduct = BABYLON.Vector3.Dot(cameraForward, directionToEntity);
+                
+                return {
+                    entity: entity,
+                    distance: distance,
+                    dotProduct: dotProduct
+                };
+            })
+            .filter(item => item.dotProduct > 0.3) // Only entities in front (roughly 70 degree cone)
+            .sort((a, b) => {
+                // Sort by distance (closest first)
+                return a.distance - b.distance;
+            });
+        
+        if (entitiesInFront.length === 0) {
+            // No entities in front, just use all entities sorted by distance
+            const sortedAll = allEntities
+                .map(entity => {
+                    const distance = entity.mesh.position.subtract(playerPos).length();
+                    return { entity: entity, distance: distance };
+                })
+                .sort((a, b) => a.distance - b.distance);
+            
+            this.scene.combat.setTarget(sortedAll[0].entity);
+            return;
+        }
+        
+        // Find current target in the list
         const currentTarget = this.scene.combat.currentTarget;
-        if (currentTarget && currentTarget.isEnemy) {
-            currentIndex = allEnemies.findIndex(e => e.id === currentTarget.id);
+        let currentIndex = -1;
+        
+        if (currentTarget) {
+            currentIndex = entitiesInFront.findIndex(item => item.entity.id === currentTarget.id);
         }
         
         // Get next target (wrap around)
-        const nextIndex = (currentIndex + 1) % allEnemies.length;
-        this.scene.combat.setTarget(allEnemies[nextIndex]);
+        const nextIndex = (currentIndex + 1) % entitiesInFront.length;
+        this.scene.combat.setTarget(entitiesInFront[nextIndex].entity);
     }
     
-    // Target previous enemy (D-pad) - WoW/FFXI style
+    // Target previous entity (camera-aware)
     targetPrevious() {
         if (!this.scene.combat || !this.scene.world) return;
         
-        // Get all ENEMIES only (not NPCs) - like WoW/FFXI
-        const allEnemies = this.scene.world.enemies.filter(e => !e.isDead && e.mesh);
+        // Get all targetable entities (enemies AND NPCs)
+        const allEntities = [
+            ...this.scene.world.enemies.filter(e => e.isAlive && e.mesh),
+            ...this.scene.world.npcs.filter(n => n.isAlive && n.mesh)
+        ];
         
-        if (allEnemies.length === 0) return;
+        if (allEntities.length === 0) return;
         
-        // Find current target index
-        let currentIndex = -1;
+        // Get camera forward direction
+        const camera = this.scene.activeCamera;
+        const cameraForward = camera.getForwardRay().direction;
+        const playerPos = this.mesh.position;
+        
+        // Filter to entities in front of camera and sort by distance
+        const entitiesInFront = allEntities
+            .map(entity => {
+                const entityPos = entity.mesh.position;
+                const toEntity = entityPos.subtract(playerPos);
+                const distance = toEntity.length();
+                const directionToEntity = toEntity.normalize();
+                const dotProduct = BABYLON.Vector3.Dot(cameraForward, directionToEntity);
+                
+                return {
+                    entity: entity,
+                    distance: distance,
+                    dotProduct: dotProduct
+                };
+            })
+            .filter(item => item.dotProduct > 0.3) // Only entities in front
+            .sort((a, b) => a.distance - b.distance);
+        
+        if (entitiesInFront.length === 0) {
+            // No entities in front, just use all entities sorted by distance
+            const sortedAll = allEntities
+                .map(entity => {
+                    const distance = entity.mesh.position.subtract(playerPos).length();
+                    return { entity: entity, distance: distance };
+                })
+                .sort((a, b) => a.distance - b.distance);
+            
+            this.scene.combat.setTarget(sortedAll[0].entity);
+            return;
+        }
+        
+        // Find current target in the list
         const currentTarget = this.scene.combat.currentTarget;
-        if (currentTarget && currentTarget.isEnemy) {
-            currentIndex = allEnemies.findIndex(e => e.id === currentTarget.id);
+        let currentIndex = -1;
+        
+        if (currentTarget) {
+            currentIndex = entitiesInFront.findIndex(item => item.entity.id === currentTarget.id);
         }
         
         // Get previous target (wrap around)
-        const prevIndex = currentIndex <= 0 ? allEnemies.length - 1 : currentIndex - 1;
-        this.scene.combat.setTarget(allEnemies[prevIndex]);
+        const prevIndex = currentIndex <= 0 ? entitiesInFront.length - 1 : currentIndex - 1;
+        this.scene.combat.setTarget(entitiesInFront[prevIndex].entity);
     }
     
     // Handle A button confirm
