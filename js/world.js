@@ -481,9 +481,9 @@ class World {
     // ==================== TERRAIN GENERATION ====================
     
     async createTerrain() {
-        // Create ground mesh
+        // Create ground mesh (name it 'terrain' for player compatibility)
         this.ground = BABYLON.MeshBuilder.CreateGroundFromHeightMap(
-            'ground',
+            'terrain', // IMPORTANT: Player waits for mesh named 'terrain'
             'data:image/png;base64,' + this.generateHeightMapDataURL(),
             {
                 width: this.size,
@@ -492,7 +492,11 @@ class World {
                 minHeight: 0,
                 maxHeight: this.maxHeight,
                 onReady: (mesh) => {
-                    console.log('[World] ✓ Terrain generated');
+                    // IMPORTANT: Set checkCollisions AFTER heightmap is loaded
+                    // This signals to player that terrain is fully ready
+                    mesh.checkCollisions = true;
+                    mesh.isPickable = true;
+                    console.log('[World] ✓ Terrain generated and ready');
                 }
             },
             this.scene
@@ -500,9 +504,6 @@ class World {
         
         // Backward compatibility alias
         this.terrain = this.ground;
-        
-        this.ground.checkCollisions = true;
-        this.ground.isPickable = true;
         
         // Apply grass texture if available
         const grassTexture = ASSET_PATHS.getTexturePath('grass');
@@ -595,6 +596,11 @@ class World {
         // Use Babylon's built-in height retrieval
         const height = this.ground.getHeightAtCoordinates(x, z);
         return height !== null ? height : 0;
+    }
+    
+    // Backward compatibility alias
+    getTerrainHeight(x, z) {
+        return this.getHeightAt(x, z);
     }
     
     // ==================== SKYBOX ====================
