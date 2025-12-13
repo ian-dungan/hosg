@@ -149,9 +149,11 @@ class UIManager {
         this.minimapDots.forEach(dot => dot.dispose());
         this.minimapDots = [];
 
-        // Define map constants
+        // Define map constants (handle both old and new world structure)
         const mapSize = 150; 
-        const worldSize = this.game.world.options.size || 1000;
+        const worldSize = (this.game.world && this.game.world.size) || 
+                         (this.game.world && this.game.world.options && this.game.world.options.size) || 
+                         1000;
         const scale = mapSize / worldSize; 
 
         const playerX = this.player.mesh.position.x;
