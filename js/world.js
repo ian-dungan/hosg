@@ -8,31 +8,81 @@ class World {
         this.scene = scene;
         this.game = scene.game;
         
-        // Configuration
-        this.size = options.size || CONFIG.WORLD.SIZE;
-        this.segments = options.segments || CONFIG.WORLD.TERRAIN_SIZE;
-        this.maxHeight = options.maxHeight || 5;
-        this.seed = options.seed || CONFIG.WORLD.SEED;
-        this.waterLevel = options.waterLevel || CONFIG.WORLD.WATER_LEVEL;
+        // Configuration (matching original structure)
+        this.options = {
+            size: options.size || CONFIG.WORLD.SIZE,
+            segments: options.segments || CONFIG.WORLD.TERRAIN_SIZE,
+            maxHeight: options.maxHeight || 5,
+            seed: options.seed || CONFIG.WORLD.SEED,
+            waterLevel: options.waterLevel || CONFIG.WORLD.WATER_LEVEL,
+            ...options
+        };
+        
+        // Shortcut properties for compatibility
+        this.size = this.options.size;
+        this.segments = this.options.segments;
+        this.maxHeight = this.options.maxHeight;
+        this.seed = this.options.seed;
+        this.waterLevel = this.options.waterLevel;
         this.onProgress = options.onProgress || (() => {});
         
-        // World elements
-        this.ground = null;
+        // Terrain (both old and new naming for compatibility)
+        this.terrain = null;
+        this.terrainMaterial = null;
+        this.ground = null; // New v3 naming
         this.water = null;
+        this.waterMaterial = null;
         this.skybox = null;
         this.heightMap = null;
+        
+        // Environment decoration
+        this.trees = [];
+        this.rocks = [];
+        this.grass = [];
+        this.buildings = [];
         
         // NPCs and Enemies
         this.npcs = [];
         this.enemies = [];
-        this.allEntities = new Map(); // id -> entity
+        this.items = []; // Original items array
+        this.worldItems = []; // Items dropped in the world (for inventory pickup)
+        this.allEntities = new Map(); // id -> entity (v3 addition)
         
-        // Spawn data from database
+        // Time and weather
+        this.time = 0; // 0-24 hours
+        this.day = 1;
+        this.weather = 'clear'; // clear, rain, snow, storm
+        this.weatherIntensity = 0; // 0-1
+        this.weatherTargetIntensity = 0;
+        this.weatherTransitionSpeed = 0.1;
+        
+        // Lighting
+        this.sunLight = null;
+        this.ambientLight = null;
+        this.shadowGenerator = null;
+        
+        // Physics
+        this.gravity = new BABYLON.Vector3(0, -9.81, 0);
+        
+        // Asset loader (for caching models/textures)
+        this.assetLoader = (typeof AssetLoader !== 'undefined') ? new AssetLoader(this.scene) : null;
+        if (this.scene) {
+            this.scene.world = this;
+            if (this.scene.game) {
+                this.scene.game.world = this;
+            }
+            this.scene.assetLoader = this.assetLoader;
+            if (this.scene.game) {
+                this.scene.game.assetLoader = this.assetLoader;
+            }
+        }
+        
+        // Spawn data from database (v3 additions)
         this.npcTemplates = new Map(); // id -> template
         this.spawnPoints = []; // All spawn points from database
         this.spawnedEntities = new Map(); // spawn_id -> entity array
         
-        // Respawn management
+        // Respawn management (v3 additions)
         this.respawnQueue = [];
         this.respawnCheckInterval = 1000; // Check every second
         this.lastRespawnCheck = 0;
@@ -448,6 +498,9 @@ class World {
             this.scene
         );
         
+        // Backward compatibility alias
+        this.terrain = this.ground;
+        
         this.ground.checkCollisions = true;
         this.ground.isPickable = true;
         
@@ -464,6 +517,7 @@ class World {
                 mat.diffuseTexture = texture;
                 mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
                 this.ground.material = mat;
+                this.terrainMaterial = mat; // Store reference
             } else {
                 this.applyDefaultGroundMaterial();
             }
@@ -480,6 +534,7 @@ class World {
         mat.diffuseColor = new BABYLON.Color3(0.3, 0.5, 0.2); // Grass green
         mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         this.ground.material = mat;
+        this.terrainMaterial = mat; // Store reference
     }
     
     generateHeightMapDataURL() {
@@ -584,6 +639,7 @@ class World {
         waterMat.alpha = 0.7;
         
         this.water.material = waterMat;
+        this.waterMaterial = waterMat; // Store reference
         console.log('[World] ✓ Water created at y =', this.waterLevel);
     }
     
@@ -599,6 +655,7 @@ class World {
         sun.intensity = 0.8;
         sun.diffuse = new BABYLON.Color3(1, 0.95, 0.9);
         sun.specular = new BABYLON.Color3(1, 1, 1);
+        this.sunLight = sun; // Store reference
         
         // Ambient light
         const ambient = new BABYLON.HemisphericLight(
@@ -609,6 +666,7 @@ class World {
         ambient.intensity = 0.4;
         ambient.diffuse = new BABYLON.Color3(0.8, 0.8, 1.0);
         ambient.groundColor = new BABYLON.Color3(0.3, 0.3, 0.2);
+        this.ambientLight = ambient; // Store reference
         
         console.log('[World] ✓ Lighting setup complete');
     }
