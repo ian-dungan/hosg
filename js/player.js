@@ -436,6 +436,28 @@ class Player {
                     }
                     break;
                 
+                // E key - Interact/Confirm (open target menu / execute menu action)
+                case 'e':
+                    if (isDown && !this._eKeyWasPressed) {
+                        this.handleConfirm();
+                        this._eKeyWasPressed = true;
+                    }
+                    if (!isDown) {
+                        this._eKeyWasPressed = false;
+                    }
+                    break;
+                
+                // Escape key - Cancel/Close menu
+                case 'escape':
+                    if (isDown && !this._escapeKeyWasPressed) {
+                        this.handleCancel();
+                        this._escapeKeyWasPressed = true;
+                    }
+                    if (!isDown) {
+                        this._escapeKeyWasPressed = false;
+                    }
+                    break;
+                
                 // Ability hotkeys
                 case '1':
                 case '2':
