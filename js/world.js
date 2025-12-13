@@ -555,19 +555,8 @@ class World {
         skyboxMat.backFaceCulling = false;
         skyboxMat.disableLighting = true;
         
-        // Try to load HDRI sky texture
-        const skyTexture = ASSET_PATHS.getTexturePath('sky_hdri');
-        if (skyTexture) {
-            const hdrTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(
-                skyTexture,
-                this.scene
-            );
-            hdrTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-            skyboxMat.reflectionTexture = hdrTexture;
-        } else {
-            // Fallback to solid color
-            skyboxMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 1.0);
-        }
+        // Use simple gradient sky (HDRI requires .env or .dds cubemap files)
+        skyboxMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 1.0);
         
         skybox.material = skyboxMat;
         skybox.infiniteDistance = true;
