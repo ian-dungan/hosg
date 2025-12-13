@@ -857,19 +857,26 @@ class World {
         let attempts = 0;
         const maxAttempts = count * 5;
         
-        // Define rock model paths
+        // Check if we should try loading FBX models
+        const tryFBXModels = false; // Set to false until FBX loader is configured
+        
+        // Define rock model paths (if using GLB instead of FBX, change extension)
         const rockModels = {
             large: [
-                'assets/environment/rock_largeA.fbx',
-                'assets/environment/rock_largeB.fbx',
-                'assets/environment/rock_largeC.fbx'
+                'assets/environment/rock_largeA.glb',  // Convert FBX to GLB for better compatibility
+                'assets/environment/rock_largeB.glb',
+                'assets/environment/rock_largeC.glb'
             ],
             small: [
-                'assets/environment/rock_smallA.fbx',
-                'assets/environment/rock_smallB.fbx',
-                'assets/environment/rock_smallC.fbx'
+                'assets/environment/rock_smallA.glb',
+                'assets/environment/rock_smallB.glb',
+                'assets/environment/rock_smallC.glb'
             ]
         };
+        
+        if (!tryFBXModels) {
+            console.log('[World] Using simple rock meshes (set tryFBXModels=true to use 3D models)');
+        }
         
         while (spawned < count && attempts < maxAttempts) {
             attempts++;
@@ -884,7 +891,7 @@ class World {
             if (groundY <= waterY + 0.5) continue;
             
             // Try to load rock model, fallback to simple mesh
-            if (this.assetLoader) {
+            if (tryFBXModels && this.assetLoader) {
                 // Randomly choose large or small (70% small, 30% large for variety)
                 const isLarge = Math.random() > 0.7;
                 const rockType = isLarge ? 'large' : 'small';
@@ -895,12 +902,12 @@ class World {
                     await this.createRockModel(modelPath, x, groundY, z, isLarge);
                     spawned++;
                 } catch (e) {
-                    console.warn('[World] Failed to load rock model, using simple rock:', e);
+                    // Silently fall back to simple rocks
                     this.createSimpleRock(x, groundY, z);
                     spawned++;
                 }
             } else {
-                // No asset loader, use simple rocks
+                // Use simple rocks
                 this.createSimpleRock(x, groundY, z);
                 spawned++;
             }
