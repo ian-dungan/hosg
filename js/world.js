@@ -496,6 +496,8 @@ class World {
                     // This signals to player that terrain is fully ready
                     mesh.checkCollisions = true;
                     mesh.isPickable = true;
+                    mesh.receiveShadows = true;
+                    mesh.metadata = { isTerrain: true, type: 'ground' };
                     console.log('[World] ✓ Terrain generated and ready');
                 }
             },
@@ -505,24 +507,34 @@ class World {
         // Backward compatibility alias
         this.terrain = this.ground;
         
-        // Apply grass texture if available
-        const grassTexture = ASSET_PATHS.getTexturePath('grass');
-        if (grassTexture && this.scene.game.assetManager) {
-            const texture = await this.scene.game.assetManager.loadTexture(grassTexture, {
-                uScale: CONFIG.WORLD.GROUND.TILE_SCALE,
-                vScale: CONFIG.WORLD.GROUND.TILE_SCALE
-            });
-            
-            if (texture) {
-                const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
-                mat.diffuseTexture = texture;
-                mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-                this.ground.material = mat;
-                this.terrainMaterial = mat; // Store reference
+        // Apply grass texture using AssetLoader (like original)
+        if (this.assetLoader) {
+            const grassTexturePath = ASSET_PATHS.getTexturePath('grass');
+            if (grassTexturePath) {
+                this.assetLoader.loadTexture(grassTexturePath, { uScale: 50, vScale: 50 })
+                    .then(diffuseTexture => {
+                        if (diffuseTexture) {
+                            const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
+                            mat.diffuseTexture = diffuseTexture;
+                            mat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.4); // Green tint
+                            mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // Low specular
+                            this.ground.material = mat;
+                            this.terrainMaterial = mat;
+                            console.log('[World] ✓ Grass texture loaded');
+                        } else {
+                            this.applyDefaultGroundMaterial();
+                        }
+                    })
+                    .catch(e => {
+                        console.error('[World] Failed to load grass texture:', e);
+                        this.applyDefaultGroundMaterial();
+                    });
             } else {
+                console.warn('[World] No grass texture path found');
                 this.applyDefaultGroundMaterial();
             }
         } else {
+            console.warn('[World] AssetLoader not available');
             this.applyDefaultGroundMaterial();
         }
         
@@ -532,10 +544,11 @@ class World {
     
     applyDefaultGroundMaterial() {
         const mat = new BABYLON.StandardMaterial('groundMat', this.scene);
-        mat.diffuseColor = new BABYLON.Color3(0.3, 0.5, 0.2); // Grass green
-        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        mat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.4); // Natural grass green
+        mat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // Low shine
         this.ground.material = mat;
-        this.terrainMaterial = mat; // Store reference
+        this.terrainMaterial = mat;
+        console.log('[World] ✓ Using default grass material (no texture)');
     }
     
     generateHeightMapDataURL() {
@@ -606,24 +619,68 @@ class World {
     // ==================== SKYBOX ====================
     
     createSkybox() {
-        const skybox = BABYLON.MeshBuilder.CreateBox(
-            'skybox',
-            { size: CONFIG.WORLD.SKYBOX.SIZE },
-            this.scene
-        );
+        // Try to load custom HDRI skybox from ASSET_PATHS
+        let skyPath = 'assets/environment/DaySkyHDRI023B_4K_TONEMAPPED.jpg'; // Default fallback
         
-        const skyboxMat = new BABYLON.StandardMaterial('skyboxMat', this.scene);
-        skyboxMat.backFaceCulling = false;
-        skyboxMat.disableLighting = true;
-        
-        // Use simple gradient sky (HDRI requires .env or .dds cubemap files)
-        skyboxMat.emissiveColor = new BABYLON.Color3(0.5, 0.7, 1.0);
-        
-        skybox.material = skyboxMat;
-        skybox.infiniteDistance = true;
-        
-        this.skybox = skybox;
-        console.log('[World] ✓ Skybox created');
+        // Check if ASSET_PATHS exists and has skybox config
+        if (window.ASSET_PATHS && window.ASSET_PATHS.getTexturePath) {
+            skyPath = ASSET_PATHS.getTexturePath('sky_hdri');
+            console.log('[World] Using skybox from ASSET_PATHS:', skyPath);
+        }
+
+        try {
+            // Use PhotoDome for 360° panoramic skybox
+            this.skybox = new BABYLON.PhotoDome(
+                "skyDome",
+                skyPath,
+                {
+                    resolution: 32,
+                    size: 5000,
+                    useDirectMapping: false
+                },
+                this.scene
+            );
+
+            console.log('[World] ✓ Custom HDRI skybox loaded');
+
+            // Set scene clear color to match sky
+            this.scene.clearColor = new BABYLON.Color4(0.5, 0.7, 0.9, 1.0);
+
+        } catch (e) {
+            console.warn('[World] Failed to load HDRI skybox, using fallback:', e);
+
+            // Fallback: Create simple box skybox
+            this.skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 10000 }, this.scene);
+            const skyboxMaterial = new BABYLON.StandardMaterial("skyboxMaterial", this.scene);
+            skyboxMaterial.backFaceCulling = false;
+            skyboxMaterial.disableLighting = true;
+
+            // Try gradient texture
+            let skyTexture = null;
+            try {
+                if (BABYLON.Texture && typeof BABYLON.Texture.CreateGradientTexture === "function") {
+                    skyTexture = BABYLON.Texture.CreateGradientTexture("skyGradient", 
+                        new BABYLON.Color3(0.1, 0.2, 0.4), 
+                        new BABYLON.Color3(0.45, 0.65, 0.9), 
+                        300, 
+                        this.scene
+                    );
+                    skyboxMaterial.emissiveTexture = skyTexture;
+                } else {
+                    skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+                    skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+                    skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+                }
+            } catch (error) {
+                console.warn('[World] Failed to create gradient texture, using flat color:', error);
+                // Fallback to flat color
+                skyboxMaterial.diffuseColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+                skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+                skyboxMaterial.emissiveColor = new BABYLON.Color3(0.45, 0.65, 0.9);
+            }
+            this.skybox.material = skyboxMaterial;
+            this.skybox.infiniteDistance = true;
+        }
     }
     
     // ==================== WATER ====================
@@ -631,21 +688,77 @@ class World {
     createWater() {
         if (this.waterLevel <= 0) return;
         
+        // Create water plane
         this.water = BABYLON.MeshBuilder.CreateGround(
-            'water',
-            { width: this.size, height: this.size },
+            "water",
+            { width: this.size * 1.5, height: this.size * 1.5, subdivisions: 1 },
             this.scene
         );
-        
         this.water.position.y = this.waterLevel;
+        this.water.isPickable = false;
+        this.water.checkCollisions = false; // No collision with water
         
-        const waterMat = new BABYLON.StandardMaterial('waterMat', this.scene);
-        waterMat.diffuseColor = new BABYLON.Color3(0.2, 0.4, 0.6);
-        waterMat.specularColor = new BABYLON.Color3(1, 1, 1);
-        waterMat.alpha = 0.7;
+        // Check for WaterMaterial and AssetLoader
+        if (typeof BABYLON.WaterMaterial === 'undefined' || !this.assetLoader) {
+            console.log('[World] WaterMaterial not found, using basic material');
+            this.waterMaterial = new BABYLON.StandardMaterial('basicWater', this.scene);
+            this.waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.9);
+            this.waterMaterial.alpha = 0.7;
+            this.water.material = this.waterMaterial;
+            console.log('[World] ✓ Water created at y =', this.waterLevel);
+            return;
+        }
+
+        // Use WaterMaterial if available
+        try {
+            this.waterMaterial = new BABYLON.WaterMaterial("waterMat", this.scene, new BABYLON.Vector2(512, 512));
+            this.waterMaterial.backFaceCulling = true;
+            this.waterMaterial.waterColor = new BABYLON.Color3(0.1, 0.5, 0.9);
+            this.waterMaterial.waterColorLevel = 0.1;
+            this.waterMaterial.fresnelLevel = 1.0;
+            this.waterMaterial.waveHeight = 0.3;
+            this.waterMaterial.waveLength = 0.1;
+
+            // Reflect terrain
+            this.waterMaterial.reflectionTexture = new BABYLON.MirrorTexture("reflection", 1024, this.scene, true);
+            this.waterMaterial.reflectionTexture.mirrorPlane = new BABYLON.Plane(0, -1, 0, this.waterLevel);
+            this.waterMaterial.reflectionTexture.renderList.push(this.skybox);
+            this.waterMaterial.reflectionTexture.renderList.push(this.terrain);
+            
+            // Refraction
+            this.waterMaterial.refractionTexture = new BABYLON.RenderTargetTexture("refraction", 1024, this.scene, true);
+            this.waterMaterial.refractionTexture.renderList.push(this.terrain);
+            
+            this.water.material = this.waterMaterial;
+
+            // Load water bump texture
+            if (window.ASSET_PATHS && window.ASSET_PATHS.getTexturePath) {
+                const waterBumpPath = ASSET_PATHS.getTexturePath('water_bump');
+                if (waterBumpPath) {
+                    this.assetLoader.loadTexture(waterBumpPath, { uScale: 5, vScale: 5 })
+                        .then(bumpTexture => {
+                            if (bumpTexture) {
+                                this.waterMaterial.bumpTexture = bumpTexture;
+                                this.waterMaterial.bumpTexture.level = 0.1;
+                                console.log('[World] ✓ Water bump texture loaded');
+                            }
+                        })
+                        .catch(e => {
+                            console.log('[World] Water bump texture not found:', e);
+                        });
+                }
+            }
+            
+            console.log('[World] ✓ WaterMaterial created');
+        } catch (e) {
+            console.warn('[World] Failed to create WaterMaterial:', e);
+            // Fallback to basic material
+            this.waterMaterial = new BABYLON.StandardMaterial('basicWater', this.scene);
+            this.waterMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.9);
+            this.waterMaterial.alpha = 0.7;
+            this.water.material = this.waterMaterial;
+        }
         
-        this.water.material = waterMat;
-        this.waterMaterial = waterMat; // Store reference
         console.log('[World] ✓ Water created at y =', this.waterLevel);
     }
     
