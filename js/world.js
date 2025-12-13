@@ -3,6 +3,75 @@
 // Complete database-driven world with proper NPC/enemy placement
 // ============================================================================
 
+// WorldItem class - represents items dropped in the world
+class WorldItem {
+    constructor(scene, position, itemData) {
+        this.scene = scene;
+        this.position = position;
+        this.itemData = itemData;
+        this.mesh = null;
+        this.particleSystem = null;
+        this.createMesh();
+        this.createSparkle();
+    }
+    
+    createMesh() {
+        // Create simple box for now
+        this.mesh = BABYLON.MeshBuilder.CreateBox('worldItem', {
+            width: 0.3,
+            height: 0.3,
+            depth: 0.3
+        }, this.scene);
+        
+        this.mesh.position = this.position.clone();
+        
+        // Material based on rarity
+        const mat = new BABYLON.StandardMaterial('itemMat', this.scene);
+        mat.emissiveColor = this.getRarityColor(this.itemData.rarity);
+        this.mesh.material = mat;
+        
+        this.mesh.metadata = { isItem: true, itemData: this.itemData };
+    }
+    
+    createSparkle() {
+        // Store start time for animation
+        this.startTime = Date.now();
+    }
+    
+    getRarityColor(rarity) {
+        switch(rarity) {
+            case 'common': return new BABYLON.Color3(0.8, 0.8, 0.8);
+            case 'uncommon': return new BABYLON.Color3(0.2, 0.8, 0.2);
+            case 'rare': return new BABYLON.Color3(0.2, 0.4, 1.0);
+            case 'epic': return new BABYLON.Color3(0.7, 0.2, 0.9);
+            case 'legendary': return new BABYLON.Color3(1.0, 0.6, 0.0);
+            default: return new BABYLON.Color3(0.8, 0.8, 0.8);
+        }
+    }
+    
+    update(deltaTime) {
+        if (!this.mesh) return;
+        
+        // Float up and down
+        const time = (Date.now() - this.startTime) / 1000;
+        this.mesh.position.y = this.position.y + Math.sin(time * 2) * 0.1;
+        
+        // Rotate
+        this.mesh.rotation.y += deltaTime * 0.001;
+    }
+    
+    dispose() {
+        if (this.mesh) {
+            this.mesh.dispose();
+            this.mesh = null;
+        }
+        if (this.particleSystem) {
+            this.particleSystem.dispose();
+            this.particleSystem = null;
+        }
+    }
+}
+
 class World {
     constructor(scene, options = {}) {
         this.scene = scene;
@@ -92,33 +161,48 @@ class World {
     
     async init() {
         try {
-            // Create terrain
-            this.onProgress('Generating terrain...', 10);
-            await this.createTerrain();
-            
-            // Create skybox
-            this.onProgress('Creating sky...', 30);
-            this.createSkybox();
-            
-            // Create water
-            this.onProgress('Adding water...', 40);
-            this.createWater();
-            
-            // Load NPC templates and spawns from database
-            this.onProgress('Loading world data...', 50);
-            await this.loadFromDatabase();
-            
-            // Spawn all NPCs and enemies
-            this.onProgress('Populating world...', 70);
-            await this.populateWorld();
-            
-            // Setup lighting
-            this.onProgress('Setting up lighting...', 90);
+            // Create lights first
+            this.reportProgress('Creating lights...', 10);
             this.setupLighting();
             
-            this.onProgress('World ready!', 100);
+            // Create skybox
+            this.reportProgress('Creating skybox...', 20);
+            this.createSkybox();
+            
+            // Create terrain
+            this.reportProgress('Generating terrain...', 30);
+            await this.createTerrain();
+            await this.delay(10);
+            
+            // Create water
+            this.reportProgress('Adding water...', 40);
+            this.createWater();
+            await this.delay(10);
+            
+            // Load NPC templates and spawns from database
+            this.reportProgress('Loading world data...', 50);
+            await this.loadFromDatabase();
+            
+            // Populate world with NPCs, enemies, and decorations
+            this.reportProgress('Populating world...', 60);
+            await this.populateWorld();
+            
+            // Add environmental decorations
+            this.reportProgress('Adding trees...', 75);
+            await this.createTrees(50); // Spawn 50 trees
+            
+            this.reportProgress('Adding rocks...', 80);
+            await this.createRocks(30); // Spawn 30 rocks
+            
+            this.reportProgress('Adding grass...', 85);
+            await this.createGrass(100); // Spawn 100 grass patches
+            
+            this.reportProgress('Finalizing...', 95);
+            await this.delay(10);
+            
+            this.reportProgress('World ready!', 100);
             console.log('[World] ✓ Initialized');
-            console.log(`[World] NPCs: ${this.npcs.length}, Enemies: ${this.enemies.length}`);
+            console.log(`[World] NPCs: ${this.npcs.length}, Enemies: ${this.enemies.length}, Trees: ${this.trees.length}, Rocks: ${this.rocks.length}, Grass: ${this.grass.length}`);
             
         } catch (error) {
             console.error('[World] Initialization failed:', error);
@@ -149,17 +233,17 @@ class World {
                 console.log(`[World] ✓ Loaded ${templates.length} NPC templates`);
             }
             
-            // Load spawn points
+            // Load spawn points from ALL zones
             const { data: spawns, error: spawnsError } = await window.supabaseService.client
                 .from('hosg_npc_spawns')
-                .select('*')
-                .eq('zone_id', 1); // Load all zones, or filter by current zone
+                .select('*');
+                // Removed .eq('zone_id', 1) to load ALL zones!
             
             if (spawnsError) throw spawnsError;
             
             if (spawns) {
                 this.spawnPoints = spawns;
-                console.log(`[World] ✓ Loaded ${spawns.length} spawn points`);
+                console.log(`[World] ✓ Loaded ${spawns.length} spawn points across all zones`);
             }
             
         } catch (error) {
@@ -616,6 +700,242 @@ class World {
         return this.getHeightAt(x, z);
     }
     
+    // ==================== UTILITY METHODS ====================
+    
+    reportProgress(message, percent) {
+        console.log(`[World] ${message} (${percent}%)`);
+        if (this.onProgress) {
+            this.onProgress(message, percent);
+        }
+    }
+    
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    // ==================== WORLD DECORATION ====================
+    
+    async createTrees(count) {
+        const spawnRadius = Math.min(200, this.size * 0.4);
+        let spawned = 0;
+        let attempts = 0;
+        const maxAttempts = count * 5;
+        
+        // Check if we have tree models available
+        const hasTreeModels = window.ASSET_PATHS && 
+                             window.ASSET_PATHS.GENERIC_MODELS && 
+                             window.ASSET_PATHS.GENERIC_MODELS.tree01;
+        
+        const treeTypes = [];
+        if (hasTreeModels) {
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree01) treeTypes.push('tree01');
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree02) treeTypes.push('tree02');
+            if (window.ASSET_PATHS.GENERIC_MODELS.tree03) treeTypes.push('tree03');
+        }
+        
+        while (spawned < count && attempts < maxAttempts) {
+            attempts++;
+            
+            // Random position
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const x = Math.sin(angle) * distance;
+            const z = Math.cos(angle) * distance;
+            
+            // Get terrain height
+            const groundY = this.getHeightAt(x, z);
+            
+            // Skip if underwater (with margin)
+            const waterY = this.waterLevel || 0;
+            if (groundY <= waterY + 1.0) continue;
+            
+            // Check slope (don't spawn on steep hills)
+            const slopeCheck = 2.0;
+            const y1 = this.getHeightAt(x + slopeCheck, z);
+            const y2 = this.getHeightAt(x - slopeCheck, z);
+            const y3 = this.getHeightAt(x, z + slopeCheck);
+            const y4 = this.getHeightAt(x, z - slopeCheck);
+            const maxSlope = Math.max(
+                Math.abs(y1 - groundY),
+                Math.abs(y2 - groundY),
+                Math.abs(y3 - groundY),
+                Math.abs(y4 - groundY)
+            );
+            if (maxSlope > 3.0) continue;
+            
+            // Create tree (either GLTF model or simple mesh)
+            if (hasTreeModels && treeTypes.length > 0 && this.assetLoader) {
+                const treeType = treeTypes[Math.floor(Math.random() * treeTypes.length)];
+                await this.createTreeModel(treeType, x, groundY, z);
+            } else {
+                this.createSimpleTree(x, groundY, z);
+            }
+            
+            spawned++;
+        }
+        
+        console.log(`[World] ✓ Spawned ${spawned}/${count} trees (${attempts} attempts)`);
+    }
+    
+    async createTreeModel(treeType, x, groundY, z) {
+        try {
+            const modelPath = window.ASSET_PATHS.getModelPath(treeType);
+            if (!modelPath) {
+                this.createSimpleTree(x, groundY, z);
+                return;
+            }
+            
+            const BASE_TREE_SCALE = 2.0;
+            const result = await this.assetLoader.loadModel(modelPath, {
+                scaling: new BABYLON.Vector3(BASE_TREE_SCALE, BASE_TREE_SCALE, BASE_TREE_SCALE)
+            });
+            
+            if (result && result.meshes && result.meshes.length > 0) {
+                const treeMesh = result.meshes[0];
+                treeMesh.position = new BABYLON.Vector3(x, groundY, z);
+                treeMesh.checkCollisions = true;
+                treeMesh.isPickable = false;
+                
+                // Random rotation
+                treeMesh.rotation.y = Math.random() * Math.PI * 2;
+                
+                // Shadows
+                if (this.shadowGenerator) {
+                    result.meshes.forEach(mesh => {
+                        this.shadowGenerator.addShadowCaster(mesh);
+                        mesh.receiveShadows = true;
+                    });
+                }
+                
+                this.trees.push(treeMesh);
+            }
+        } catch (e) {
+            console.warn('[World] Failed to load tree model, using simple tree:', e);
+            this.createSimpleTree(x, groundY, z);
+        }
+    }
+    
+    createSimpleTree(x, groundY, z) {
+        // Trunk
+        const trunkHeight = 3 + Math.random() * 2;
+        const trunk = BABYLON.MeshBuilder.CreateCylinder('treeTrunk', {
+            height: trunkHeight,
+            diameter: 0.3 + Math.random() * 0.2
+        }, this.scene);
+        trunk.position = new BABYLON.Vector3(x, groundY + trunkHeight / 2, z);
+        
+        const trunkMat = new BABYLON.StandardMaterial('trunkMat', this.scene);
+        trunkMat.diffuseColor = new BABYLON.Color3(0.4, 0.3, 0.2);
+        trunk.material = trunkMat;
+        trunk.checkCollisions = true;
+        trunk.receiveShadows = true;
+        if (this.shadowGenerator) this.shadowGenerator.addShadowCaster(trunk);
+        
+        // Foliage
+        const foliageSize = 2 + Math.random();
+        const foliage = BABYLON.MeshBuilder.CreateSphere('treeFoliage', {
+            diameter: foliageSize,
+            segments: 8
+        }, this.scene);
+        foliage.position = new BABYLON.Vector3(x, groundY + trunkHeight + foliageSize / 2, z);
+        
+        const foliageMat = new BABYLON.StandardMaterial('foliageMat', this.scene);
+        foliageMat.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.3);
+        foliage.material = foliageMat;
+        foliage.receiveShadows = true;
+        if (this.shadowGenerator) this.shadowGenerator.addShadowCaster(foliage);
+        
+        this.trees.push(trunk);
+        this.trees.push(foliage);
+    }
+    
+    async createRocks(count) {
+        const spawnRadius = Math.min(200, this.size * 0.4);
+        let spawned = 0;
+        let attempts = 0;
+        const maxAttempts = count * 5;
+        
+        while (spawned < count && attempts < maxAttempts) {
+            attempts++;
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const x = Math.sin(angle) * distance;
+            const z = Math.cos(angle) * distance;
+            
+            const groundY = this.getHeightAt(x, z);
+            const waterY = this.waterLevel || 0;
+            if (groundY <= waterY + 0.5) continue;
+            
+            // Create rock
+            const rockSize = 0.5 + Math.random() * 1.5;
+            const rock = BABYLON.MeshBuilder.CreateSphere('rock', {
+                diameter: rockSize,
+                segments: 8
+            }, this.scene);
+            
+            rock.position = new BABYLON.Vector3(x, groundY + rockSize / 3, z);
+            rock.scaling.x = 0.8 + Math.random() * 0.4;
+            rock.scaling.y = 0.6 + Math.random() * 0.3;
+            rock.scaling.z = 0.8 + Math.random() * 0.4;
+            rock.rotation.y = Math.random() * Math.PI * 2;
+            
+            const rockMat = new BABYLON.StandardMaterial('rockMat', this.scene);
+            rockMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.45);
+            rockMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+            rock.material = rockMat;
+            rock.checkCollisions = true;
+            rock.receiveShadows = true;
+            if (this.shadowGenerator) this.shadowGenerator.addShadowCaster(rock);
+            
+            this.rocks.push(rock);
+            spawned++;
+        }
+        
+        console.log(`[World] ✓ Spawned ${spawned}/${count} rocks`);
+    }
+    
+    async createGrass(count) {
+        const spawnRadius = Math.min(150, this.size * 0.3);
+        let spawned = 0;
+        let attempts = 0;
+        const maxAttempts = count * 5;
+        
+        while (spawned < count && attempts < maxAttempts) {
+            attempts++;
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * spawnRadius;
+            const x = Math.sin(angle) * distance;
+            const z = Math.cos(angle) * distance;
+            
+            const groundY = this.getHeightAt(x, z);
+            const waterY = this.waterLevel || 0;
+            if (groundY <= waterY + 0.3) continue;
+            
+            // Create grass tuft
+            const grassPatch = BABYLON.MeshBuilder.CreatePlane('grass', {
+                size: 0.5 + Math.random() * 0.5
+            }, this.scene);
+            
+            grassPatch.position = new BABYLON.Vector3(x, groundY + 0.2, z);
+            grassPatch.rotation.x = Math.PI / 2;
+            grassPatch.rotation.z = Math.random() * Math.PI * 2;
+            
+            const grassMat = new BABYLON.StandardMaterial('grassMat', this.scene);
+            grassMat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.3);
+            grassMat.alpha = 0.8;
+            grassPatch.material = grassMat;
+            grassPatch.isPickable = false;
+            grassPatch.receiveShadows = true;
+            
+            this.grass.push(grassPatch);
+            spawned++;
+        }
+        
+        console.log(`[World] ✓ Spawned ${spawned}/${count} grass patches`);
+    }
+    
     // ==================== SKYBOX ====================
     
     createSkybox() {
@@ -793,6 +1113,36 @@ class World {
     // ==================== UPDATE LOOP ====================
     
     update(deltaTime) {
+        // Update time and weather
+        this.time += deltaTime * 0.001; // Time progresses slowly (0.001 = game hour per second)
+        if (this.time >= 24) {
+            this.time -= 24;
+            this.day++;
+        }
+        
+        // Smooth weather transitions
+        if (this.weatherIntensity !== this.weatherTargetIntensity) {
+            if (this.weatherIntensity < this.weatherTargetIntensity) {
+                this.weatherIntensity = Math.min(
+                    this.weatherTargetIntensity,
+                    this.weatherIntensity + this.weatherTransitionSpeed * deltaTime
+                );
+            } else {
+                this.weatherIntensity = Math.max(
+                    this.weatherTargetIntensity,
+                    this.weatherIntensity - this.weatherTransitionSpeed * deltaTime
+                );
+            }
+        }
+        
+        // Update world items (floating and spinning animations)
+        for (let i = 0; i < this.worldItems.length; i++) {
+            const item = this.worldItems[i];
+            if (item && typeof item.update === 'function') {
+                item.update(deltaTime);
+            }
+        }
+        
         // Update enemies
         for (let i = 0; i < this.enemies.length; i++) {
             const enemy = this.enemies[i];
@@ -914,6 +1264,22 @@ class World {
             if (npc.mesh) npc.mesh.dispose();
         });
         
+        // Dispose world items
+        this.worldItems.forEach(item => {
+            if (item && item.dispose) item.dispose();
+        });
+        
+        // Dispose decorations
+        this.trees.forEach(tree => {
+            if (tree) tree.dispose();
+        });
+        this.rocks.forEach(rock => {
+            if (rock) rock.dispose();
+        });
+        this.grass.forEach(grass => {
+            if (grass) grass.dispose();
+        });
+        
         // Dispose world elements
         if (this.ground) this.ground.dispose();
         if (this.water) this.water.dispose();
@@ -923,5 +1289,6 @@ class World {
     }
 }
 
+window.WorldItem = WorldItem;
 window.World = World;
-console.log('[World] v3.0.0 loaded - Database-driven with AI');
+console.log('[World] v3.0.0 loaded - Database-driven with AI, complete decorations, and animations');
