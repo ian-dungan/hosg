@@ -321,21 +321,63 @@ class World {
     async createEnemy(template, position, spawnData) {
         const enemyId = `enemy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Create enemy mesh
-        const mesh = BABYLON.MeshBuilder.CreateCapsule(enemyId, {
-            height: 1.8,
-            radius: 0.4
-        }, this.scene);
+        let mesh = null;
         
-        // CRITICAL: Set position BEFORE enabling physics
-        mesh.position.copyFrom(position);
+        // Try to load GLTF model from ASSET_PATHS
+        const assetKey = template.code || 'wolf'; // Use template code (wolf, goblin, orc, etc)
         
-        // Material based on level/type
-        const mat = new BABYLON.StandardMaterial(`enemyMat_${enemyId}`, this.scene);
-        const hue = (template.level || 1) * 30;  // Different color per level
-        mat.diffuseColor = BABYLON.Color3.FromHSV(hue, 0.8, 0.6);
-        mat.emissiveColor = BABYLON.Color3.FromHSV(hue, 0.8, 0.2);
-        mesh.material = mat;
+        if (window.ASSET_PATHS && window.ASSET_PATHS.getEnemyPath && this.assetLoader) {
+            const modelPath = window.ASSET_PATHS.getEnemyPath(assetKey);
+            
+            if (modelPath) {
+                try {
+                    console.log(`[World] Loading enemy model: ${modelPath} for ${template.name}`);
+                    const result = await this.assetLoader.loadModel(modelPath, {
+                        name: template.name,
+                        scaling: new BABYLON.Vector3(1.0, 1.0, 1.0)
+                    });
+                    
+                    if (result && result.meshes && result.meshes.length > 0) {
+                        mesh = result.meshes[0]; // Root mesh
+                        mesh.position.copyFrom(position);
+                        
+                        // Hide collision/debug meshes
+                        result.meshes.forEach(m => {
+                            if (!m) return;
+                            const name = (m.name || '').toLowerCase();
+                            if (name.includes('collision') || name.includes('collider') || 
+                                name.includes('hitbox') || name.includes('debug')) {
+                                m.isVisible = false;
+                                m.isPickable = false;
+                                m.setEnabled(false);
+                            }
+                        });
+                        
+                        console.log(`[World] ✓ Loaded model for ${template.name}`);
+                    }
+                } catch (e) {
+                    console.warn(`[World] Failed to load model for ${assetKey}:`, e);
+                }
+            }
+        }
+        
+        // Fallback: Create simple capsule if model failed or unavailable
+        if (!mesh) {
+            console.log(`[World] Using simple mesh for ${template.name}`);
+            mesh = BABYLON.MeshBuilder.CreateCapsule(enemyId, {
+                height: 1.8,
+                radius: 0.4
+            }, this.scene);
+            
+            mesh.position.copyFrom(position);
+            
+            // Material based on level/type
+            const mat = new BABYLON.StandardMaterial(`enemyMat_${enemyId}`, this.scene);
+            const hue = (template.level || 1) * 30;
+            mat.diffuseColor = BABYLON.Color3.FromHSV(hue, 0.8, 0.6);
+            mat.emissiveColor = BABYLON.Color3.FromHSV(hue, 0.8, 0.2);
+            mesh.material = mat;
+        }
         
         // Create enemy object
         const enemy = {
@@ -351,6 +393,7 @@ class World {
             spawnPosition: position.clone(),
             spawnRadius: parseFloat(spawnData.spawn_radius) || 15,
             isAlive: true,
+            isEnemy: true, // CRITICAL: UI needs this to show Attack option!
             maxHealth: (template.stats && template.stats.health) || 100,
             health: (template.stats && template.stats.health) || 100,
             damage: (template.stats && template.stats.attack) || 10,
@@ -359,8 +402,9 @@ class World {
             aiProfile: template.ai_profile || 'aggressive'
         };
         
-        // Store reference in mesh
-        mesh.entityData = enemy;
+        // Store reference in mesh metadata AND entityData
+        mesh.metadata = { isEnemy: true, id: enemyId }; // For click detection
+        mesh.entityData = enemy; // For entity lookup
         mesh.isPickable = true;
         
         // Initialize AI if available
@@ -385,20 +429,62 @@ class World {
     async createNPC(template, position, spawnData) {
         const npcId = `npc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Create NPC mesh
-        const mesh = BABYLON.MeshBuilder.CreateCapsule(npcId, {
-            height: 1.8,
-            radius: 0.4
-        }, this.scene);
+        let mesh = null;
         
-        // CRITICAL: Set position BEFORE enabling physics
-        mesh.position.copyFrom(position);
+        // Try to load GLTF model from ASSET_PATHS
+        const assetKey = template.code || 'merchant'; // Use template code (merchant, guard, etc)
         
-        // Friendly NPC material (green-ish)
-        const mat = new BABYLON.StandardMaterial(`npcMat_${npcId}`, this.scene);
-        mat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.3);
-        mat.emissiveColor = new BABYLON.Color3(0.1, 0.2, 0.1);
-        mesh.material = mat;
+        if (window.ASSET_PATHS && window.ASSET_PATHS.getNPCPath && this.assetLoader) {
+            const modelPath = window.ASSET_PATHS.getNPCPath(assetKey);
+            
+            if (modelPath) {
+                try {
+                    console.log(`[World] Loading NPC model: ${modelPath} for ${template.name}`);
+                    const result = await this.assetLoader.loadModel(modelPath, {
+                        name: template.name,
+                        scaling: new BABYLON.Vector3(1.0, 1.0, 1.0)
+                    });
+                    
+                    if (result && result.meshes && result.meshes.length > 0) {
+                        mesh = result.meshes[0]; // Root mesh
+                        mesh.position.copyFrom(position);
+                        
+                        // Hide collision/debug meshes
+                        result.meshes.forEach(m => {
+                            if (!m) return;
+                            const name = (m.name || '').toLowerCase();
+                            if (name.includes('collision') || name.includes('collider') || 
+                                name.includes('hitbox') || name.includes('debug')) {
+                                m.isVisible = false;
+                                m.isPickable = false;
+                                m.setEnabled(false);
+                            }
+                        });
+                        
+                        console.log(`[World] ✓ Loaded model for ${template.name}`);
+                    }
+                } catch (e) {
+                    console.warn(`[World] Failed to load NPC model for ${assetKey}:`, e);
+                }
+            }
+        }
+        
+        // Fallback: Create simple capsule if model failed or unavailable
+        if (!mesh) {
+            console.log(`[World] Using simple mesh for ${template.name}`);
+            mesh = BABYLON.MeshBuilder.CreateCapsule(npcId, {
+                height: 1.8,
+                radius: 0.4
+            }, this.scene);
+            
+            mesh.position.copyFrom(position);
+            
+            // Friendly NPC material (green-ish)
+            const mat = new BABYLON.StandardMaterial(`npcMat_${npcId}`, this.scene);
+            mat.diffuseColor = new BABYLON.Color3(0.3, 0.7, 0.3);
+            mat.emissiveColor = new BABYLON.Color3(0.1, 0.2, 0.1);
+            mesh.material = mat;
+        }
         
         // Create NPC object
         const npc = {
@@ -413,12 +499,14 @@ class World {
             spawnData: spawnData,
             spawnPosition: position.clone(),
             isAlive: true,
+            isNPC: true, // CRITICAL: UI needs this to show Talk/Trade options!
             maxHealth: (template.stats && template.stats.health) || 150,
             health: (template.stats && template.stats.health) || 150
         };
         
-        // Store reference in mesh
-        mesh.entityData = npc;
+        // Store reference in mesh metadata AND entityData
+        mesh.metadata = { isNPC: true, id: npcId }; // For click detection
+        mesh.entityData = npc; // For entity lookup
         mesh.isPickable = true;
         
         // Add to world
