@@ -341,6 +341,7 @@ class World {
         const enemy = {
             id: enemyId,
             mesh: mesh,
+            scene: this.scene, // CRITICAL: AI needs this!
             name: template.name,
             level: template.level,
             type: template.code,
@@ -403,6 +404,7 @@ class World {
         const npc = {
             id: npcId,
             mesh: mesh,
+            scene: this.scene, // For consistency
             name: template.name,
             level: template.level,
             type: template.code,
