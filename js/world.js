@@ -855,6 +855,20 @@ class World {
         let attempts = 0;
         const maxAttempts = count * 5;
         
+        // Define rock model paths
+        const rockModels = {
+            large: [
+                'assets/environment/rock_largeA.fbx',
+                'assets/environment/rock_largeB.fbx',
+                'assets/environment/rock_largeC.fbx'
+            ],
+            small: [
+                'assets/environment/rock_smallA.fbx',
+                'assets/environment/rock_smallB.fbx',
+                'assets/environment/rock_smallC.fbx'
+            ]
+        };
+        
         while (spawned < count && attempts < maxAttempts) {
             attempts++;
             
@@ -867,32 +881,89 @@ class World {
             const waterY = this.waterLevel || 0;
             if (groundY <= waterY + 0.5) continue;
             
-            // Create rock
-            const rockSize = 0.5 + Math.random() * 1.5;
-            const rock = BABYLON.MeshBuilder.CreateSphere('rock', {
-                diameter: rockSize,
-                segments: 8
-            }, this.scene);
-            
-            rock.position = new BABYLON.Vector3(x, groundY + rockSize / 3, z);
-            rock.scaling.x = 0.8 + Math.random() * 0.4;
-            rock.scaling.y = 0.6 + Math.random() * 0.3;
-            rock.scaling.z = 0.8 + Math.random() * 0.4;
-            rock.rotation.y = Math.random() * Math.PI * 2;
-            
-            const rockMat = new BABYLON.StandardMaterial('rockMat', this.scene);
-            rockMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.45);
-            rockMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-            rock.material = rockMat;
-            rock.checkCollisions = true;
-            rock.receiveShadows = true;
-            if (this.shadowGenerator) this.shadowGenerator.addShadowCaster(rock);
-            
-            this.rocks.push(rock);
-            spawned++;
+            // Try to load rock model, fallback to simple mesh
+            if (this.assetLoader) {
+                // Randomly choose large or small (70% small, 30% large for variety)
+                const isLarge = Math.random() > 0.7;
+                const rockType = isLarge ? 'large' : 'small';
+                const models = rockModels[rockType];
+                const modelPath = models[Math.floor(Math.random() * models.length)];
+                
+                try {
+                    await this.createRockModel(modelPath, x, groundY, z, isLarge);
+                    spawned++;
+                } catch (e) {
+                    console.warn('[World] Failed to load rock model, using simple rock:', e);
+                    this.createSimpleRock(x, groundY, z);
+                    spawned++;
+                }
+            } else {
+                // No asset loader, use simple rocks
+                this.createSimpleRock(x, groundY, z);
+                spawned++;
+            }
         }
         
         console.log(`[World] ✓ Spawned ${spawned}/${count} rocks`);
+    }
+    
+    async createRockModel(modelPath, x, groundY, z, isLarge) {
+        const scale = isLarge ? 1.5 : 1.0; // Large rocks are 1.5x bigger
+        
+        const result = await this.assetLoader.loadModel(modelPath, {
+            scaling: new BABYLON.Vector3(scale, scale, scale)
+        });
+        
+        if (result && result.meshes && result.meshes.length > 0) {
+            const rockMesh = result.meshes[0];
+            rockMesh.position = new BABYLON.Vector3(x, groundY, z);
+            rockMesh.checkCollisions = true;
+            rockMesh.isPickable = false;
+            
+            // Random rotation for variety
+            rockMesh.rotation.y = Math.random() * Math.PI * 2;
+            
+            // Slight random tilt for natural look
+            rockMesh.rotation.x = (Math.random() - 0.5) * 0.2;
+            rockMesh.rotation.z = (Math.random() - 0.5) * 0.2;
+            
+            // Shadows
+            if (this.shadowGenerator) {
+                result.meshes.forEach(mesh => {
+                    this.shadowGenerator.addShadowCaster(mesh);
+                    mesh.receiveShadows = true;
+                });
+            }
+            
+            this.rocks.push(rockMesh);
+        } else {
+            throw new Error('No meshes in model');
+        }
+    }
+    
+    createSimpleRock(x, groundY, z) {
+        // Fallback: Create simple deformed sphere rock
+        const rockSize = 0.5 + Math.random() * 1.5;
+        const rock = BABYLON.MeshBuilder.CreateSphere('rock', {
+            diameter: rockSize,
+            segments: 8
+        }, this.scene);
+        
+        rock.position = new BABYLON.Vector3(x, groundY + rockSize / 3, z);
+        rock.scaling.x = 0.8 + Math.random() * 0.4;
+        rock.scaling.y = 0.6 + Math.random() * 0.3;
+        rock.scaling.z = 0.8 + Math.random() * 0.4;
+        rock.rotation.y = Math.random() * Math.PI * 2;
+        
+        const rockMat = new BABYLON.StandardMaterial('rockMat', this.scene);
+        rockMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.45);
+        rockMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        rock.material = rockMat;
+        rock.checkCollisions = true;
+        rock.receiveShadows = true;
+        if (this.shadowGenerator) this.shadowGenerator.addShadowCaster(rock);
+        
+        this.rocks.push(rock);
     }
     
     async createGrass(count) {
