@@ -26,7 +26,15 @@ async function freePort(): Promise<number> {
 
 /** Starts an app on a free port; the caller must `app.close()` it. */
 export async function startServer(
-  opts: { store?: Store; reconnectSeconds?: number; saveSeconds?: number; clientDir?: string; maxPlayers?: number } = {},
+  opts: {
+    store?: Store;
+    reconnectSeconds?: number;
+    saveSeconds?: number;
+    clientDir?: string;
+    maxPlayers?: number;
+    authRatePerMinute?: number;
+    trustProxy?: number;
+  } = {},
 ): Promise<TestServer> {
   const store = opts.store ?? createMemoryStore();
   const app = createApp({ ...opts, store, jwtSecret: SECRET });

@@ -16,6 +16,8 @@ export interface AppOptions {
   reconnectSeconds?: number;
   saveSeconds?: number;
   authRatePerMinute?: number;
+  /** Reverse proxies in front of the server whose X-Forwarded-For is believed (Express's `trust proxy` hop count); none when unset. */
+  trustProxy?: number;
   /** Test-only: a smaller grove (default MAX_PLAYERS). */
   maxPlayers?: number;
 }
@@ -42,6 +44,7 @@ export function createApp(opts: AppOptions): App {
     greet: false,
     gracefullyShutdown: false, // index.ts handles signals and calls close()
     express: (app) => {
+      if (opts.trustProxy !== undefined) app.set('trust proxy', opts.trustProxy); // before the login limit reads req.ip
       app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute }));
       app.get('/healthz', (_req, res) => {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).

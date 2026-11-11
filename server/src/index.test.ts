@@ -55,4 +55,14 @@ describe('server startup', () => {
     expect(code).toBe(1);
     expect(stderr.trim()).toBe(`Shady Grove 2 server: cannot open the database at DATABASE_URL: connect ECONNREFUSED 127.0.0.1:${port}.`);
   }, 20_000);
+
+  it('exits with one line when SG2_TRUST_PROXY is not a hop count', async () => {
+    for (const value of ['loopback', '0', '-1', '1.5', 'true']) {
+      const { code, stderr } = await runServer({ SG2_STORE: 'memory', SG2_TRUST_PROXY: value });
+      expect(code).toBe(1);
+      expect(stderr.trim()).toBe(
+        `Shady Grove 2 server: SG2_TRUST_PROXY must be the number of proxies in front of the server (for example 1), or empty (got "${value}").`,
+      );
+    }
+  }, 60_000);
 });

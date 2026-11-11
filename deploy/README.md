@@ -138,6 +138,7 @@ are commands: type what follows the `$`. Lines under them show what you should s
    ```
    $ docker compose logs sg2-server
    sg2-server  | Shady Grove 2 server listening on port 2570, serving /app/client/dist-online.
+   sg2-server  | Shady Grove 2 server: SG2_TRUST_PROXY is off; login limits count each connection's own address.
    ```
 
    If something is wrong, this log says what in one line. For example
@@ -274,36 +275,94 @@ $ docker image rm sg2-server
 $ sudo ufw delete allow 2570/tcp     # only if you added the rule in step 8
 ```
 
-## Later: a web address with HTTPS (shadygrove2.mooo.com) — NOT READY, do not follow yet
+## Later: a web address with HTTPS (shadygrove2.mooo.com)
 
-> **Do not follow this section yet.** Behind Caddy, the game server would see every player as
-> coming from the same address, so its login limit (10 sign-ins a minute) would be shared by all
-> players together and most of them could not sign in. A later update of the game will fix this,
-> and this section will then say it is ready. Until then, use http://116.203.110.214:2570.
-
-The first installation works on the IP address only, and nothing depends on a domain name. The
-outline below is kept so you can see what the switch will involve; **do not follow it yet**.
+The first installation works on the IP address only, and nothing depends on a domain name. When
+you want players to use **https://shadygrove2.mooo.com** instead, follow these steps in order.
+Caddy, a small web server, then sits in front of the game: it gets the HTTPS certificate by itself
+and passes everything, the game's live connection too, on to the game server.
 
 1. At FreeDNS (mooo.com), point `shadygrove2.mooo.com` at `116.203.110.214` (an `A` record).
-   Check it from the server: `getent hosts shadygrove2.mooo.com` should print `116.203.110.214`.
-2. Caddy will need ports 80 and 443. Check what uses them:
-   `sudo ss -ltnp | grep -E ':(80|443) '`.
+   Wait a few minutes, then check it from the server:
+
+   ```
+   $ getent hosts shadygrove2.mooo.com
+   116.203.110.214  shadygrove2.mooo.com
+   ```
+
+   Do not go on until it prints `116.203.110.214`.
+
+2. Caddy needs ports 80 and 443. Check what uses them:
+
+   ```
+   $ sudo ss -ltnp | grep -E ':(80|443) '
+   ```
+
    - If that prints **nothing**, install Caddy (see https://caddyserver.com/docs/install, the
-     "Debian, Ubuntu" section), then replace the contents of `/etc/caddy/Caddyfile` with:
+     "Debian, Ubuntu" section), then replace the contents of `/etc/caddy/Caddyfile` with these
+     three lines:
 
      ```
      shadygrove2.mooo.com {
-         reverse_proxy localhost:2570
+         reverse_proxy 127.0.0.1:2570
      }
      ```
 
-     and run `sudo systemctl reload caddy`. Caddy gets the HTTPS certificate by itself and passes
-     the game's WebSocket connections through.
+     and run `sudo systemctl reload caddy`.
    - If another game's web server already uses ports 80/443, do not install a second one: add the
-     same `reverse_proxy localhost:2570` site to that web server instead.
-3. If `ufw` is active, allow the web ports: `sudo ufw allow 80/tcp` and `sudo ufw allow 443/tcp`.
-4. Open **https://shadygrove2.mooo.com**; you should see the login screen.
-5. Optional, once the address works: stop offering the plain port to the internet. In `.env`,
-   change the port line to `SG2_PORT=127.0.0.1:2570`, run `docker compose up -d`, and remove the
-   firewall rule with `sudo ufw delete allow 2570/tcp`. Caddy still reaches the game on the server
-   itself, but http://116.203.110.214:2570 stops working from outside.
+     same `reverse_proxy 127.0.0.1:2570` site to that web server instead. If that web server itself
+     runs in a Docker container, it cannot reach `127.0.0.1` on the server: stop here and ask for help.
+
+   (If you chose another port in step 2 of the first installation, put it in place of 2570 here and
+   in step 4.)
+
+3. If `ufw` is active, allow the web ports:
+
+   ```
+   $ sudo ufw allow 80/tcp
+   $ sudo ufw allow 443/tcp
+   ```
+
+   In the Hetzner Cloud Console firewall (if you use one), add inbound rules for TCP 80 and 443 too.
+
+4. Tell the game it is behind Caddy, and close the plain port to the internet, **both in this one
+   step**. Run these lines from the game folder:
+
+   ```
+   $ cd ~/shady-grove-2
+   $ sed -i 's/^SG2_PORT=.*/SG2_PORT=127.0.0.1:2570/' .env
+   $ sed -i '/^SG2_TRUST_PROXY=/d' .env
+   $ echo 'SG2_TRUST_PROXY=1' >> .env
+   $ grep -E '^SG2_(PORT|TRUST_PROXY)=' .env
+   SG2_PORT=127.0.0.1:2570
+   SG2_TRUST_PROXY=1
+   $ docker compose up -d
+   ```
+
+   `SG2_TRUST_PROXY=1` makes the login limit count each player's own address, which Caddy passes on,
+   instead of Caddy's (otherwise all players together would share one limit of 10 sign-ins a
+   minute). `SG2_PORT=127.0.0.1:2570` is not optional: with the setting on and the port still open
+   to the internet, anyone could connect directly with a made-up address and dodge the login limit.
+
+   Then remove the old firewall rule (and the Hetzner rule for port 2570, if you added one):
+
+   ```
+   $ sudo ufw delete allow 2570/tcp
+   ```
+
+5. Check it:
+
+   ```
+   $ docker compose ps
+   NAME         IMAGE         ...   STATUS                    PORTS
+   sg2-server   sg2-server    ...   Up 1 minute (healthy)     127.0.0.1:2570->2570/tcp
+   $ docker compose logs sg2-server | grep TRUST
+   sg2-server  | Shady Grove 2 server: SG2_TRUST_PROXY=1; login limits count the address the proxy forwards.
+   ```
+
+   The `PORTS` column must start with `127.0.0.1:`. Open **https://shadygrove2.mooo.com**: you
+   should see the login screen with a padlock in the address bar. **http://116.203.110.214:2570**
+   no longer works from outside; that is expected.
+
+To go back to the IP address, undo step 4: set `SG2_PORT=2570`, delete the `SG2_TRUST_PROXY=1`
+line, run `docker compose up -d`, and open the port again as in step 8 of the first installation.

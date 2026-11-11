@@ -24,7 +24,22 @@ function positiveInt(name: string, fallback: number): number {
   return value;
 }
 
+/**
+ * SG2_TRUST_PROXY: how many reverse proxies (e.g. Caddy) stand in front of the server, so a login's
+ * address is read from X-Forwarded-For; unset, empty or `false` trusts none (the socket's address).
+ */
+function trustProxyHops(): number | undefined {
+  const raw = process.env.SG2_TRUST_PROXY;
+  if (raw === undefined || raw === '' || raw === 'false') return undefined;
+  const hops = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(hops) || hops < 1) {
+    fail(`SG2_TRUST_PROXY must be the number of proxies in front of the server (for example 1), or empty (got "${raw}").`);
+  }
+  return hops;
+}
+
 const port = positiveInt('SG2_PORT', 2570);
+const trustProxy = trustProxyHops();
 const authRatePerMinute = positiveInt('SG2_AUTH_RATE_PER_MIN', 10);
 const jwtSecret = process.env.SG2_JWT_SECRET;
 if (!jwtSecret) fail('SG2_JWT_SECRET is not set. Set it to a random string of at least 32 characters.');
@@ -45,7 +60,7 @@ if (process.env.SG2_STORE === 'memory') {
   }
 }
 
-const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute });
+const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute, trustProxy });
 try {
   await app.listen(port);
 } catch (err) {
@@ -53,6 +68,11 @@ try {
   fail(inUse ? `port ${port} is already in use; stop whatever uses it or set SG2_PORT to another port.` : `cannot listen on port ${port}: ${reason(err)}.`);
 }
 console.log(`Shady Grove 2 server listening on port ${port}${clientDir ? `, serving ${clientDir}` : ''}.`);
+console.log(
+  trustProxy === undefined
+    ? 'Shady Grove 2 server: SG2_TRUST_PROXY is off; login limits count each connection\'s own address.'
+    : `Shady Grove 2 server: SG2_TRUST_PROXY=${trustProxy}; login limits count the address the proxy forwards.`,
+);
 
 let stopping = false;
 async function stop(signal: string) {
