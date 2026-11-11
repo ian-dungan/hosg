@@ -52,6 +52,10 @@ export interface WorldApi {
   /** World position of the statue's spyglass lens (for the beam / camera work). */
   readonly statueLens: Vector3;
   setQuality(q: Quality): void;
+  /** Register a character's meshes so they cast shadows (and get outlines, where the world draws them). */
+  addShadowCaster(root: TransformNode): void;
+  /** Call once the player camera exists, so the world can attach post-processing to it. */
+  attachCamera(camera: ArcRotateCamera): void;
   update(dt: number): void;
 }
 /** Implemented in src/world/index.ts */

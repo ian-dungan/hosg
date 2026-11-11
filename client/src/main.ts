@@ -105,6 +105,8 @@ async function boot(): Promise<void> {
     },
   });
   rigRef = rig;
+  world.attachCamera(rig.camera);
+  world.addShadowCaster(rig.view.root);
   rig.camera.maxZ = 8000;   // the sky dome must never be clipped, even when the camera looks up
   const start = world.anchor('playerStart');
   rig.teleport(start.pos, start.facing);
@@ -138,6 +140,7 @@ async function boot(): Promise<void> {
     view.root.rotation.y = a.facing;
     view.setEntityId(id);
     view.setPose('idle');
+    world.addShadowCaster(view.root);
     interactables.push({ id, label, pos: view.root.position, view, talk });
   }
   function addSpot(id: number, anchor: AnchorName, label: string, talk: () => Promise<void>): void {
