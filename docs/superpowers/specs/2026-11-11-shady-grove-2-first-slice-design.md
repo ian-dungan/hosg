@@ -8,7 +8,7 @@ Prove that Shady Grove 2 feels like a next-gen sequel: a bright 3D world in the 
 
 ## World shape
 
-The player starts on solid ground. The first game was a small corner of a much larger continent, which is the main game. The floating islands are the endgame: they are where Ellie and Felix went, visible in the sky from the opening quest and reached only late.
+The player starts on solid ground. The first game was a small corner of a much larger continent, which is the main game. The floating islands are a later-game region, not necessarily the final one: they are where Ellie and Felix went, visible in the sky from the opening quest and reached well into the game.
 
 ## Hard requirements
 
@@ -33,7 +33,7 @@ The player starts on solid ground. The first game was a small corner of a much l
    - Knockback and launches in combat: heavy hits push characters, and being knocked off a ledge matters.
    - Short falls are free; long falls cost some health but never kill outright.
    - Built as simple character physics that the server checks, not a full physics engine, so it stays fair online and smooth on phones.
-   - Gliding is saved for the sky endgame.
+   - Gliding is saved for the later sky region.
 6. **Combat**
    - Tap-target lock-on with automatic basic attacks in range.
    - Loadout of 5 abilities chosen from a pool of about 12, including heals.
@@ -62,7 +62,7 @@ The player starts on solid ground. The first game was a small corner of a much l
 
 ## Out of scope (later rounds, each with its own design)
 
-Normandy (the capital), the wider continent, and the endgame sky region (floating islands, ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets), player-versus-player, further zones.
+Normandy (the capital), the wider continent, and the later-game sky region (floating islands, ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets), player-versus-player, further zones.
 
 ## Architecture
 
