@@ -154,16 +154,11 @@ try {
   await check('signing in to A\'s account elsewhere shows "Signed in somewhere else" on A', async () => {
     const token = await a.page.evaluate(() => sessionStorage.getItem('sg2.token'));
     if (!token) throw new Error('A has no saved token');
-    // Freeze A's page while the new one loads and joins, so A's rendering does not starve it. A
-    // frozen page runs no scripts; the kick reaches it as soon as it is thawed below.
-    const aSession = await a.context.newCDPSession(a.page);
-    await aSession.send('Page.setWebLifecycleState', { state: 'frozen' });
-    try {
-      a2 = await open('A again (desktop)', desktop, token); // the saved token is set again on every load
-      await joinA2();
-    } finally {
-      await aSession.send('Page.setWebLifecycleState', { state: 'active' });
-    }
+    // Shrink A's page first: software rendering costs CPU per pixel, and a full-size A starves the
+    // new page's join. (Freezing A with CDP does not stop its rendering.) A stays connected.
+    await a.page.setViewportSize({ width: 160, height: 120 });
+    a2 = await open('A again (desktop)', desktop, token); // the saved token is set again on every load
+    await joinA2();
     await a.page.waitForFunction(loginError, 'Signed in somewhere else', { timeout: WAIT_MS });
     await a2.page.waitForFunction(onlineIs, 1, { timeout: WAIT_MS });
   });
