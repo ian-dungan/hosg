@@ -1,6 +1,6 @@
 # Shady Grove 2 — First Playable Slice (Design)
 
-Date: 2026-11-11. Status: awaiting owner review.
+Date: 2026-11-11. Status: approved by the owner.
 
 ## Goal
 
