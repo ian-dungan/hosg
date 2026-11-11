@@ -2,8 +2,8 @@
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import {
   CHAT_MIN_INTERVAL_MS,
-  MAX_MOVE_ALLOWANCE,
   SPAWN,
+  STEP_SLACK,
   TICK_HZ,
   checkMove,
   cleanChat,
@@ -34,13 +34,21 @@ interface Session {
   player: PlayerState;
   /** Last accepted position. */
   lastGood: { x: number; z: number };
-  /** Metres this adventurer may still move, and when it was last refilled (ms). */
-  allowance: number;
-  allowanceAt: number;
+  /** The account's movement allowance (shared with its later sessions). */
+  movement: Allowance;
+  /** Message token bucket: tokens left, and when it was last refilled (ms). */
+  tokens: number;
+  tokensAt: number;
   /** When this adventurer's last chat line went out (ms), or -Infinity. */
   lastChatAt: number;
   /** Set while the client is away and may reconnect. */
   reconnection?: Deferred<Client>;
+}
+
+/** Metres an account may still move, and when that was last refilled (ms). */
+interface Allowance {
+  metres: number;
+  at: number;
 }
 
 /** What a successful onAuth attaches to the client (`client.auth`). */
@@ -59,13 +67,19 @@ async function authenticate(store: Store, jwtSecret: string, options: unknown): 
 
 const KICK_REASON = 'Signed in somewhere else';
 const FULL_REASON = 'Shady Grove is full, try again soon';
-/** Moves at TICK_HZ with room to spare for jitter, plus chat. More than this and Colyseus drops the client. */
-const MAX_MESSAGES_PER_SECOND = 3 * TICK_HZ + 5;
+/**
+ * Per-client message budget (token bucket): refills at 3 * TICK_HZ a second and holds about 4 s of
+ * normal traffic, so a catch-up burst after a stall is absorbed. Messages beyond it are dropped
+ * silently; the client stays connected.
+ */
+const MESSAGE_RATE = 3 * TICK_HZ;
+const MESSAGE_BURST = 4 * (TICK_HZ + 1);
+/** How long after its last move an absent account's allowance is surely full again and can be forgotten. */
+const ALLOWANCE_FORGET_MS = 2000;
 
 export class ZoneRoom extends Room<{ state: ZoneState }> {
   state = new ZoneState();
   autoDispose = false; // the one grove room lives as long as the server
-  maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
 
   private store!: Store;
   private reconnectSeconds!: number;
@@ -73,6 +87,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private maxPlayers!: number;
   private sessions = new Map<string, Session>(); // key: sessionId
   private sessionByAccount = new Map<string, string>(); // accountId -> sessionId
+  /** Movement allowances by account id, kept across kick and re-join so a new session gets no fresh budget. */
+  private allowances = new Map<string, Allowance>();
 
   onCreate(options: ZoneRoomOptions) {
     if (options.live.size > 0) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON); // never a second grove
@@ -88,7 +104,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
     this.onMessage('move', this.guard('move', (client, message) => this.onMove(client, message)));
     this.onMessage('chat', this.guard('chat', (client, message) => this.onChat(client, message)));
-    this.clock.setInterval(() => void this.saveAll(), options.saveSeconds * 1000);
+    this.clock.setInterval(() => {
+      this.forgetIdleAllowances();
+      void this.saveAll();
+    }, options.saveSeconds * 1000);
   }
 
   async onJoin(client: Client) {
@@ -120,8 +139,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       adventurerId: adventurer.id,
       player,
       lastGood: { x: start.x, z: start.z },
-      allowance: MAX_MOVE_ALLOWANCE,
-      allowanceAt: Date.now(),
+      movement: this.allowanceFor(accountId),
+      tokens: MESSAGE_BURST,
+      tokensAt: Date.now(),
       lastChatAt: -Infinity,
     });
     this.state.players.set(client.sessionId, player);
@@ -166,13 +186,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const pose = parsePose(message);
     if (!session || !pose) return;
     const now = Date.now();
-    session.allowance = refillAllowance(session.allowance, (now - session.allowanceAt) / 1000);
-    session.allowanceAt = now;
-    if (checkMove(session.lastGood, pose, session.allowance, groveTownWalkable) !== 'ok') {
+    const movement = session.movement;
+    movement.metres = refillAllowance(movement.metres, (now - movement.at) / 1000);
+    movement.at = now;
+    if (checkMove(session.lastGood, pose, movement.metres, groveTownWalkable) !== 'ok') {
       this.sendTo(client, 'correct', { ...session.lastGood });
       return;
     }
-    session.allowance -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
+    movement.metres -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
     session.lastGood = { x: pose.x, z: pose.z };
     Object.assign(session.player, pose);
   }
@@ -229,9 +250,40 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     client.send(type, message);
   }
 
-  /** Wraps a message handler so a throw is logged and the room carries on. */
+  /** The account's allowance; a new one holds only the step slack, so joining never banks distance. */
+  private allowanceFor(accountId: string): Allowance {
+    let allowance = this.allowances.get(accountId);
+    if (!allowance) {
+      allowance = { metres: STEP_SLACK, at: Date.now() };
+      this.allowances.set(accountId, allowance);
+    }
+    return allowance;
+  }
+
+  /** Drops allowances of accounts that are not here and have been still long enough to be full anyway. */
+  private forgetIdleAllowances() {
+    const now = Date.now();
+    for (const [accountId, allowance] of this.allowances) {
+      if (!this.sessionByAccount.has(accountId) && now - allowance.at > ALLOWANCE_FORGET_MS) this.allowances.delete(accountId);
+    }
+  }
+
+  /** Takes one token from the client's message bucket; false (drop the message) when it is empty. */
+  private takeToken(client: Client): boolean {
+    const session = this.sessions.get(client.sessionId);
+    if (!session) return true; // handlers ignore messages without a session anyway
+    const now = Date.now();
+    session.tokens = Math.min(MESSAGE_BURST, session.tokens + ((now - session.tokensAt) / 1000) * MESSAGE_RATE);
+    session.tokensAt = now;
+    if (session.tokens < 1) return false;
+    session.tokens -= 1;
+    return true;
+  }
+
+  /** Wraps a message handler: rate-limited per client, and a throw is logged while the room carries on. */
   private guard(type: string, handler: (client: Client, message: unknown) => void) {
     return (client: Client, message: unknown) => {
+      if (!this.takeToken(client)) return;
       try {
         handler(client, message);
       } catch (err) {

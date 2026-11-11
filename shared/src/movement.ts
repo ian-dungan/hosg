@@ -16,7 +16,7 @@ export function parsePose(msg: unknown): Pose | null {
 /** Fastest an adventurer may move, in m/s: running speed plus 30% for timing jitter. */
 export const MAX_MOVE_SPEED = RUN_SPEED * 1.3;
 /** Extra distance allowed on top of the speed limit, for jitter. Granted once, as part of the allowance cap. */
-const STEP_SLACK = 0.5;
+export const STEP_SLACK = 0.5;
 /** Most distance an adventurer can bank: one second of movement plus the slack. */
 export const MAX_MOVE_ALLOWANCE = MAX_MOVE_SPEED * 1 + STEP_SLACK;
 /** Distance between the points checked along a step, so thin obstacles cannot be stepped over. */

@@ -101,12 +101,64 @@ describe('movement', () => {
     expect(corrections.at(-1)).toEqual({ x: me.x, z: SPAWN.z });
   });
 
-  it('disconnects a client that floods the room with messages', async () => {
+  it('does not give a re-joining account a fresh allowance', async () => {
+    const { url, store } = await start();
+    const { token } = await accountFor(store, 'Alice');
+    const first = await joinGrove(url, token);
+    await sleep(1100); // bank a full allowance, then spend it
+    const firstCorrections = collect(first.room, 'correct');
+    for (let i = 1; i <= 40; i++) first.room.send('move', pose(SPAWN.x + i * 0.4, SPAWN.z));
+    await waitFor(() => firstCorrections.length > 0);
+    await sleep(50);
+    const spentAt = first.room.state.players.get(first.room.sessionId).x;
+    expect(spentAt - SPAWN.x).toBeGreaterThan(7);
+
+    collect(first.room, 'kicked');
+    const again = await joinGrove(url, token); // kicks the first session
+    const corrections = collect(again.room, 'correct');
+    const startX = again.room.state.players.get(again.room.sessionId).x;
+    expect(startX).toBe(spentAt);
+    for (let i = 1; i <= 40; i++) again.room.send('move', pose(startX + i * 0.4, SPAWN.z));
+    await waitFor(() => corrections.length > 0);
+    await sleep(50);
+    expect(again.room.state.players.get(again.room.sessionId).x - startX).toBeLessThan(2); // not another 8.3 m
+  });
+
+  it('absorbs a catch-up burst of 60 moves: the client stays connected and moves normally afterwards', async () => {
     const { url, store } = await start();
     const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
-    const left = new Promise<number>((resolve) => a.room.onLeave((code) => resolve(code)));
-    for (let i = 0; i < 200; i++) a.room.send('move', pose(SPAWN.x, SPAWN.z));
-    expect(await left).toBe(4002);
+    let left = false;
+    a.room.onLeave(() => (left = true));
+    collect(a.room, 'correct');
+    for (let i = 1; i <= 60; i++) a.room.send('move', pose(SPAWN.x + (i % 2) * 0.4, SPAWN.z)); // back and forth
+    await sleep(1100);
+    const me = a.room.state.players.get(a.room.sessionId);
+    const next = me.x + 0.4;
+    a.room.send('move', pose(next, SPAWN.z));
+    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === next);
+    expect(left).toBe(false);
+  });
+
+  it('throttles a sustained flood without disconnecting anyone or stalling the room', async () => {
+    const { url, store } = await start();
+    const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
+    const b = await joinGrove(url, (await accountFor(store, 'Bob')).token);
+    let left = false;
+    a.room.onLeave(() => (left = true));
+    collect(a.room, 'correct');
+    const floodStart = Date.now();
+    for (let round = 0; round < 5; round++) {
+      for (let i = 1; i <= 100; i++) a.room.send('move', pose(SPAWN.x + (round * 100 + i) * 0.4, SPAWN.z));
+      await sleep(20);
+    }
+    // Another adventurer's move still goes through promptly.
+    b.room.send('move', pose(SPAWN.x - 0.4, SPAWN.z));
+    await waitFor(() => a.room.state.players.get(b.room.sessionId)?.x === SPAWN.x - 0.4, 500);
+    await sleep(200);
+    const elapsed = (Date.now() - floodStart) / 1000;
+    const travelled = a.room.state.players.get(a.room.sessionId).x - SPAWN.x;
+    expect(travelled).toBeLessThanOrEqual(0.5 + 6 * 1.3 * elapsed);
+    expect(left).toBe(false);
   });
 
   it('corrects a move into the statue plinth', async () => {
