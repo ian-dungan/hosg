@@ -1,0 +1,18 @@
+{
+  "name": "@sg2/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1"
+  },
+  "dependencies": {
+    "@sg2/shared": "0.1.0",
+    "pg": "^8.23.1"
+  }
+}

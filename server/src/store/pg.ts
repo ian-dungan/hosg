@@ -1,0 +1,149 @@
+// PostgreSQL Store. Opening it applies any migrations/*.sql not yet recorded in schema_migrations.
+import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+import { SPAWN } from '@sg2/shared';
+import { NameTakenError, type Account, type Adventurer, type Store } from './types';
+
+const UNIQUE_VIOLATION = '23505';
+// Any constant shared by all server processes: serialises concurrent migration runs.
+const MIGRATION_LOCK_ID = 2570_0001;
+
+// server/migrations, seen from this file in src/store/ or from a bundle in dist/.
+function migrationsDir(): string {
+  const candidates = ['../../migrations/', '../migrations/'].map((p) => fileURLToPath(new URL(p, import.meta.url)));
+  const found = candidates.find((dir) => existsSync(`${dir}001_init.sql`));
+  if (!found) throw new Error(`migrations folder not found (looked in ${candidates.join(', ')})`);
+  return found;
+}
+
+async function migrate(pool: pg.Pool): Promise<void> {
+  const dir = migrationsDir();
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK_ID]);
+    await client.query(
+      'CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())',
+    );
+    const { rows } = await client.query<{ name: string }>('SELECT name FROM schema_migrations');
+    const applied = new Set(rows.map((r) => r.name));
+    for (const file of files) {
+      if (applied.has(file)) continue;
+      await client.query(await readFile(`${dir}${file}`, 'utf8'));
+      await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+interface AccountRow {
+  id: string;
+  username: string;
+  password_hash: string | null;
+  is_guest: boolean;
+  is_gm: boolean;
+}
+
+interface AdventurerRow {
+  id: string;
+  account_id: string;
+  name: string;
+  x: number;
+  z: number;
+  facing: number;
+  zone: 'grove';
+  level: number;
+  xp: number;
+  gold: number;
+}
+
+const ACCOUNT_COLUMNS = 'id, username, password_hash, is_guest, is_gm';
+const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, level, xp, gold';
+
+function toAccount(r: AccountRow): Account {
+  return { id: r.id, username: r.username, passwordHash: r.password_hash, isGuest: r.is_guest, isGm: r.is_gm };
+}
+
+function toAdventurer(r: AdventurerRow): Adventurer {
+  return {
+    id: r.id,
+    accountId: r.account_id,
+    name: r.name,
+    x: r.x,
+    z: r.z,
+    facing: r.facing,
+    zone: r.zone,
+    level: r.level,
+    xp: r.xp,
+    gold: r.gold,
+  };
+}
+
+export async function createPgStore(databaseUrl: string): Promise<Store> {
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  try {
+    await migrate(pool);
+  } catch (err) {
+    await pool.end();
+    throw err;
+  }
+
+  return {
+    async createAccount({ username, passwordHash, isGuest }) {
+      try {
+        const { rows } = await pool.query<AccountRow>(
+          `INSERT INTO accounts (username, password_hash, is_guest) VALUES ($1, $2, $3) RETURNING ${ACCOUNT_COLUMNS}`,
+          [username, passwordHash, isGuest],
+        );
+        return toAccount(rows[0]!);
+      } catch (err) {
+        if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new NameTakenError(username);
+        throw err;
+      }
+    },
+
+    async findAccountByUsername(username) {
+      const { rows } = await pool.query<AccountRow>(
+        `SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE lower(username) = lower($1)`,
+        [username],
+      );
+      return rows[0] ? toAccount(rows[0]) : null;
+    },
+
+    async getOrCreateAdventurer(accountId, name) {
+      // Insert-or-nothing keeps one adventurer per account even if two calls race.
+      await pool.query(
+        `INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold)
+         VALUES ($1, $2, $3, $4, $5, 'grove', 1, 0, 0)
+         ON CONFLICT (account_id) DO NOTHING`,
+        [accountId, name, SPAWN.x, SPAWN.z, SPAWN.facing],
+      );
+      const { rows } = await pool.query<AdventurerRow>(
+        `SELECT ${ADVENTURER_COLUMNS} FROM adventurers WHERE account_id = $1`,
+        [accountId],
+      );
+      return toAdventurer(rows[0]!);
+    },
+
+    async saveAdventurer({ id, x, z, facing }) {
+      await pool.query('UPDATE adventurers SET x = $2, z = $3, facing = $4, updated_at = now() WHERE id = $1', [
+        id,
+        x,
+        z,
+        facing,
+      ]);
+    },
+
+    async close() {
+      await pool.end();
+    },
+  };
+}
