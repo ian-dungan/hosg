@@ -52,7 +52,11 @@ The player starts on solid ground. The first game was a small corner of a much l
    - No "party required" gate. Solo is possible with top gear and near-perfect play.
    - A solo kill grants a unique title and a place on the boss leaderboard.
 9. **Progression**: levels 1 to 10, three gear tiers, abilities unlocked by level and quest.
-   - **Visible gear**: what you equip shows on your character and is seen by every other player. Slots: head, chest, legs, feet, hands, back (cape or pack), main weapon and off-hand. The first slice has three looks per slot, one per gear tier. A separate appearance slot lets you keep a look you like while wearing better stats.
+   - **Visible gear**: what you equip shows on your character and is seen by every other player. Slots: head, chest, legs, feet, hands, back (cape or pack), main weapon and off-hand.
+   - **Armour types**: cloth (for casters and healers: stronger abilities, low defence), light (speed and critical hits) and heavy (defence and stagger resistance). Any adventurer can wear any type; the choice is how you lean toward a role, since there are no fixed classes.
+   - **Armour sets**: each set has its own style and colours. The first slice has one set per armour type per gear tier (nine sets).
+   - **Costumes**: purely cosmetic outfits worn over your gear in a separate costume slot, so they never change stats. Adventurers buy them from a costume shop or win them at GM-run events.
+   - **GM tools**: game masters can start an event, announce it to the server and award a costume or item to the winners.
 10. **Online**: accounts (username and password, or play as guest), saved characters, chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
 
 ## Out of scope (later rounds, each with its own design)
