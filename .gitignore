@@ -3,3 +3,5 @@ node_modules/
 dist/
 dist-online/
 .env
+# Database backups hold password hashes: never commit them.
+sg2-backup-*.sql

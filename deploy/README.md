@@ -46,7 +46,7 @@ are commands: type what follows the `$`. Lines under them show what you should s
    ```
 
    This should print **nothing**. If it prints a line, another program has the port: choose another
-   port (for example 2580) and use it in step 4 and everywhere this guide says 2570.
+   port (for example 2580) and use it in step 5 and everywhere this guide says 2570.
 
 3. Check there is free memory:
 
@@ -91,7 +91,8 @@ are commands: type what follows the `$`. Lines under them show what you should s
 
    - `SG2_JWT_SECRET` signs players' logins. `POSTGRES_PASSWORD` is the database password.
    - Never share `.env` or put it in Git (Git is already told to ignore it). Keep a copy somewhere
-     safe: without `POSTGRES_PASSWORD` you cannot use a database backup made with this setup.
+     safe: the `sg2-pgdata` volume only opens with the `POSTGRES_PASSWORD` it was made with.
+     (Backups do not need it: a backup goes into any new database.)
    - The database password is set once, the first time the database starts. Changing it in `.env`
      later does not change the database's password, and the server could no longer log in.
    - If you chose another port in step 2, change the `SG2_PORT=2570` line in `.env` to it.
@@ -202,20 +203,23 @@ Saved accounts and adventurers are kept. Afterwards, check with step 7.
 
 ```
 $ cd ~/shady-grove-2
-$ docker compose exec -T sg2-db pg_dump -U sg2 -d sg2 > sg2-backup-$(date +%F).sql
-$ ls -lh sg2-backup-*.sql
+$ mkdir -p ~/sg2-backups && chmod 700 ~/sg2-backups
+$ docker compose exec -T sg2-db pg_dump -U sg2 -d sg2 > ~/sg2-backups/sg2-backup-$(date +%F).sql
+$ ls -lh ~/sg2-backups
 ```
 
-The file (for example `sg2-backup-2026-11-12.sql`) should be larger than 0 bytes. Copy it to
-another computer from time to time, for example with `scp` from your own machine.
+The file (for example `~/sg2-backups/sg2-backup-2026-11-12.sql`) should be larger than 0 bytes.
+Backups go in their own folder, outside the game folder, because they hold every account's
+(scrambled) password: never put one in Git or share it. Copy them to another computer from time
+to time, for example with `scp` from your own machine.
 
 To restore a backup, it must go into an **empty** database, before the game server has started on
 it (the server creates the tables the first time it starts). On a fresh installation, do this
-instead of step 6, with the same `POSTGRES_PASSWORD` in `.env` as before if you have it:
+instead of step 6 (any `POSTGRES_PASSWORD` works, a new one too):
 
 ```
 $ docker compose up -d --wait sg2-db
-$ docker compose exec -T sg2-db psql -q -U sg2 -d sg2 < sg2-backup-2026-11-12.sql
+$ docker compose exec -T sg2-db psql -q -U sg2 -d sg2 < ~/sg2-backups/sg2-backup-2026-11-12.sql
 $ docker compose up -d --build
 ```
 

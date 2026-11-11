@@ -10,3 +10,5 @@ concepts
 docs
 deploy
 *.md
+# Database backups hold password hashes: never put them in the image.
+**/sg2-backup-*.sql
