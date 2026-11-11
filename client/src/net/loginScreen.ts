@@ -1,4 +1,5 @@
-// The online login screen: name and password, Play / Create account / Play as guest, and an inline error.
+// The online login screen: name and password, Play / Create account / Play as guest, and an inline error;
+// "Continue as <name>" first when this tab still holds a signed-in account (e.g. after "Connection lost").
 // Styled like the HUD's title screen (it reuses the HUD's buttons and colours).
 import { h } from '../hud/dom';
 import { login } from './session';
@@ -26,6 +27,7 @@ const CSS = /* css */ `
 .sg-login-row{display:flex;gap:10px}
 .sg-login-row .sg-btn{flex:1;min-width:0;padding:0 12px}
 .sg-login-guest{margin-top:2px}
+.sg-login-continue{margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sg-login.busy .sg-btn{opacity:.55;pointer-events:none}
 @media (max-height:500px){
   .sg-login .sg-title-name{font-size:36px}
@@ -44,8 +46,16 @@ export function injectLoginStyles(): void {
   document.head.appendChild(s);
 }
 
-/** Shows the login screen over `root` until an account is signed in. `notice` is shown as the error line (e.g. why you were sent back here). */
-export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: string; name: string | null }> {
+/**
+ * Shows the login screen over `root` until an account is signed in. `notice` is shown as the error line
+ * (e.g. why you were sent back here). With `resume`, it offers "Continue as <name>", which resolves
+ * with that saved account as it is (the caller finds out whether its token still works).
+ */
+export function showLogin(
+  root: HTMLElement,
+  notice = '',
+  resume: { token: string; name: string } | null = null,
+): Promise<{ token: string; name: string | null }> {
   injectLoginStyles();
   return new Promise((resolve) => {
     const wrap = h('div', 'sg-hud', root);
@@ -55,6 +65,8 @@ export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: stri
     h('div', 'sg-login-sub', box, 'Adventurers gather in the Plaza of the Two');
     const form = h('form', 'sg-login-form', box);
     form.noValidate = true;
+    const resumeButton = resume && h('button', 'sg-btn sg-btn-gold sg-login-continue', form, `Continue as ${resume.name}`);
+    if (resumeButton) resumeButton.type = 'button';
     const nameLabel = h('label', '', form, 'Name');
     const name = h('input', '', nameLabel);
     Object.assign(name, { type: 'text', name: 'username', autocomplete: 'username', maxLength: 16, spellcheck: false });
@@ -65,7 +77,7 @@ export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: stri
     const err = h('div', 'sg-login-err', form, notice);
     err.setAttribute('role', 'alert');
     const row = h('div', 'sg-login-row', form);
-    const play = h('button', 'sg-btn sg-btn-gold', row, 'Play');
+    const play = h('button', resume ? 'sg-btn' : 'sg-btn sg-btn-gold', row, 'Play');
     play.type = 'submit';
     const create = h('button', 'sg-btn', row, 'Create account');
     create.type = 'button';
@@ -73,17 +85,19 @@ export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: stri
     guest.type = 'button';
 
     let busy = false;
+    const done = (session: { token: string; name: string | null }) => {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      screen.classList.remove('in');
+      window.setTimeout(() => wrap.remove(), 350);
+      resolve(session);
+    };
     const attempt = async (kind: 'register' | 'login' | 'guest') => {
       if (busy) return;
       busy = true;
       screen.classList.add('busy');
       err.textContent = '';
       try {
-        const session = kind === 'guest' ? await login('guest') : await login(kind, name.value.trim(), pass.value);
-        (document.activeElement as HTMLElement | null)?.blur?.();
-        screen.classList.remove('in');
-        window.setTimeout(() => wrap.remove(), 350);
-        resolve(session);
+        done(kind === 'guest' ? await login('guest') : await login(kind, name.value.trim(), pass.value));
       } catch (e) {
         err.textContent = e instanceof Error ? e.message : String(e);
         busy = false;
@@ -93,6 +107,11 @@ export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: stri
     form.addEventListener('submit', (e) => { e.preventDefault(); void attempt('login'); });
     create.addEventListener('click', () => void attempt('register'));
     guest.addEventListener('click', () => void attempt('guest'));
+    resumeButton?.addEventListener('click', () => {
+      if (busy || !resume) return;
+      busy = true;
+      done(resume);
+    });
     // Keys typed here belong to the form, not the game.
     screen.addEventListener('keydown', (e) => e.stopPropagation());
     requestAnimationFrame(() => requestAnimationFrame(() => screen.classList.add('in')));

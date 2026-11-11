@@ -1,7 +1,16 @@
 // Shady Grove 2 — online: sign in, then walk the grove with everyone else who is here.
 // The server owns positions; this page sends the adventurer's pose and draws the others.
 import { Vector3 } from '@babylonjs/core';
-import { RECONNECT_SECONDS, TICK_HZ, type C2S, type S2C } from '@sg2/shared';
+import {
+  CLIENT_RECONNECTION,
+  REASON_GROVE_FULL,
+  REASON_NAME_FIRST,
+  REASON_SIGNED_IN_ELSEWHERE,
+  RECONNECT_SECONDS,
+  TICK_HZ,
+  type C2S,
+  type S2C,
+} from '@sg2/shared';
 import type { HudState } from './core/contracts';
 import { bootGame } from './boot';
 import { h } from './hud/dom';
@@ -9,11 +18,22 @@ import { createChat } from './net/chatBox';
 import { showLogin } from './net/loginScreen';
 import { LeaveNameScreen, showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
-import { connect, forgetToken, nameAdventurer, savedToken, type GroveRoom } from './net/session';
+import {
+  UNREACHABLE,
+  connect,
+  forgetToken,
+  nameAdventurer,
+  rememberName,
+  savedAccount,
+  savedToken,
+  type GroveRoom,
+} from './net/session';
 
 const CONNECTION_LOST = 'Connection lost';
-/** The server's reason for refusing a join of an account whose adventurer has no name yet. */
-const NAME_FIRST = 'Name your adventurer first';
+const CONNECTING = 'Connecting…';
+const RECONNECTING = 'Reconnecting…';
+/** Join refusals that say nothing against the account: its saved token is kept, so "Continue as" stays on offer. */
+const KEEP_TOKEN_ON = new Set([UNREACHABLE, REASON_GROVE_FULL]);
 /** Longest wait after joining for the room to show this adventurer. */
 const ENTER_TIMEOUT_MS = 15_000;
 /** Smallest pose change worth sending (m or rad); the rig's slow-down never quite reaches zero. */
@@ -23,6 +43,7 @@ const CSS = /* css */ `
 .sg-online{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
   font-size:13px;font-weight:600;background:rgba(16,18,42,.45)}
 .sg-online.away{color:#ffd9a0}
+.sg-online:empty{display:none}
 .sg-net-off{display:none}
 `;
 
@@ -41,7 +62,8 @@ function boot(): void {
   style.textContent = CSS;
   document.head.appendChild(style);
   const netUi = h('div', 'sg-net-off', hudRoot);
-  const status = h('div', 'sg-online', h('div', 'sg-hud', netUi));
+  // Outside netUi, so "Connecting…" shows before the room does.
+  const status = h('div', 'sg-online', h('div', 'sg-hud', hudRoot));
   const chat = createChat(netUi, (text) => room && send(room, 'chat', { text }));
 
   const net: NetDebug = { remotes: [] };
@@ -57,15 +79,17 @@ function boot(): void {
     inCombat: false,
   };
 
+  /** From asking to join until this adventurer is in the room (or the attempt ends). */
+  let connecting = false;
   let statusText = '';
   game.start((dt) => {
     remotes?.update(dt);
-    let text = '';
-    if (room) text = room.reconnection.isReconnecting ? 'Reconnecting…' : `Adventurers online: ${room.state.players?.size ?? 0}`;
+    let text = connecting ? CONNECTING : '';
+    if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.players?.size ?? 0}`;
     if (text !== statusText) {
       statusText = text;
       status.textContent = text;
-      status.classList.toggle('away', text === 'Reconnecting…');
+      status.classList.toggle('away', text === RECONNECTING);
     }
     hud.render(state);
   });
@@ -80,7 +104,7 @@ function boot(): void {
       const sent = { x: NaN, z: NaN, facing: NaN, moving: false };
 
       // Reconnect for up to RECONNECT_SECONDS, however long the room has been up, then give up.
-      Object.assign(r.reconnection, { minUptime: 0, maxRetries: 1000, maxDelay: 2000 });
+      Object.assign(r.reconnection, CLIENT_RECONNECTION);
       r.onDrop(() => {
         rig.setMoveScale(0);
         game.walkTo(null);
@@ -93,6 +117,8 @@ function boot(): void {
         sent.x = NaN; // the server may have missed the last pose: send it again
       });
       r.onMessage('kicked', (m: S2C['kicked']) => { kickedFor = m.reason; });
+      // Kicked while away: the server refuses the reconnection with the reason.
+      r.onError((_code, message) => { if (message === REASON_SIGNED_IN_ELSEWHERE) kickedFor = message; });
       r.onMessage('chat', (m: S2C['chat']) => chat.add(m.from, m.text));
       r.onMessage('correct', (m: S2C['correct']) => {
         game.walkTo(null);
@@ -109,7 +135,9 @@ function boot(): void {
       };
       const enter = (me: { name: string; x: number; z: number; facing: number }) => {
         entered = true;
+        connecting = false;
         state.player.name = me.name;
+        rememberName(me.name);
         rig.teleport(new Vector3(me.x, 0, me.z), me.facing);
         Object.assign(sent, { x: me.x, z: me.z, facing: me.facing, moving: false });
         room = r;
@@ -134,6 +162,7 @@ function boot(): void {
       const enterTimer = window.setTimeout(() => { if (!entered) void r.leave(); }, ENTER_TIMEOUT_MS);
 
       r.onLeave(() => {
+        connecting = false;
         clearTimeout(enterTimer);
         clearTimeout(lostTimer);
         clearInterval(sendTimer);
@@ -177,21 +206,23 @@ function boot(): void {
       let token = resume;
       resume = null;
       if (!token) {
-        const session = await showLogin(hudRoot, notice);
+        const session = await showLogin(hudRoot, notice, savedAccount());
         token = session.token;
         if (session.name === null && !(await chooseName(token))) continue;
       }
       let r: GroveRoom;
+      connecting = true;
       try {
         r = await connect(token);
       } catch (err) {
+        connecting = false;
         const message = err instanceof Error ? err.message : CONNECTION_LOST;
-        if (message === NAME_FIRST) {
+        if (message === REASON_NAME_FIRST) {
           // A reload while choosing a name: carry on choosing it, then join.
           if (await chooseName(token)) resume = token;
           continue;
         }
-        forgetToken();
+        if (!KEEP_TOKEN_ON.has(message)) forgetToken(); // refused: back to the plain login screen
         notice = message;
         continue;
       }

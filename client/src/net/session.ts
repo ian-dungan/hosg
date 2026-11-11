@@ -3,7 +3,7 @@
 // points the room connection somewhere else (the /api requests stay on the page's origin, which the
 // dev server proxies; see vite.config.ts). Production builds never read it: a crafted link must not
 // send the player's token to another server.
-import { Client, type Room } from '@colyseus/sdk';
+import { Client, ErrorCode, type Room } from '@colyseus/sdk';
 
 /** One adventurer as the room state shows it (the server's PlayerState). */
 export interface PlayerView {
@@ -26,9 +26,13 @@ export interface ZoneState {
 export type GroveRoom = Room<ZoneState>;
 
 const TOKEN_KEY = 'sg2.token';
+/** The saved token's adventurer name, once known, for the login screen's "Continue as". */
+const NAME_KEY = 'sg2.name';
 /** Longest wait for the server to answer a login or a join, so the page never hangs on a dead server. */
 const TIMEOUT_MS = 15_000;
-const UNREACHABLE = 'Cannot reach the server';
+export const UNREACHABLE = 'Cannot reach the server';
+/** A join refused because the token is no good (expired, or its account is gone). */
+const SIGN_IN_AGAIN = 'Please sign in again';
 
 /**
  * The room server: the page's own origin, or in a development build `?server=` when it is a valid
@@ -53,12 +57,36 @@ export function savedToken(): string | null {
   try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
-export function forgetToken(): void {
-  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ }
+/** The saved token and its adventurer's name, when both are known: the login screen offers to continue with them. */
+export function savedAccount(): { token: string; name: string } | null {
+  try {
+    const token = sessionStorage.getItem(TOKEN_KEY);
+    const name = sessionStorage.getItem(NAME_KEY);
+    return token && name ? { token, name } : null;
+  } catch {
+    return null;
+  }
 }
 
-function saveToken(token: string): void {
-  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* storage blocked: a reload asks again */ }
+export function forgetToken(): void {
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(NAME_KEY);
+  } catch { /* storage blocked */ }
+}
+
+/** Saves the token, and its adventurer's name if it has one (a new token never keeps an old name). */
+function saveToken(token: string, name: string | null): void {
+  try {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    if (name === null) sessionStorage.removeItem(NAME_KEY);
+    else sessionStorage.setItem(NAME_KEY, name);
+  } catch { /* storage blocked: a reload asks again */ }
+}
+
+/** Records the saved token's adventurer name (as the room shows it) for "Continue as". */
+export function rememberName(name: string): void {
+  try { if (sessionStorage.getItem(TOKEN_KEY)) sessionStorage.setItem(NAME_KEY, name); } catch { /* storage blocked */ }
 }
 
 /** Rejects with `Error(message)` if `p` has not settled within TIMEOUT_MS. */
@@ -100,7 +128,7 @@ export async function login(
   if (!res.ok || typeof body?.token !== 'string' || (typeof name !== 'string' && name !== null)) {
     throw new Error(typeof body?.error === 'string' ? body.error : `The server could not sign you in (${res.status})`);
   }
-  saveToken(body.token);
+  saveToken(body.token, name);
   return { token: body.token, name };
 }
 
@@ -148,6 +176,7 @@ export async function connect(token: string): Promise<GroveRoom> {
     } catch (err) {
       // A join that completes after the timeout must not linger as a second, invisible session.
       joining.then((room) => room.leave(), () => {});
+      if ((err as { code?: unknown } | null)?.code === ErrorCode.AUTH_FAILED) throw new Error(SIGN_IN_AGAIN);
       const message = err instanceof Error && err.message ? err.message : UNREACHABLE;
       // A busy device can open the socket too late for its reserved seat; trying again usually fits.
       if (attempt < 3 && /seat reservation expired/i.test(message)) continue;

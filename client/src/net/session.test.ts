@@ -1,9 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { nameResult, serverUrl } from './session';
+import { forgetToken, login, nameResult, rememberName, savedAccount, savedToken, serverUrl } from './session';
 
 const page = (search: string) => ({ origin: 'http://game.example:2570', search });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+/** A sessionStorage stand-in (vitest runs these tests in Node, which has none). */
+function stubStorage(): Map<string, string> {
+  const items = new Map<string, string>();
+  vi.stubGlobal('sessionStorage', {
+    getItem: (key: string) => items.get(key) ?? null,
+    setItem: (key: string, value: string) => void items.set(key, value),
+    removeItem: (key: string) => void items.delete(key),
+  });
+  return items;
+}
+
+/** fetch answering every request with `body`. */
+function stubFetch(body: unknown): void {
+  vi.stubGlobal('window', globalThis); // for window.setTimeout
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify(body), { status: 200 }));
+}
 
 describe('serverUrl', () => {
   it('uses the page origin when there is no override', () => {
@@ -49,5 +69,43 @@ describe('nameResult', () => {
     });
     expect(nameResult(500, null)).toEqual({ kind: 'retry', error: 'The server could not save the name (500)' });
     expect(nameResult(200, {})).toEqual({ kind: 'retry', error: 'The server could not save the name (200)' });
+  });
+});
+
+describe('the saved account ("Continue as")', () => {
+  it('keeps a guest\'s token and adventurer name together', async () => {
+    stubStorage();
+    stubFetch({ token: 'guest-token', name: 'Guest-123456' });
+    await login('guest');
+    expect(savedAccount()).toEqual({ token: 'guest-token', name: 'Guest-123456' });
+  });
+
+  it('never pairs a new token with an older account\'s name', async () => {
+    stubStorage();
+    stubFetch({ token: 'old', name: 'Guest-123456' });
+    await login('guest');
+    stubFetch({ token: 'new', name: null }); // registered, adventurer still to be named
+    await login('register', 'rowan_88', 'longenough');
+    expect(savedToken()).toBe('new');
+    expect(savedAccount()).toBeNull();
+    rememberName('Elowen'); // the room showed the adventurer
+    expect(savedAccount()).toEqual({ token: 'new', name: 'Elowen' });
+  });
+
+  it('remembers a name only alongside a token, and forgets both together', () => {
+    stubStorage();
+    rememberName('Elowen');
+    expect(savedAccount()).toBeNull();
+    sessionStorage.setItem('sg2.token', 't');
+    rememberName('Elowen');
+    expect(savedAccount()).toEqual({ token: 't', name: 'Elowen' });
+    forgetToken();
+    expect(savedAccount()).toBeNull();
+    expect(savedToken()).toBeNull();
+  });
+
+  it('is simply absent when storage is blocked', () => {
+    vi.stubGlobal('sessionStorage', { getItem: () => { throw new Error('blocked'); } });
+    expect(savedAccount()).toBeNull();
   });
 });
