@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:online": "vite --mode online --open /online.html?server=http://localhost:2570",
     "build": "tsc --noEmit && vite build",
+    "build:online": "tsc --noEmit && vite build --mode online",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@babylonjs/core": "^9.35.0",
+    "@colyseus/sdk": "^0.18.10",
     "@sg2/shared": "0.1.0"
   },
   "devDependencies": {
