@@ -56,6 +56,17 @@ are commands: type what follows the `$`. Lines under them show what you should s
 
    In the `available` column of the `Mem:` row you want at least `2.0Gi`.
 
+> **What has not been tested yet.** This guide was checked on a test machine, but:
+>
+> - the `Dockerfile` exactly as it is in the repository has never been built (only a slightly
+>   changed copy that the test machine needed for its network);
+> - downloading the base images from Docker Hub, and running on this server, are untested;
+> - real iPhones and iPads (Safari) are untested; only a simulated iPhone was tried.
+>
+> So if step 6 fails the first time, nothing is broken: run
+> `docker compose build 2>&1 | tail -n 30`, copy those last 30 lines, and send them to whoever
+> maintains the game. Your other games are not affected.
+
 ## First installation
 
 4. Download the game into a folder called `shady-grove-2` in your home folder:
@@ -171,6 +182,9 @@ are commands: type what follows the `$`. Lines under them show what you should s
 
    If the page does not load from outside but step 7 worked, the port is still blocked: check
    step 8 (and the Hetzner firewall).
+
+   When you invite players, tell them **not to use a password they use anywhere else** until the
+   game has HTTPS (the last section of this guide): over plain `http://`, passwords are not encrypted.
 
 10. Check that your other games are untouched:
 
