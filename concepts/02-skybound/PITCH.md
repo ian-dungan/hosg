@@ -1,10 +1,10 @@
-# KAETRAM: WINDWARD — The Sundered Sky
+# SHADY GROVE 2: WINDWARD — The Sundered Sky
 
 > *The world broke upward. Two heroes pointed the way. Go find out what they saw.*
 
 ## Premise
 
-Ellie and Felix won the last war of old Kaetram by ending it at the root, at the Heartstone under the continent. The world lived, but the stone's release lifted the land itself, and Kaetram drifted apart into thousands of islands above an endless sea of cloud. Three generations later the sky is home. Folk sail between islands in wind-ships with patchwork sails, read the currents like roads, and swap rumours of islets no chart has caught. Islands drift on slow orbits, so the map is never the same twice. Now the drift is speeding up. Old routes are tearing apart, and something far above the Cloudline has begun to *answer*.
+Ellie and Felix won the last war of old Shady Grove by ending it at the root, at the Heartstone under the continent. The world lived, but the stone's release lifted the land itself, and the land drifted apart into thousands of islands above an endless sea of cloud. Three generations later the sky is home. Folk sail between islands in wind-ships with patchwork sails, read the currents like roads, and swap rumours of islets no chart has caught. Islands drift on slow orbits, so the map is never the same twice. Now the drift is speeding up. Old routes are tearing apart, and something far above the Cloudline has begun to *answer*.
 
 ## Ellie & Felix
 
@@ -17,9 +17,9 @@ They did not die. After the Sundering they took their little ship, the *Second C
 - **Ellie's Margins:** her original maps, crowded with jokes, doodles and riddles, and still the most accurate charts anywhere. They also hold *hidden routes* that only open when the drift lines up.
 - **Pim:** the cheerful, slightly vain ship-spirit of the *Second Chance*'s figurehead. Pim fell back to the world long ago and chooses the player as its new captain. Pim is a companion, not a stand-in for the heroes, and full of affectionate stories about both of them.
 
-## Starting Town: Lanternrest
+## Starting Town: Normandy
 
-Lanternrest is a terraced sky-port built into a coral-gold island. Its stair-streets drop past windmills, bunting and swaying dock-cranes to piers that jut straight out over the clouds. The **Plaza of the Two** sits at its heart. On its bronze-and-verdigris statue, Ellie stands mid-stride with her arm flung out, pointing at an empty patch of sky. Felix has a hand on her shoulder and holds his spyglass to his eye, sighting along her arm. For seventy years nobody has known what they were pointing at.
+Normandy is a terraced sky-port built into a coral-gold island. Its stair-streets drop past windmills, bunting and swaying dock-cranes to piers that jut straight out over the clouds. The **Plaza of the Two** sits at its heart. On its bronze-and-verdigris statue, Ellie stands mid-stride with her arm flung out, pointing at an empty patch of sky. Felix has a hand on her shoulder and holds his spyglass to his eye, sighting along her arm. For seventy years nobody has known what they were pointing at.
 
 **Inciting moment (minute 8):** at the solstice sun-crossing, light runs through the statue's real Wayglass lens and throws a beam into the sky. Where it lands, an island **surfaces from the cloud** for the first time since the Sundering. It is the *Beacon*, and the docks erupt. The old chart-keeper realises that the drift is no longer random. *Someone up there is steering it.*
 

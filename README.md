@@ -1,3 +1,3 @@
-# Kaetram II (working title)
+# Shady Grove 2: Windward
 
-Fresh start. Sequel concept exploration lives in `concepts/`.
+Sequel to Shady Grove. Concepts in `concepts/`, design in `docs/superpowers/specs/`.

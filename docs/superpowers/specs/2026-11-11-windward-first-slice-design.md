@@ -1,4 +1,4 @@
-# Kaetram: Windward — First Playable Slice (Design)
+# Shady Grove 2: Windward — First Playable Slice (Design)
 
 Date: 2026-11-11. Status: awaiting owner review.
 
@@ -15,7 +15,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 
 ## In scope
 
-1. **Lanternrest**: the terraced sky-port, with the Plaza of the Two and the statue of Ellie (pointing) and Felix (spyglass).
+1. **Normandy** (starting town): the terraced sky-port, with the Plaza of the Two and the statue of Ellie (pointing) and Felix (spyglass).
 2. **Opening quest, "The Solstice Crossing"**: talk to Old Marrow, watch the beam leave the statue and the Beacon island rise, meet Pim, take the ferry to the Beacon Shelf.
 3. **The Beacon Shelf**: one combat zone with ordinary enemies, a few side quests, and the mega boss arena at the lighthouse.
 4. **Controls**
@@ -44,7 +44,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 
 ## Out of scope (later rounds, each with its own design)
 
-Ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets, player-versus-player, further zones.
+The capital island of Shady Grove (the largest surviving piece of the old land, with the original grove on it), ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets, player-versus-player, further zones.
 
 ## Architecture
 
@@ -52,7 +52,7 @@ Ships and crews, drifting islands, wind roads and gliding, player-drawn maps, tr
 - **Server**: Node.js with TypeScript and Colyseus. The server owns all game state; clients only send inputs. One room per zone, one room per boss arena. 15 updates per second, with the client smoothing movement between them.
 - **Shared rules package**: combat maths, ability and item data live in one package used by both client and server, so they can never disagree.
 - **Database**: PostgreSQL for accounts, characters, inventory and leaderboards. Passwords hashed with argon2.
-- **Hosting**: Docker Compose on the Hetzner server with Caddy for HTTPS, on its own subdomain and port so the existing Kaetram game keeps running beside it.
+- **Hosting**: Docker Compose on the Hetzner server with Caddy for HTTPS, on its own subdomain and port so the existing Shady Grove game keeps running beside it.
 - **Art**: models built in code or taken from CC0 low-poly packs, then recoloured to the Windward palette. The statue is modelled specially.
 
 ## Error handling

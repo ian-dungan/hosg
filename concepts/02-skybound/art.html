@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Lanternrest Key Art</title>
+<html><head><meta charset="utf-8"><title>Normandy Key Art</title>
 <style>
 html,body{margin:0;background:#8fc3ec;overflow:hidden}
 #wrap{position:relative;width:1600px;height:900px;overflow:hidden}
@@ -9,7 +9,7 @@ html,body{margin:0;background:#8fc3ec;overflow:hidden}
 <script>
 "use strict";
 // ======================================================================
-//  KAETRAM: WINDWARD — "Lanternrest, Plaza of the Two" target render
+//  SHADY GROVE 2: WINDWARD — "Normandy, Plaza of the Two" target render
 //  Raw WebGL2: procedural low-poly meshes, flat normals, toon ramp,
 //  shadow map, rim light, view-dependent sky fog, ink outline post.
 // ======================================================================
@@ -645,7 +645,7 @@ function buildScene() {
     pop();
   }
 
-  // ---------------- Lanternrest town island ----------------
+  // ---------------- Normandy town island ----------------
   newId();
   const TI = [26, 0, -30];
   island(TI[0], 0, TI[2], 36, 80, { n: 22, seed: 11, tipOff: [6, 4], bump: 0.2 });
@@ -1066,7 +1066,7 @@ function hud(VP) {
   c.save(); c.shadowColor = 'rgba(30,20,60,0.45)'; c.shadowBlur = 14;
   c.fillStyle = '#ffe2a0'; c.font = `600 15px ${sans}`;
   c.letterSpacing = '6px';
-  c.fillText('LANTERNREST', 800, 92);
+  c.fillText('NORMANDY', 800, 92);
   c.letterSpacing = '1px';
   c.fillStyle = '#fffaf0'; c.font = `italic 600 46px ${serif}`;
   c.fillText('The Plaza of the Two', 800, 132);
