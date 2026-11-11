@@ -1,13 +1,35 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
 import { SPAWN } from '@sg2/shared';
-import { NameTakenError, type Account, type Adventurer, type Store } from './types';
+import { AlreadyNamedError, NameTakenError, type Account, type Adventurer, type Store } from './types';
 
 export function createMemoryStore(): Store {
   const accountsByName = new Map<string, Account>(); // key: lower-cased username
   const accountsById = new Map<string, Account>();
   const adventurersByAccount = new Map<string, Adventurer>();
   const adventurersById = new Map<string, Adventurer>();
+  const adventurerNames = new Set<string>(); // lower-cased
+
+  function adventurerFor(accountId: string): Adventurer {
+    let adventurer = adventurersByAccount.get(accountId);
+    if (!adventurer) {
+      adventurer = {
+        id: randomUUID(),
+        accountId,
+        name: null,
+        x: SPAWN.x,
+        z: SPAWN.z,
+        facing: SPAWN.facing,
+        zone: 'grove',
+        level: 1,
+        xp: 0,
+        gold: 0,
+      };
+      adventurersByAccount.set(accountId, adventurer);
+      adventurersById.set(adventurer.id, adventurer);
+    }
+    return adventurer;
+  }
 
   return {
     async createAccount({ username, passwordHash, isGuest }) {
@@ -29,24 +51,17 @@ export function createMemoryStore(): Store {
       return account ? { ...account } : null;
     },
 
-    async getOrCreateAdventurer(accountId, name) {
-      let adventurer = adventurersByAccount.get(accountId);
-      if (!adventurer) {
-        adventurer = {
-          id: randomUUID(),
-          accountId,
-          name,
-          x: SPAWN.x,
-          z: SPAWN.z,
-          facing: SPAWN.facing,
-          zone: 'grove',
-          level: 1,
-          xp: 0,
-          gold: 0,
-        };
-        adventurersByAccount.set(accountId, adventurer);
-        adventurersById.set(adventurer.id, adventurer);
-      }
+    async getOrCreateAdventurer(accountId) {
+      return { ...adventurerFor(accountId) };
+    },
+
+    async nameAdventurer(accountId, name) {
+      const adventurer = adventurerFor(accountId);
+      if (adventurer.name !== null) throw new AlreadyNamedError();
+      const key = name.toLowerCase();
+      if (adventurerNames.has(key)) throw new NameTakenError(name);
+      adventurerNames.add(key);
+      adventurer.name = name;
       return { ...adventurer };
     },
 

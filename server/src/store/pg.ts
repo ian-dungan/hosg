@@ -4,7 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { SPAWN } from '@sg2/shared';
-import { NameTakenError, type Account, type Adventurer, type Store } from './types';
+import { AlreadyNamedError, NameTakenError, type Account, type Adventurer, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,7 +56,7 @@ interface AccountRow {
 interface AdventurerRow {
   id: string;
   account_id: string;
-  name: string;
+  name: string | null;
   x: number;
   z: number;
   facing: number;
@@ -110,6 +110,16 @@ export async function createPgStore(databaseUrl: string): Promise<Store> {
     throw err;
   }
 
+  /** Makes the account's adventurer if it has none; insert-or-nothing keeps one per account even if two calls race. */
+  async function insertAdventurer(accountId: string): Promise<void> {
+    await pool.query(
+      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold)
+       VALUES ($1, NULL, $2, $3, $4, 'grove', 1, 0, 0)
+       ON CONFLICT (account_id) DO NOTHING`,
+      [accountId, SPAWN.x, SPAWN.z, SPAWN.facing],
+    );
+  }
+
   return {
     async createAccount({ username, passwordHash, isGuest }) {
       try {
@@ -139,19 +149,31 @@ export async function createPgStore(databaseUrl: string): Promise<Store> {
       return rows[0] ? toAccount(rows[0]) : null;
     },
 
-    async getOrCreateAdventurer(accountId, name) {
-      // Insert-or-nothing keeps one adventurer per account even if two calls race.
-      await pool.query(
-        `INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold)
-         VALUES ($1, $2, $3, $4, $5, 'grove', 1, 0, 0)
-         ON CONFLICT (account_id) DO NOTHING`,
-        [accountId, name, SPAWN.x, SPAWN.z, SPAWN.facing],
-      );
+    async getOrCreateAdventurer(accountId) {
+      await insertAdventurer(accountId);
       const { rows } = await pool.query<AdventurerRow>(
         `SELECT ${ADVENTURER_COLUMNS} FROM adventurers WHERE account_id = $1`,
         [accountId],
       );
       return toAdventurer(rows[0]!);
+    },
+
+    async nameAdventurer(accountId, name) {
+      await insertAdventurer(accountId);
+      let rows: AdventurerRow[];
+      try {
+        // Only an unnamed adventurer takes a name; the unique index on lower(name) settles races.
+        ({ rows } = await pool.query<AdventurerRow>(
+          `UPDATE adventurers SET name = $2, updated_at = now() WHERE account_id = $1 AND name IS NULL
+           RETURNING ${ADVENTURER_COLUMNS}`,
+          [accountId, name],
+        ));
+      } catch (err) {
+        if ((err as { code?: string }).code === UNIQUE_VIOLATION) throw new NameTakenError(name);
+        throw err;
+      }
+      if (!rows[0]) throw new AlreadyNamedError();
+      return toAdventurer(rows[0]);
     },
 
     async saveAdventurer({ id, x, z, facing }) {

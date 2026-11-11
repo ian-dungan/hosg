@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
+import { BAD_WORDS } from '@sg2/shared';
 import { authRouter } from './routes';
 import { signToken, verifyToken } from './tokens';
 
@@ -62,12 +63,12 @@ describe('tokens', () => {
 });
 
 describe('POST /api/register', () => {
-  it('creates an account and returns a token for it', async () => {
+  it('creates an account and returns a token for it, with an adventurer still to be named', async () => {
     const { url, store } = await startApp();
-    const res = await post(url, '/api/register', { username: 'Ellie', password: 'longenough' });
+    const res = await post(url, '/api/register', { username: 'Rowan', password: 'longenough' });
     expect(res.status).toBe(200);
-    expect(res.body.name).toBe('Ellie');
-    const account = await store.findAccountByUsername('ellie');
+    expect(res.body).toEqual({ token: expect.any(String), name: null });
+    const account = await store.findAccountByUsername('rowan');
     expect(account).not.toBeNull();
     expect(account!.passwordHash).toMatch(/^\$argon2/);
     expect(account!.isGuest).toBe(false);
@@ -80,17 +81,27 @@ describe('POST /api/register', () => {
       status: 400,
       body: { error: 'Names are 3 to 16 letters, numbers or underscores.' },
     });
-    expect(await post(url, '/api/register', { username: 'Ellie', password: 'short' })).toEqual({
+    expect(await post(url, '/api/register', { username: 'Rowan', password: 'short' })).toEqual({
       status: 400,
       body: { error: 'Passwords need at least 8 characters.' },
     });
     expect(await post(url, '/api/register', {})).toEqual({ status: 400, body: { error: 'Name is required.' } });
   });
 
+  it('refuses offensive and reserved usernames', async () => {
+    const { url, store } = await startApp();
+    const word = BAD_WORDS.find((w) => w.length >= 4 && w.length <= 16)!;
+    for (const username of [word, 'Admin', 'Guest_12']) {
+      const res = await post(url, '/api/register', { username, password: 'longenough' });
+      expect(res).toEqual({ status: 400, body: { error: 'That name is not allowed' } });
+      expect(await store.findAccountByUsername(username)).toBeNull();
+    }
+  });
+
   it('rejects a taken name, ignoring case', async () => {
     const { url } = await startApp();
-    expect((await post(url, '/api/register', { username: 'Ellie', password: 'longenough' })).status).toBe(200);
-    expect(await post(url, '/api/register', { username: 'ELLIE', password: 'longenough' })).toEqual({
+    expect((await post(url, '/api/register', { username: 'Rowan', password: 'longenough' })).status).toBe(200);
+    expect(await post(url, '/api/register', { username: 'ROWAN', password: 'longenough' })).toEqual({
       status: 409,
       body: { error: 'That name is taken' },
     });
@@ -99,8 +110,8 @@ describe('POST /api/register', () => {
   it('gives one 200 and one 409 for two simultaneous registers of the same name', async () => {
     const { url } = await startApp();
     const results = await Promise.all([
-      post(url, '/api/register', { username: 'Ellie', password: 'longenough' }),
-      post(url, '/api/register', { username: 'ellie', password: 'longenough' }),
+      post(url, '/api/register', { username: 'Rowan', password: 'longenough' }),
+      post(url, '/api/register', { username: 'rowan', password: 'longenough' }),
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
   });
@@ -109,19 +120,19 @@ describe('POST /api/register', () => {
 describe('POST /api/login', () => {
   it('returns a token for the right password', async () => {
     const { url, store } = await startApp();
-    await post(url, '/api/register', { username: 'Ellie', password: 'longenough' });
-    const res = await post(url, '/api/login', { username: 'eLLie', password: 'longenough' });
+    await post(url, '/api/register', { username: 'Rowan', password: 'longenough' });
+    const res = await post(url, '/api/login', { username: 'rOWan', password: 'longenough' });
     expect(res.status).toBe(200);
-    expect(res.body.name).toBe('Ellie');
-    const account = await store.findAccountByUsername('Ellie');
+    expect(res.body).toEqual({ token: expect.any(String), name: null });
+    const account = await store.findAccountByUsername('Rowan');
     expect(verifyToken(res.body.token, SECRET)).toEqual({ accountId: account!.id });
   });
 
   it('gives the same 401 for a wrong password and an unknown name', async () => {
     const { url } = await startApp();
-    await post(url, '/api/register', { username: 'Ellie', password: 'longenough' });
+    await post(url, '/api/register', { username: 'Rowan', password: 'longenough' });
     const expected = { status: 401, body: { error: 'Wrong name or password' } };
-    expect(await post(url, '/api/login', { username: 'Ellie', password: 'wrongpassword' })).toEqual(expected);
+    expect(await post(url, '/api/login', { username: 'Rowan', password: 'wrongpassword' })).toEqual(expected);
     expect(await post(url, '/api/login', { username: 'Nobody', password: 'longenough' })).toEqual(expected);
     expect(await post(url, '/api/login', {})).toEqual(expected);
   });
@@ -137,7 +148,7 @@ describe('POST /api/login', () => {
 });
 
 describe('POST /api/guest', () => {
-  it('creates a passwordless guest named Guest- and 6 digits', async () => {
+  it('creates a passwordless guest named Guest- and 6 digits, with an adventurer of the same name', async () => {
     const { url, store } = await startApp();
     const res = await post(url, '/api/guest');
     expect(res.status).toBe(200);
@@ -145,6 +156,7 @@ describe('POST /api/guest', () => {
     const account = await store.findAccountByUsername(res.body.name);
     expect(account).toMatchObject({ isGuest: true, passwordHash: null });
     expect(verifyToken(res.body.token, SECRET)).toEqual({ accountId: account!.id });
+    expect((await store.getOrCreateAdventurer(account!.id)).name).toBe(res.body.name);
   });
 
   it('picks another number when the name is taken', async () => {
@@ -162,14 +174,74 @@ describe('POST /api/guest', () => {
   });
 });
 
+describe('POST /api/name', () => {
+  async function nameAs(url: string, token: string | undefined, body: unknown) {
+    const res = await fetch(url + '/api/name', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { authorization: `Bearer ${token}` }) },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as any };
+  }
+
+  it('names the adventurer once; login then returns the name', async () => {
+    const { url, store } = await startApp();
+    const { token } = (await post(url, '/api/register', { username: 'Rowan', password: 'longenough' })).body;
+    expect(await nameAs(url, token, { name: "Mary-Ann O'Neil" })).toEqual({ status: 200, body: { name: "Mary-Ann O'Neil" } });
+    const account = await store.findAccountByUsername('Rowan');
+    expect((await store.getOrCreateAdventurer(account!.id)).name).toBe("Mary-Ann O'Neil");
+    expect((await post(url, '/api/login', { username: 'Rowan', password: 'longenough' })).body.name).toBe("Mary-Ann O'Neil");
+    expect(await nameAs(url, token, { name: 'Elowen' })).toEqual({
+      status: 409,
+      body: { error: 'Your adventurer already has a name' },
+    });
+  });
+
+  it('answers a bad name with the validator message', async () => {
+    const { url } = await startApp();
+    const { token } = (await post(url, '/api/register', { username: 'Rowan', password: 'longenough' })).body;
+    expect(await nameAs(url, token, { name: 'Al' })).toEqual({ status: 400, body: { error: 'Names are 3 to 16 letters' } });
+    expect(await nameAs(url, token, { name: 'Felix' })).toEqual({ status: 400, body: { error: 'That name is not allowed' } });
+    const word = BAD_WORDS.find((w) => w.length >= 4 && w.length <= 16)!;
+    expect(await nameAs(url, token, { name: word })).toEqual({ status: 400, body: { error: 'That name is not allowed' } });
+    expect((await nameAs(url, token, {})).status).toBe(400);
+  });
+
+  it('answers a name another adventurer has, ignoring case, with 409', async () => {
+    const { url } = await startApp();
+    const a = (await post(url, '/api/register', { username: 'Rowan', password: 'longenough' })).body.token;
+    const b = (await post(url, '/api/register', { username: 'Hazel', password: 'longenough' })).body.token;
+    expect((await nameAs(url, a, { name: 'Elowen' })).status).toBe(200);
+    expect(await nameAs(url, b, { name: 'ELOWEN' })).toEqual({ status: 409, body: { error: 'That name is taken' } });
+  });
+
+  it('refuses a guest, whose adventurer is already named', async () => {
+    const { url } = await startApp();
+    const guest = (await post(url, '/api/guest')).body;
+    expect(await nameAs(url, guest.token, { name: 'Elowen' })).toEqual({
+      status: 409,
+      body: { error: 'Your adventurer already has a name' },
+    });
+  });
+
+  it('answers a missing, bad or unknown-account token with 401', async () => {
+    const { url } = await startApp();
+    for (const token of [undefined, 'not-a-token', signToken('acc-1', 'other-secret'), signToken('no-such-account', SECRET)]) {
+      const res = await nameAs(url, token, { name: 'Elowen' });
+      expect(res.status).toBe(401);
+      expect(typeof res.body.error).toBe('string');
+    }
+  });
+});
+
 describe('limits', () => {
   it('answers the 11th request in a minute from one address with 429', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-11T12:00:00Z'));
     const { url } = await startApp();
-    const paths = ['/api/register', '/api/login', '/api/guest'];
+    const paths = ['/api/register', '/api/login', '/api/guest', '/api/name'];
     for (let i = 0; i < 10; i++) {
-      const res = await post(url, paths[i % 3]!, { username: 'Nobody', password: 'x' });
+      const res = await post(url, paths[i % 4]!, { username: 'Nobody', password: 'x' });
       expect(res.status).not.toBe(429);
     }
     expect(await post(url, '/api/guest')).toEqual({ status: 429, body: { error: 'Too many attempts, wait a minute' } });
@@ -190,7 +262,7 @@ describe('limits', () => {
 
   it('rejects bodies over 2 KB with 413', async () => {
     const { url } = await startApp();
-    const res = await post(url, '/api/register', { username: 'Ellie', password: 'x'.repeat(2100) });
+    const res = await post(url, '/api/register', { username: 'Rowan', password: 'x'.repeat(2100) });
     expect(res.status).toBe(413);
     // Also when the body is not declared as JSON.
     const plain = await fetch(url + '/api/login', {

@@ -35,7 +35,8 @@ const CSS = /* css */ `
 }
 `;
 
-function injectStyles(): void {
+/** Adds the login screen's styles (shared with the name screen) to the page once. */
+export function injectLoginStyles(): void {
   if (document.getElementById('sg-net-login-css')) return;
   const s = document.createElement('style');
   s.id = 'sg-net-login-css';
@@ -44,8 +45,8 @@ function injectStyles(): void {
 }
 
 /** Shows the login screen over `root` until an account is signed in. `notice` is shown as the error line (e.g. why you were sent back here). */
-export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: string; name: string }> {
-  injectStyles();
+export function showLogin(root: HTMLElement, notice = ''): Promise<{ token: string; name: string | null }> {
+  injectLoginStyles();
   return new Promise((resolve) => {
     const wrap = h('div', 'sg-hud', root);
     const screen = h('div', 'sg-login', wrap);

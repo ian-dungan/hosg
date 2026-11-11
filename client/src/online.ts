@@ -7,10 +7,13 @@ import { bootGame } from './boot';
 import { h } from './hud/dom';
 import { createChat } from './net/chatBox';
 import { showLogin } from './net/loginScreen';
+import { showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
-import { connect, forgetToken, savedToken, type GroveRoom } from './net/session';
+import { connect, forgetToken, nameAdventurer, savedToken, type GroveRoom } from './net/session';
 
 const CONNECTION_LOST = 'Connection lost';
+/** The server's reason for refusing a join of an account whose adventurer has no name yet. */
+const NAME_FIRST = 'Name your adventurer first';
 /** Longest wait after joining for the room to show this adventurer. */
 const ENTER_TIMEOUT_MS = 15_000;
 /** Smallest pose change worth sending (m or rad); the rig's slow-down never quite reaches zero. */
@@ -152,15 +155,28 @@ function boot(): void {
   void (async () => {
     let notice = '';
     let resume = savedToken(); // a reload carries on with this tab's account
+    const chooseName = (token: string) => showNameScreen(hudRoot, (name) => nameAdventurer(token, name));
     for (;;) {
-      const token = resume ?? (await showLogin(hudRoot, notice)).token;
+      let token = resume;
       resume = null;
+      if (!token) {
+        const session = await showLogin(hudRoot, notice);
+        token = session.token;
+        if (session.name === null) await chooseName(token);
+      }
       let r: GroveRoom;
       try {
         r = await connect(token);
       } catch (err) {
+        const message = err instanceof Error ? err.message : CONNECTION_LOST;
+        if (message === NAME_FIRST) {
+          // A reload while choosing a name: carry on choosing it, then join.
+          await chooseName(token);
+          resume = token;
+          continue;
+        }
         forgetToken();
-        notice = err instanceof Error ? err.message : CONNECTION_LOST;
+        notice = message;
         continue;
       }
       notice = await play(r);

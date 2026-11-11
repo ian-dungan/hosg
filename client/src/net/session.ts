@@ -68,32 +68,49 @@ function withTimeout<T>(p: Promise<T>, message: string): Promise<T> {
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Registers, logs in or makes a guest account; throws an Error with the server's `error` text. */
-export async function login(
-  kind: 'register' | 'login' | 'guest',
-  username?: string,
-  password?: string,
-): Promise<{ token: string; name: string }> {
+/** POSTs JSON to the accounts API, within TIMEOUT_MS; resolves with the status and the parsed body (null if none). */
+async function postApi(path: string, payload: unknown, headers: Record<string, string> = {}): Promise<{ res: Response; body: Record<string, unknown> | null }> {
   const controller = new AbortController();
-  let res: Response;
-  let body: { token?: unknown; name?: unknown; error?: unknown } | null = null;
   try {
-    res = await withTimeout(fetch(`/api/${kind}`, {
+    const res = await withTimeout(fetch(`/api/${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(kind === 'guest' ? {} : { username, password }),
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
       signal: controller.signal,
     }), UNREACHABLE);
-    body = await withTimeout(res.json(), UNREACHABLE).catch(() => null);
+    const body = await withTimeout(res.json(), UNREACHABLE).catch(() => null);
+    return { res, body: body && typeof body === 'object' ? body : null };
   } catch {
     controller.abort();
     throw new Error(UNREACHABLE);
   }
-  if (!res.ok || typeof body?.token !== 'string' || typeof body.name !== 'string') {
+}
+
+/**
+ * Registers, logs in or makes a guest account; throws an Error with the server's `error` text.
+ * `name` is the adventurer's name, or null while the player has still to choose it.
+ */
+export async function login(
+  kind: 'register' | 'login' | 'guest',
+  username?: string,
+  password?: string,
+): Promise<{ token: string; name: string | null }> {
+  const { res, body } = await postApi(kind, kind === 'guest' ? {} : { username, password });
+  const name = body?.name;
+  if (!res.ok || typeof body?.token !== 'string' || (typeof name !== 'string' && name !== null)) {
     throw new Error(typeof body?.error === 'string' ? body.error : `The server could not sign you in (${res.status})`);
   }
   saveToken(body.token);
-  return { token: body.token, name: body.name };
+  return { token: body.token, name };
+}
+
+/** Gives the account's adventurer its permanent name; resolves with it, or throws an Error with the server's reason. */
+export async function nameAdventurer(token: string, name: string): Promise<string> {
+  const { res, body } = await postApi('name', { name }, { Authorization: `Bearer ${token}` });
+  if (!res.ok || typeof body?.name !== 'string') {
+    throw new Error(typeof body?.error === 'string' ? body.error : `The server could not save the name (${res.status})`);
+  }
+  return body.name;
 }
 
 /** Joins the grove with a token. Throws an Error with the server's reason if the join is refused. */

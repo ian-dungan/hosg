@@ -1,11 +1,14 @@
 // Input checks for names, passwords and chat. Validators return an error message, or null when fine.
 import { CHAT_MAX } from './constants';
+import { NAME_NOT_ALLOWED, isOffensive, isReserved } from './names';
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
 
 export function validateUsername(s: unknown): string | null {
   if (typeof s !== 'string') return 'Name is required.';
   if (!USERNAME_RE.test(s)) return 'Names are 3 to 16 letters, numbers or underscores.';
+  // Guest names are made by the server and never come through here.
+  if (isOffensive(s) || isReserved(s)) return NAME_NOT_ALLOWED;
   return null;
 }
 

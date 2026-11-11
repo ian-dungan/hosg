@@ -34,7 +34,39 @@ describe('joining the grove', () => {
     await expect(new Client(url).joinOrCreate('grove', { token: unknownAccount })).rejects.toThrow();
   });
 
-  it('puts a new adventurer at SPAWN, under the account name', async () => {
+  it('refuses an account whose adventurer has no name yet, and admits it once named', async () => {
+    const { url, store } = await start();
+    const registered = await fetch(`${url}/api/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'rowan_88', password: 'longenough' }),
+    });
+    const { token, name } = (await registered.json()) as any;
+    expect(name).toBeNull();
+    await expect(new Client(url).joinOrCreate('grove', { token })).rejects.toThrow('Name your adventurer first');
+
+    const named = await fetch(`${url}/api/name`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: 'Elowen' }),
+    });
+    expect(named.status).toBe(200);
+    const a = await joinGrove(url, token);
+    expect(a.room.state.players.get(a.room.sessionId)?.name).toBe('Elowen');
+    const b = await joinGrove(url, (await accountFor(store, 'Bob')).token);
+    await waitFor(() => b.room.state.players.get(a.room.sessionId));
+    expect(b.room.state.players.get(a.room.sessionId)?.name).toBe('Elowen'); // the adventurer's name, not 'rowan_88'
+  });
+
+  it('admits a guest without naming, under its Guest- name', async () => {
+    const { url } = await start();
+    const { token, name } = (await (await fetch(`${url}/api/guest`, { method: 'POST' })).json()) as any;
+    expect(name).toMatch(/^Guest-\d{6}$/);
+    const { room } = await joinGrove(url, token);
+    expect(room.state.players.get(room.sessionId)?.name).toBe(name);
+  });
+
+  it('puts a new adventurer at SPAWN, under its name', async () => {
     const { url, store } = await start();
     const { token } = await accountFor(store, 'Ellie');
     const { room } = await joinGrove(url, token);
@@ -45,7 +77,7 @@ describe('joining the grove', () => {
   it('uses SPAWN when the saved position is not walkable in the town', async () => {
     const { url, store } = await start();
     const { accountId, token } = await accountFor(store, 'Ellie');
-    const saved = await store.getOrCreateAdventurer(accountId, 'Ellie');
+    const saved = await store.getOrCreateAdventurer(accountId);
     await store.saveAdventurer({ id: saved.id, x: 420, z: -260, facing: 1 }); // the far Beacon clearing
     const { room } = await joinGrove(url, token);
     expect(room.state.players.get(room.sessionId)).toMatchObject({ x: SPAWN.x, z: SPAWN.z });
@@ -109,7 +141,8 @@ describe('movement', () => {
     const firstCorrections = collect(first.room, 'correct');
     for (let i = 1; i <= 40; i++) first.room.send('move', pose(SPAWN.x + i * 0.4, SPAWN.z));
     await waitFor(() => firstCorrections.length > 0);
-    await sleep(50);
+    // The correction names the last accepted position; wait for the state patch to show it too.
+    await waitFor(() => first.room.state.players.get(first.room.sessionId).x === firstCorrections[0].x);
     const spentAt = first.room.state.players.get(first.room.sessionId).x;
     expect(spentAt - SPAWN.x).toBeGreaterThan(7);
 
@@ -196,9 +229,9 @@ describe('sessions', () => {
     const memory = createMemoryStore();
     const slow: Store = {
       ...memory,
-      getOrCreateAdventurer: async (accountId, name) => {
-        await sleep(200);
-        return memory.getOrCreateAdventurer(accountId, name);
+      getOrCreateAdventurer: async (accountId) => {
+        await sleep(400); // onAuth and onJoin both load the adventurer: room for the newer join to overtake
+        return memory.getOrCreateAdventurer(accountId);
       },
     };
     const { url } = await start({ store: slow });
@@ -247,7 +280,7 @@ describe('sessions', () => {
     await walk(first.room, SPAWN, { x: 1.2, z: -10 });
     await waitFor(() => first.room.state.players.get(first.room.sessionId)?.x === 1.2);
     await first.room.leave();
-    await waitFor(async () => (await store.getOrCreateAdventurer(accountId, 'Alice')).x === 1.2);
+    await waitFor(async () => (await store.getOrCreateAdventurer(accountId)).x === 1.2);
 
     const again = await joinGrove(url, token);
     expect(again.room.state.players.get(again.room.sessionId)).toMatchObject({ x: 1.2, z: -10 });
@@ -258,7 +291,7 @@ describe('sessions', () => {
     const { accountId, token } = await accountFor(store, 'Alice');
     const a = await joinGrove(url, token);
     a.room.send('move', pose(0.4, -11));
-    await waitFor(async () => (await store.getOrCreateAdventurer(accountId, 'Alice')).x === 0.4);
+    await waitFor(async () => (await store.getOrCreateAdventurer(accountId)).x === 0.4);
     expect(a.room.state.players.get(a.room.sessionId)).toBeDefined(); // still online
   });
 
@@ -297,7 +330,7 @@ describe('sessions', () => {
     await sleep(500);
     expect(b.room.state.players.get(a.room.sessionId)).toBeDefined();
     await waitFor(() => !b.room.state.players.get(a.room.sessionId), 2000);
-    expect((await store.getOrCreateAdventurer(alice.accountId, 'Alice')).x).toBe(0.8);
+    expect((await store.getOrCreateAdventurer(alice.accountId)).x).toBe(0.8);
   });
 });
 

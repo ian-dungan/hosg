@@ -35,9 +35,10 @@ export async function startServer(
   return { url: `http://127.0.0.1:${port}`, store, app };
 }
 
-/** A guest account in the store and a valid token for it. */
+/** A guest account in the store, its adventurer named `username`, and a valid token for it. */
 export async function accountFor(store: Store, username: string): Promise<{ accountId: string; token: string }> {
   const account = await store.createAccount({ username, passwordHash: null, isGuest: true });
+  await store.nameAdventurer(account.id, username);
   return { accountId: account.id, token: signToken(account.id, SECRET) };
 }
 

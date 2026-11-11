@@ -13,7 +13,7 @@ import {
   type S2C,
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
-import type { Store } from '../store/types';
+import type { Adventurer, Store } from '../store/types';
 import { PatchRateMeter } from './patchRate';
 import { PlayerState, ZoneState } from './state';
 
@@ -55,7 +55,6 @@ interface Allowance {
 /** What a successful onAuth attaches to the client (`client.auth`). */
 interface JoinAuth {
   accountId: string;
-  username: string;
 }
 
 /** The account for a join's `{ token }` option, or false (missing or invalid token, unknown account). */
@@ -63,10 +62,11 @@ async function authenticate(store: Store, jwtSecret: string, options: unknown): 
   const token = (options as { token?: unknown } | undefined)?.token;
   const verified = typeof token === 'string' ? verifyToken(token, jwtSecret) : null;
   const account = verified && (await store.findAccountById(verified.accountId));
-  return account ? { accountId: account.id, username: account.username } : false;
+  return account ? { accountId: account.id } : false;
 }
 
 const KICK_REASON = 'Signed in somewhere else';
+const NAME_FIRST = 'Name your adventurer first';
 const FULL_REASON = 'Shady Grove is full, try again soon';
 /**
  * Per-client message budget (token bucket): refills at 3 * TICK_HZ a second and holds about 4 s of
@@ -113,7 +113,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   async onJoin(client: Client) {
-    const { accountId, username } = client.auth as JoinAuth;
+    const { accountId } = client.auth as JoinAuth;
     // Checked again here because two joins can pass onAuth at the same time.
     if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
     // Claim the account before any await, so a third join of the same account kicks this one.
@@ -121,9 +121,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.sessionByAccount.set(accountId, client.sessionId);
     if (previous) await this.kick(previous);
 
-    let adventurer;
+    let adventurer: Adventurer;
+    let name: string;
     try {
-      adventurer = await this.store.getOrCreateAdventurer(accountId, username);
+      adventurer = await this.store.getOrCreateAdventurer(accountId);
+      // onAuth refused unnamed adventurers already; names are never taken away, so this is a safeguard.
+      if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, NAME_FIRST);
+      name = adventurer.name;
     } catch (err) {
       if (this.sessionByAccount.get(accountId) === client.sessionId) this.sessionByAccount.delete(accountId);
       throw err;
@@ -134,7 +138,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
 
     const start = groveTownWalkable(adventurer.x, adventurer.z) ? adventurer : SPAWN;
-    const player = new PlayerState({ name: adventurer.name, x: start.x, z: start.z, facing: start.facing, moving: false });
+    const player = new PlayerState({ name, x: start.x, z: start.z, facing: start.facing, moving: false });
     this.sessions.set(client.sessionId, {
       client,
       accountId,
@@ -307,14 +311,18 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
 /**
  * The grove room class for one app. Joins are checked during matchmaking (static onAuth), so a bad
- * token or a full grove is refused over HTTP before any seat or socket is opened.
+ * token, an adventurer without a name or a full grove is refused over HTTP before any seat or socket is opened.
  */
 export function zoneRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof ZoneRoom {
   return class GroveRoom extends ZoneRoom {
     static async onAuth(_token: string, joinOptions: unknown, _context: AuthContext) {
       const auth = await authenticate(options.store, jwtSecret, joinOptions);
+      if (!auth) return false;
+      if ((await options.store.getOrCreateAdventurer(auth.accountId)).name === null) {
+        throw new ServerError(ErrorCode.APPLICATION_ERROR, NAME_FIRST);
+      }
       const [room] = options.live;
-      if (auth && room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
+      if (room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
       return auth;
     }
   };

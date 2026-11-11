@@ -1,5 +1,7 @@
 export * from './constants';
 export * from './validate';
+export * from './names';
+export { BAD_WORDS } from './badwords';
 export * from './movement';
 export * from './messages';
 export * from './world/layout';
