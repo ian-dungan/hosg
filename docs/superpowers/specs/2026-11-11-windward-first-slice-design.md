@@ -29,7 +29,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
    - Combos: one ability applies a state (Soaked, Burning, Marked), another cashes it in. Any two players' abilities combine.
    - Two weapon types with their own rhythm: Blade (parry) and Bow (charged shot).
    - Every dangerous attack is telegraphed on the ground and can be dodged.
-   - No wind in combat.
+   - Wind is not a standing combat mechanic. A few set-piece battles may use it as their special twist, where it is done well.
 6. **Parties**
    - Up to 4 players. Invite by tapping a player. Party health bars. Shared loot rolls.
    - No fixed classes: gear and loadout decide whether you lean damage, healing or tanking.
@@ -71,5 +71,4 @@ Normandy (the capital sky-port), ships and crews, drifting islands, wind roads a
 
 ## Open questions for the owner
 
-1. Hetzner server size (CPU cores and RAM), and the web address to use.
-2. Does "leave out the wind" cover only combat, or also wind roads and gliding in later rounds?
+1. The web address to use. (Server: Ubuntu, 16 GB RAM, which is enough.)
