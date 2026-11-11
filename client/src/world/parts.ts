@@ -1,5 +1,5 @@
 // Reusable low-poly props (houses, trees, lamps, ships, islands, clouds, waterfalls).
-import { Builder, hex, tint, add, mul, norm, lerp3, hash, vnoise, type RGB, type V3 } from './mesh';
+import { Builder, hex, tint, mix, add, mul, norm, lerp3, hash, vnoise, type RGB, type V3 } from './mesh';
 import { PALETTE } from '../core/contracts';
 
 export const PAL = {
@@ -15,6 +15,8 @@ export const PAL = {
   flowerA: hex('#ff7a8a'), flowerB: hex('#ffd36a'), flowerC: hex('#ff8a5c'), white: hex('#ffffff'),
 };
 const WALLS = [PAL.wall, PAL.wall2, PAL.wall3];
+/** World positions of chimney tops (for smoke). */
+export const CHIMNEYS: V3[] = [];
 export const ROOFS = { roof: PAL.roof1, roof2: PAL.roof2, teal: PAL.roof3, orange: PAL.roof4 } as const;
 
 /** Lit builder + unlit glow builder that share transforms. */
@@ -24,12 +26,13 @@ export class Kit {
 }
 
 function roofSlope(b: Builder, a: V3, bb: V3, c: V3, e: V3, col: RGB) {
-  const rows = 4;
+  const rows = 6;
   for (let k = 0; k < rows; k++) {
     const t0 = k / rows, t1 = (k + 1) / rows;
     const A = lerp3(a, e, t0), B = lerp3(bb, c, t0), C = lerp3(bb, c, t1), E = lerp3(a, e, t1);
-    const lift: V3 = [0, 0.07, 0];
-    b.quad(A, B, add(C, lift), add(E, lift), tint(col, k % 2 ? 1.0 : 0.9));
+    const lift: V3 = [0, 0.06, 0];
+    const v = 0.94 + 0.08 * Math.sin(k * 2.3 + a[0]);
+    b.quad(A, B, add(C, lift), add(E, lift), tint(col, 0.8 * v), tint(col, 1.06 * v));
   }
 }
 
@@ -92,13 +95,15 @@ export function house(k: Kit, x: number, y: number, z: number, w: number, d: num
     }
   });
   if (w < d) k.glow(g => g.box(0, h + rh * 0.3, d / 2 + 0.04, 0.45, 0.5, 0.06, PAL.window));
-  if (opt.chimney) { b.box(w * 0.25, h + rh * 0.75, -d * 0.18, 0.55, rh * 1.1, 0.55, PAL.plinth); b.box(w * 0.25, h + rh * 1.32, -d * 0.18, 0.7, 0.14, 0.7, PAL.plinthDark); }
+  if (opt.chimney) { b.box(w * 0.25, h + rh * 0.75, -d * 0.18, 0.55, rh * 1.1, 0.55, PAL.plinth); b.box(w * 0.25, h + rh * 1.32, -d * 0.18, 0.7, 0.14, 0.7, PAL.plinthDark); CHIMNEYS.push(b.tp([w * 0.25, h + rh * 1.42, -d * 0.18])); }
   b.pop();
 }
 
 /** Tree. kind 0 = green, 1 = blossom, 2 = teal-green, 3 = big old grove oak. */
 export function tree(b: Builder, x: number, y: number, z: number, s: number, kind = 0) {
   b.push(); b.T(x, y, z); b.RY(hash(x, z) * 6.28); b.SC(s, s, s);
+  const oldW = b.windFn; const y0 = y + 1.3 * s;
+  b.windFn = (p: V3) => Math.max(0, p[1] - y0) * 0.028;
   const lc = kind === 1 ? PAL.blossom : kind === 2 ? hex('#5cbf86') : kind === 3 ? hex('#6cbf55') : PAL.leaf1;
   const lc2 = kind === 1 ? PAL.blossom2 : kind === 2 ? hex('#3d9a74') : kind === 3 ? PAL.leafDeep : PAL.leaf2;
   if (kind === 3) {
@@ -113,12 +118,22 @@ export function tree(b: Builder, x: number, y: number, z: number, s: number, kin
     b.ball([-0.9, 2.7, -0.35], 1.05, lc, 1.1, 0.72, 1.1, 1, 0.3, lc2);
     b.ball([0.15, 2.6, -0.95], 0.9, lc, 1.1, 0.7, 1.1, 1, 0.3, lc2);
     b.ball([-0.2, 2.55, 0.95], 0.85, lc, 1.1, 0.7, 1.1, 1, 0.3, lc2);
+    // leaf clusters for a fuller, sun-speckled crown
+    const hi = mix(lc, hex('#c8ec7a'), 0.55);
+    for (let i = 0; i < 16; i++) {
+      const a = i * 2.39996 + hash(x, i) * 0.5, up = 0.25 + 0.7 * hash(i, z);
+      const rr = 1.5 * Math.sqrt(1 - up * up) + 0.25, py = 2.75 + up * 1.15;
+      b.ball([Math.cos(a) * rr * 1.1, py, Math.sin(a) * rr * 1.1], 0.38 + 0.2 * hash(i, x), up > 0.55 ? hi : lc, 1, 0.8, 1, 0, 0.3, lc2);
+    }
   } else {
     b.prism([0, -0.2, 0], [0.05, 1.6, 0.02], 0.16, 0.1, 5, PAL.woodDark);
     b.ball([0.05, 2.3, 0], 1.0, lc, 1.1, 0.85, 1.1, 1, 0.35, lc2);
     b.ball([0.55, 1.9, 0.25], 0.65, lc, 1, 0.85, 1, 1, 0.3, lc2);
     b.ball([-0.5, 2.0, -0.2], 0.7, lc, 1, 0.85, 1, 1, 0.3, lc2);
+    const hi = mix(lc, hex('#d4f08a'), 0.5);
+    for (let i = 0; i < 5; i++) { const a = i * 2.4 + hash(z, i); b.ball([Math.cos(a) * 0.75, 2.55 + hash(i, x) * 0.4, Math.sin(a) * 0.75], 0.32, i % 2 ? hi : lc, 1, 0.8, 1, 0, 0.3, lc2); }
   }
+  b.windFn = oldW;
   b.pop();
 }
 
@@ -134,6 +149,8 @@ export function lantern(k: Kit, x: number, y: number, z: number, h = 3.0, yaw = 
 }
 
 export function bunting(b: Builder, a: V3, c: V3, sag: number, n: number, cols: RGB[]) {
+  const oldW = b.windFn; const topY = Math.min(a[1], c[1]) - sag - 0.05;
+  b.windFn = (p: V3) => p[1] < topY ? 0.22 : 0.06;
   b.withHint(null, () => {
     for (let i = 0; i < n; i++) {
       const t0 = i / n, t1 = (i + 0.7) / n, tm = (i + 0.35) / n;
@@ -142,13 +159,16 @@ export function bunting(b: Builder, a: V3, c: V3, sag: number, n: number, cols: 
       b.tri(A, B, C, cols[i % cols.length]);
     }
   });
+  b.windFn = oldW;
   b.prism(a, c, 0.025, 0.025, 3, PAL.woodDark, { caps: false });
 }
 
 export function flag(b: Builder, base: V3, h: number, col: RGB, dir = 1) {
   b.prism(base, add(base, [0, h, 0]), 0.07, 0.045, 5, PAL.woodDark);
   b.ball(add(base, [0, h + 0.05, 0]), 0.1, PAL.gold, 1, 1, 1, 0);
-  b.sheet((u, v) => [base[0] + dir * u * 1.7, base[1] + h - 0.1 - v * 0.95 + Math.sin(u * 4) * 0.12, base[2] + Math.sin(u * 5 + v) * 0.18 * u], 4, 1, (i) => i % 2 ? col : tint(col, 0.9));
+  const oldW = b.windFn; b.windFn = (p: V3) => Math.hypot(p[0] - base[0], p[2] - base[2]) * 0.16;
+  b.sheet((u, v) => [base[0] + dir * u * 1.7, base[1] + h - 0.1 - v * 0.95 + Math.sin(u * 4) * 0.12, base[2] + Math.sin(u * 5 + v) * 0.18 * u], 6, 2, (i) => i % 2 ? col : tint(col, 0.9));
+  b.windFn = oldW;
 }
 
 export function ship(k: Kit, x: number, y: number, z: number, yaw: number, s: number, opt: { hull?: RGB; stripe?: RGB; sail?: RGB; wing?: RGB; masts?: number; noWings?: boolean } = {}) {

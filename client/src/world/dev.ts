@@ -1,12 +1,13 @@
 // Dev harness for the world: free camera + debug keys. Open /dev/world.html.
 // Keys: B raise Beacon, 1/2/3 arena phase, G walkability overlay, L/M/H quality.
 // URL: ?cam=alpha,beta,radius,tx,ty,tz&q=low|med|high&beacon=1&phase=2&grid=1
-import { SceneInstrumentation, Engine, Scene, ArcRotateCamera, Vector3, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
+import { SceneInstrumentation, TransformNode, MeshBuilder, Engine, Scene, ArcRotateCamera, Vector3, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
 import { buildWorld } from './index';
 import type { Quality } from '../core/contracts';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+if (new URLSearchParams(location.search).get('phone')) engine.setHardwareScalingLevel(1 / 1.5);
 const scene = new Scene(engine);
 const world = buildWorld(scene);
 const instr = new SceneInstrumentation(scene); instr.captureFrameTime = false;
@@ -14,7 +15,7 @@ const qs = new URLSearchParams(location.search);
 
 const start = world.anchor('playerStart');
 const cam = new ArcRotateCamera('devcam', -Math.PI / 2, 1.08, 20, start.pos.add(new Vector3(0, 1, 0)), scene);
-cam.minZ = 0.3; cam.maxZ = 6000; cam.wheelPrecision = 20; cam.panningSensibility = 60;
+cam.minZ = 0.3; cam.maxZ = 8000; cam.fov = 0.8; cam.wheelPrecision = 20; cam.panningSensibility = 60;
 cam.attachControl(canvas, true);
 const c = qs.get('cam');
 if (c) { const [a, b, r, x, y, z] = c.split(',').map(Number); cam.alpha = a; cam.beta = b; cam.radius = r; cam.target.set(x, y, z); }
@@ -22,6 +23,15 @@ if (qs.get('fov')) cam.fov = Number(qs.get('fov'));
 
 let q: Quality = (qs.get('q') as Quality) || 'med';
 world.setQuality(q);
+world.attachCamera(cam);
+// stand-in character at the camera target (to check shadows + occlusion fade)
+{
+  const root = new TransformNode('devplayer', scene);
+  const body = MeshBuilder.CreateCapsule('devbody', { height: 1.7, radius: 0.32 }, scene); body.parent = root; body.position.y = 0.85;
+  const bm = new StandardMaterial('devbm', scene); bm.diffuseColor = new Color3(0.9, 0.35, 0.25); body.material = bm;
+  const t = cam.target; root.position.set(t.x, world.groundAt(t.x, t.z) ?? 0, t.z);
+  world.addShadowCaster(root);
+}
 
 let overlay: Mesh | null = null;
 function toggleGrid() {

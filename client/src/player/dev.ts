@@ -1,100 +1,129 @@
 // Dev harness for characters + player rig (dev/player.html). Not used by the game.
-// URL params: ?view=lineup (fixed camera on the line-up), ?pose=run (freeze all line-up poses),
-//             ?only=player,npc (filter line-up kinds)
+// URL params:
+//   ?world=real        use the real world module (lighting, shadows, post) instead of the flat test disc
+//   ?view=lineup       fixed camera on the line-up
+//   ?pose=run          freeze all line-up poses (otherwise they cycle)
+//   ?only=player,npc   filter line-up kinds
+//   ?q=low|med|high    world quality (real world only)
 import {
-  Engine, Scene, Vector3, Color3, Color4, HemisphericLight, DirectionalLight, MeshBuilder, StandardMaterial,
+  Engine, Scene, Vector3, Color3, Color4, HemisphericLight, DirectionalLight, MeshBuilder, StandardMaterial, ShadowGenerator,
+  ImageProcessingConfiguration,
 } from '@babylonjs/core';
-import type { WorldApi, Pose, CharacterView, TapInfo, EntityKind } from '../core/contracts';
+import type { WorldApi, Pose, CharacterView, TapInfo, EntityKind, Quality } from '../core/contracts';
 import { PALETTE } from '../core/contracts';
-import { makeCharacter } from './character';
+import { makeCharacter, characterStats } from './character';
 import { createPlayerRig } from './rig';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
 const scene = new Scene(engine);
-scene.clearColor = Color4.FromHexString(PALETTE.sky + 'ff');
-scene.ambientColor = new Color3(0.6, 0.55, 0.6);
 
-const hemi = new HemisphericLight('hemi', new Vector3(0.2, 1, 0.1), scene);
-hemi.intensity = 0.6;
-hemi.diffuse = Color3.FromHexString(PALETTE.cloud);
-hemi.groundColor = Color3.FromHexString(PALETTE.rock).scale(0.9);
-const sun = new DirectionalLight('sun', new Vector3(-0.5, -1, 0.6), scene);
-sun.intensity = 0.7;
-sun.diffuse = Color3.FromHexString(PALETTE.horizon);
-
-// ── fake world: flat disc island radius 30, a few box obstacles, a ramp ──
-const R = 30;
-const ground = MeshBuilder.CreateDisc('ground', { radius: R, tessellation: 48 }, scene);
-ground.rotation.x = Math.PI / 2;
-const gm = new StandardMaterial('gm', scene); gm.diffuseColor = Color3.FromHexString(PALETTE.meadow); gm.specularColor = Color3.Black();
-ground.material = gm;
-const plaza = MeshBuilder.CreateDisc('plaza', { radius: 9, tessellation: 32 }, scene);
-plaza.rotation.x = Math.PI / 2; plaza.position.y = 0.01;
-const pm = new StandardMaterial('pm', scene); pm.diffuseColor = Color3.FromHexString(PALETTE.stone); pm.specularColor = Color3.Black();
-plaza.material = pm;
-const boxes = [
-  { x: -8, z: -6, w: 4, d: 3 }, { x: 6, z: -10, w: 3, d: 6 }, { x: -14, z: 6, w: 5, d: 2 },
-];
-const bm = new StandardMaterial('bm', scene); bm.diffuseColor = Color3.FromHexString(PALETTE.roof); bm.specularColor = Color3.Black();
-for (const b of boxes) {
-  const m = MeshBuilder.CreateBox('obst', { width: b.w, depth: b.d, height: 2.5 }, scene);
-  m.position.set(b.x, 1.25, b.z); m.material = bm;
+// ── fake world: flat disc island radius 30, a few box obstacles, a ramp; lit like the real world ──
+function fakeWorld(): WorldApi {
+  const haze = Color3.FromHexString('#f2d9c2');
+  scene.clearColor = new Color4(haze.r, haze.g, haze.b, 1);
+  scene.ambientColor = new Color3(0, 0, 0);
+  const toSun = new Vector3(-0.62, 0.52, -0.58).normalize();
+  const sun = new DirectionalLight('sun', toSun.scale(-1), scene);
+  sun.diffuse = Color3.FromHexString('#ffe2b8'); sun.intensity = 0.88; sun.specular = new Color3(0.3, 0.3, 0.3);
+  sun.position = toSun.scale(40);
+  const hemi = new HemisphericLight('hemi', new Vector3(0.1, 1, 0.2), scene);
+  hemi.diffuse = Color3.FromHexString('#d2dcf2'); hemi.groundColor = Color3.FromHexString('#a7889f'); hemi.intensity = 0.78; hemi.specular = new Color3(0, 0, 0);
+  const shadow = new ShadowGenerator(2048, sun);
+  shadow.usePercentageCloserFiltering = true; shadow.bias = 0.004; shadow.normalBias = 0.025; shadow.darkness = 0.38;
+  // same grading as src/world (tone mapping + curves + vignette)
+  const c = scene.imageProcessingConfiguration;
+  c.toneMappingEnabled = true; c.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
+  c.exposure = 1.08; c.contrast = 1.12; c.colorCurvesEnabled = true;
+  const cc = c.colorCurves!; cc.globalSaturation = 14; cc.shadowsHue = 235; cc.shadowsDensity = 22; cc.shadowsSaturation = 20; cc.highlightsHue = 40; cc.highlightsDensity = 18; cc.highlightsSaturation = 15;
+  c.vignetteEnabled = true; c.vignetteWeight = 1.25; c.vignetteStretch = 0.5; c.vignetteColor = new Color4(0.16, 0.1, 0.22, 0);
+  const R = 30;
+  const mat = (hexc: string) => { const m = new StandardMaterial('m' + hexc, scene); m.diffuseColor = Color3.FromHexString(hexc); m.specularColor = Color3.Black(); return m; };
+  const ground = MeshBuilder.CreateDisc('ground', { radius: R, tessellation: 48 }, scene);
+  ground.rotation.x = Math.PI / 2; ground.material = mat('#7fbf5a'); ground.receiveShadows = true;
+  const plaza = MeshBuilder.CreateDisc('plaza', { radius: 9, tessellation: 32 }, scene);
+  plaza.rotation.x = Math.PI / 2; plaza.position.y = 0.01; plaza.material = mat('#d9c8a8'); plaza.receiveShadows = true;
+  const boxes = [{ x: -8, z: -6, w: 4, d: 3 }, { x: 6, z: -10, w: 3, d: 6 }, { x: -14, z: 6, w: 5, d: 2 }];
+  for (const b of boxes) {
+    const m = MeshBuilder.CreateBox('obst', { width: b.w, depth: b.d, height: 2.5 }, scene);
+    m.position.set(b.x, 1.25, b.z); m.material = mat(PALETTE.roof); shadow.addShadowCaster(m); m.receiveShadows = true;
+  }
+  const rampH = (x: number) => (x < 14 ? 0 : x < 20 ? ((x - 14) / 6) * 1.5 : 1.5);
+  const ramp = MeshBuilder.CreateBox('ramp', { width: 12, depth: 8, height: 0.2 }, scene);
+  ramp.material = mat(PALETTE.teal); ramp.position.set(20, 0.75, 0); ramp.rotation.z = Math.atan2(1.5, 12);
+  return {
+    groundAt(x, z) {
+      if (x * x + z * z > R * R) return null;
+      for (const b of boxes) if (Math.abs(x - b.x) < b.w / 2 + 0.35 && Math.abs(z - b.z) < b.d / 2 + 0.35) return null;
+      if (Math.abs(z) < 4 && x > 14) return rampH(x);
+      return 0;
+    },
+    anchor() { return { pos: new Vector3(0, 0, 0), facing: 0 }; },
+    enemySpawns() { return []; },
+    raiseBeacon() { return Promise.resolve(); },
+    beaconRaised: false,
+    setArenaPhase() {},
+    statueLens: new Vector3(0, 5, 0),
+    setQuality() {},
+    addShadowCaster(root) { for (const m of root.getChildMeshes(false)) shadow.addShadowCaster(m, false); },
+    attachCamera() {},
+    update() {},
+  };
 }
-// ramp up to a platform: x 14..20 rises 0..1.5, platform 20..26 at 1.5, z -4..4
-const rampH = (x: number) => (x < 14 ? 0 : x < 20 ? ((x - 14) / 6) * 1.5 : 1.5);
-const ramp = MeshBuilder.CreateBox('ramp', { width: 12, depth: 8, height: 0.2 }, scene);
-const rm = new StandardMaterial('rm', scene); rm.diffuseColor = Color3.FromHexString(PALETTE.teal); rm.specularColor = Color3.Black();
-ramp.material = rm; ramp.position.set(20, 0.75, 0); ramp.rotation.z = Math.atan2(1.5, 12);
 
-const world: WorldApi = {
-  groundAt(x, z) {
-    if (x * x + z * z > R * R) return null;
-    for (const b of boxes) if (Math.abs(x - b.x) < b.w / 2 + 0.35 && Math.abs(z - b.z) < b.d / 2 + 0.35) return null;
-    if (Math.abs(z) < 4 && x > 14) return rampH(x);
-    return 0;
-  },
-  anchor() { return { pos: new Vector3(0, 0, 0), facing: 0 }; },
-  enemySpawns() { return []; },
-  raiseBeacon() { return Promise.resolve(); },
-  beaconRaised: false,
-  setArenaPhase() {},
-  statueLens: new Vector3(0, 5, 0),
-  setQuality() {},
-  update() {}, addShadowCaster() {}, attachCamera() {},
-};
+const useReal = params.get('world') === 'real';
+let world: WorldApi;
+if (useReal) {
+  // not statically analysable on purpose: keeps src/world out of this page's reload graph unless asked for
+  const path = '../world/' + 'index';
+  const mod = (await import(/* @vite-ignore */ path)) as { buildWorld: (s: Scene) => WorldApi };
+  world = mod.buildWorld(scene);
+  const q = params.get('q') as Quality | null;
+  if (q) world.setQuality(q);
+} else world = fakeWorld();
 
 // ── line-up ──
 type Spec = { kind: EntityKind | 'npc'; color?: string; label: string };
 let specs: Spec[] = [
   { kind: 'player', label: 'player' },
+  { kind: 'npc', label: 'Marrow' },
+  { kind: 'npc', color: PALETTE.teal, label: 'Tamsin' },
+  { kind: 'npc', color: PALETTE.roof, label: 'Bram' },
   { kind: 'companion', label: 'Wren' },
-  { kind: 'npc', label: 'elder' },
-  { kind: 'npc', color: PALETTE.roof, label: 'npc roof' },
   { kind: 'npc', color: PALETTE.sky, label: 'npc sky' },
   { kind: 'npc', color: PALETTE.meadow, label: 'npc meadow' },
   { kind: 'npc', color: PALETTE.cliff, label: 'npc cliff' },
   { kind: 'npc', color: PALETTE.gold, label: 'npc gold' },
+  { kind: 'npc', color: PALETTE.rock, label: 'npc rock' },
   { kind: 'grunt', label: 'grunt' },
   { kind: 'archer', label: 'archer' },
   { kind: 'brute', label: 'brute' },
   { kind: 'warden', label: 'warden' },
 ];
 const only = params.get('only');
-if (only) specs = specs.filter((s) => only.split(',').includes(s.kind));
-const chars: { spec: Spec; view: CharacterView }[] = [];
-let xCursor = -((specs.length - 1) * 1.6) / 2;
+if (only) specs = specs.filter((s) => only.split(',').includes(s.kind) || only.split(',').includes(s.label));
+const start = useReal ? world.anchor('playerStart') : { pos: new Vector3(0, 0, 0), facing: 0 };
+const fwd = new Vector3(Math.sin(start.facing), 0, Math.cos(start.facing));
+const right = new Vector3(fwd.z, 0, -fwd.x);
+const lineC = start.pos.add(fwd.scale(useReal ? 5 : 12));
+const chars: { spec: Spec; view: CharacterView; tris: number }[] = [];
+let xCursor = -((specs.length - 1) * 1.5) / 2;
 specs.forEach((spec, i) => {
   const view = makeCharacter(scene, { kind: spec.kind, color: spec.color });
-  const w = spec.kind === 'warden' ? 3.5 : spec.kind === 'brute' ? 2.4 : 1.6;
+  const tris = characterStats.lastTriangles;
+  const w = spec.kind === 'warden' ? 3.5 : spec.kind === 'brute' ? 2.4 : 1.5;
   xCursor += i === 0 ? 0 : w / 2;
-  view.root.position.set(xCursor, 0, 12);
+  const p = lineC.add(right.scale(xCursor));
+  p.y = world.groundAt(p.x, p.z) ?? lineC.y;
+  view.root.position.copyFrom(p);
   xCursor += w / 2;
-  view.root.rotation.y = Math.PI; // face the default camera (-Z)
+  view.root.rotation.y = start.facing + Math.PI; // face back toward the start / default camera
   view.setEntityId(100 + i);
-  chars.push({ spec, view });
+  world.addShadowCaster(view.root);
+  chars.push({ spec, view, tris });
 });
+console.log('triangles per character: ' + chars.map((c) => `${c.spec.label}=${c.tris}`).join(' '));
 
 const POSES: Pose[] = ['idle', 'run', 'attack', 'cast', 'hit', 'staggered', 'parry', 'charge', 'dead'];
 const fixedPose = params.get('pose') as Pose | null;
@@ -107,6 +136,7 @@ const joy = { x: 0, y: 0 };
 // A minimal stand-in for the HUD joystick (a DOM element over the canvas, like the real HUD).
 {
   const pad = document.createElement('div');
+  pad.id = 'joypad';
   pad.style.cssText = 'position:fixed;left:20px;bottom:20px;width:140px;height:140px;border-radius:50%;background:#fff3;border:2px solid #fff8;touch-action:none;';
   const knob = document.createElement('div');
   knob.style.cssText = 'position:absolute;left:45px;top:45px;width:50px;height:50px;border-radius:50%;background:#fffc;pointer-events:none;';
@@ -137,13 +167,16 @@ const rig = createPlayerRig(scene, {
   },
 });
 scene.activeCamera = rig.camera;
-rig.teleport(new Vector3(0, 0, 0), 0);
+world.addShadowCaster(rig.view.root);
+world.attachCamera(rig.camera);
+rig.teleport(start.pos.clone(), start.facing);
+window.addEventListener('keydown', (e) => { if (e.code === 'Space') rig.jump(); });
 
 if (params.get('view') === 'lineup') {
   rig.setCinematic(true);
   const cam = rig.camera;
-  cam.target.set(0, 1.4, 12);
-  cam.alpha = -Math.PI / 2; cam.beta = 1.35; cam.radius = 17;
+  cam.target.copyFrom(lineC).addInPlaceFromFloats(0, 1.2, 0);
+  cam.alpha = Math.atan2(-fwd.z, -fwd.x); cam.beta = 1.35; cam.radius = 17;
 }
 
 let frames = 0;
@@ -158,16 +191,17 @@ scene.onBeforeRenderObservable.add(() => {
   }
   if (!paused) for (const c of chars) c.view.update(dt);
   rig.update(dt);
+  world.update(dt);
   const p = rig.position;
   info.textContent = `pos ${p.x.toFixed(2)} ${p.y.toFixed(2)} ${p.z.toFixed(2)}  facing ${rig.facing.toFixed(2)}  moving ${rig.moving}\n` +
     `cam a ${rig.camera.alpha.toFixed(2)} b ${rig.camera.beta.toFixed(2)} r ${rig.camera.radius.toFixed(1)}  pose ${fixedPose ?? pose}\n` +
-    `taps ${taps.length} last ${JSON.stringify(taps[taps.length - 1] ?? null, (k, v) => (typeof v === 'number' ? +v.toFixed(2) : v))}  active meshes ${scene.getActiveMeshes().length}`;
+    `taps ${taps.length}  active meshes ${scene.getActiveMeshes().length}`;
 });
 engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 (window as unknown as { __dev: unknown }).__dev = {
-  scene, engine, rig, chars, taps, joy, world,
+  scene, engine, rig, chars, taps, joy, world, lineC, fwd, right,
   get frames() { return frames; },
   setPose: (p: Pose) => applyAll(p),
   /** Show every line-up character at time t into pose p, then hold still. */
@@ -175,7 +209,18 @@ window.addEventListener('resize', () => engine.resize());
     paused = true;
     for (const c of chars) { c.view.setPose('idle'); c.view.update(1); c.view.setPose(p); for (let k = 0; k < Math.round(t / 0.02); k++) c.view.update(0.02); }
   },
+  /** Advance the line-up by t seconds of animation in small steps, then hold. */
+  advance(t: number) { paused = true; for (const c of chars) for (let k = 0; k < Math.round(t / 0.02); k++) c.view.update(0.02); },
   resume() { paused = false; },
+  hideUi() { info.style.display = 'none'; document.getElementById('joypad')?.style.setProperty('display', 'none'); },
+  /** Camera relative to the line-up centre: (offset along line, height of target, yaw from front, beta, radius). */
+  look(along: number, ty: number, yaw: number, beta: number, radius: number) {
+    rig.setCinematic(true);
+    const t = lineC.add(right.scale(along)); t.y += ty;
+    rig.camera.target.copyFrom(t);
+    const a = Math.atan2(-fwd.z, -fwd.x) + yaw;
+    rig.camera.alpha = a; rig.camera.beta = beta; rig.camera.radius = radius;
+  },
   cam(alpha: number, beta: number, radius: number, x: number, y: number, z: number) {
     rig.setCinematic(true);
     rig.camera.alpha = alpha; rig.camera.beta = beta; rig.camera.radius = radius; rig.camera.target.set(x, y, z);

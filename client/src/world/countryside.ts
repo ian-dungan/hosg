@@ -49,7 +49,7 @@ function groundCol(x: number, z: number, y: number): RGB {
   const w = woodAt(x, z); if (w > 0) c = mix(c, hex('#4f9a55'), w * 0.8);
   if (y < WATER_Y + 0.7 && Math.abs(x - riverX(z)) < 22) c = mix(c, hex('#d9c38f'), Math.min(1, (WATER_Y + 0.7 - y) / 0.6));
   if (y > 25) c = mix(c, hex('#8fbf6a'), Math.min(1, (y - 25) / 40));
-  c = mix(c, hex('#9dbb95'), smooth(500, 1600, r) * 0.6);
+  c = mix(c, hex('#9dbb95'), smooth(140, 1200, r) * 0.55);
   return c;
 }
 
@@ -133,8 +133,12 @@ export function buildCountryside(terrain: Builder, band: Kit, far: Kit, water: B
         const step = x < 140 ? 2.4 : x < 400 ? 8 : 30; const x1 = x + step;
         const z0 = roadZ(x), z1 = roadZ(x1); const w = x < 400 ? 1.9 : 3;
         const lift = x < 140 ? 0.07 : x < 400 ? 0.35 : 1.2;
-        const col = h2(Math.floor(x / 2.4), 5) > 0.5 ? hex('#d6a874') : hex('#c99b6a');
-        b.quad([x, H(x, z0 - w) + lift, z0 - w], [x, H(x, z0 + w) + lift, z0 + w], [x1, H(x1, z1 + w) + lift, z1 + w], [x1, H(x1, z1 - w) + lift, z1 - w], col);
+        const v = 0.93 + 0.12 * h2(Math.floor(x / 2.4), 5);
+        const grass = hex('#7fbb5c'), dirt = tint(hex('#d2a673'), v), rut = tint(hex('#a97c52'), v), crown = mix(hex('#c9b178'), grass, 0.35);
+        const S = [-w - 0.9, -w, -w * 0.62, -w * 0.3, 0, w * 0.3, w * 0.62, w, w + 0.9];
+        const C = [grass, dirt, rut, crown, crown, crown, rut, dirt, grass];
+        const P = (xx: number, zc: number, s: number): V3 => [xx, H(xx, zc + s) + lift - (Math.abs(s) > w ? 0.03 : 0), zc + s];
+        for (let k = 0; k < S.length - 1; k++) b.quad(P(x, z0, S[k]), P(x1, z1, S[k]), P(x1, z1, S[k + 1]), P(x, z0, S[k + 1]), C[k], C[k + 1]);
         x = x1;
       }
     });

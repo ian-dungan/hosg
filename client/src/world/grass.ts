@@ -1,7 +1,7 @@
 // Swaying grass tufts and little flowers (merged, per-vertex wind weight), split into tiers.
 import { Builder, hex, mix, vnoise, type RGB, type V3 } from './mesh';
 
-const BASE = hex('#4e9a48'), TIP = hex('#b9e27c'), TIP2 = hex('#d7e98a'), DRY = hex('#d8cf7a');
+const BASE = hex('#4a8a46'), TIP = hex('#a6cf6c'), TIP2 = hex('#c4d77c'), DRY = hex('#d2c27a');
 const FLOWERS: RGB[] = [hex('#ffffff'), hex('#ffd36a'), hex('#ff8fa0'), hex('#b9a4ff'), hex('#ff9a5c')];
 
 /** Fill `b` with `count` tufts at positions accepted by `ok` (sampled with density `dens`). */

@@ -90,7 +90,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
     if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
     const p = local(e);
     try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    ptrs.set(e.pointerId, { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), moved: false, multi: false, type: e.pointerType, button: e.button });
+    ptrs.set(e.pointerId, { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: e.timeStamp || performance.now(), moved: false, multi: false, type: e.pointerType, button: e.button });
     if (ptrs.size >= 2) {
       for (const q of ptrs.values()) q.multi = true;
       pinchDist = twoDist();
@@ -120,7 +120,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
     ptrs.delete(e.pointerId);
     try { canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (ptrs.size === 2) pinchDist = twoDist();
-    const quick = performance.now() - q.t < TAP_MS;
+    const quick = (e.timeStamp || performance.now()) - q.t < TAP_MS;
     if (!cancelled && !q.moved && !q.multi && quick && !(q.type === 'mouse' && q.button !== 0)) doTap(q.x, q.y);
   };
   const onUp = (e: PointerEvent) => endPtr(e, false);

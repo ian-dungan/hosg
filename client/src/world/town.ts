@@ -57,6 +57,8 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     }
   });
   b.cj = oldCj;
+  // mortar bed under the paving
+  b.prism([0, -0.2, 0], [0, 0.03, 0], PLAZA_R, PLAZA_R, 48, PAL.plinth, { capB: hex('#c9b591') });
   // plaza kerb
   b.prism([0, -0.3, 0], [0, 0.12, 0], PLAZA_R + 0.25, PLAZA_R + 0.2, 48, PAL.plinth, { caps: false });
   obs.push(circ(0, 0, PLINTH_R));
@@ -73,7 +75,15 @@ export function buildTown(k: Kit, props: Kit): TownOut {
           const s0 = -p.w / 2 + c * p.w / cols + ((i % 2) ? 0.25 : 0), s1 = Math.min(p.w / 2, s0 + p.w / cols - 0.06);
           const pt = (t: number, s: number): V3 => { const x = ax + dx * t + px * s, z = az + dz * t + pz * s; return [x, H(x, z) + 0.06, z]; };
           const col = hash(i * 3.1 + ax, c) > 0.5 ? PAL.pave1 : hash(c, i * 1.7 + bz) > 0.4 ? PAL.pave2 : PAL.pave3;
-          b.quad(pt(t0, s0), pt(t1 - 0.06, s0), pt(t1 - 0.06, s1), pt(t0, s1), col);
+          const cv = 0.9 + 0.2 * hash(c * 7.3 + i, bx);
+          b.quad(pt(t0, s0), pt(t1 - 0.06, s0), pt(t1 - 0.06, s1), pt(t0, s1), mix(col, PAL.pave3, 0.15) as RGB, tint(col, cv * 1.03));
+        }
+        // grout bed + worn soft edges blending into the grass
+        const g = (t: number, s: number, y: number): V3 => { const x = ax + dx * t + px * s, z = az + dz * t + pz * s; return [x, H(x, z) + y, z]; };
+        b.quad(g(t0, -p.w / 2, 0.045), g(t1, -p.w / 2, 0.045), g(t1, p.w / 2, 0.045), g(t0, p.w / 2, 0.045), hex('#b8a37f'), hex('#b8a37f'));
+        for (const sd of [-1, 1]) {
+          const e = 0.55 + 0.35 * hash(i, sd + ax);
+          b.quad(g(t0, sd * p.w / 2, 0.035), g(t1, sd * p.w / 2, 0.035), g(t1, sd * (p.w / 2 + e), 0.02), g(t0, sd * (p.w / 2 + e), 0.02), hex('#c2a97c'), hex('#7fbb5c'));
         }
       }
     });

@@ -33,7 +33,7 @@ void main(){
   // sun glints
   vec3 H = normalize(V + normalize(uSun));
   float g = pow(n2(vW.xz * 2.2 + vec2(t * 0.6, -t * 1.1)), 9.0) * pow(max(H.y, 0.0), 40.0);
-  c += vec3(1.0, 0.92, 0.75) * g * 6.0;
+  c += vec3(1.0, 0.92, 0.75) * g * 3.0;
   // shore foam
   float edge = d + (a - 0.5) * 0.35;
   float foam = 1.0 - smoothstep(0.08, 0.32, edge);

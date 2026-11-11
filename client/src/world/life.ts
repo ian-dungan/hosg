@@ -127,6 +127,6 @@ export function createCloudBank(scene: Scene, center: Vector3, side: Vector3, ra
     p.color = new Color4(1, 1, 1, alpha);
     return p;
   };
-  sps.setParticles();
-  return { mesh: mesh as Mesh, set(pt: number, a: number) { part = pt; alpha = a; sps.setParticles(); } };
+  if (scene.activeCamera) sps.setParticles();
+  return { mesh: mesh as Mesh, set(pt: number, a: number) { part = pt; alpha = a; if (scene.activeCamera) sps.setParticles(); } };
 }

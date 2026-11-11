@@ -15,6 +15,7 @@ export interface WfxOpts { noise?: number; rim?: number; cloudShadow?: number; f
 export class WorldFxPlugin extends MaterialPluginBase {
   constructor(material: Material, private o: WfxOpts) {
     super(material, 'WorldFx', 210, { WFX_WIND: false, WFX_FADE: false, WFX_NOISE: false, WFX_RIM: false, WFX_CLOUDSH: false, WFX_FLICKER: false });
+    this.doNotSerialize = true;
     this._enable(true);
   }
   getClassName() { return 'WorldFxPlugin'; }

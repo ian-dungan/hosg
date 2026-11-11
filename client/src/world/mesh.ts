@@ -55,7 +55,8 @@ const ICO = (() => {
     return nf;
   };
   const v1 = v.slice(); const f1 = subd(v1, f);
-  return [{ v: v.slice(), f }, { v: v1, f: f1 }];
+  const v2 = v1.slice(); const f2 = subd(v2, f1);
+  return [{ v: v.slice(), f }, { v: v1, f: f1 }, { v: v2, f: f2 }];
 })();
 
 /** Hint used to orient a triangle's normal: a local-space point it should face away from,
@@ -147,12 +148,19 @@ export class Builder {
   ball(c: V3, r: number, col: RGB, sx = 1, sy = 1, sz = 1, detail = 1, jit = 0, col2: RGB | null = null) {
     const G = ICO[detail]; const s = this.rng.next() * 100;
     const pts = G.v.map((p, i): V3 => { const k = 1 + (hash(i * 1.7 + s, s * 0.3) - 0.5) * jit; return [c[0] + p[0] * r * sx * k, c[1] + p[1] * r * sy * k, c[2] + p[2] * r * sz * k]; });
+    const start = this.pos.length;
     this.withHint(c, () => {
       for (const [a, b, d] of G.f) {
         if (col2) { const cy = (pts[a][1] + pts[b][1] + pts[d][1]) / 3; const t = Math.max(0, Math.min(1, (cy - (c[1] - r * sy)) / (2 * r * sy))); this.tri(pts[a], pts[b], pts[d], mix(col2, col, t)); }
         else this.tri(pts[a], pts[b], pts[d], col);
       }
     });
+    // soft, rounded shading: normals point away from the (world-space) centre
+    const cw = this.tp(c), P = this.pos, N = this.nor;
+    for (let i = start; i < P.length; i += 3) {
+      const nx = P[i] - cw[0], ny = (P[i + 1] - cw[1]) * 1.15, nz = P[i + 2] - cw[2]; const l = Math.hypot(nx, ny, nz) || 1;
+      N[i] = nx / l; N[i + 1] = ny / l; N[i + 2] = nz / l;
+    }
   }
   /** Double-sided parametric sheet. */
   sheet(fn: (u: number, v: number) => V3, nu: number, nv: number, colFn: (i: number, j: number) => RGB) {
