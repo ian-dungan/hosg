@@ -18,6 +18,7 @@
 4. **Parties and the Fallen Warden** — parties of 4, loot rolls, private boss arenas, three phases, solo title and leaderboard.
 5. **Progression and gear** — levels 1–10, armour types and nine sets, unique weapons, visible gear, costumes and the gold costume shop, GM tools.
 6. **Opening quest online** — "The Solstice Crossing" as a saved, per-adventurer quest.
+7. **World generator** — areas are generated, never hand-placed. Each area is a short recipe (biome, size, seed, landmarks, town template, enemy families, boss arena) and the generator lays out terrain, vegetation, roads, buildings, enemy camps and points of interest from it, identically on the server and every client. Only story landmarks (such as the statue) are authored. This comes before the wider continent so the world can grow far past the first slice.
 
 Tabled by the owner for later (can be added at any time): party voice chat. It needs HTTPS, so it can only follow the move to `shadygrove2.mooo.com`.
 
