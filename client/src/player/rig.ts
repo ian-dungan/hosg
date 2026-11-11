@@ -8,8 +8,8 @@
 import { Scene, ArcRotateCamera, Vector3, Plane, type AbstractMesh, type Node } from '@babylonjs/core';
 import type { CreatePlayerRig, PlayerRig, PlayerRigOpts, TapInfo } from '../core/contracts';
 import { makeCharacter } from './character';
+import { RUN_SPEED } from '@sg2/shared';
 
-const RUN_SPEED = 6;
 const ACCEL = 14;             // exponential approach rate toward target velocity (1/s)
 const TURN_RATE = 12;         // rad/s max turn speed
 const DEFAULT_RADIUS = 20;

@@ -1,0 +1,15 @@
+{
+  "name": "@sg2/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./world/layout": "./src/world/layout.ts",
+    "./world/obstacles": "./src/world/obstacles.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

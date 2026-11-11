@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@babylonjs/core": "^9.35.0"
+    "@babylonjs/core": "^9.35.0",
+    "@sg2/shared": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

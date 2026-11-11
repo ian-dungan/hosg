@@ -20,7 +20,7 @@ import { buildGrass } from './grass';
 import { createLife, createCloudBank, dotTex } from './life';
 import { createReveal } from './reveal';
 import {
-  Walk, groundHeight, BEACON_DIR, BEACON_C, BEACON_U, BEACON_PERP, ARENA_C, ARENA_Y, BEACON_TOP, B_DOCK_U, B_DOCK_Y, SKY_ISLAND,
+  createGroveWalk, groundHeight, BEACON_DIR, BEACON_C, BEACON_U, BEACON_PERP, ARENA_C, ARENA_Y, BEACON_TOP, B_DOCK_U, B_DOCK_Y, SKY_ISLAND,
   DOCK_START, DOCK_LEN, DOCK_Y, PLAZA_R, ROAD_X0, roadZ, bandR,
 } from './layout';
 
@@ -86,7 +86,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   band.b.aoFn = aoGround;
   const far = new Kit(new Builder(33), new Builder(34));
   const riverDummy = new Builder(35), mount = new Builder(36);
-  const cOut = buildCountryside(terrainB, band, far, riverDummy, mount);
+  buildCountryside(terrainB, band, far, riverDummy, mount);
   band.b.aoFn = null;
 
   const arenaB = new Builder(61), ringB = new Builder(63);
@@ -95,7 +95,8 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   buildSkyIsland(isl, islWater);
   const sail = new Builder(71); windmillSails(sail);
 
-  const walk = new Walk([...tOut.obstacles, ...cOut.obstacles]);
+  // Built from the baked copy of tOut/cOut obstacles that the server shares (see world/obstacles.test.ts).
+  const walk = createGroveWalk();
 
   // grass: tier A (med+high) and tier B (high only)
   const gOk = (x: number, z: number) => {
