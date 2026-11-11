@@ -7,6 +7,7 @@ import { SPAWN } from '@sg2/shared';
 import { NameTakenError, type Account, type Adventurer, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Any constant shared by all server processes: serialises concurrent migration runs.
 const MIGRATION_LOCK_ID = 2570_0001;
 
@@ -128,6 +129,13 @@ export async function createPgStore(databaseUrl: string): Promise<Store> {
         `SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE lower(username) = lower($1)`,
         [username],
       );
+      return rows[0] ? toAccount(rows[0]) : null;
+    },
+
+    async findAccountById(id) {
+      // Ids come from verified tokens, but a malformed one must read as unknown, not as a SQL error.
+      if (!UUID_RE.test(id)) return null;
+      const { rows } = await pool.query<AccountRow>(`SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE id = $1`, [id]);
       return rows[0] ? toAccount(rows[0]) : null;
     },
 

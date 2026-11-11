@@ -5,6 +5,7 @@ import { NameTakenError, type Account, type Adventurer, type Store } from './typ
 
 export function createMemoryStore(): Store {
   const accountsByName = new Map<string, Account>(); // key: lower-cased username
+  const accountsById = new Map<string, Account>();
   const adventurersByAccount = new Map<string, Adventurer>();
   const adventurersById = new Map<string, Adventurer>();
 
@@ -14,11 +15,17 @@ export function createMemoryStore(): Store {
       if (accountsByName.has(key)) throw new NameTakenError(username);
       const account: Account = { id: randomUUID(), username, passwordHash, isGuest, isGm: false };
       accountsByName.set(key, account);
+      accountsById.set(account.id, account);
       return { ...account };
     },
 
     async findAccountByUsername(username) {
       const account = accountsByName.get(username.toLowerCase());
+      return account ? { ...account } : null;
+    },
+
+    async findAccountById(id) {
+      const account = accountsById.get(id);
       return account ? { ...account } : null;
     },
 

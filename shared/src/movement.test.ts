@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePose, checkStep } from './movement';
-import { groveWalkable, groveGroundY, groundHeight } from './world/layout';
+import { groveWalkable, groveTownWalkable, groveGroundY, groundHeight, BEACON_C } from './world/layout';
 import { SPAWN } from './constants';
 
 describe('parsePose', () => {
@@ -32,6 +32,12 @@ describe('checkStep', () => {
     expect(checkStep({ x: 0, z: 0 }, { x: 9, z: 0, facing: 0, moving: true }, 10, open)).toBe('too-fast');
     expect(checkStep({ x: 0, z: 0 }, { x: 8, z: 0, facing: 0, moving: true }, 10, open)).toBe('ok');
   });
+  it('treats a non-finite dt as no time at all', () => {
+    const step = { x: 2, z: 0, facing: 0, moving: true };
+    expect(checkStep({ x: 0, z: 0 }, step, NaN, open)).toBe('too-fast');
+    expect(checkStep({ x: 0, z: 0 }, step, Infinity, open)).toBe('too-fast');
+    expect(checkStep({ x: 0, z: 0 }, { x: 0.4, z: 0, facing: 0, moving: true }, NaN, open)).toBe('ok');
+  });
   it('reports blocked when the target is not walkable', () => {
     expect(checkStep({ x: 0, z: 0 }, { x: 0.4, z: 0, facing: 0, moving: true }, 1 / 15, () => false)).toBe('blocked');
   });
@@ -43,6 +49,13 @@ describe('grove walkability', () => {
     expect(groveWalkable(0, -11)).toBe(true);
     expect(groveWalkable(0, 0)).toBe(false);
     expect(groveWalkable(5000, 5000)).toBe(false);
+  });
+  it('groveTownWalkable is the town area only: the far Beacon clearing does not count', () => {
+    expect(groveWalkable(BEACON_C.x, BEACON_C.z)).toBe(true); // standable for the client's anchors
+    expect(groveTownWalkable(BEACON_C.x, BEACON_C.z)).toBe(false);
+    expect(groveTownWalkable(SPAWN.x, SPAWN.z)).toBe(true);
+    expect(groveTownWalkable(0, 0)).toBe(false);
+    expect(groveTownWalkable(5000, 5000)).toBe(false);
   });
   it('groveGroundY gives terrain height where walkable and null elsewhere', () => {
     expect(groveGroundY(0, -11)).toBe(groundHeight(0, -11));

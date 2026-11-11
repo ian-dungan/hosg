@@ -16,14 +16,14 @@ export function parsePose(msg: unknown): Pose | null {
 /** Longest gap between two moves that still earns more allowed distance. */
 const MAX_STEP_DT = 1;
 
-/** Whether an adventurer at `from` can reach `to` within `dtSeconds`, given the walkable test. */
+/** Whether an adventurer at `from` can reach `to` within `dtSeconds` (a non-finite dt counts as 0), given the walkable test. */
 export function checkStep(
   from: { x: number; z: number },
   to: Pose,
   dtSeconds: number,
   walkable: (x: number, z: number) => boolean,
 ): 'ok' | 'too-fast' | 'blocked' {
-  const dt = Math.min(MAX_STEP_DT, Math.max(0, dtSeconds));
+  const dt = Number.isFinite(dtSeconds) ? Math.min(MAX_STEP_DT, Math.max(0, dtSeconds)) : 0;
   const allowed = RUN_SPEED * 1.3 * dt + 0.5;
   if (Math.hypot(to.x - from.x, to.z - from.z) > allowed) return 'too-fast';
   if (!walkable(to.x, to.z)) return 'blocked';

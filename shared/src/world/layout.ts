@@ -165,6 +165,8 @@ export const B_DOCK_Y = BEACON_TOP;
 export const SKY_ISLAND = { dist: 950, y: 168, r: 55 };
 
 // ───────── walkability ─────────
+/** Radius of the town + countryside area; beyond it only the out-of-play Beacon clearing is standable. */
+const TOWN_R = 118;
 const CELL = 4, GMIN = -116, GN = 58; // grid over [-116, 116]^2 for the town + band
 export class Walk {
   private grid: Obstacle[][] = [];
@@ -195,7 +197,7 @@ export class Walk {
   }
   groundAt(x: number, z: number): number | null {
     const r2 = x * x + z * z;
-    if (r2 < 118 * 118) {
+    if (r2 < TOWN_R * TOWN_R) {
       // ferry jetty over the river
       const u = x * BEACON_DIR.x + z * BEACON_DIR.z, v = x * PERP.x + z * PERP.z;
       if (u > DOCK_START && u < DOCK_START + DOCK_LEN && Math.abs(v) < DOCK_HW - 0.3) return DOCK_Y;
@@ -229,3 +231,5 @@ const defaultWalk = () => (groveWalk ??= createGroveWalk());
 export function groveGroundY(x: number, z: number): number | null { return defaultWalk().groundAt(x, z); }
 /** True if an adventurer can stand at (x, z). */
 export function groveWalkable(x: number, z: number): boolean { return groveGroundY(x, z) !== null; }
+/** True if an adventurer can stand at (x, z) in the grove town area, which is all the online zone allows (not the Beacon clearing). */
+export function groveTownWalkable(x: number, z: number): boolean { return x * x + z * z < TOWN_R * TOWN_R && groveWalkable(x, z); }

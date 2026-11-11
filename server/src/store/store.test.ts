@@ -32,6 +32,13 @@ function storeSuite(label: string, open: () => Promise<Store>) {
       expect(found).toEqual(created);
     });
 
+    it('finds a created account by id, and returns null for an unknown id', async () => {
+      const created = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'hash', isGuest: false });
+      expect(await store.findAccountById(created.id)).toEqual(created);
+      expect(await store.findAccountById('00000000-0000-4000-8000-000000000000')).toBeNull();
+      expect(await store.findAccountById('not-an-id')).toBeNull();
+    });
+
     it('returns null for an unknown name', async () => {
       expect(await store.findAccountByUsername(uniqueName('Nobody'))).toBeNull();
     });

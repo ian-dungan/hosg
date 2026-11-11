@@ -34,6 +34,7 @@ export interface Store {
   createAccount(a: { username: string; passwordHash: string | null; isGuest: boolean }): Promise<Account>;
   /** Case-insensitive. */
   findAccountByUsername(username: string): Promise<Account | null>;
+  findAccountById(id: string): Promise<Account | null>;
   /** One adventurer per account; a new one spawns at SPAWN with level 1, 0 xp and 0 gold. */
   getOrCreateAdventurer(accountId: string, name: string): Promise<Adventurer>;
   /** Saves position and facing; an unknown id is ignored. */
