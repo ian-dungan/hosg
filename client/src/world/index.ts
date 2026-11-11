@@ -2,6 +2,7 @@
 import {
   Vector3, Color3, Color4, StandardMaterial, DirectionalLight, HemisphericLight, ShadowGenerator, GlowLayer,
   Scene, MeshBuilder, Matrix, Quaternion, type Mesh, type AbstractMesh,
+  DefaultRenderingPipeline, SSAO2RenderingPipeline, ImageProcessingConfiguration, type ArcRotateCamera, type TransformNode,
 } from '@babylonjs/core';
 import type { BuildWorld, WorldApi, AnchorName, Anchor, Quality } from '../core/contracts';
 import { ARENA_RADIUS } from '../core/contracts';
@@ -207,7 +208,44 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   let phase: 1 | 2 | 3 = 1;
   const baseSun = sun.diffuse.clone(), baseHemi = hemi.diffuse.clone(), baseInt = sun.intensity;
 
+  // ── post-processing (attached once the player camera exists) ──
+  let quality: Quality = 'med';
+  let cam: ArcRotateCamera | null = null;
+  let pipe: DefaultRenderingPipeline | null = null;
+  let ssao: SSAO2RenderingPipeline | null = null;
+  const applyPost = () => {
+    if (!cam) return;
+    pipe?.dispose(); pipe = null;
+    ssao?.dispose(); ssao = null;
+    if (quality === 'low') return;
+    pipe = new DefaultRenderingPipeline('world_post', true, scene, [cam]);
+    pipe.fxaaEnabled = true;
+    pipe.imageProcessingEnabled = true;
+    const ip = pipe.imageProcessing;
+    ip.toneMappingEnabled = true;
+    ip.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    ip.exposure = 1.25; ip.contrast = 1.18;
+    ip.vignetteEnabled = true; ip.vignetteWeight = 1.6; ip.vignetteStretch = 0.4;
+    ip.vignetteColor = new Color4(0.12, 0.08, 0.2, 0);
+    if (quality === 'high') {
+      pipe.bloomEnabled = true; pipe.bloomThreshold = 0.78; pipe.bloomWeight = 0.35; pipe.bloomKernel = 48; pipe.bloomScale = 0.5;
+      pipe.sharpenEnabled = true; pipe.sharpen.edgeAmount = 0.18;
+      try {
+        ssao = new SSAO2RenderingPipeline('world_ssao', scene, { ssaoRatio: 0.5, blurRatio: 1 }, [cam]);
+        ssao.radius = 1.6; ssao.totalStrength = 1.0; ssao.base = 0.15; ssao.samples = 12; ssao.maxZ = 250; ssao.expensiveBlur = true;
+      } catch (e) { console.warn('SSAO unavailable', e); ssao = null; }
+    }
+  };
+
   const api: WorldApi = {
+    addShadowCaster: (root: TransformNode) => {
+      for (const m of root.getChildMeshes(false)) {
+        if (casters.includes(m)) continue;
+        casters.push(m);
+        shadow?.addShadowCaster(m, false);
+      }
+    },
+    attachCamera: (c: ArcRotateCamera) => { cam = c; applyPost(); },
     groundAt: (x, z) => walk.groundAt(x, z),
     anchor: (name) => { const a = anchors[name]; return { pos: a.pos.clone(), facing: a.facing }; },
     enemySpawns: () => spawns.map(p => p.clone()),
@@ -226,7 +264,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
       else { sun.diffuse = baseSun.clone(); sun.intensity = baseInt; hemi.diffuse = baseHemi.clone(); scene.fogColor = fogCol; }
     },
     statueLens,
-    setQuality,
+    setQuality: (q: Quality) => { quality = q; setQuality(q); applyPost(); },
     update: (dt) => {
       time += dt;
       sails.rotation.z = time * 0.6;

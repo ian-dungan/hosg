@@ -62,7 +62,7 @@ const world: WorldApi = {
   setArenaPhase() {},
   statueLens: new Vector3(0, 5, 0),
   setQuality() {},
-  update() {},
+  update() {}, addShadowCaster() {}, attachCamera() {},
 };
 
 // ── line-up ──
