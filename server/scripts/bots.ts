@@ -1,7 +1,9 @@
 // Load test: `count` guest adventurers join the grove, run about at TICK_HZ with the shared character
-// controller (over the grove's height surface, jumping now and then) and chat every 20 s. Prints the patch rate the bots saw and the server's peak memory, and exits non-zero
-// unless every bot stayed connected, the mean patch rate is at least 14 Hz and no legal step was
-// corrected.
+// controller (over the grove's height surface, jumping now and then) and chat every 20 s. Prints the
+// patch rate the bots saw and the server's peak memory, and exits non-zero unless every bot stayed
+// connected, the mean patch rate is at least 14 Hz, no legal step was corrected, no bot was ever
+// left in the air without a pose it could send, and none was stuck for a second or more.
+// The first few corrections are printed in full, with the pose the bot had sent.
 //   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60
 // The server's auth limiter allows 10 logins per IP a minute by default: start it with a higher
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
@@ -65,7 +67,17 @@ class Bot {
   /** Patches received while measuring (null: not measuring). */
   patches: number | null = null;
   corrections = 0;
+  /** The first few corrections: what the bot last sent, and where the server put it. */
+  correctionLog: string[] = [];
   jumps = 0;
+  /** Ticks on which no step it tried would be accepted (it sent nothing). */
+  stalledTicks = 0;
+  /** Of those, ticks it was in the air: its check and the server's disagree with its own controller. */
+  airStalls = 0;
+  /** Longest run of stalled ticks in a row. */
+  longestStall = 0;
+  private stallRun = 0;
+  private lastSent: unknown = null;
   chatsHeard = 0;
   disconnected: string | null = null;
   private body: Body = makeBody(0, 0, groveTownSurface);
@@ -86,7 +98,10 @@ class Bot {
     this.name = body.name ?? `bot ${this.index}`;
     this.room = await new Client(url).joinOrCreate('grove', { token: body.token });
     this.room.reconnection.enabled = false; // a drop is a failure, not something to ride out
-    this.room.onMessage('correct', () => this.corrections++);
+    this.room.onMessage('correct', (m: unknown) => {
+      this.corrections++;
+      if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}`);
+    });
     this.room.onMessage('chat', () => this.chatsHeard++);
     this.room.onMessage('kicked', (m: { reason: string }) => (this.disconnected ??= `kicked: ${m.reason}`));
     this.room.onDrop((code) => (this.disconnected ??= `dropped (code ${code})`));
@@ -139,8 +154,13 @@ class Bot {
       this.air = air;
       if (stepped.jumped) this.jumps++;
       this.room.send('move', next);
+      this.lastSent = next;
+      this.stallRun = 0;
       return;
     }
+    this.stalledTicks++;
+    if (!this.body.grounded) this.airStalls++;
+    this.longestStall = Math.max(this.longestStall, ++this.stallRun);
   }
 
   private chat() {
@@ -184,6 +204,9 @@ const lost = bots.filter((bot) => bot.disconnected);
 const corrections = bots.reduce((n, bot) => n + bot.corrections, 0);
 const chatsHeard = bots.reduce((n, bot) => n + bot.chatsHeard, 0);
 const jumps = bots.reduce((n, bot) => n + bot.jumps, 0);
+const stalledTicks = bots.reduce((n, bot) => n + bot.stalledTicks, 0);
+const airStalls = bots.reduce((n, bot) => n + bot.airStalls, 0);
+const longestStall = Math.max(...bots.map((bot) => bot.longestStall));
 await Promise.all(bots.map((bot) => bot.stop()));
 
 const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
@@ -196,10 +219,14 @@ console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFi
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
 console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}; jumps: ${jumps}`);
+console.log(`ticks with no sendable pose: ${stalledTicks} (${airStalls} in the air); longest run: ${longestStall} ticks`);
+for (const line of bots.flatMap((bot) => bot.correctionLog).slice(0, 5)) console.log(`  correction: ${line}`);
 
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);
 if (!(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
 if (corrections) failures.push(`${corrections} legal steps were corrected`);
+if (airStalls) failures.push(`${airStalls} ticks in the air had no pose the server would accept`);
+if (longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
 console.log(failures.length ? `FAIL: ${failures.join('; ')}` : 'PASS');
 process.exit(failures.length ? 1 : 0);

@@ -647,6 +647,85 @@ describe('height', () => {
   });
 });
 
+describe('height after a long gap in the air', { timeout: 15_000 }, () => {
+  const offTheTop = { x: RAMP_END + 0.3, z: RAMP_Z, y: 9.9, facing: 0, moving: true };
+  const below = { x: RAMP_END + 0.6, z: RAMP_Z, y: 0, facing: 0, moving: true };
+
+  // From a 10 m take-off the jump ceiling is below the ground after about 1.7 s: these gaps are longer.
+  it('accepts a landing that arrives 2.5 s after the last pose in the air', async () => {
+    const { url, store } = await start({ surface: testSurface });
+    const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
+    const corrections = collect(a.room, 'correct');
+    const hurts = collect(a.room, 'hurt');
+    await sendPoses(a.room, [...rampPoses(), offTheTop]);
+    await sleep(2500);
+    await sendPoses(a.room, [below, { ...below, x: below.x + 0.4 }]);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).x === below.x + 0.4);
+    expect(corrections).toEqual([]);
+    expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
+  });
+
+  it('reconnecting 2.5 s after going airborne, on the ground, still costs the health and is not corrected', async () => {
+    const { url, store } = await start({ surface: testSurface });
+    const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
+    await sendPoses(a.room, [...rampPoses(), offTheTop]);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 9.9);
+    a.room.connection.close();
+    await sleep(2500);
+    const resumed = await a.client.reconnect(a.room.reconnectionToken);
+    resumed.reconnection.enabled = false;
+    const corrections = collect(resumed, 'correct');
+    const hurts = collect(resumed, 'hurt');
+    resumed.send('move', below);
+    await waitFor(() => hurts.length > 0);
+    expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
+    resumed.send('move', { ...below, x: below.x + 0.4 });
+    await waitFor(() => resumed.state.players.get(resumed.sessionId).x === below.x + 0.4);
+    expect(corrections).toEqual([]);
+  });
+
+  it('re-joining 2.5 s after going airborne lands on the ground with the fall\'s damage', async () => {
+    const { url, store } = await start({ surface: testSurface });
+    const { accountId, token } = await accountFor(store, 'Alice');
+    const saved = await store.getOrCreateAdventurer(accountId);
+    await store.saveAdventurer({ id: saved.id, x: 0, z: RAMP_Z, facing: 0 });
+    const first = await joinGrove(url, token);
+    await sendPoses(first.room, [...rampPoses(), offTheTop]);
+    await waitFor(() => first.room.state.players.get(first.room.sessionId).y === 9.9);
+    collect(first.room, 'kicked');
+    await sleep(2500);
+    const again = await joinGrove(url, token);
+    const corrections = collect(again.room, 'correct');
+    const hurts = collect(again.room, 'hurt');
+    again.room.send('move', below);
+    await waitFor(() => hurts.length > 0);
+    expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
+    expect(corrections).toEqual([]);
+  });
+
+  it('a correction in the air puts the adventurer on the ground below, with the fall\'s damage, and the next step from there is accepted', async () => {
+    const { url, store } = await start({ surface: testSurface });
+    const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
+    const corrections = collect(a.room, 'correct');
+    const hurts = collect(a.room, 'hurt');
+    await sendPoses(a.room, [...rampPoses(), offTheTop]);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 9.9);
+    a.room.send('move', { ...offTheTop, y: 50 });
+    await waitFor(() => corrections.length > 0);
+    const landed = { x: offTheTop.x, z: offTheTop.z, y: 0 };
+    expect(corrections).toEqual([landed]);
+    await waitFor(() => hurts.length > 0);
+    expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 0);
+    expect(a.room.state.players.get(a.room.sessionId)).toMatchObject(landed);
+    // the client takes the corrected pose and carries on from it: accepted, no loop
+    a.room.send('move', { ...landed, x: landed.x + 0.4, facing: 0, moving: true });
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).x === landed.x + 0.4);
+    expect(corrections).toHaveLength(1);
+    expect(hurts).toHaveLength(1);
+  });
+});
+
 /** Running steps of at most 0.4 m from `from` to `to` (excluding `from`), on flat ground at y = 0. */
 function stepsBetween(from: SentPose, to: SentPose): SentPose[] {
   const n = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / 0.4);

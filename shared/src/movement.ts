@@ -93,6 +93,13 @@ export function makeAirTrack(y: number): AirTrack {
   return { grounded: true, airStartMs: 0, airStartY: y, peakY: y, y };
 }
 
+/** Puts a track on the ground at groundY; returns how far it fell from its highest point (0 if it was grounded, never negative). */
+export function landAirTrack(track: AirTrack, groundY: number): number {
+  const drop = track.grounded ? 0 : Math.max(0, Math.max(track.peakY, track.airStartY) - groundY);
+  Object.assign(track, makeAirTrack(groundY));
+  return drop;
+}
+
 /**
  * Room above a jump's arc: a rising body that clears a rim by less than STEP_UP is lifted onto it
  * (see stepBody), so it can be up to STEP_UP above the plain arc; plus 0.2 m, so the ceiling at the
@@ -125,6 +132,9 @@ export function jumpCeiling(y0: number, tSeconds: number): number {
  *   than STEP_UP above the body's height there (interpolated); the end is below the surface; or a
  *   standing body rose more than STEP_UP without being in the air.
  * - 'floating': in the air (or landing) higher than jumpCeiling allows since the air phase began.
+ *   Once that ceiling has fallen below the ground (late messages, a reconnect, a re-join), the arc is
+ *   surely over: a landing on the surface no higher than the last accepted height is accepted, and
+ *   anything in the air is refused, so an expired track can only come down.
  * landedDrop: on landing (or dropping straight onto lower ground), how far it fell (never negative).
  */
 export function checkPose(
@@ -163,13 +173,10 @@ export function checkPose(
   const t = (nowMs - airStartMs) / 1000;
   // the arc's highest point over [t − slack, t]: it rises until APEX_S, then falls
   const ceiling = jumpCeiling(airStartY, Math.min(t, Math.max(APEX_S, t - CLOCK_SLACK_S)));
-  if (to.y > ceiling) return { result: 'floating', landedDrop: 0 };
+  const arcOver = grounded && !track.grounded && to.y <= track.y + GROUND_EPSILON;
+  if (to.y > ceiling && !arcOver) return { result: 'floating', landedDrop: 0 };
 
-  if (grounded) {
-    const landedDrop = Math.max(0, Math.max(track.peakY, track.airStartY) - to.y);
-    Object.assign(track, makeAirTrack(to.y));
-    return { result: 'ok', landedDrop };
-  }
+  if (grounded) return { result: 'ok', landedDrop: landAirTrack(track, to.y) };
   const peakY = track.grounded ? Math.max(track.y, to.y) : Math.max(track.peakY, to.y);
   Object.assign(track, { grounded: false, airStartMs, airStartY, peakY, y: to.y });
   return { result: 'ok', landedDrop: 0 };

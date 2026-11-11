@@ -14,6 +14,7 @@ import {
   checkPose,
   cleanChat,
   fallDamage,
+  landAirTrack,
   makeAirTrack,
   parsePose,
   refillAllowance,
@@ -234,7 +235,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     movement.at = now;
     const { result, landedDrop } = checkPose(session.lastGood, movement.air, pose, now, movement.metres, this.surface);
     if (result !== 'ok') {
-      this.sendTo(client, 'correct', { ...session.lastGood });
+      this.correct(session, now);
       return;
     }
     movement.metres -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
@@ -242,6 +243,25 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     Object.assign(session.player, pose);
     const damage = fallDamage(landedDrop);
     if (damage > 0) this.hurt(session, damage, now);
+  }
+
+  /**
+   * Sends the client back to its last accepted pose. In the air, that pose would soon be refused
+   * itself (the arc runs out), so the adventurer is first landed on the ground below it, with the
+   * fall's damage: the corrected pose is then one the next move can start from.
+   */
+  private correct(session: Session, now: number) {
+    const air = session.movement.air;
+    if (!air.grounded) {
+      const { x, z } = session.lastGood;
+      const groundY = (this.surface(x, z) ?? air.y) + 0; // + 0: never -0
+      const damage = fallDamage(landAirTrack(air, groundY));
+      session.lastGood = { x, z, y: groundY };
+      session.player.y = groundY;
+      session.player.moving = false;
+      if (damage > 0) this.hurt(session, damage, now);
+    }
+    this.sendTo(session.client, 'correct', { ...session.lastGood });
   }
 
   /** Takes `damage` hp from the adventurer, never the last one, and tells its client what was lost. */

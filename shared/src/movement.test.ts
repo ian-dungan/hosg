@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  parsePose, checkStep, checkMove, checkPose, jumpCeiling, makeAirTrack, refillAllowance,
-  MAX_MOVE_ALLOWANCE, MAX_MOVE_SPEED, type Pose,
+  parsePose, checkStep, checkMove, checkPose, jumpCeiling, landAirTrack, makeAirTrack, refillAllowance,
+  MAX_MOVE_ALLOWANCE, MAX_MOVE_SPEED, type AirTrack, type Pose,
 } from './movement';
 import { makeBody, stepBody, fallDamage, type Body, type BodyInput, type BodyStep, type Surface } from './body';
 import { groveWalkable, groveTownWalkable, groveTownSurface, groveGroundY, groundHeight, BEACON_C, PLAZA_R, type Rect } from './world/layout';
@@ -313,6 +313,61 @@ describe('checkPose', () => {
     const rim = makeAirTrack(0);
     checkPose({ x: 0, z: 0 }, rim, at(0.4, 0, 0.4), 1000, 5, platform);
     expect(checkPose({ x: 0.4, z: 0 }, rim, at(1.2, 0, 0.9), 1067, 5, platform).landedDrop).toBe(0);
+  });
+});
+
+describe('checkPose once the arc is surely over (lag, reconnect, re-join)', () => {
+  /** A track that left flat ground at 1000 ms and was last accepted at y (peak `peak`) in the air. */
+  const airborne = (y: number, peak = y): AirTrack => ({ grounded: false, airStartMs: 1000, airStartY: 0, peakY: peak, y });
+
+  it('accepts a landing whose poses arrive 400 ms late, and is not locked out afterwards', () => {
+    const c = new SimClient(flat, 0, 0, 1 / 15);
+    c.run(20, 0, 0.5, 2);
+    // every pose from the third airborne one on arrives 400 ms late
+    const firstAir = c.sent.findIndex((s) => s.pose.y > 0.05);
+    const late = c.sent.map((s, i) => (i >= firstAir + 2 ? { ...s, ms: s.ms + 400 } : s));
+    const results = replay(flat, { x: 0, z: 0, y: 0 }, late);
+    const landing = results.findIndex((r, i) => i > firstAir && late[i].pose.y === 0 && r.result === 'ok');
+    expect(landing).toBeGreaterThan(firstAir);
+    expect(rejected(results.slice(landing))).toEqual([]);
+  });
+
+  it('accepts the ground 1.5 s after the last pose in the air, as a landing measured from the peak', () => {
+    const track = airborne(1, 1.2);
+    const r = checkPose({ x: 0, z: 0 }, track, at(0.4, 0, 0), 2500, 5, flat);
+    expect(r).toEqual({ result: 'ok', landedDrop: 1.2 });
+    expect(track.grounded).toBe(true);
+    expect(checkPose({ x: 0.4, z: 0 }, track, at(0.8, 0, 0), 2567, 5, flat).result).toBe('ok');
+  });
+
+  it('charges the whole fall when it lands long after (a reconnect on the ground)', () => {
+    const ledge: Surface = (x) => (x < 1 ? 10 : 0);
+    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 10, peakY: 10, y: 9.9 };
+    const r = checkPose({ x: 1.1, z: 0 }, track, at(1.4, 0, 0), 4000, 5, ledge);
+    expect(r).toEqual({ result: 'ok', landedDrop: 10 });
+  });
+
+  it('never lets an expired track rise or hover', () => {
+    // in the air, at the same height or higher
+    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 1), 3000, 5, flat).result).toBe('floating');
+    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 0.5), 3000, 5, flat).result).toBe('floating');
+    // "landing" on something higher than its last height
+    const crate: Surface = (x) => (x > 0.1 ? 1.5 : 0);
+    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 1.5), 3000, 5, crate).result).toBe('floating');
+    // hovering: the same airborne pose over and over is refused
+    const track = airborne(1);
+    const results = Array.from({ length: 10 }, (_, i) => checkPose({ x: 0, z: 0 }, track, at(0, 0, 1), 3000 + i * 67, 5, flat).result);
+    expect(results.every((r) => r === 'floating')).toBe(true);
+  });
+});
+
+describe('landAirTrack', () => {
+  it('puts a track on the ground and returns how far it fell from its highest point', () => {
+    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 4.5, peakY: 5, y: 3 };
+    expect(landAirTrack(track, 0)).toBe(5);
+    expect(track).toEqual(makeAirTrack(0));
+    expect(landAirTrack(makeAirTrack(2), 2)).toBe(0);
+    expect(landAirTrack({ grounded: false, airStartMs: 0, airStartY: 0, peakY: 0.5, y: 0.4 }, 0.9)).toBe(0); // never negative
   });
 });
 
