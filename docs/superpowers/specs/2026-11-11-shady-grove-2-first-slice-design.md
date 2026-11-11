@@ -12,6 +12,7 @@ The player starts on solid ground. The first game was a small corner of a much l
 
 ## Hard requirements
 
+- Player characters are called **adventurers**, in the game's text and its story (Ellie and Felix were the greatest of them).
 - Runs in a web browser on phones, tablets and computers. No install.
 - 100 players online at once on the owner's Hetzner server.
 - Ellie and Felix are the legendary heroes; their statue stands in the starting town.

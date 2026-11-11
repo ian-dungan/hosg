@@ -257,13 +257,13 @@ async function boot(): Promise<void> {
     hud.banner('The Beacon', 'An island appears in the sky');
     await say('Old Marrow', [
       'Seventy years. They were pointing at something after all.',
-      'That is the end of this little demo, wayfarer. The road, the wide world and, one day, the sky come next.',
+      'That is the end of this little demo, adventurer. The road, the wide world and, one day, the sky come next.',
     ]);
   }
 
   // ── HUD state ──
   const state: HudState = {
-    player: { name: 'Wayfarer', hp: 100, maxHp: 100, statuses: [], level: 1, weapon: 'blade', cast: null },
+    player: { name: 'Adventurer', hp: 100, maxHp: 100, statuses: [], level: 1, weapon: 'blade', cast: null },
     target: null,
     party: [],
     slots: [],
