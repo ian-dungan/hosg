@@ -55,6 +55,7 @@ The player starts on solid ground. The first game was a small corner of a much l
    - **Visible gear**: what you equip shows on your character and is seen by every other player. Slots: head, chest, legs, feet, hands, back (cape or pack), main weapon and off-hand.
    - **Armour types**: cloth (for casters and healers: stronger abilities, low defence), light (speed and critical hits) and heavy (defence and stagger resistance). Any adventurer can wear any type; the choice is how you lean toward a role, since there are no fixed classes.
    - **Armour sets**: each set has its own style and colours. The first slice has one set per armour type per gear tier (nine sets).
+   - **Weapons**: each weapon has its own look wherever possible (shape, colour, glow or trail), so a named or rare weapon is recognisable in another adventurer's hands. Boss drops and quest rewards always get a unique model; only common starter weapons may share one. The first slice has about six blades and six bows.
    - **Costumes**: purely cosmetic outfits worn over your gear in a separate costume slot, so they never change stats. Adventurers buy them from a costume shop or win them at GM-run events.
    - **GM tools**: game masters can start an event, announce it to the server and award a costume or item to the winners.
 10. **Online**: accounts (username and password, or play as guest), saved characters, chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
