@@ -63,7 +63,12 @@ const ICO = (() => {
 type Hint = V3 | 'up' | null;
 
 export class Builder {
-  pos: number[] = []; nor: number[] = []; col: number[] = [];
+  pos: number[] = []; nor: number[] = []; col: number[] = []; wd: number[] = [];
+  /** Optional per-vertex wind weight (0 = rigid). */
+  windFn: ((p: V3) => number) | null = null;
+  /** Optional per-vertex colour multiplier (baked AO / painted gradients). */
+  aoFn: ((p: V3) => number) | null = null;
+  private anyWind = false;
   M: M4 = mI(); private stk: M4[] = [];
   cj = 0.035;
   hint: Hint = null;
@@ -84,7 +89,12 @@ export class Builder {
     const P = this.pos, N = this.nor, C = this.col;
     P.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     for (let i = 0; i < 3; i++) N.push(n[0], n[1], n[2]);
-    for (const k of [ca, cb, cc]) C.push(Math.min(1, k[0] * j), Math.min(1, k[1] * j), Math.min(1, k[2] * j), 1);
+    const vs = [a, b, c], cs = [ca, cb, cc];
+    for (let i = 0; i < 3; i++) {
+      const k = cs[i]; const ao = this.aoFn ? this.aoFn(vs[i]) : 1; const f = j * ao;
+      C.push(Math.min(1, k[0] * f), Math.min(1, k[1] * f), Math.min(1, k[2] * f), 1);
+      const w = this.windFn ? this.windFn(vs[i]) : 0; if (w) this.anyWind = true; this.wd.push(w);
+    }
   }
   /** World-space triangle. */
   triW(a: V3, b: V3, c: V3, ca: RGB, cb?: RGB, cc?: RGB, hintW?: Hint) {
@@ -159,6 +169,19 @@ export class Builder {
     this.ball(pts[pts.length - 1], rads[rads.length - 1] * 1.05, col, 1, 1, 1, 0);
   }
 
+  /** Average normals of coincident vertices whose faces are within `creaseDeg` (soft sculpted look). */
+  smoothNormals(creaseDeg: number) {
+    const P = this.pos, N = this.nor, n = P.length / 3; const cosT = Math.cos(creaseDeg * Math.PI / 180);
+    const map = new Map<string, number[]>();
+    for (let i = 0; i < n; i++) { const k = Math.round(P[i * 3] * 500) + ',' + Math.round(P[i * 3 + 1] * 500) + ',' + Math.round(P[i * 3 + 2] * 500); let l = map.get(k); if (!l) map.set(k, l = []); l.push(i); }
+    const out = new Float32Array(N.length);
+    for (const l of map.values()) for (const i of l) {
+      let x = 0, y = 0, z = 0;
+      for (const j of l) { const d = N[i * 3] * N[j * 3] + N[i * 3 + 1] * N[j * 3 + 1] + N[i * 3 + 2] * N[j * 3 + 2]; if (d >= cosT) { x += N[j * 3]; y += N[j * 3 + 1]; z += N[j * 3 + 2]; } }
+      const L = Math.hypot(x, y, z) || 1; out[i * 3] = x / L; out[i * 3 + 1] = y / L; out[i * 3 + 2] = z / L;
+    }
+    this.nor = Array.from(out);
+  }
   build(scene: Scene, name: string, mat: Material): Mesh {
     const m = new Mesh(name, scene);
     const vd = new VertexData();
@@ -168,6 +191,7 @@ export class Builder {
     for (let i = 0; i < n; i += 3) { idx[i] = i; idx[i + 1] = i + 2; idx[i + 2] = i + 1; }
     vd.positions = new Float32Array(this.pos); vd.normals = new Float32Array(this.nor); vd.colors = new Float32Array(this.col); vd.indices = idx;
     vd.applyToMesh(m, false);
+    if (this.anyWind) m.setVerticesData('wind', new Float32Array(this.wd), false, 1);
     m.material = mat;
     m.isPickable = false;
     m.hasVertexAlpha = false;
