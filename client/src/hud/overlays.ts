@@ -139,8 +139,6 @@ export class Overlays {
       const root = h('div', 'sg-title sg-ctl', this.layer);
       const box = h('div', 'sg-title-box', root);
       h('div', 'sg-title-name', box, 'Shady Grove 2');
-      const sub = h('div', 'sg-title-sub', box);
-      h('i', '', sub); h('span', '', sub, 'Windward'); h('i', '', sub);
       h('div', 'sg-title-credit', box, 'A sequel — in honour of Ellie & Felix');
       const play = h('div', 'sg-btn sg-btn-gold sg-title-play', box, 'Play');
       const hint = h('div', 'sg-title-hint', box);

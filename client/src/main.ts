@@ -1,4 +1,4 @@
-// Shady Grove 2: Windward — walkable town demo.
+// Shady Grove 2 — walkable town demo.
 // Joins the world, the player rig, the NPCs and the HUD. No combat, no server.
 import { Engine, Scene, Vector3 } from '@babylonjs/core';
 import type { AnchorName, CharacterView, HudState, TapInfo } from './core/contracts';

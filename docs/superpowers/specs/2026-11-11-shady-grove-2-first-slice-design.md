@@ -1,10 +1,10 @@
-# Shady Grove 2: Windward — First Playable Slice (Design)
+# Shady Grove 2 — First Playable Slice (Design)
 
 Date: 2026-11-11. Status: awaiting owner review.
 
 ## Goal
 
-Prove that Windward feels like a next-gen sequel: a bright 3D world in the browser, deep combat, parties, and many players online together. This slice is the foundation every later round builds on. Story source: `concepts/02-skybound/PITCH.md`.
+Prove that Shady Grove 2 feels like a next-gen sequel: a bright 3D world in the browser, deep combat, parties, and many players online together. This slice is the foundation every later round builds on. Story source: `concepts/02-skybound/PITCH.md`.
 
 ## World shape
 
@@ -57,7 +57,7 @@ Normandy (the capital), the wider continent, and the endgame sky region (floatin
 - **Shared rules package**: combat maths, ability and item data live in one package used by both client and server, so they can never disagree.
 - **Database**: PostgreSQL for accounts, characters, inventory and leaderboards. Passwords hashed with argon2.
 - **Hosting**: Docker Compose on the Hetzner server with Caddy for HTTPS, on its own subdomain and port so the existing Shady Grove game keeps running beside it.
-- **Art**: models built in code or taken from CC0 low-poly packs, then recoloured to the Windward palette. The statue is modelled specially.
+- **Art**: models built in code or taken from CC0 low-poly packs, then recoloured to the game palette. The statue is modelled specially.
 
 ## Error handling
 
@@ -71,7 +71,7 @@ Normandy (the capital), the wider continent, and the endgame sky region (floatin
 - Unit tests for combat rules in the shared package (damage, stagger, combos, boss scaling).
 - A bot script that connects 100 simulated players and checks the server holds 15 updates per second.
 - Browser smoke tests at phone, tablet and desktop sizes: log in, move, fight, form a party.
-- A scripted solo run and a scripted 3-player run of the Lighthouse Warden to check tuning.
+- A scripted solo run and a scripted 3-player run of the Fallen Warden to check tuning.
 
 ## Open questions for the owner
 

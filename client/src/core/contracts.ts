@@ -1,4 +1,4 @@
-// Shady Grove 2: Windward — demo contracts.
+// Shady Grove 2 — demo contracts.
 // This file is the ONLY coupling between modules. Do not change it; if it is
 // wrong or missing something, report that back instead of editing it.
 // Units: metres, seconds, radians. Babylon left-handed, Y up. Ground plane is X/Z.
@@ -241,7 +241,7 @@ export interface HudApi {
   floatText(x: number, y: number, text: string, kind: 'damage' | 'crit' | 'heal' | 'combo' | 'hurt' | 'info'): void;
   /** Dialogue box; resolves with the index of the chosen option (0 if there are no choices) after the last line. */
   dialogue(speaker: string, lines: string[], choices?: string[]): Promise<number>;
-  titleScreen(): Promise<void>;                                  // "Shady Grove 2: Windward" + Play
+  titleScreen(): Promise<void>;                                  // "Shady Grove 2" + Play
   /** Pick 5 abilities from the pool; resolves with the chosen ids. */
   loadout(pool: AbilityDef[], current: string[], weapon: WeaponId): Promise<string[]>;
   endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[]): Promise<number>;

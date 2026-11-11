@@ -1,4 +1,4 @@
-// Shady Grove 2: Windward — HUD. Plain DOM + CSS (injected), no Babylon.
+// Shady Grove 2 — HUD. Plain DOM + CSS (injected), no Babylon.
 import type { CreateHud, HudApi, HudEvent, HudState } from '../core/contracts';
 import { injectStyles } from './style';
 import { h, toggle, ICONS } from './dom';
