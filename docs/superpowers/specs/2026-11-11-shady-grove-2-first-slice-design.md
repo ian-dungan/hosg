@@ -26,6 +26,7 @@ The player starts on solid ground. The first game was a small corner of a much l
    - Touch: virtual joystick to move, tap to target, ability buttons under the right thumb.
    - Computer: WASD to move, click to target, keys 1 to 5 for abilities.
    - Overhead three-quarter camera that rotates and zooms.
+   - Tap-to-walk: tap or click the ground to walk there, or a person to walk over and talk, with path-finding around obstacles. It works alongside the joystick and keys, and a "Tap to walk" switch in Settings turns it off for players who find it gets in the way (for example when tapping to target in combat).
 5. **Physical movement**
    - Jumping (Space on a computer, a jump button on touch), gravity and falling, with ledges you can drop from and low obstacles you can hop over.
    - Knockback and launches in combat: heavy hits push characters, and being knocked off a ledge matters.
