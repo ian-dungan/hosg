@@ -1,19 +1,25 @@
-// The grove zone room: validated movement, periodic saving, reconnect window, one session per account.
+// The grove zone room: validated movement and height, fall damage, periodic saving, reconnect window,
+// one session per account.
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import {
   CHAT_MIN_INTERVAL_MS,
+  HP_REGEN_PER_S,
+  MAX_HP,
   REASON_GROVE_FULL,
   REASON_NAME_FIRST,
   REASON_SIGNED_IN_ELSEWHERE,
   SPAWN,
   STEP_SLACK,
   TICK_HZ,
-  checkMove,
+  checkPose,
   cleanChat,
-  groveTownWalkable,
+  fallDamage,
+  makeAirTrack,
   parsePose,
   refillAllowance,
+  type AirTrack,
   type S2C,
+  type Surface,
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
 import type { Adventurer, Store } from '../store/types';
@@ -28,6 +34,10 @@ export interface ZoneRoomOptions {
   maxPlayers: number;
   /** The live grove room (there is only ever one), so the app can count adventurers online. */
   live: Set<ZoneRoom>;
+  /** Where adventurers can stand, and how high (groveTownSurface outside tests). */
+  surface: Surface;
+  /** Seconds after the last damage before health starts coming back. */
+  hpRegenDelaySeconds: number;
 }
 
 /** One adventurer in the room. */
@@ -37,9 +47,11 @@ interface Session {
   adventurerId: string;
   player: PlayerState;
   /** Last accepted position. */
-  lastGood: { x: number; z: number };
-  /** The account's movement allowance (shared with its later sessions). */
+  lastGood: { x: number; z: number; y: number };
+  /** The account's movement allowance and air track (shared with its later sessions). */
   movement: Allowance;
+  /** When this adventurer last lost health (ms), or -Infinity. */
+  lastHurtAt: number;
   /** Message token bucket: tokens left, and when it was last refilled (ms). */
   tokens: number;
   tokensAt: number;
@@ -49,10 +61,11 @@ interface Session {
   reconnection?: Deferred<Client>;
 }
 
-/** Metres an account may still move, and when that was last refilled (ms). */
+/** Metres an account may still move, when that was last refilled (ms), and its height in the air or on the ground. */
 interface Allowance {
   metres: number;
   at: number;
+  air: AirTrack;
 }
 
 /** What a successful onAuth attaches to the client (`client.auth`). */
@@ -77,6 +90,8 @@ const MESSAGE_RATE = 3 * TICK_HZ;
 const MESSAGE_BURST = 4 * (TICK_HZ + 1);
 /** How long after its last move an absent account's allowance is surely full again and can be forgotten. */
 const ALLOWANCE_FORGET_MS = 2000;
+/** How often health is given back (ms). */
+const REGEN_EVERY_MS = 500;
 
 export class ZoneRoom extends Room<{ state: ZoneState }> {
   state = new ZoneState();
@@ -86,6 +101,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private reconnectSeconds!: number;
   private live!: Set<ZoneRoom>;
   private maxPlayers!: number;
+  private surface!: Surface;
+  private hpRegenDelayMs!: number;
   private sessions = new Map<string, Session>(); // key: sessionId
   private sessionByAccount = new Map<string, string>(); // accountId -> sessionId
   /** Movement allowances by account id, kept across kick and re-join so a new session gets no fresh budget. */
@@ -101,6 +118,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.maxClients = options.maxPlayers * 2;
     this.reconnectSeconds = options.reconnectSeconds;
     this.live = options.live;
+    this.surface = options.surface;
+    this.hpRegenDelayMs = options.hpRegenDelaySeconds * 1000;
     this.live.add(this);
     this.setPatchRate(1000 / TICK_HZ);
 
@@ -110,6 +129,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       this.forgetIdleAllowances();
       void this.saveAll();
     }, options.saveSeconds * 1000);
+    this.clock.setInterval(() => this.regenerate(), REGEN_EVERY_MS);
   }
 
   async onJoin(client: Client) {
@@ -137,15 +157,22 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_SIGNED_IN_ELSEWHERE);
     }
 
-    const start = groveTownWalkable(adventurer.x, adventurer.z) ? adventurer : SPAWN;
-    const player = new PlayerState({ name, x: start.x, z: start.z, facing: start.facing, moving: false });
+    // Standing on the surface at the saved spot (SPAWN if nobody can stand there now), unless the
+    // account's air track says it is still falling there (a re-join mid-air): then it carries on falling.
+    const savedY = this.surface(adventurer.x, adventurer.z);
+    const start = savedY === null ? SPAWN : adventurer;
+    const movement = this.allowanceFor(accountId);
+    if (savedY === null || movement.air.grounded) movement.air = makeAirTrack(savedY ?? this.surface(SPAWN.x, SPAWN.z) ?? 0);
+    const y = movement.air.y + 0; // + 0: never -0 (terrain height can be), which state and messages encode differently
+    const player = new PlayerState({ name, x: start.x, z: start.z, y, facing: start.facing, moving: false, hp: MAX_HP, maxHp: MAX_HP });
     this.sessions.set(client.sessionId, {
       client,
       accountId,
       adventurerId: adventurer.id,
       player,
-      lastGood: { x: start.x, z: start.z },
-      movement: this.allowanceFor(accountId),
+      lastGood: { x: start.x, z: start.z, y },
+      movement,
+      lastHurtAt: -Infinity,
       tokens: MESSAGE_BURST,
       tokensAt: Date.now(),
       lastChatAt: -Infinity,
@@ -205,13 +232,35 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const movement = session.movement;
     movement.metres = refillAllowance(movement.metres, (now - movement.at) / 1000);
     movement.at = now;
-    if (checkMove(session.lastGood, pose, movement.metres, groveTownWalkable) !== 'ok') {
+    const { result, landedDrop } = checkPose(session.lastGood, movement.air, pose, now, movement.metres, this.surface);
+    if (result !== 'ok') {
       this.sendTo(client, 'correct', { ...session.lastGood });
       return;
     }
     movement.metres -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
-    session.lastGood = { x: pose.x, z: pose.z };
+    session.lastGood = { x: pose.x, z: pose.z, y: pose.y };
     Object.assign(session.player, pose);
+    const damage = fallDamage(landedDrop);
+    if (damage > 0) this.hurt(session, damage, now);
+  }
+
+  /** Takes `damage` hp from the adventurer, never the last one, and tells its client what was lost. */
+  private hurt(session: Session, damage: number, now: number) {
+    const amount = Math.min(damage, session.player.hp - 1);
+    session.lastHurtAt = now;
+    if (amount <= 0) return;
+    session.player.hp -= amount;
+    this.sendTo(session.client, 'hurt', { amount, cause: 'fall' });
+  }
+
+  /** Gives health back at HP_REGEN_PER_S to adventurers who have not been hurt for the regen delay. */
+  private regenerate() {
+    const now = Date.now();
+    for (const session of this.sessions.values()) {
+      const player = session.player;
+      if (player.hp >= player.maxHp || now - session.lastHurtAt < this.hpRegenDelayMs) continue;
+      player.hp = Math.min(player.maxHp, player.hp + (HP_REGEN_PER_S * REGEN_EVERY_MS) / 1000);
+    }
   }
 
   /** Cleaned text goes to everyone, sender included; empty text and lines within CHAT_MIN_INTERVAL_MS are dropped. */
@@ -269,11 +318,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     client.send(type, message);
   }
 
-  /** The account's allowance; a new one holds only the step slack, so joining never banks distance. */
+  /**
+   * The account's allowance; a new one holds only the step slack, so joining never banks distance.
+   * A new one's air track is set by the join.
+   */
   private allowanceFor(accountId: string): Allowance {
     let allowance = this.allowances.get(accountId);
     if (!allowance) {
-      allowance = { metres: STEP_SLACK, at: Date.now() };
+      allowance = { metres: STEP_SLACK, at: Date.now(), air: makeAirTrack(0) };
       this.allowances.set(accountId, allowance);
     }
     return allowance;

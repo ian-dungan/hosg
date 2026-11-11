@@ -2,7 +2,7 @@
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { Client, type Room } from '@colyseus/sdk';
-import { TICK_HZ } from '@sg2/shared';
+import { TICK_HZ, groveTownSurface, type Surface } from '@sg2/shared';
 import { createApp } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
@@ -34,6 +34,8 @@ export async function startServer(
     maxPlayers?: number;
     authRatePerMinute?: number;
     trustProxy?: number;
+    surface?: Surface;
+    hpRegenDelaySeconds?: number;
   } = {},
 ): Promise<TestServer> {
   const store = opts.store ?? createMemoryStore();
@@ -79,13 +81,21 @@ export function collect(room: Room<any, any>, type: string): any[] {
   return seen;
 }
 
-/** Walks in a straight line from `from` to `to` at running speed: steps of at most 0.4 m, one per tick. */
-export async function walk(room: Room<any, any>, from: { x: number; z: number }, to: { x: number; z: number }): Promise<void> {
+/**
+ * Walks in a straight line from `from` to `to` at running speed: steps of at most 0.4 m, one per tick,
+ * each standing on `surface` (default the grove town's).
+ */
+export async function walk(
+  room: Room<any, any>,
+  from: { x: number; z: number },
+  to: { x: number; z: number },
+  surface: Surface = groveTownSurface,
+): Promise<void> {
   const steps = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / 0.4);
   for (let i = 1; i <= steps; i++) {
     const x = i === steps ? to.x : from.x + ((to.x - from.x) * i) / steps;
     const z = i === steps ? to.z : from.z + ((to.z - from.z) * i) / steps;
-    room.send('move', { x, z, facing: 0, moving: i < steps });
+    room.send('move', { x, z, y: surface(x, z) ?? 0, facing: 0, moving: i < steps });
     await sleep(1000 / TICK_HZ);
   }
 }

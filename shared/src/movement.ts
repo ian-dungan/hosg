@@ -1,16 +1,18 @@
-// Movement messages: parsing a client's pose and checking a step is possible.
-import { RUN_SPEED } from './constants';
+// Movement messages: parsing a client's pose and checking a step (and its height) is possible.
+import { GRAVITY, JUMP_SPEED, RUN_SPEED, STEP_UP, TICK_HZ } from './constants';
+import type { Surface } from './body';
 
-export interface Pose { x: number; z: number; facing: number; moving: boolean }
+/** y: the height of the adventurer's feet. */
+export interface Pose { x: number; z: number; y: number; facing: number; moving: boolean }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-/** A clean Pose (known fields only), or null unless x, z and facing are finite numbers and moving is a boolean. */
+/** A clean Pose (known fields only), or null unless x, z, y and facing are finite numbers and moving is a boolean. */
 export function parsePose(msg: unknown): Pose | null {
   if (typeof msg !== 'object' || msg === null) return null;
   const m = msg as Record<string, unknown>;
-  if (!finite(m.x) || !finite(m.z) || !finite(m.facing) || typeof m.moving !== 'boolean') return null;
-  return { x: m.x, z: m.z, facing: m.facing, moving: m.moving };
+  if (!finite(m.x) || !finite(m.z) || !finite(m.y) || !finite(m.facing) || typeof m.moving !== 'boolean') return null;
+  return { x: m.x, z: m.z, y: m.y, facing: m.facing, moving: m.moving };
 }
 
 /** Fastest an adventurer may move, in m/s: running speed plus 30% for timing jitter. */
@@ -69,4 +71,106 @@ export function checkStep(
   walkable: Walkable,
 ): 'ok' | 'too-fast' | 'blocked' {
   return checkMove(from, to, MAX_MOVE_SPEED * clampDt(dtSeconds) + STEP_SLACK, walkable);
+}
+
+// ───────── height ─────────
+
+/** What the server knows of an adventurer's height: standing, or in the air since airStartMs from airStartY. */
+export interface AirTrack {
+  grounded: boolean;
+  /** When the current air phase began (ms; meaningless while grounded). */
+  airStartMs: number;
+  /** Height the current air phase began at. */
+  airStartY: number;
+  /** Highest accepted height since leaving the ground. */
+  peakY: number;
+  /** Last accepted height. */
+  y: number;
+}
+
+/** A track standing at height y. */
+export function makeAirTrack(y: number): AirTrack {
+  return { grounded: true, airStartMs: 0, airStartY: y, peakY: y, y };
+}
+
+/**
+ * Room above a jump's arc: a rising body that clears a rim by less than STEP_UP is lifted onto it
+ * (see stepBody), so it can be up to STEP_UP above the plain arc; plus 0.2 m, so the ceiling at the
+ * apex (≈ 2.0 m) is at least 0.15 m above the highest rim stepBody clears (1.80 m, measured in
+ * movement.test.ts at 15, 30 and 60 frames a second).
+ */
+const CEILING_TOLERANCE = STEP_UP + 0.2;
+/** Most height an air phase may reach above its take-off. */
+const CEILING_CAP = 2.0;
+/** Seconds the server's clock may run ahead of a client's (messages delayed, then on time): the arc may be that much later. */
+const CLOCK_SLACK_S = 0.25;
+/** A pose within this of the surface is standing on it. */
+const GROUND_EPSILON = 0.05;
+/** Seconds from take-off to the top of a full jump. */
+const APEX_S = JUMP_SPEED / GRAVITY;
+
+/**
+ * Highest y a body may have t seconds after leaving the ground at y0: its jump arc
+ * y0 + JUMP_SPEED·t − ½·GRAVITY·t² plus STEP_UP + 0.2 m, never above y0 + 2 m.
+ */
+export function jumpCeiling(y0: number, tSeconds: number): number {
+  const t = Math.max(0, tSeconds);
+  return Math.min(y0 + JUMP_SPEED * t - 0.5 * GRAVITY * t * t + CEILING_TOLERANCE, y0 + CEILING_CAP);
+}
+
+/**
+ * Horizontal + vertical check of one reported pose. Mutates `track` only when the result is 'ok'.
+ * - 'too-fast': further than `allowance` (as checkMove).
+ * - 'blocked': some point along the step (every WALK_SAMPLE m, and the end) has no surface or one more
+ *   than STEP_UP above the body's height there (interpolated); the end is below the surface; or a
+ *   standing body rose more than STEP_UP without being in the air.
+ * - 'floating': in the air (or landing) higher than jumpCeiling allows since the air phase began.
+ * landedDrop: on landing (or dropping straight onto lower ground), how far it fell (never negative).
+ */
+export function checkPose(
+  from: { x: number; z: number },
+  track: AirTrack,
+  to: Pose,
+  nowMs: number,
+  allowance: number,
+  surface: Surface,
+): { result: 'ok' | 'too-fast' | 'blocked' | 'floating'; landedDrop: number } {
+  const dx = to.x - from.x, dz = to.z - from.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance > allowance) return { result: 'too-fast', landedDrop: 0 };
+  const samples = Math.max(1, Math.ceil(distance / WALK_SAMPLE));
+  let end = 0;
+  for (let i = 1; i <= samples; i++) {
+    const f = i / samples;
+    const x = i === samples ? to.x : from.x + dx * f;
+    const z = i === samples ? to.z : from.z + dz * f;
+    const s = surface(x, z);
+    if (s === null || s > track.y + (to.y - track.y) * f + STEP_UP) return { result: 'blocked', landedDrop: 0 };
+    end = s;
+  }
+  if (to.y < end - GROUND_EPSILON) return { result: 'blocked', landedDrop: 0 };
+  const grounded = to.y <= end + GROUND_EPSILON;
+
+  if (grounded && track.grounded) {
+    if (to.y - track.y > STEP_UP) return { result: 'blocked', landedDrop: 0 };
+    const landedDrop = Math.max(0, track.y - to.y);
+    Object.assign(track, makeAirTrack(to.y));
+    return { result: 'ok', landedDrop };
+  }
+
+  const airStartMs = track.grounded ? nowMs - 1000 / TICK_HZ : track.airStartMs;
+  const airStartY = track.grounded ? track.y : track.airStartY;
+  const t = (nowMs - airStartMs) / 1000;
+  // the arc's highest point over [t − slack, t]: it rises until APEX_S, then falls
+  const ceiling = jumpCeiling(airStartY, Math.min(t, Math.max(APEX_S, t - CLOCK_SLACK_S)));
+  if (to.y > ceiling) return { result: 'floating', landedDrop: 0 };
+
+  if (grounded) {
+    const landedDrop = Math.max(0, Math.max(track.peakY, track.airStartY) - to.y);
+    Object.assign(track, makeAirTrack(to.y));
+    return { result: 'ok', landedDrop };
+  }
+  const peakY = track.grounded ? Math.max(track.y, to.y) : Math.max(track.peakY, to.y);
+  Object.assign(track, { grounded: false, airStartMs, airStartY, peakY, y: to.y });
+  return { result: 'ok', landedDrop: 0 };
 }

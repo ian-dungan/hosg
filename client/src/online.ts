@@ -148,7 +148,7 @@ function boot(): void {
       const sendPose = () => {
         if (r.reconnection.isReconnecting) return;
         const p = rig.position;
-        const pose: C2S['move'] = { x: p.x, z: p.z, facing: rig.facing, moving: rig.moving };
+        const pose: C2S['move'] = { x: p.x, z: p.z, y: p.y, facing: rig.facing, moving: rig.moving };
         if (Math.abs(pose.x - sent.x) < POSE_EPSILON && Math.abs(pose.z - sent.z) < POSE_EPSILON
           && Math.abs(pose.facing - sent.facing) < POSE_EPSILON && pose.moving === sent.moving) return;
         send(r, 'move', pose);

@@ -1,5 +1,5 @@
-// Load test: `count` guest adventurers join the grove, walk in random legal steps at TICK_HZ and chat
-// every 20 s. Prints the patch rate the bots saw and the server's peak memory, and exits non-zero
+// Load test: `count` guest adventurers join the grove, run about at TICK_HZ with the shared character
+// controller (over the grove's height surface, jumping now and then) and chat every 20 s. Prints the patch rate the bots saw and the server's peak memory, and exits non-zero
 // unless every bot stayed connected, the mean patch rate is at least 14 Hz and no legal step was
 // corrected.
 //   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60
@@ -7,7 +7,17 @@
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
-import { RUN_SPEED, TICK_HZ, checkMove, groveTownWalkable } from '@sg2/shared';
+import {
+  RUN_SPEED,
+  TICK_HZ,
+  checkPose,
+  groveTownSurface,
+  makeAirTrack,
+  makeBody,
+  stepBody,
+  type AirTrack,
+  type Body,
+} from '@sg2/shared';
 
 const MIN_MEAN_HZ = 14;
 const CHAT_EVERY_MS = 20_000;
@@ -16,7 +26,8 @@ const JOINS_AT_ONCE = 10;
 const SETTLE_MS = 1200;
 /** Time between the last join and the start of measuring. */
 const WARMUP_MS = 2000;
-const STEP = RUN_SPEED / TICK_HZ;
+/** Chance a grounded bot jumps on a given tick (about once every 4 s). */
+const JUMP_CHANCE = 1 / 60;
 
 const { values } = parseArgs({
   options: {
@@ -54,9 +65,12 @@ class Bot {
   /** Patches received while measuring (null: not measuring). */
   patches: number | null = null;
   corrections = 0;
+  jumps = 0;
   chatsHeard = 0;
   disconnected: string | null = null;
-  private pos = { x: 0, z: 0 };
+  private body: Body = makeBody(0, 0, groveTownSurface);
+  /** The server's view of this bot's height, so it only sends poses the server accepts. */
+  private air: AirTrack = makeAirTrack(0);
   private heading = Math.random() * 2 * Math.PI;
   private timers: NodeJS.Timeout[] = [];
 
@@ -86,7 +100,8 @@ class Bot {
       if (Date.now() > deadline) throw new Error(`${this.name} never appeared in the room`);
       await sleep(20);
     }
-    this.pos = { x: me.x, z: me.z };
+    this.body = makeBody(me.x, me.z, groveTownSurface);
+    this.air = makeAirTrack(this.body.y);
   }
 
   start() {
@@ -101,14 +116,28 @@ class Bot {
     );
   }
 
-  /** One running step in a wandering direction; turns away from anything the server would refuse. */
+  /**
+   * One tick of running in a wandering direction with the shared controller, jumping now and then.
+   * Turns away from walls, and from any step the server's own check would refuse.
+   */
   private step() {
+    const now = Date.now();
     for (let attempt = 0; attempt < 12; attempt++) {
       const heading = attempt === 0 ? this.heading + (Math.random() - 0.5) * 0.4 : Math.random() * 2 * Math.PI;
-      const next = { x: this.pos.x + Math.sin(heading) * STEP, z: this.pos.z + Math.cos(heading) * STEP, facing: heading, moving: true };
-      if (checkMove(this.pos, next, Infinity, groveTownWalkable) !== 'ok') continue;
+      const body = { ...this.body };
+      const jump = attempt === 0 && Math.random() < JUMP_CHANCE;
+      const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, 1 / TICK_HZ, groveTownSurface);
+      const moved = Math.hypot(body.x - this.body.x, body.z - this.body.z);
+      // stuck against something (in the air it carries on regardless, so its fall keeps up with the clock)
+      if (body.grounded && moved < (RUN_SPEED / TICK_HZ) * 0.5) continue;
+      const next = { x: body.x, z: body.z, y: body.y, facing: heading, moving: true };
+      const air = { ...this.air };
+      // running speed is well inside the server's allowance, so only the height check can refuse it
+      if (checkPose(this.body, air, next, now, Infinity, groveTownSurface).result !== 'ok') continue;
       this.heading = heading;
-      this.pos = { x: next.x, z: next.z };
+      this.body = body;
+      this.air = air;
+      if (stepped.jumped) this.jumps++;
       this.room.send('move', next);
       return;
     }
@@ -154,6 +183,7 @@ const final = await health();
 const lost = bots.filter((bot) => bot.disconnected);
 const corrections = bots.reduce((n, bot) => n + bot.corrections, 0);
 const chatsHeard = bots.reduce((n, bot) => n + bot.chatsHeard, 0);
+const jumps = bots.reduce((n, bot) => n + bot.jumps, 0);
 await Promise.all(bots.map((bot) => bot.stop()));
 
 const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
@@ -165,7 +195,7 @@ console.log(`players: ${final.players}`);
 console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFixed(2)} Hz (over ${measured.toFixed(1)} s)`);
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
-console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}`);
+console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}; jumps: ${jumps}`);
 
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);

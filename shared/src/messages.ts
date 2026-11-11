@@ -18,6 +18,9 @@ export type C2S = {
 /** Server → client. */
 export type S2C = {
   chat: { from: string; text: string };
-  correct: { x: number; z: number };
+  /** The move was refused: go back to the last accepted pose. */
+  correct: { x: number; z: number; y: number };
+  /** Health lost (already taken off the adventurer's hp). */
+  hurt: { amount: number; cause: 'fall' };
   kicked: { reason: string };
 };

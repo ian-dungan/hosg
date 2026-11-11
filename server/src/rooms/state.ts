@@ -7,8 +7,13 @@ export const PlayerState = schema(
     // float64, so clients see exactly the position the server checks moves against (t.number() is float32).
     x: t.float64(),
     z: t.float64(),
+    /** Height of the feet. */
+    y: t.float64(),
     facing: t.float64(),
     moving: t.boolean(),
+    /** Health, 1..maxHp (falls never take the last point). */
+    hp: t.number(),
+    maxHp: t.number(),
   },
   'PlayerState',
 );

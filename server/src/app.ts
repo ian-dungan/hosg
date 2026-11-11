@@ -4,7 +4,7 @@ import type { Server as HttpServer } from 'node:http';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS } from '@sg2/shared';
+import { HP_REGEN_DELAY_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, groveTownSurface, type Surface } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
 import { zoneRoomFor, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
@@ -20,6 +20,10 @@ export interface AppOptions {
   trustProxy?: number;
   /** Test-only: a smaller grove (default MAX_PLAYERS). */
   maxPlayers?: number;
+  /** Test-only: the height surface moves are checked against (default groveTownSurface). */
+  surface?: Surface;
+  /** Test-only: seconds after a fall before health comes back (default HP_REGEN_DELAY_S). */
+  hpRegenDelaySeconds?: number;
 }
 
 export interface App {
@@ -61,6 +65,8 @@ export function createApp(opts: AppOptions): App {
     reconnectSeconds: opts.reconnectSeconds ?? RECONNECT_SECONDS,
     saveSeconds: opts.saveSeconds ?? SAVE_SECONDS,
     maxPlayers: opts.maxPlayers ?? MAX_PLAYERS,
+    surface: opts.surface ?? groveTownSurface,
+    hpRegenDelaySeconds: opts.hpRegenDelaySeconds ?? HP_REGEN_DELAY_S,
     live,
   };
   gameServer.define('grove', zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions);
