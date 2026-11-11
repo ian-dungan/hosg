@@ -510,7 +510,7 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
  }
  // teal uplight from the glyph band onto the heroes
  { vec3 ul = vec3(5.2,6.2,5.2)-p; float d2=dot(ul,ul); ul*=inversesqrt(d2);
-   col += alb*vec3(.2,.9,.8)*max(dot(n,ul),0.0)*(m>2.5&&m<3.5?1.6:.5)/(1.0+d2*.02); }
+   col += alb*vec3(.2,.9,.8)*max(dot(n,ul),0.0)*(m>2.5&&m<3.5?1.05:.5)/(1.0+d2*.02); }
  // conduit light pools
  float dc = conduits(p);
  col += alb*TEAL*exp(-dc*1.1)*1.6*(.4+.6*max(dot(n,vec3(0,1,0)),0.3));
