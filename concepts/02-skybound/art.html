@@ -159,14 +159,16 @@ const PAL = {
 const tint = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 
 // ---------------- scene constants ----------------
-const SUN = norm([-0.72, 0.52, 0.42]);
+const SUN = norm([-0.76, 0.52, 0.33]);
+let LENS_W = [0, 0, 0];
 const GLOW = norm([-0.85, 0.06, -0.5]);
 const CAM = [9, 12.5, 33], TGT = [-3.2, 6.0, -8];
 const STATUE = [-1.5, 0, -2.5];
-const PLINTH_TOP = 4.1;
-const FIG_YAW = Math.atan2(-1, 0.32);
-const FIG_S = 3.0;
-const POINT_DIR_LOCAL = norm([-0.08, 0.5, 0.86]);
+const PLINTH_TOP = 3.55;
+const FIG_YAW = Math.atan2(-1, 0.5);
+const FIG_S = 3.7;
+const POINT_DIR_LOCAL = norm([0.02, 0.42, 0.9]);
+const GLASS_DIR_LOCAL = norm([-0.12, 0.72, 0.68]);
 
 // ======================================================================
 //  CHARACTERS
@@ -190,13 +192,13 @@ function ellie(S, S2, SH) {
   prism([0.15, 1.34, 0.05], [-0.17, 0.92, -0.02], 0.022, 0.022, 4, SH);
   // neck & head (tilted up toward the far sky)
   limb([0, 1.34, 0.04], [0, 1.46, 0.08], 0.05, 0.045, S);
-  ball([0, 1.56, 0.09], 0.105, S, 0.95, 1.05, 1.0, 1);
+  ball([0, 1.57, 0.09], 0.13, S, 0.95, 1.05, 1.0, 1);
   // nose wedge
-  prism([0.0, 1.565, 0.18], [0.0, 1.55, 0.215], 0.022, 0.006, 4, S);
+  prism([0.0, 1.575, 0.205], [0.0, 1.56, 0.245], 0.026, 0.007, 4, S);
   // hair cap + fringe
-  ball([0, 1.6, 0.05], 0.115, SH, 1.02, 0.92, 1.05, 1);
+  ball([0, 1.62, 0.05], 0.14, SH, 1.02, 0.92, 1.05, 1);
   // ponytail streaming in the wind (back and a little up)
-  chain([[0, 1.63, -0.04], [0.0, 1.62, -0.16], [0.04, 1.6, -0.3], [0.1, 1.6, -0.44], [0.17, 1.64, -0.58], [0.23, 1.7, -0.68]], [0.055, 0.06, 0.055, 0.045, 0.03, 0.012], SH);
+  chain([[0, 1.66, -0.06], [0.0, 1.64, -0.18], [0.04, 1.6, -0.3], [0.1, 1.6, -0.44], [0.17, 1.64, -0.58], [0.23, 1.7, -0.68]], [0.055, 0.06, 0.055, 0.045, 0.03, 0.012], SH);
   // scarf around neck + two tails flying back
   prism([0, 1.33, 0.03], [0, 1.4, 0.05], 0.1, 0.085, 8, SH);
   sheet((u, v) => { const x = -0.05 + u * 0.1, z = -0.05 - v * 0.55, y = 1.36 - v * 0.05 + Math.sin(v * 5) * 0.04; return [x + v * 0.12 + Math.sin(v * 6) * 0.03, y, z]; }, 1, 5, () => SH);
@@ -204,7 +206,7 @@ function ellie(S, S2, SH) {
   const sh = [0.19, 1.33, 0.03];
   const el = add(sh, mul(POINT_DIR_LOCAL, 0.29)), ha = add(sh, mul(POINT_DIR_LOCAL, 0.56));
   ball(sh, 0.065, S, 1, 1, 1, 0);
-  limb(sh, el, 0.052, 0.045, S); limb(el, ha, 0.045, 0.035, S);
+  limb(sh, el, 0.058, 0.05, S); limb(el, ha, 0.05, 0.04, S);
   ball(ha, 0.042, S, 1, 1, 1, 0);
   prism(ha, add(ha, mul(POINT_DIR_LOCAL, 0.1)), 0.018, 0.01, 4, S);
   // trailing right arm with rolled map
@@ -231,19 +233,21 @@ function felix(S, S2, SH, G) {
   ball([-0.27, 1.45, 0.0], 0.1, SH, 1.1, 0.8, 1.1, 1);
   // head
   limb([0, 1.46, 0.02], [0, 1.57, 0.04], 0.065, 0.06, S);
-  ball([0, 1.67, 0.05], 0.12, S, 0.95, 1.05, 1, 1);
-  prism([0.0, 1.675, 0.16], [0.0, 1.66, 0.2], 0.025, 0.007, 4, S);
+  ball([0, 1.69, 0.05], 0.145, S, 0.95, 1.05, 1, 1);
+  prism([0.0, 1.695, 0.185], [0.0, 1.68, 0.23], 0.028, 0.008, 4, S);
   // short spiky hair
-  ball([0, 1.72, 0.01], 0.12, SH, 1.02, 0.75, 1.05, 1);
-  for (let i = 0; i < 6; i++) { const a = -0.6 + i * 0.35; prism([Math.sin(a) * 0.08, 1.76, -0.02 + Math.cos(a) * 0.05], [Math.sin(a) * 0.12, 1.84, -0.12], 0.04, 0.0, 4, SH); }
+  ball([0, 1.75, 0.01], 0.145, SH, 1.02, 0.75, 1.05, 1);
+  for (let i = 0; i < 6; i++) { const a = -0.6 + i * 0.35; prism([Math.sin(a) * 0.1, 1.8, -0.02 + Math.cos(a) * 0.06], [Math.sin(a) * 0.15, 1.9, -0.14], 0.05, 0.0, 4, SH); }
   // spyglass to his left eye, sighting along Ellie's arm
-  const eye = [0.05, 1.69, 0.15];
-  const sgA = add(eye, mul(POINT_DIR_LOCAL, 0.02)), sgB = add(eye, mul(POINT_DIR_LOCAL, 0.5));
-  prism(sgA, add(sgA, mul(POINT_DIR_LOCAL, 0.18)), 0.034, 0.034, 8, G);
-  prism(add(sgA, mul(POINT_DIR_LOCAL, 0.18)), sgB, 0.044, 0.052, 8, G);
-  prism(sgB, add(sgB, mul(POINT_DIR_LOCAL, 0.03)), 0.06, 0.06, 8, G);
+  const eye = [0.06, 1.71, 0.17];
+  const sgA = add(eye, mul(GLASS_DIR_LOCAL, 0.02)), sgB = add(eye, mul(GLASS_DIR_LOCAL, 0.5));
+  prism(sgA, add(sgA, mul(GLASS_DIR_LOCAL, 0.18)), 0.034, 0.034, 8, G);
+  prism(add(sgA, mul(GLASS_DIR_LOCAL, 0.18)), sgB, 0.044, 0.052, 8, G);
+  prism(sgB, add(sgB, mul(GLASS_DIR_LOCAL, 0.03)), 0.06, 0.06, 8, G);
+  EMI = 1; prism(add(sgB, mul(GLASS_DIR_LOCAL, 0.03)), add(sgB, mul(GLASS_DIR_LOCAL, 0.035)), 0.05, 0.05, 8, hex('#fff2c0')); EMI = 0;
+  LENS_W = tp(add(sgB, mul(GLASS_DIR_LOCAL, 0.04)));
   // left arm holds spyglass
-  const ls = [0.27, 1.42, 0.0], le = [0.34, 1.42, 0.24], lh = add(eye, mul(POINT_DIR_LOCAL, 0.3));
+  const ls = [0.27, 1.42, 0.0], le = [0.34, 1.42, 0.24], lh = add(eye, mul(GLASS_DIR_LOCAL, 0.3));
   limb(ls, le, 0.062, 0.052, S); limb(le, lh, 0.052, 0.042, S); ball(lh, 0.05, S, 1, 1, 1, 0);
   // right arm reaching forward to rest on Ellie's shoulder
   const rs = [-0.27, 1.42, 0.0], re = [-0.3, 1.3, 0.3], rh = [-0.26, 1.33, 0.56];
@@ -253,14 +257,15 @@ function felix(S, S2, SH, G) {
     const th = (u - 0.5) * Math.PI * 1.05;
     const rx = 0.28 + v * 0.3, rz = 0.16 + v * 0.22;
     let x = Math.sin(th) * rx, z = -0.04 - Math.cos(th) * rz;
-    let y = 1.47 - v * 1.12 + v * v * 0.12;
+    let y = 1.47 - v * 0.98 + v * v * 0.1;
     z -= v * v * 0.32; x += v * v * 0.16 * (0.6 + u * 0.6);
     z += Math.sin(u * 7 + v * 4) * 0.045 * v;
     return [x, y, z];
   }, 9, 6, () => SH);
   // round shield slung over the back
   push(); T(-0.02, 1.18, -0.3); RX(-0.25);
-  prism([0, 0, 0.02], [0, 0, -0.05], 0.27, 0.25, 12, S2, { rot: 0.1 });
+  prism([0, 0, 0.02], [0, 0, -0.06], 0.31, 0.29, 12, S2, { rot: 0.1 });
+  prism([0, 0, -0.06], [0, 0, -0.07], 0.24, 0.24, 12, SH, { rot: 0.1 });
   prism([0, 0, -0.05], [0, 0, -0.1], 0.08, 0.05, 8, G);
   pop();
 }
@@ -572,6 +577,7 @@ function buildScene() {
   CJ = 0.035;
   // gold compass-rose inlay pointing out from the plinth
   for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2 + Math.PI / 8, L = i % 2 ? 7.2 : 9.6; const p0 = [PC[0] + Math.cos(a) * 5.5, 0.012, PC[2] + Math.sin(a) * 5.5], tip = [PC[0] + Math.cos(a) * L, 0.012, PC[2] + Math.sin(a) * L], s1 = [PC[0] + Math.cos(a + 0.09) * 5.5, 0.012, PC[2] + Math.sin(a + 0.09) * 5.5], s2 = [PC[0] + Math.cos(a - 0.09) * 5.5, 0.012, PC[2] + Math.sin(a - 0.09) * 5.5]; tri(s2, tip, s1, PAL.gold); }
+  prism([PC[0], -0.05, PC[2]], [PC[0], -0.02, PC[2]], PR, PR, 40, PAL.pave2);
   // plaza rim + rocky underside
   prism([PC[0], -1.4, PC[2]], [PC[0], 0.0, PC[2]], PR + 0.3, PR + 0.1, 40, PAL.plinth, { caps: false });
   island(PC[0], -1.4, PC[2], PR + 0.6, 38, { n: 20, seed: 3, noTop: true, cols: [PAL.soil, PAL.rock1, PAL.rock2, PAL.rock3, PAL.rock4, PAL.rock4], tipOff: [-4, 2] });
@@ -601,12 +607,12 @@ function buildScene() {
   const S = STATUE;
   prism([S[0], 0, S[2]], [S[0], 0.45, S[2]], 4.3, 4.2, 8, PAL.plinth, { col2: PAL.plinth, capB: PAL.pave2, rot: Math.PI / 8 });
   prism([S[0], 0.45, S[2]], [S[0], 0.9, S[2]], 3.7, 3.6, 8, PAL.plinth, { capB: PAL.pave1, rot: Math.PI / 8 });
-  prism([S[0], 0.9, S[2]], [S[0], 3.35, S[2]], 2.75, 2.55, 8, hex('#c8b9a2'), { rot: Math.PI / 8 });
-  prism([S[0], 2.35, S[2]], [S[0], 2.75, S[2]], 2.68, 2.66, 8, PAL.verd, { rot: Math.PI / 8 }); // verdigris band
-  prism([S[0], 3.35, S[2]], [S[0], 3.75, S[2]], 3.0, 3.05, 8, PAL.plinth, { capB: PAL.stone2, rot: Math.PI / 8 });
-  prism([S[0], 3.75, S[2]], [S[0], PLINTH_TOP, S[2]], 2.5, 2.4, 8, PAL.stone2, { rot: Math.PI / 8 });
-  // gold plaque
-  push(); T(S[0], 1.6, S[2]); RY(-0.2); EMI = 0.25; box(0.0, 0, 2.62, 1.8, 0.55, 0.1, PAL.gold); EMI = 0; pop();
+  prism([S[0], 0.9, S[2]], [S[0], 2.85, S[2]], 2.7, 2.5, 8, hex('#c8b49a'), { rot: Math.PI / 8 });
+  prism([S[0], 2.2, S[2]], [S[0], 2.5, S[2]], 2.6, 2.58, 8, hex('#6fa597'), { rot: Math.PI / 8 }); // verdigris band
+  prism([S[0], 2.85, S[2]], [S[0], 3.2, S[2]], 2.95, 3.0, 8, PAL.plinth, { capB: PAL.stone2, rot: Math.PI / 8 });
+  prism([S[0], 3.2, S[2]], [S[0], PLINTH_TOP, S[2]], 2.5, 2.4, 8, PAL.stone2, { rot: Math.PI / 8 });
+  // bronze plaque
+  push(); T(S[0], 1.5, S[2]); RY(-0.32); box(0.0, 0, 2.58, 1.4, 0.5, 0.08, hex('#c9944a')); pop();
   // banners hanging from cornice
   for (const a of [Math.PI * 0.35, Math.PI * 0.75]) {
     const bx = S[0] + Math.cos(a) * 3.0, bz = S[2] + Math.sin(a) * 3.0;
@@ -617,19 +623,19 @@ function buildScene() {
   // figures
   push(); T(S[0], PLINTH_TOP, S[2]); RY(FIG_YAW); SC(FIG_S, FIG_S, FIG_S);
   // rocky base they stand on
-  newId(); taperBox([0, -0.02, 0.0], 0.95, 1.15, [0, 0.06, 0.0], 0.85, 1.05, PAL.stone2);
+  newId(); taperBox([0, -0.02, 0.0], 1.0, 1.3, [0, 0.06, 0.0], 0.9, 1.2, PAL.stone2);
   taperBox([0.1, 0.0, 0.36], 0.3, 0.3, [0.1, 0.1, 0.36], 0.26, 0.26, PAL.stone2);
-  newId(); push(); T(-0.1, 0.06, 0.25); ellie(PAL.stone, PAL.stone2, PAL.stoneHair); pop();
-  newId(); push(); T(0.18, 0.06, -0.33); SC(1.08, 1.08, 1.08); felix(PAL.stone, PAL.stone2, PAL.stoneHair, hex('#d9a24a')); pop();
+  newId(); push(); T(-0.14, 0.06, 0.3); ellie(PAL.stone, PAL.stone2, PAL.stoneHair); pop();
+  newId(); push(); T(0.2, 0.06, -0.36); SC(1.08, 1.08, 1.08); felix(PAL.stone, PAL.stone2, PAL.stoneHair, hex('#d9a24a')); pop();
   pop();
 
   // ---------------- player + NPC ----------------
-  newId(); push(); T(4.2, 0, 9.5); RY(-2.6); adventurer(); pop();
+  newId(); push(); T(4.4, 0, 7.4); RY(-2.75); adventurer(); pop();
   // selection ring under player
   EMI = 0.9; newId();
-  for (let i = 0; i < 24; i++) { const a0 = i / 24 * Math.PI * 2, a1 = (i + 0.6) / 24 * Math.PI * 2; quad([4.2 + Math.cos(a0) * 0.75, 0.03, 9.5 + Math.sin(a0) * 0.75], [4.2 + Math.cos(a1) * 0.75, 0.03, 9.5 + Math.sin(a1) * 0.75], [4.2 + Math.cos(a1) * 0.6, 0.03, 9.5 + Math.sin(a1) * 0.6], [4.2 + Math.cos(a0) * 0.6, 0.03, 9.5 + Math.sin(a0) * 0.6], hex('#7fe0ff')); }
+  for (let i = 0; i < 24; i++) { const a0 = i / 24 * Math.PI * 2, a1 = (i + 0.6) / 24 * Math.PI * 2; quad([4.4 + Math.cos(a0) * 0.75, 0.03, 7.4 + Math.sin(a0) * 0.75], [4.4 + Math.cos(a1) * 0.75, 0.03, 7.4 + Math.sin(a1) * 0.75], [4.4 + Math.cos(a1) * 0.6, 0.03, 7.4 + Math.sin(a1) * 0.6], [4.4 + Math.cos(a0) * 0.6, 0.03, 7.4 + Math.sin(a0) * 0.6], hex('#7fe0ff')); }
   EMI = 0;
-  newId(); push(); T(2.8, 0, 3.6); RY(-1.9); npcElder(); pop();
+  newId(); push(); T(0.2, 0, 5.4); RY(-0.2); npcElder(); pop();
   // a few townsfolk silhouettes
   const folk = [[8.2, 0, -3.5, '#e66a5a'], [9.0, 0, -2.6, '#4aa6a0'], [-7.5, 0, 6.5, '#e0a040'], [6.5, 0, -8.5, '#7a6ac8'], [-10.5, 0, 2.6, '#ff8a66'], [10.8, 0, 4.0, '#5a8ae0'], [-3.5, 0, 10.0, '#c06aa0']];
   for (const [fx, fy, fz, c] of folk) {
@@ -665,9 +671,8 @@ function buildScene() {
   // ground tier, framing the right of the plaza
   house(14, 0, -6, 4.0, 3.6, 3.4, 0.25, PAL.wall3, PAL.roof3, { door: true });
   house(20, 0, -9.5, 4.8, 4, 4.0, -0.1, PAL.wall, PAL.roof1, { door: true, chimney: true });
-  house(18, 0, 5.5, 4.4, 3.8, 3.8, -0.55, PAL.wall2, PAL.roof2, { door: true, chimney: true });
+  house(19.5, 0, 1.5, 4.4, 3.8, 3.8, -0.55, PAL.wall2, PAL.roof2, { door: true, chimney: true });
   house(25, 0, -1, 5, 4, 4.4, -0.35, PAL.wall, PAL.roof4, { door: true });
-  house(15.5, 0, 13.5, 4.2, 3.6, 3.4, -0.85, PAL.wall, PAL.roof1, { door: true });
   // tier 1
   house(9, Y1, -25, 4, 3.6, 3.8, 0.35, PAL.wall2, PAL.roof1, { chimney: true });
   house(15, Y1, -19, 4.4, 3.8, 4.0, 0.05, PAL.wall, PAL.roof2);
@@ -686,6 +691,25 @@ function buildScene() {
   const T_ = (x, y, z, s, k) => { newId(); tree(x, y, z, s, k); };
   T_(11.5, 0, 1.5, 1.15, 1); T_(10.5, 0, -11, 1.0, 0); T_(23, 0, 8, 1.3, 2); T_(18.5, Y1, -27, 1.1, 1);
   T_(29, Y2, -42, 1.0, 0); T_(26, Y3, -50, 0.9, 2); T_(21, 0, 14, 1.4, 0); T_(31, Y1, -15, 1.2, 1); T_(5, Y1, -27, 1.0, 2);
+  // stone road + stair from the plaza mouth up to the first terrace
+  newId(); CJ = 0.07;
+  for (let i = 0; i < 12; i++) { const t0 = i / 12, t1 = (i + 1) / 12; const P0 = lerp([11.5, 0.015, -1.5], [12.5, 0.015, -12.6], t0), P1 = lerp([11.5, 0.015, -1.5], [12.5, 0.015, -12.6], t1);
+    for (let k = 0; k < 3; k++) { const x0 = -1.6 + k * 1.07 + (i % 2) * 0.3, x1 = x0 + 1.0; quad([P0[0] + x0, 0.015, P0[2]], [P0[0] + x1, 0.015, P0[2]], [P1[0] + x1, 0.015, P1[2]], [P1[0] + x0, 0.015, P1[2]], hash(i, k) > 0.5 ? PAL.pave1 : PAL.pave2); } }
+  for (let i = 0; i < 8; i++) box(12.6, 0.3 + i * 0.6, -13.2 - i * 0.62, 3.6, 0.6 + i * 0.0, 0.66, PAL.pave2, PAL.pave1);
+  for (const sx of [-2.0, 2.0]) for (let i = 0; i < 8; i += 2) box(12.6 + sx, 0.75 + i * 0.6, -13.4 - i * 0.62, 0.35, 1.5, 0.35, PAL.plinth, PAL.pave1);
+  CJ = 0.035;
+  // shrubs, flower clumps and grass tufts on the green
+  newId(); SEED = 4242;
+  const spots = [];
+  for (let i = 0; i < 260; i++) { const x = R(4, 36), z = R(-16, 16); const dp = Math.hypot(x - 0, z - 1); if (dp < 14.5) continue; if (Math.hypot(x - 20, z + 30) < 17.5) continue; if (Math.abs(x - 12) < 2.6 && z < -1 && z > -13) continue; spots.push([x, z]); }
+  for (const [x, z] of spots.slice(0, 90)) {
+    const k = rnd();
+    if (k < 0.35) ball([x, 0.35, z], R(0.45, 0.8), PAL.leaf2, 1, 0.75, 1, 0, 0.3, PAL.grassDark);
+    else if (k < 0.6) for (let j = 0; j < 4; j++) ball([x + R(-0.4, 0.4), 0.25, z + R(-0.4, 0.4)], 0.18, [PAL.blossom, hex('#ffd36a'), hex('#ffffff'), hex('#ff7a5c')][Math.floor(R(0, 4))], 1, 0.8, 1, 0);
+    else for (let j = 0; j < 3; j++) prism([x + R(-0.3, 0.3), 0, z + R(-0.3, 0.3)], [x + R(-0.5, 0.5), R(0.5, 0.9), z + R(-0.5, 0.5)], 0.12, 0.0, 3, j % 2 ? PAL.grass2 : PAL.grassDark);
+  }
+  // hedges along terrace foot
+  for (let i = 0; i < 14; i++) { const a = Math.PI * 0.35 + i / 14 * Math.PI * 0.9; const x = 20 + Math.cos(a) * 17.6, z = -30 + Math.sin(a) * 17.6; if (Math.abs(x - 12.6) < 2.6) continue; ball([x, 0.5, z], 0.9, PAL.leaf2, 1.3, 0.7, 1.0, 0, 0.25, PAL.grassDark); }
   // market stalls with striped awnings near the plaza mouth
   const stall = (x, z, yaw, c1) => {
     push(); T(x, 0, z); RY(yaw); newId();
@@ -702,7 +726,7 @@ function buildScene() {
   // bunting over the plaza approach
   newId();
   bunting([8.8, 4.0, -9.0], [14.5, 4.4, -3.2], 0.6, 10, [PAL.roof1, hex('#ffd36a'), PAL.roof3, PAL.sail]);
-  bunting([10.5, 4.2, 9.5], [16.2, 4.3, 3.0], 0.7, 10, [PAL.roof3, PAL.roof1, hex('#ffd36a')]);
+  bunting([10.6, 3.4, 8.2], [17.4, 4.0, 2.4], 0.7, 10, [PAL.roof3, PAL.roof1, hex('#ffd36a')]);
   flag([12.0, 0, -1.0], 6.5, PAL.roof1, -1);
   flag([-12.3, 0, 7.5], 5.5, PAL.roof3, -1);
 
@@ -738,18 +762,17 @@ function buildScene() {
   newId(); island(-620, 80, -1050, 170, 260, { n: 26, seed: 41, tipOff: [-10, 0], dome: 20, bump: 8 });
   waterfall([-620 + Math.cos(1.3) * 168, 80.5, -1050 + Math.sin(1.3) * 168], [Math.cos(1.3), 0, Math.sin(1.3)], 330, 22, 2);
   // island C: where the Two are pointing, half-lost in haze
-  newId(); island(-110, 90, -760, 60, 110, { n: 18, seed: 51, tipOff: [4, 0], dome: 6 });
-  tree(-110, 94, -760, 10, 1); tree(-92, 93, -748, 8, 2);
-  waterfall([-110 + Math.cos(1.5) * 58, 90.5, -760 + Math.sin(1.5) * 58], [0, 0, 1], 260, 9, 1);
+  newId(); island(-110, 60, -760, 60, 110, { n: 18, seed: 51, tipOff: [4, 0], dome: 6 });
+  tree(-110, 64, -760, 10, 1); tree(-92, 63, -748, 8, 2);
+  waterfall([-110 + Math.cos(1.5) * 58, 60.5, -760 + Math.sin(1.5) * 58], [0, 0, 1], 260, 9, 1);
   // small drifting rocks
   newId(); island(-120, 34, -190, 7, 14, { n: 10, seed: 61 }); tree(-120, 34.2, -190, 1.8, 0);
   newId(); island(-330, 95, -560, 16, 30, { n: 12, seed: 71 });
   newId(); island(-30, -30, -230, 10, 20, { n: 10, seed: 81 });
   newId(); island(120, 60, -900, 120, 180, { n: 22, seed: 95, dome: 12 });
   // wind-ships in flight
-  ship(-58, 17, -95, -1.75, 1.35, {});
-  ship(-230, 60, -420, -2.2, 2.4, { stripe: hex('#3fb0a6'), wing: hex('#ff9a6a') });
-  ship(-150, 120, -620, -1.4, 2.4, { sail: hex('#fff6e8') });
+  ship(-84, -3, -78, -1.65, 1.35, {});
+  ship(-215, 18, -330, -2.2, 2.4, { stripe: hex('#3fb0a6'), wing: hex('#ff9a6a') });
 
   // ---------------- sea of clouds ----------------
   SOFT = 1; newId();
@@ -766,8 +789,8 @@ function buildScene() {
   for (let i = 0; i < 520; i++) {
     const x = R(-1800, 1400), z = R(-2200, 60);
     const d = Math.hypot(x - CAM[0], z - CAM[2]);
-    const r = R(18, 45) * (0.6 + d / 900);
-    cloudPuff([x, CY + R(-10, 20), z], r, 0.5);
+    const r = R(22, 50) * (0.6 + d / 900);
+    cloudPuff([x, CY + R(-5, 25), z], r, 0.62);
   }
   // cloud collars under islands
   for (const [x, y, z, r] of [[-330, -150, -700, 50], [-128, -60, -250, 22], [-620, -150, -1050, 80], [-110, -40, -760, 40], [-48, -8, -72, 6], [0, -36, 1, 10], [-120, 22, -190, 6]]) for (let k = 0; k < 7; k++) cloudPuff([x + R(-r, r) * 1.6, y + R(-6, 6), z + R(-r, r)], r * R(0.5, 0.9), 0.5);
@@ -800,12 +823,12 @@ vec3 skyCol(vec3 d){
   float sa=max(dot(hz,sz),0.);
   float s=max(dot(d,uGlow),0.);
   vec3 zen=vec3(0.09,0.33,0.82), mid=vec3(0.28,0.60,0.95);
-  vec3 horCool=vec3(0.74,0.85,0.97), horWarm=vec3(1.0,0.80,0.58);
+  vec3 horCool=vec3(0.72,0.84,0.97), horWarm=vec3(1.0,0.76,0.56);
   vec3 hor=mix(horCool,horWarm,pow(sa,2.2));
   float hh=max(h,0.);
   vec3 c=mix(hor,mid,smoothstep(0.0,0.20,hh));
   c=mix(c,zen,smoothstep(0.16,0.7,hh));
-  c+=vec3(1.0,0.55,0.25)*pow(s,5.)*0.30+vec3(1.,0.85,0.6)*pow(s,48.)*0.6;
+  c+=vec3(1.0,0.55,0.30)*pow(s,6.)*0.16+vec3(1.,0.85,0.6)*pow(s,60.)*0.35;
   if(h<0.) c=mix(c, mix(vec3(0.86,0.88,0.97),vec3(1.0,0.88,0.76),pow(sa,2.)), smoothstep(0.,-0.15,h));
   return c;
 }`;
@@ -836,12 +859,16 @@ void main(){
   vec3 base=vCol*(0.95+pn*0.1);
   float ndl=dot(N,uSun);
   float shd=vMat.y>0.5?1.:shadowF();
+  float cs=1.;
+  if(dist<70. && vPos.y>-3.){ float m=n2(vPos.xz*0.09+vec2(3.1,7.7)); cs=1.-0.8*smoothstep(-0.4,0.4,vPos.z-9.0-m*5.0+vPos.x*0.12); }
+  shd*=cs;
   float l=smoothstep(-0.03,0.07,ndl)*shd;
+  float midT=smoothstep(0.18,0.26,ndl);
   float hi=smoothstep(0.58,0.66,ndl)*shd;
   vec3 sunC=vec3(1.08,0.93,0.76);
   vec3 shadowC=pow(base,vec3(1.12))*vec3(0.56,0.56,0.84)+vec3(0.015,0.02,0.06);
-  shadowC=mix(shadowC, base*vec3(0.80,0.83,0.98), vMat.y);
-  vec3 c=mix(shadowC, base*sunC, l);
+  shadowC=mix(shadowC, base*vec3(0.70,0.73,0.93), vMat.y);
+  vec3 c=mix(shadowC, base*sunC*mix(0.86,1.0,midT), l);
   c+=base*hi*vec3(0.10,0.08,0.04);
   c+=base*(vec3(0.07,0.10,0.18)*max(N.y,0.)+vec3(0.14,0.07,0.04)*max(-N.y,0.));
   float rim=pow(1.-clamp(dot(N,V),0.,1.),3.0);
@@ -850,7 +877,7 @@ void main(){
   c=mix(c, vCol*1.25, vMat.x);
   // atmosphere
   float f=1.-exp(-pow(dist/900.,1.5));
-  f=max(f, smoothstep(-60.,-170.,vPos.y)*0.45*smoothstep(80.,400.,dist));
+  f=max(f, smoothstep(-90.,-190.,vPos.y)*0.25*smoothstep(150.,600.,dist));
   vec3 fogC=skyCol(-V);
   c=mix(c,fogC,clamp(f*vMat.z,0.,1.));
   oC=vec4(c,uAlpha);
@@ -902,11 +929,24 @@ void main(){
   float fade=1.-smoothstep(70.,240.,d);
   e*=fade*lw;
   c=mix(c,c*vec3(0.34,0.27,0.40),e*0.92);
+  // depth-based ambient occlusion (near field only)
+  if(d<300.){
+    float ao=0.; float rr=clamp(900./d,6.,40.);
+    for(int i=0;i<12;i++){ float an=float(i)*0.5236+0.3; float k=(float(i%3)+1.)/3.; vec2 off=vec2(cos(an),sin(an))*rr*k;
+      float nd=texture(uA,uv+off*px).y; float df=d-nd;
+      ao+=smoothstep(d*0.004,d*0.03,df)*(1.-smoothstep(d*0.06,d*0.16,df)); }
+    ao/=12.; c*=1.-ao*0.55*(1.-smoothstep(120.,300.,d))*lw;
+  }
+  // light shafts: radial march toward the glow, occluded by islands
+  { vec2 dl=(uSunS-uv)/48.; vec2 tc=uv; float acc=0.;
+    for(int i=0;i<48;i++){ tc+=dl; if(tc.x<0.||tc.x>1.||tc.y<0.||tc.y>1.) break; float dd=texture(uA,tc).y; acc+=(dd>1800.?1.:0.)*(1.-float(i)/48.); }
+    acc/=24.; float rd2=length((uv-uSunS)*vec2(uRes.x/uRes.y,1.));
+    c+=vec3(1.0,0.76,0.48)*pow(acc,1.5)*0.16*(1.-smoothstep(0.3,1.6,rd2)); }
   // bloom-ish glow from emissive / hot pixels (cheap ring taps)
   vec3 g=vec3(0.);
   for(int i=0;i<16;i++){float an=float(i)*0.3927; for(int k=1;k<=3;k++){vec2 off=vec2(cos(an),sin(an))*float(k)*7.;vec3 s=texture(uC,uv+off*px).rgb; g+=max(s-vec3(0.95),0.);}}
   c+=g*0.05*vec3(1.,0.8,0.55);
-  // sun shafts from off-screen left
+  // stylised streaks from off-screen glow
   vec2 sd=uv-uSunS; float ang=atan(sd.y,sd.x); float rd=length(sd*vec2(uRes.x/uRes.y,1.));
   float ray=smoothstep(0.55,1.0,sin(ang*42.)*0.5+0.5)*smoothstep(0.5,1.0,sin(ang*17.+1.3)*0.5+0.5);
   c+=vec3(1.0,0.82,0.55)*ray*0.07*(1.-smoothstep(0.2,1.3,rd))*smoothstep(150.,800.,d);
@@ -914,7 +954,7 @@ void main(){
   c=mix(c, 0.82+0.18*(1.-exp(-(c-0.82)/0.18)), step(0.82,c));
   float L=dot(c,vec3(0.299,0.587,0.114)); c=mix(vec3(L),c,1.10);
   c=c*c*(3.-2.*c)*0.18+c*0.82;
-  vec2 q=uv-0.5; c*=1.-dot(q*vec2(1.0,1.2),q*vec2(1.0,1.2))*0.42;
+  vec2 q=uv-0.5; c*=1.-dot(q*vec2(1.0,1.2),q*vec2(1.0,1.2))*0.42; c*=mix(0.86,1.,smoothstep(0.,0.35,uv.y));
   o=vec4(pow(clamp(c,0.,1.),vec3(1.0)),1.);
 }`;
 
@@ -1034,6 +1074,7 @@ function hud(VP) {
   // --- quest tracker
   c.textAlign = 'left';
   const qx = 1330, qy = 250;
+  { const gg = c.createLinearGradient(1290, 0, 1600, 0); gg.addColorStop(0, 'rgba(18,22,48,0)'); gg.addColorStop(0.25, 'rgba(18,22,48,0.42)'); gg.addColorStop(1, 'rgba(18,22,48,0.5)'); c.fillStyle = gg; c.fillRect(1290, qy - 30, 310, 122); }
   c.save(); c.shadowColor = 'rgba(20,20,50,0.6)'; c.shadowBlur = 8;
   c.fillStyle = '#ffcf5a'; c.font = `700 12px ${sans}`; c.letterSpacing = '2px'; c.fillText('MAIN QUEST', qx, qy);
   c.letterSpacing = '0px';
@@ -1043,15 +1084,21 @@ function hud(VP) {
   c.fillText('◇  Find where the Two are pointing', qx, qy + 72);
   c.restore();
   c.fillStyle = 'rgba(255,207,90,0.9)'; c.fillRect(qx - 12, qy - 8, 2, 88);
+  // --- Wayglass lens glint
+  { const lp = toS(LENS_W); const gx = lp[0], gy = lp[1];
+    const rg = c.createRadialGradient(gx, gy, 0, gx, gy, 26); rg.addColorStop(0, 'rgba(255,250,220,0.95)'); rg.addColorStop(0.25, 'rgba(255,220,140,0.5)'); rg.addColorStop(1, 'rgba(255,200,120,0)');
+    c.fillStyle = rg; c.fillRect(gx - 30, gy - 30, 60, 60);
+    c.fillStyle = 'rgba(255,248,225,0.9)';
+    for (const [w, h] of [[34, 1.6], [1.6, 22]]) { c.beginPath(); c.ellipse(gx, gy, w, h, 0, 0, Math.PI * 2); c.fill(); } }
   // --- NPC marker + interact prompt
-  const np = toS([2.8, 2.35, 3.6]);
-  c.save(); c.shadowColor = 'rgba(255,190,60,0.9)'; c.shadowBlur = 12; c.fillStyle = '#ffd35a'; c.font = `800 26px ${serif}`; c.textAlign = 'center'; c.fillText('!', np[0], np[1]); c.restore();
-  const pp = toS([4.2, 2.25, 9.5]);
+  const np = toS([0.2, 2.45, 5.4]);
+  c.save(); c.shadowColor = 'rgba(255,190,60,0.9)'; c.shadowBlur = 12; c.fillStyle = '#ffd35a'; c.font = `800 34px ${serif}`; c.textAlign = 'center'; c.fillText('!', np[0], np[1]); c.restore();
+  const pp = toS([4.4, 2.3, 7.4]);
   c.textAlign = 'center'; c.font = `600 12px ${sans}`;
   c.save(); c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 4; c.fillStyle = '#eaf8ff'; c.fillText('Wren', pp[0], pp[1]); c.restore();
   // interact prompt
-  const ip = toS([2.8, 1.0, 3.6]);
-  const bx = ip[0] + 26, by = ip[1] - 10;
+  const ip = toS([0.2, 1.0, 5.4]);
+  const bx = ip[0] - 172, by = ip[1] - 22;
   c.fillStyle = 'rgba(20,25,50,0.55)'; c.beginPath(); c.roundRect(bx, by, 132, 26, 13); c.fill();
   c.fillStyle = '#fff6e6'; c.beginPath(); c.roundRect(bx + 4, by + 4, 18, 18, 4); c.fill();
   c.fillStyle = '#2a2a44'; c.font = `700 12px ${sans}`; c.fillText('E', bx + 13, by + 13.5);
