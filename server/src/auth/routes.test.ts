@@ -137,11 +137,11 @@ describe('POST /api/login', () => {
 });
 
 describe('POST /api/guest', () => {
-  it('creates a passwordless guest named Guest- and 4 digits', async () => {
+  it('creates a passwordless guest named Guest- and 6 digits', async () => {
     const { url, store } = await startApp();
     const res = await post(url, '/api/guest');
     expect(res.status).toBe(200);
-    expect(res.body.name).toMatch(/^Guest-\d{4}$/);
+    expect(res.body.name).toMatch(/^Guest-\d{6}$/);
     const account = await store.findAccountByUsername(res.body.name);
     expect(account).toMatchObject({ isGuest: true, passwordHash: null });
     expect(verifyToken(res.body.token, SECRET)).toEqual({ accountId: account!.id });
@@ -150,12 +150,12 @@ describe('POST /api/guest', () => {
   it('picks another number when the name is taken', async () => {
     const { url, store } = await startApp();
     const random = vi.spyOn(Math, 'random');
-    // The first pick is Guest-1234 (taken), the second Guest-5678.
-    random.mockReturnValueOnce(0.1234).mockReturnValueOnce(0.5678);
-    await store.createAccount({ username: 'Guest-1234', passwordHash: null, isGuest: true });
+    // The first pick is Guest-123456 (taken), the second Guest-567891.
+    random.mockReturnValueOnce(0.123456).mockReturnValueOnce(0.567891);
+    await store.createAccount({ username: 'Guest-123456', passwordHash: null, isGuest: true });
     try {
       const first = await post(url, '/api/guest');
-      expect(first.body.name).toBe('Guest-5678');
+      expect(first.body.name).toBe('Guest-567891');
     } finally {
       random.mockRestore();
     }

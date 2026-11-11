@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import pg from 'pg';
 import { SPAWN } from '@sg2/shared';
 import { NameTakenError, type Store } from './types';
 import { createMemoryStore } from './memory';
-import { createPgStore } from './pg';
+import { createPgStore, createPool } from './pg';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -92,6 +92,22 @@ function storeSuite(label: string, open: () => Promise<Store>) {
 }
 
 storeSuite('MemoryStore', async () => createMemoryStore());
+
+describe('PgStore pool', () => {
+  it('logs idle-connection errors instead of crashing', async () => {
+    // No connection is opened until a query, so this needs no database.
+    const pool = createPool('postgres://nobody@127.0.0.1:1/none');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => pool.emit('error', new Error('terminating connection due to administrator command'))).not.toThrow();
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(String(logged.mock.calls[0])).toContain('terminating connection');
+    } finally {
+      logged.mockRestore();
+      await pool.end();
+    }
+  });
+});
 
 if (databaseUrl) {
   storeSuite('PgStore', () => createPgStore(databaseUrl));

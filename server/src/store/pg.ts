@@ -87,8 +87,21 @@ function toAdventurer(r: AdventurerRow): Adventurer {
   };
 }
 
-export async function createPgStore(databaseUrl: string): Promise<Store> {
+/**
+ * A pool that survives losing idle connections (Postgres restart, idle kill): node-postgres emits
+ * 'error' on the pool for those, and an unhandled 'error' event would crash the server. The broken
+ * client is discarded and the next query opens a new connection.
+ */
+export function createPool(databaseUrl: string): pg.Pool {
   const pool = new pg.Pool({ connectionString: databaseUrl });
+  pool.on('error', (err) => {
+    console.error('PostgreSQL idle connection error (continuing):', err.message);
+  });
+  return pool;
+}
+
+export async function createPgStore(databaseUrl: string): Promise<Store> {
+  const pool = createPool(databaseUrl);
   try {
     await migrate(pool);
   } catch (err) {

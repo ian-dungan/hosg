@@ -10,8 +10,9 @@ import { signToken } from './tokens';
 const WRONG_LOGIN = 'Wrong name or password';
 const GUEST_NAME_TRIES = 20;
 
+/** `Guest-` and 6 random digits: a million names, so collisions stay rare as guests pile up. */
 function randomGuestName(): string {
-  return `Guest-${String(Math.floor(Math.random() * 10_000)).padStart(4, '0')}`;
+  return `Guest-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
 }
 
 export function authRouter(store: Store, secret: string, opts: { ratePerMinute?: number } = {}): express.Router {
