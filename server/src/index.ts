@@ -9,6 +9,13 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/** An error's message for a one-line report (a refused connection to "localhost" has none of its own). */
+function reason(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const inner = err instanceof AggregateError ? err.errors.find((e) => e instanceof Error) : undefined;
+  return err.message || inner?.message || (err as NodeJS.ErrnoException).code || err.name;
+}
+
 function positiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -31,11 +38,20 @@ if (process.env.SG2_STORE === 'memory') {
 } else {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) fail('DATABASE_URL is not set (or set SG2_STORE=memory to run without a database).');
-  store = await createPgStore(databaseUrl);
+  try {
+    store = await createPgStore(databaseUrl);
+  } catch (err) {
+    fail(`cannot open the database at DATABASE_URL: ${reason(err)}.`);
+  }
 }
 
 const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute });
-await app.listen(port);
+try {
+  await app.listen(port);
+} catch (err) {
+  const inUse = (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
+  fail(inUse ? `port ${port} is already in use; stop whatever uses it or set SG2_PORT to another port.` : `cannot listen on port ${port}: ${reason(err)}.`);
+}
 console.log(`Shady Grove 2 server listening on port ${port}${clientDir ? `, serving ${clientDir}` : ''}.`);
 
 let stopping = false;

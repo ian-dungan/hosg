@@ -1,0 +1,49 @@
+# Shady Grove 2: the game server and its PostgreSQL database.
+# Creates only sg2-* containers, the sg2-pgdata volume and the sg2-net network.
+# Secrets come from .env (copy .env.example and fill it in; see deploy/README.md).
+name: sg2
+
+services:
+  sg2-server:
+    build: .
+    image: sg2-server
+    container_name: sg2-server
+    ports:
+      - "${SG2_PORT:-2570}:2570"
+    environment:
+      SG2_PORT: "2570" # inside the container; the host port is SG2_PORT from .env
+      SG2_JWT_SECRET: ${SG2_JWT_SECRET:?set SG2_JWT_SECRET in .env}
+      DATABASE_URL: postgres://sg2:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@sg2-db:5432/sg2
+      # Logins per IP address a minute. Raise it only for a load test (docs/load-test.md).
+      SG2_AUTH_RATE_PER_MIN: ${SG2_AUTH_RATE_PER_MIN:-10}
+    depends_on:
+      sg2-db:
+        condition: service_healthy
+    mem_limit: 1g
+    restart: unless-stopped
+
+  sg2-db:
+    image: postgres:16
+    container_name: sg2-db
+    environment:
+      POSTGRES_USER: sg2
+      POSTGRES_DB: sg2
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - sg2-pgdata:/var/lib/postgresql/data
+    # No ports: the database is reachable only from sg2-server, never from the host or the internet.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sg2 -d sg2"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 512m
+    restart: unless-stopped
+
+volumes:
+  sg2-pgdata:
+    name: sg2-pgdata
+
+networks:
+  default:
+    name: sg2-net

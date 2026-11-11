@@ -1,0 +1,12 @@
+# Only what the image build needs; never secrets.
+.git
+.env
+.env.*
+.superpowers
+**/node_modules
+**/dist
+**/dist-online
+concepts
+docs
+deploy
+*.md

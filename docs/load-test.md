@@ -14,6 +14,14 @@ state-update rate the bots saw was at least 14 a second, and no bot had a step c
    SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 npm start -w server
    ```
 
+   With Docker (`docker-compose.yml`), start the stack with the raised limit for the test, and
+   restart it without afterwards:
+
+   ```sh
+   SG2_AUTH_RATE_PER_MIN=1000 docker compose up -d   # for the bot run only
+   docker compose up -d                              # afterwards: back to 10 a minute
+   ```
+
    Do not leave `SG2_AUTH_RATE_PER_MIN` raised on a public server: the limit is what slows down
    password guessing.
 
@@ -44,3 +52,18 @@ PASS
 
 Exit status 0. The rate is slightly above 15 because Node runs the 66.7 ms patch timer every 66 ms.
 No server changes were needed to pass.
+
+The same run against the Docker image (`docker compose up -d` with `SG2_AUTH_RATE_PER_MIN=1000`,
+server bundle `node server/dist/index.js`, PostgreSQL 16 store), same machine:
+
+```
+players: 100
+patch rate seen by bots: mean 15.12 Hz, min 15.12 Hz (over 60.0 s)
+server patch rate (/healthz, 5 s window): min 15 Hz, max 15.2 Hz
+server peak RSS: 91 MB
+corrections: 0; disconnected bots: 0; chat lines heard: 30700
+PASS
+```
+
+Exit status 0. `docker stats` just after an earlier identical run showed the containers well inside
+their limits: `sg2-server` 46 MiB of 1 GiB, `sg2-db` 61 MiB of 512 MiB.

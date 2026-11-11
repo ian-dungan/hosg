@@ -63,8 +63,22 @@ export function createApp(opts: AppOptions): App {
   gameServer.define('grove', zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions);
 
   return {
+    /** Rejects (e.g. EADDRINUSE) when the port cannot be bound. */
     async listen(port) {
-      await gameServer.listen(port);
+      // Colyseus never settles listen() when the bind fails (it only prints the error), so race the
+      // HTTP server's 'error' instead, with Colyseus's printing listeners set aside meanwhile.
+      const http = transport.server as HttpServer;
+      const printers = http.listeners('error') as ((err: Error) => void)[];
+      http.removeAllListeners('error');
+      const stopWatching = new AbortController();
+      const bindFailed = once(http, 'error', { signal: stopWatching.signal }).then(([err]) => Promise.reject(err));
+      bindFailed.catch(() => {}); // settled by the race below, or aborted once listening
+      try {
+        await Promise.race([gameServer.listen(port), bindFailed]);
+      } finally {
+        stopWatching.abort();
+        for (const print of printers) http.on('error', print);
+      }
       // The one grove room, made up front so joins find it (a join that got in first already made it).
       if (live.size === 0) await matchMaker.createRoom('grove', {});
     },

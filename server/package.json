@@ -6,8 +6,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --alias:@sg2/shared=../shared/src/index.ts --outfile=dist/index.js",
     "start": "tsx src/index.ts",
-    "bots": "tsx scripts/bots.ts"
+    "bots": "tsx scripts/bots.ts",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@colyseus/sdk": "^0.18.10",
@@ -15,6 +17,8 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
     "tsx": "^4.23.15"
   },
   "dependencies": {
