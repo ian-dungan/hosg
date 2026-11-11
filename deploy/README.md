@@ -270,10 +270,15 @@ $ docker image rm sg2-server
 $ sudo ufw delete allow 2570/tcp     # only if you added the rule in step 8
 ```
 
-## Later: a web address with HTTPS (shadygrove2.mooo.com)
+## Later: a web address with HTTPS (shadygrove2.mooo.com) — NOT READY, do not follow yet
 
-The first installation works on the IP address only, and nothing depends on a domain name. When you
-want players to use **https://shadygrove2.mooo.com** instead:
+> **Do not follow this section yet.** Behind Caddy, the game server would see every player as
+> coming from the same address, so its login limit (10 sign-ins a minute) would be shared by all
+> players together and most of them could not sign in. A later update of the game will fix this,
+> and this section will then say it is ready. Until then, use http://116.203.110.214:2570.
+
+The first installation works on the IP address only, and nothing depends on a domain name. The
+outline below is kept so you can see what the switch will involve; **do not follow it yet**.
 
 1. At FreeDNS (mooo.com), point `shadygrove2.mooo.com` at `116.203.110.214` (an `A` record).
    Check it from the server: `getent hosts shadygrove2.mooo.com` should print `116.203.110.214`.

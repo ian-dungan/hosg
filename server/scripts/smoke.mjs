@@ -5,8 +5,10 @@
 // a new browser shows "Signed in somewhere else" on A; killing the server shows "Connection lost".
 // Any page error fails the test. Browser console errors are not counted: Chrome logs refused
 // reconnect attempts and failed requests there, which are expected.
-// The server is killed at the end: by default with `fuser -k -9 <port>/tcp` (a server on this
-// machine); for Docker pass --kill "docker compose kill sg2-server".
+// The server is killed at the end. Only for a URL on this machine (localhost, 127.0.0.1 or ::1)
+// with an explicit port is there a default, `fuser -k -9 <port>/tcp`; for Docker pass
+// --kill "docker compose kill sg2-server". For any other URL, without --kill the "Connection lost"
+// step is skipped (with a note) and the exit code reflects only the steps that ran.
 import { execSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { chromium, devices } from 'playwright';
@@ -17,7 +19,13 @@ if (positionals.length !== 1) {
   process.exit(2);
 }
 const url = new URL(positionals[0]);
-const killCommand = values.kill ?? `fuser -k -9 ${url.port || 80}/tcp`;
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']); // URL keeps the brackets on IPv6
+// Never a default for a remote host (it would kill whatever holds that port HERE) or for a URL
+// without an explicit port (that would be 80 or 443, typically another site's web server).
+const killCommand = values.kill ?? (LOCAL_HOSTS.has(url.hostname) && url.port ? `fuser -k -9 ${url.port}/tcp` : null);
+console.log(killCommand
+  ? `smoke test of ${url.href}; the server will be killed with: ${killCommand}`
+  : `smoke test of ${url.href}; no --kill given and the URL is not localhost/127.0.0.1/::1 with a port, so the "Connection lost" step will be skipped`);
 const CHAT = 'hello <img src=x onerror=window.__pwned=1>';
 const LOAD_MS = 180_000; // the first page load compiles a large bundle under software rendering
 const WAIT_MS = 120_000;
@@ -41,7 +49,7 @@ async function playAsGuest({ page }) {
   await page.waitForSelector('.sg-login.in', { timeout: LOAD_MS });
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/guest'), { timeout: WAIT_MS }),
-    page.click('button:has-text("Play as guest")'),
+    page.click('button:has-text("Play as guest")', { timeout: WAIT_MS }),
   ]);
   const body = await response.json();
   if (!body.name) throw new Error(`guest login failed: ${JSON.stringify(body)}`);
@@ -127,10 +135,7 @@ try {
   await c.context.close();
 
   let a2;
-  await check('signing in to A\'s account elsewhere shows "Signed in somewhere else" on A', async () => {
-    const token = await a.page.evaluate(() => sessionStorage.getItem('sg2.token'));
-    if (!token) throw new Error('A has no saved token');
-    a2 = await open('A again (desktop)', desktop, token); // the saved token is set again on every load
+  async function joinA2() {
     // A starved headless page can miss the client's 15 s join timeout ("Cannot reach the server"):
     // load it again, at most four times. Any other outcome is checked below.
     for (let retries = 4; ; retries--) {
@@ -144,11 +149,29 @@ try {
       console.log('     the second sign-in timed out on this busy machine; loading it again');
       await a2.page.reload({ timeout: LOAD_MS });
     }
+  }
+
+  await check('signing in to A\'s account elsewhere shows "Signed in somewhere else" on A', async () => {
+    const token = await a.page.evaluate(() => sessionStorage.getItem('sg2.token'));
+    if (!token) throw new Error('A has no saved token');
+    // Freeze A's page while the new one loads and joins, so A's rendering does not starve it. A
+    // frozen page runs no scripts; the kick reaches it as soon as it is thawed below.
+    const aSession = await a.context.newCDPSession(a.page);
+    await aSession.send('Page.setWebLifecycleState', { state: 'frozen' });
+    try {
+      a2 = await open('A again (desktop)', desktop, token); // the saved token is set again on every load
+      await joinA2();
+    } finally {
+      await aSession.send('Page.setWebLifecycleState', { state: 'active' });
+    }
     await a.page.waitForFunction(loginError, 'Signed in somewhere else', { timeout: WAIT_MS });
     await a2.page.waitForFunction(onlineIs, 1, { timeout: WAIT_MS });
   });
 
-  await check('killing the server shows "Connection lost" within 60 s', async () => {
+  if (!killCommand) {
+    console.log('skip killing the server shows "Connection lost": the URL is not localhost/127.0.0.1/::1 with a port,');
+    console.log('     so nothing is killed by default; pass --kill "<command that kills the server>" to run this step');
+  } else await check('killing the server shows "Connection lost" within 60 s', async () => {
     console.log(`     running: ${killCommand}`);
     execSync(killCommand, { stdio: 'ignore' });
     await a2.page.waitForFunction(loginError, 'Connection lost', { timeout: 60_000, polling: 500 });
