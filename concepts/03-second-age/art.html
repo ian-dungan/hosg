@@ -1,0 +1,643 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Second Age Key Art</title>
+<style>
+html,body{margin:0;padding:0;background:#05080d;overflow:hidden}
+#wrap{position:relative;width:1600px;height:900px}
+canvas{position:absolute;left:0;top:0}
+</style></head>
+<body><div id="wrap"><canvas id="gl" width="1600" height="900" style="visibility:hidden"></canvas><canvas id="out" width="1600" height="900"></canvas></div>
+<script id="fs" type="x-shader">#version 300 es
+precision highp float;
+uniform vec2 uRes;
+out vec4 fragColor;
+
+#define PI 3.14159265
+const float AZ = 0.7854;
+const float EL = 0.58;
+const float HALFH = 17.6;
+const vec3 TGT = vec3(0.0, 11.0, 0.0);
+const float SK = 10.0;               // statue scale
+const vec3 SPOS = vec3(0.0, 5.55, 0.0);
+const float SROT = -0.62;             // statue yaw
+vec3 ORB;
+
+float h11(float n){return fract(sin(n)*43758.5453);}
+float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float h31(vec3 p){p=fract(p*0.3183099+.1);p*=17.0;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+float noise(vec3 x){vec3 i=floor(x);vec3 f=fract(x);f=f*f*(3.0-2.0*f);
+ return mix(mix(mix(h31(i),h31(i+vec3(1,0,0)),f.x),mix(h31(i+vec3(0,1,0)),h31(i+vec3(1,1,0)),f.x),f.y),
+            mix(mix(h31(i+vec3(0,0,1)),h31(i+vec3(1,0,1)),f.x),mix(h31(i+vec3(0,1,1)),h31(i+vec3(1,1,1)),f.x),f.y),f.z);}
+float fbm(vec3 p){float a=0.5,s=0.0;for(int i=0;i<4;i++){s+=a*noise(p);p=p*2.03+vec3(1.7,9.2,3.1);a*=0.5;}return s;}
+float noise2(vec2 p){return noise(vec3(p,0.5));}
+
+float sdBox(vec3 p, vec3 b){vec3 q=abs(p)-b;return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0);}
+float sdCap(vec3 p, vec3 a, vec3 b, float r){vec3 pa=p-a,ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);return length(pa-ba*h)-r;}
+float sdRC(vec3 p, vec3 a, vec3 b, float r1, float r2){
+ vec3 ba=b-a; float l2=dot(ba,ba); float rr=r1-r2; float a2=l2-rr*rr; float il2=1.0/l2;
+ vec3 pa=p-a; float y=dot(pa,ba); float z=y-l2; vec3 xv=pa*l2-ba*y; float x2=dot(xv,xv);
+ float y2=y*y*l2; float z2=z*z*l2; float k=sign(rr)*rr*rr*x2;
+ if(sign(z)*a2*z2>k) return sqrt(x2+z2)*il2-r2;
+ if(sign(y)*a2*y2<k) return sqrt(x2+y2)*il2-r1;
+ return (sqrt(x2*a2*il2)+y*rr)*il2-r1;}
+float sdEll(vec3 p, vec3 r){float k0=length(p/r);float k1=length(p/(r*r));return k0*(k0-1.0)/k1;}
+float sdCyl(vec3 p, float r, float h){vec2 d=abs(vec2(length(p.xz),p.y))-vec2(r,h);return min(max(d.x,d.y),0.0)+length(max(d,0.0));}
+float smin(float a,float b,float k){float h=max(k-abs(a-b),0.0)/k;return min(a,b)-h*h*k*0.25;}
+vec2 U(vec2 a, vec2 b){return a.x<b.x?a:b;}
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+
+// ---------------- statue figures (human scale, feet at origin, facing +z)
+float felix(vec3 q){
+ float d = sdEll(q-vec3(0,1.665,0.012), vec3(.102,.122,.112));
+ d = smin(d, sdEll(q-vec3(0,1.705,-0.018), vec3(.112,.098,.118)), .035);
+ d = smin(d, sdEll(q-vec3(0,1.58,0.06), vec3(.075,.05,.06)), .04);      // jaw
+ d = smin(d, sdEll(q-vec3(0,1.655,.112), vec3(.02,.034,.03)), .015);
+ d = smin(d, sdEll(q-vec3(0,1.70,.092), vec3(.08,.022,.03)), .02);
+ d = smin(d, sdCap(q, vec3(0,1.47,0), vec3(0,1.6,0.01), .058), .04);
+ d = smin(d, sdEll(q-vec3(0,1.31,0.01), vec3(.235,.19,.145)), .07);
+ d = smin(d, sdCap(q, vec3(-.21,1.42,-.01), vec3(.21,1.42,-.01), .085), .07);
+ d = smin(d, sdEll(q-vec3(0,1.09,0), vec3(.17,.16,.12)), .07);
+ d = smin(d, sdRC(q, vec3(0,1.0,0), vec3(0,.66,0.0), .175, .225), .05);
+ for(int i=0;i<2;i++){
+  float s = i==0?-1.0:1.0;
+  d = smin(d, sdRC(q, vec3(s*.1,.9,0), vec3(s*.125,.5,.03), .085,.066), .03);
+  d = smin(d, sdRC(q, vec3(s*.125,.5,.03), vec3(s*.14,.1,0), .064,.05), .02);
+  d = smin(d, sdBox(q-vec3(s*.14,.05,.045), vec3(.055,.045,.115))-.012, .04);
+  d = smin(d, sdRC(q, vec3(s*.235,1.40,0), vec3(s*.27,1.17,.1), .072,.058), .03);
+  d = smin(d, sdRC(q, vec3(s*.27,1.17,.1), vec3(s*.05,1.05,.27), .056,.045), .02);
+  d = smin(d, sdEll(q-vec3(s*.045,1.04,.29), vec3(.052,.05,.058)), .02);
+  d = smin(d, sdEll(q-vec3(s*.24,1.45,0), vec3(.11,.075,.11)), .02);
+ }
+ // cape
+ float yy = clamp(1.45-q.y,0.0,1.4);
+ float w = .27+.2*yy;
+ float cz = -.15 - .09*yy + .025*sin(q.x*16.0+yy*3.0);
+ float cape = sdBox(vec3(q.x, q.y-.8, q.z-cz), vec3(w,.66,.022))*0.7;
+ d = smin(d, cape, .05);
+ // sword planted
+ float bl = sdBox(q-vec3(0,.52,.3), vec3(.03+0.012*(q.y), .44, .011));
+ float sw = min(bl, sdBox(q-vec3(0,.965,.3), vec3(.17,.025,.035)));
+ sw = min(sw, sdCap(q, vec3(0,.96,.3), vec3(0,1.1,.3), .024));
+ sw = min(sw, length(q-vec3(0,1.12,.3))-.042);
+ return min(d, sw);
+}
+float ellie(vec3 q){
+ float d = sdEll(q-vec3(0,1.6,0.012), vec3(.094,.113,.104));
+ d = smin(d, sdEll(q-vec3(0,1.635,-0.016), vec3(.104,.1,.112)), .03);
+ d = smin(d, sdEll(q-vec3(0,1.595,.104), vec3(.017,.03,.026)), .012);
+ d = smin(d, sdRC(q, vec3(0,1.6,-.06), vec3(0,1.36,-.1), .1,.075), .04);
+ // ponytail streaming in the wind
+ d = smin(d, sdRC(q, vec3(0,1.67,-.08), vec3(-.14,1.48,-.24), .055,.04), .04);
+ d = smin(d, sdRC(q, vec3(-.14,1.48,-.24), vec3(-.33,1.37,-.31), .04,.012), .03);
+ d = smin(d, sdCap(q, vec3(0,1.44,0), vec3(0,1.55,0.01), .046), .03);
+ d = smin(d, sdEll(q-vec3(0,1.29,0.01), vec3(.165,.16,.112)), .06);
+ d = smin(d, sdCap(q, vec3(-.165,1.40,0), vec3(.165,1.40,0), .062), .06);
+ d = smin(d, sdEll(q-vec3(0,1.1,0), vec3(.122,.12,.092)), .06);
+ // long coat flaring
+ float coat = sdRC(q, vec3(0,1.1,-0.01), vec3(0.03,.42,-.06), .135, .285);
+ coat = max(coat, -sdBox(q-vec3(0.0,.5,.3), vec3(.06,.4,.12))); // front split
+ d = smin(d, coat, .05);
+ for(int i=0;i<2;i++){
+  float s = i==0?-1.0:1.0;
+  d = smin(d, sdRC(q, vec3(s*.075,.9,0), vec3(s*.095,.48,.03-s*.03), .07,.056), .03);
+  d = smin(d, sdRC(q, vec3(s*.095,.48,.03-s*.03), vec3(s*.11,.09,-s*.04), .054,.042), .02);
+  d = smin(d, sdBox(q-vec3(s*.11,.045,.04-s*.04), vec3(.045,.04,.1))-.01, .03);
+ }
+ // raised outer arm with orb
+ d = smin(d, sdRC(q, vec3(-.18,1.40,0), vec3(-.31,1.66,.04), .058,.048), .03);
+ d = smin(d, sdRC(q, vec3(-.31,1.66,.04), vec3(-.27,1.93,.07), .046,.038), .02);
+ d = smin(d, sdEll(q-vec3(-.268,1.965,.07), vec3(.048,.052,.045)), .02);
+ // inner arm: hand reaching to Felix's shoulder
+ d = smin(d, sdRC(q, vec3(.18,1.40,0), vec3(.34,1.27,.07), .055,.046), .03);
+ d = smin(d, sdRC(q, vec3(.34,1.27,.07), vec3(.5,1.4,.04), .044,.038), .02);
+ d = smin(d, sdEll(q-vec3(.52,1.415,.03), vec3(.05,.035,.05)), .02);
+ return d;
+}
+vec3 toStatue(vec3 p){vec3 q=(p-SPOS)/SK; q.xz=rot(SROT)*q.xz; return q;}
+float statue(vec3 p){
+ vec3 q = toStatue(p);
+ float bb = sdBox(q-vec3(0,1.05,0), vec3(.85,1.12,.55));
+ if(bb>.1) return bb*SK;
+ float f = felix(q-vec3(.31,0,0));
+ float e = ellie((q-vec3(-.31,0,0.02))*vec3(1.0,1.03,1.0));
+ float d = smin(f,e,.03);
+ // base slab the heroes stand on
+ d = min(d, sdBox(q-vec3(0,-.01,0.02), vec3(.72,.03,.36))-.01);
+ // weathering
+ d += (noise(q*38.0)-0.5)*0.004;
+ return d*SK;
+}
+float orbD(vec3 p){return length(p-ORB)-0.72;}
+
+// ---------------- conduits
+float conduits(vec3 p){
+ float r=.16; float y=.16;
+ float d = sdCap(p, vec3(7.2,y,0), vec3(17,y,0), r);
+ d = min(d, sdCap(p, vec3(17,y,0), vec3(17,y,11), r));
+ d = min(d, sdCap(p, vec3(0,y,7.2), vec3(0,y,15), r));
+ d = min(d, sdCap(p, vec3(0,y,15), vec3(-9,y,24), r));
+ d = min(d, sdCap(p, vec3(-7.2,y,0), vec3(-20,y,0), r));
+ d = min(d, sdCap(p, vec3(0,y,-7.2), vec3(0,y,-22), r));
+ d = min(d, sdCap(p, vec3(4.9,y,4.9), vec3(13,y,13), r));
+ d = min(d, sdCap(p, vec3(13,y,13), vec3(22,y,13), r));
+ // climbing the plinth
+ d = min(d, sdCap(p, vec3(7.1,.2,-1.6), vec3(7.1,1.1,-1.6), .14));
+ d = min(d, sdCap(p, vec3(5.9,1.1,-1.6), vec3(5.9,2.1,-1.6), .14));
+ d = min(d, sdCap(p, vec3(4.72,2.0,-1.6), vec3(4.72,5.1,-1.6), .14));
+ d = min(d, sdCap(p, vec3(-1.6,.2,7.1), vec3(-1.6,1.1,7.1), .14));
+ d = min(d, sdCap(p, vec3(-1.6,1.1,5.9), vec3(-1.6,2.1,5.9), .14));
+ d = min(d, sdCap(p, vec3(-1.6,2.0,4.72), vec3(-1.6,5.1,4.72), .14));
+ d = min(d, sdCap(p, vec3(4.72,5.1,-1.6), vec3(1.6,5.1,-4.72), .12));
+ return d;
+}
+
+// ---------------- plinth & ruins
+float plinth(vec3 p){
+ float d = sdBox(p-vec3(0,.5,0), vec3(7,.5,7))-.05;
+ d = min(d, sdBox(p-vec3(0,1.5,0), vec3(5.8,.5,5.8))-.05);
+ float m = sdBox(p-vec3(0,3.5,0), vec3(4.6,1.9,4.6))-.05;
+ // recessed panels
+ m = max(m, -sdBox(vec3(abs(p.x),p.y,abs(p.z))-vec3(4.65,3.2,4.65), vec3(4.0,1.0,4.0)*vec3(1,1,1)+vec3(-0.0,0,-0.0)) );
+ d = min(d, m);
+ d = min(d, sdBox(p-vec3(0,5.32,0), vec3(4.95,.24,4.95))-.04);
+ // broken chunk on corner
+ d = max(d, -sdBox(p-vec3(-6.6,1.2,6.6), vec3(1.6,1.0,1.2)));
+ return d;
+}
+float pillar(vec3 p, float h, float tilt){
+ float d = sdCyl(p-vec3(0,h*.5,0), .85, h*.5);
+ // fluting
+ float a = atan(p.z,p.x);
+ d += .05*smoothstep(.3,1.0,sin(a*12.0));
+ vec3 n = normalize(vec3(sin(tilt),1.0,cos(tilt*1.7)));
+ d = max(d, dot(p-vec3(0,h,0), n));
+ d = min(d, sdBox(p-vec3(0,.3,0), vec3(1.15,.3,1.15)));
+ return d;
+}
+float ruins(vec3 p){
+ float d = 1e5;
+ float rr = length(p.xz);
+ if(abs(rr-12.5)<2.5){
+  for(int i=0;i<10;i++){
+   float fi=float(i);
+   float a = fi*0.6283+0.31;
+   vec3 c = vec3(cos(a),0,sin(a))*12.5;
+   float h = 2.0+8.0*h11(fi*7.3+1.0);
+   if(i==1||i==7) continue;
+   d = min(d, pillar(p-c, h, fi*1.3));
+  }
+ }
+ // fallen drums
+ d = min(d, sdCap(p, vec3(10.5,.75,-8.5), vec3(13.5,.75,-6.2), .78));
+ d = min(d, sdCap(p, vec3(-7,.75,13.5), vec3(-10.2,.75,12.4), .78));
+ // great broken arch behind
+ vec3 q = p-vec3(-17,0,-17); q.xz = rot(-.785)*q.xz;
+ float ar = sdBox(q-vec3(-6,6,0), vec3(1.3,6,1.3));
+ ar = min(ar, sdBox(q-vec3(6,4.5,0), vec3(1.3,4.5,1.3)));
+ vec2 tq = vec2(length(q.xy-vec2(0,12))-6.0, q.z);
+ float tor = length(max(abs(tq)-vec2(1.2,1.2),0.0))+min(max(abs(tq.x)-1.2,abs(tq.y)-1.2),0.0);
+ tor = max(tor, -(q.y-12.0));
+ tor = max(tor, -(-q.x+1.0+ (q.y-12.)*0.4)); // broken right half
+ ar = min(ar, tor);
+ d = min(d, ar);
+ // low ruined walls
+ d = min(d, sdBox(p-vec3(-12,1.0,20), vec3(5,1.0+0.6*sin(p.x*.9),.7)));
+ d = min(d, sdBox(p-vec3(21,1.2,-3), vec3(.7,1.2+.8*sin(p.z*.7),5)));
+ return d;
+}
+
+// ---------------- dwellings
+// returns vec2(dist, mat) ; mat 2 stone base, 9 plaster wall, 5 roof, 4 wood
+vec2 house(vec3 p, vec3 c, vec3 b, float hb, float rh, float axis){
+ vec3 q = p-c; if(axis>.5) q.xz=q.zx;
+ float bound = sdBox(q-vec3(0,(hb+b.y*2.+rh)*.5,0), vec3(b.x+1.2,(hb+b.y*2.+rh)*.5+.2,b.z+1.2));
+ if(bound>1.0) return vec2(bound,0);
+ vec2 r = vec2(sdBox(q-vec3(0,hb*.5,0), vec3(b.x+.25,hb*.5,b.z+.25))-.08, 2.0);
+ float w = sdBox(q-vec3(0,hb+b.y,0), vec3(b.x,b.y,b.z));
+ r = U(r, vec2(w, 9.0));
+ // timber frame beams
+ float beams = sdBox(vec3(abs(q.x)-b.x, q.y-hb-b.y, abs(q.z)-b.z), vec3(.14,b.y,.14));
+ beams = min(beams, sdBox(q-vec3(0,hb+.1,0), vec3(b.x+.12,.12,b.z+.12)));
+ r = U(r, vec2(beams, 4.0));
+ vec3 rq = q-vec3(0,hb+b.y*2.0,0);
+ float sl = rh/(b.z+.6);
+ float roof = max((abs(rq.z)*sl + rq.y - rh)/sqrt(sl*sl+1.0), max(-rq.y-.0, abs(rq.x)-b.x-.5));
+ roof = max(roof, -((abs(rq.z)*sl + rq.y - rh+.3)/sqrt(sl*sl+1.0)) ); // shell
+ roof = max(roof, -rq.y+0.0);
+ r = U(r, vec2(roof, 5.0));
+ // chimney
+ r = U(r, vec2(sdBox(rq-vec3(b.x*.55,rh*.6,b.z*.3), vec3(.3,rh*.6,.3)), 2.0));
+ return r;
+}
+vec2 stall(vec3 p, vec3 c, float col){
+ vec3 q=p-c;
+ float bound = sdBox(q-vec3(0,1.6,0), vec3(2.2,1.8,1.8));
+ if(bound>1.0) return vec2(bound,0);
+ vec2 r = vec2(sdBox(q-vec3(0,.55,.4), vec3(1.6,.55,.6)), 4.0);
+ vec3 pq = vec3(abs(q.x)-1.6, q.y-1.4, abs(q.z)-1.1);
+ r = U(r, vec2(sdBox(pq, vec3(.08,1.4,.08)), 4.0));
+ vec3 cq = q-vec3(0,2.9,0); cq.yz = rot(-0.25)*cq.yz;
+ float can = sdBox(cq, vec3(1.9,.04,1.5)) - .02;
+ r = U(r, vec2(can, 10.0+col));
+ // crates and goods
+ r = U(r, vec2(sdBox(q-vec3(.9,1.25,.35), vec3(.3,.15,.25)), 4.0));
+ r = U(r, vec2(length(q-vec3(-.6,1.32,.4))-.22, 12.0));
+ r = U(r, vec2(length(q-vec3(-.15,1.28,.5))-.17, 12.0));
+ return r;
+}
+vec2 walkways(vec3 p){
+ // raised plank walkways between dwellings (left cluster)
+ float d = sdBox(p-vec3(-17.5,4.2,6.5), vec3(.9,.1,3.2));
+ d = min(d, sdBox(p-vec3(10.5,3.8,-17.0), vec3(3.3,.1,.9)));
+ vec3 q = p-vec3(-17.5,2.1,6.5); q.z = abs(q.z)-2.6; q.x=abs(q.x)-.8;
+ d = min(d, sdBox(q, vec3(.1,2.1,.1)));
+ vec3 r = p-vec3(10.5,1.9,-17.0); r.x=abs(r.x)-2.8; r.z=abs(r.z)-.8;
+ d = min(d, sdBox(r, vec3(.1,1.9,.1)));
+ // rails
+ d = min(d, sdBox(vec3(abs(p.x+17.5)-.85,p.y-4.9,p.z-6.5), vec3(.05,.05,3.2)));
+ return vec2(d,4.0);
+}
+// lamp posts and lanterns
+const int NL = 12;
+vec3 LAMP[NL];
+void initLamps(){
+ LAMP[0]=vec3(9.2,3.2,-4.5); LAMP[1]=vec3(-4.5,3.2,9.2); LAMP[2]=vec3(-9.2,3.2,4.5); LAMP[3]=vec3(4.5,3.2,-9.2);
+ LAMP[4]=vec3(12.2,2.7,9.4); LAMP[5]=vec3(16.6,2.7,4.6);  // stalls
+ LAMP[6]=vec3(-17.5,5.6,4.0); LAMP[7]=vec3(-15.2,3.4,14.2);
+ LAMP[8]=vec3(13.6,3.0,-14.6); LAMP[9]=vec3(-6.0,3.2,-19.5);
+ LAMP[10]=vec3(9.35,1.15,9.0); // player's lantern
+ LAMP[11]=vec3(-22.0,3.0,-6.0);
+}
+float lampPosts(vec3 p){
+ float d=1e5;
+ for(int i=0;i<4;i++){ vec3 c=LAMP[i]; d=min(d, sdCyl(p-vec3(c.x,1.4,c.z), .14, 1.4)); d=min(d, sdBox(p-vec3(c.x,.2,c.z), vec3(.35,.2,.35))); d=min(d,sdBox(p-vec3(c.x,2.85,c.z),vec3(.3,.06,.3)));}
+ return d;
+}
+float lanterns(vec3 p){
+ float d=1e5;
+ for(int i=0;i<NL;i++){ if(i==10) continue; d=min(d, sdEll(p-LAMP[i], vec3(.22,.3,.22))); }
+ return d;
+}
+// bioluminescent mushrooms (domain repetition)
+vec2 shrooms(vec3 p){
+ if(p.y>3.5) return vec2(p.y-3.0, 0);
+ vec2 cell = floor(p.xz/3.0); vec2 lc = p.xz-(cell+.5)*3.0;
+ float hh = h21(cell);
+ vec2 cc = (cell+.5)*3.0; float rc=length(cc);
+ bool ok = hh>.8 && rc>9.5 && rc<34.0 && abs(rc-12.5)>1.8 && abs(cc.x)>1.5 && abs(cc.y)>1.5;
+ if(!ok) return vec2(1.2, 0);
+ vec2 off = (vec2(h21(cell+3.1),h21(cell+7.7))-.5)*1.2;
+ vec3 q = vec3(lc.x-off.x, p.y, lc.y-off.y);
+ float s = .6+.9*h21(cell+1.3);
+ float st = sdCap(q, vec3(0,0,0), vec3(.1*s,1.0*s,0), .08*s);
+ float cap = sdEll(q-vec3(.1*s,1.0*s,0), vec3(.42,.16,.42)*s);
+ vec3 q2 = q-vec3(.45*s,0,.3*s);
+ st = min(st, sdCap(q2, vec3(0), vec3(-.05,.55*s,0), .05*s));
+ cap = min(cap, sdEll(q2-vec3(-.05,.55*s,0), vec3(.24,.1,.24)*s));
+ return U(vec2(st,11.0), vec2(cap,12.0));
+}
+float player(vec3 p){
+ vec3 q = p-vec3(8.7,0,8.4);
+ if(length(q-vec3(0,1,0))>1.6) return length(q-vec3(0,1,0))-1.2;
+ q.xz = rot(-0.75)*q.xz;
+ float d = sdRC(q, vec3(0,.1,0), vec3(0,1.35,0), .32, .17);      // cloak
+ d = smin(d, length(q-vec3(0,1.55,-.02))-.16, .06);              // hooded head
+ d = smin(d, sdEll(q-vec3(0,1.6,-.08), vec3(.19,.2,.21)), .05);
+ d = min(d, sdCap(q, vec3(.25,1.25,0), vec3(.45,.9,.2), .07));   // arm with lantern
+ d = min(d, sdBox(q-vec3(-.12,1.1,-.28), vec3(.16,.28,.08))-.03); // pack
+ return d;
+}
+vec2 dwellings(vec3 p){
+ vec2 r = vec2(1e5,0);
+ r = U(r, house(p, vec3(-17.5,0,1.0), vec3(2.2,1.6,2.4), 2.6, 2.4, 0.0));
+ r = U(r, house(p, vec3(-17.0,0,12.0), vec3(2.0,1.4,2.8), 1.6, 2.2, 1.0));
+ r = U(r, house(p, vec3(-11.5,0,19.5), vec3(2.6,1.5,1.8), 2.0, 2.0, 0.0));
+ r = U(r, house(p, vec3(-24.0,0,-6.0), vec3(2.6,1.8,2.4), 3.2, 2.6, 1.0));
+ r = U(r, house(p, vec3(-7.0,0,-23.5), vec3(2.8,1.6,2.0), 2.4, 2.4, 0.0));
+ r = U(r, house(p, vec3(4.5,0,-24.0), vec3(2.0,1.4,2.2), 1.5, 2.0, 1.0));
+ r = U(r, house(p, vec3(14.5,0,-18.5), vec3(2.4,1.6,2.0), 2.2, 2.3, 0.0));
+ r = U(r, house(p, vec3(20.5,0,-10.0), vec3(1.9,1.5,2.6), 1.8, 2.0, 1.0));
+ r = U(r, house(p, vec3(-27.0,0,8.0), vec3(2.2,1.5,2.2), 1.4, 2.2, 0.0));
+ r = U(r, house(p, vec3(10.0,0,-28.0), vec3(2.6,1.6,2.0), 2.0, 2.2, 1.0));
+ r = U(r, house(p, vec3(-16.0,0,-28.0), vec3(3.0,1.6,2.2), 2.8, 2.5, 0.0));
+ r = U(r, stall(p, vec3(12.8,0,8.0), 0.0));
+ r = U(r, stall(p, vec3(17.2,0,3.2), 1.0));
+ r = U(r, stall(p, vec3(18.5,0,10.5), 1.0));
+ r = U(r, walkways(p));
+ return r;
+}
+vec2 mapS(vec3 p){
+ vec2 r = vec2(p.y, 1.0);
+ r = U(r, vec2(plinth(p), 2.0));
+ r = U(r, vec2(statue(p), 3.0));
+ r = U(r, vec2(orbD(p), 7.0));
+ r = U(r, vec2(conduits(p), 6.0));
+ r = U(r, vec2(ruins(p), 2.0));
+ r = U(r, vec2(lampPosts(p), 2.0));
+ r = U(r, vec2(lanterns(p), 8.0));
+ r = U(r, dwellings(p));
+ r = U(r, shrooms(p));
+ r = U(r, vec2(player(p), 13.0));
+ return r;
+}
+float map(vec3 p){return mapS(p).x;}
+vec3 calcN(vec3 p){vec2 e=vec2(1,-1)*0.003*max(1.0,1.0);
+ return normalize(e.xyy*map(p+e.xyy)+e.yyx*map(p+e.yyx)+e.yxy*map(p+e.yxy)+e.xxx*map(p+e.xxx));}
+float softShadow(vec3 ro, vec3 rd, float maxt, float k){
+ float res=1.0; float t=0.08;
+ for(int i=0;i<48;i++){ float h=map(ro+rd*t); res=min(res,k*h/t); t+=clamp(h,0.05,1.5); if(res<0.01||t>maxt) break;}
+ return clamp(res,0.0,1.0);}
+float calcAO(vec3 p, vec3 n){float o=0.0,s=1.0;for(int i=0;i<5;i++){float h=0.05+0.45*float(i);float d=map(p+n*h);o+=(h-d)*s;s*=0.7;}return clamp(1.0-0.9*o,0.0,1.0);}
+
+const vec3 TEAL = vec3(0.12,1.0,0.86);
+const vec3 AMBER = vec3(1.0,0.56,0.2);
+
+vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
+ emis = vec3(0);
+ vec3 alb = vec3(.3); float spec=0.0; float rough=.5;
+ float moss = 0.0;
+ if(m<1.5){ // ground
+  float rp = length(p.xz);
+  vec2 g = p.xz*0.62; vec2 gi=floor(g); vec2 gf=fract(g);
+  float gap = min(min(gf.x,1.0-gf.x),min(gf.y,1.0-gf.y));
+  float stone = h21(gi);
+  float plaza = 1.0-smoothstep(10.0,15.0,rp+3.0*noise2(p.xz*.15));
+  vec3 flag = mix(vec3(.17,.18,.2), vec3(.25,.24,.23), stone);
+  flag *= mix(.55,1.0,smoothstep(0.02,0.07,gap));
+  vec3 grass = mix(vec3(.04,.08,.05), vec3(.07,.13,.07), noise2(p.xz*.9));
+  float mm = smoothstep(.45,.75, fbm(vec3(p.xz*.25,1.0)));
+  alb = mix(grass, flag, plaza*(1.0-mm*.6));
+  alb = mix(alb, vec3(.06,.12,.06), (1.0-smoothstep(0.0,0.06,gap))*plaza*.7);
+  float pud = smoothstep(.55,.62, fbm(vec3(p.xz*.18,7.0)))*plaza;
+  alb *= 1.0-.4*pud; spec = .25+.75*pud; rough = mix(.35,.04,pud);
+  // tiny glowing sprouts in grass
+  float sp = step(.985, h21(floor(p.xz*3.0)))*(1.0-plaza)*smoothstep(.3,.6,noise2(p.xz*.3));
+  emis += TEAL*sp*1.4;
+  // player selection ring
+  float pr = length(p.xz-vec2(8.7,8.4));
+  emis += TEAL*1.6*smoothstep(.07,0.0,abs(pr-1.05)) + TEAL*.25*smoothstep(1.05,.2,pr);
+  moss = 0.0;
+ } else if(m<2.5){ // ruin stone
+  float f = fbm(p*.6);
+  alb = mix(vec3(.2,.21,.22), vec3(.32,.3,.28), f);
+  moss = smoothstep(.35,.85, n.y*.6+fbm(p*.45+3.0)*.9-.1);
+  spec=.1; rough=.6;
+  // glowing glyph band on plinth
+  if(max(abs(p.x),abs(p.z))<5.1 && p.y>1.9 && p.y<5.6){
+   float band = smoothstep(.09,.02,abs(p.y-4.75));
+   float u = (abs(n.x)>.5)?p.z:p.x;
+   float gl = step(.5, h21(vec2(floor(u*2.2), 3.0)))*smoothstep(.2,.05,abs(fract(u*2.2)-.5)-.2);
+   float glyph = smoothstep(.22,.12,abs(p.y-4.75))*gl;
+   emis += TEAL*(band*2.0+glyph*1.2)*(1.0-moss*.6);
+  }
+ } else if(m<3.5){ // statue
+  vec3 q = toStatue(p);
+  float f = fbm(q*14.0);
+  alb = mix(vec3(.30,.31,.31), vec3(.42,.41,.38), f);
+  alb *= .8+.2*smoothstep(0.0,1.0,q.y);  // darker grime low
+  float vine = smoothstep(.62,.8, noise(vec3(q.x*30.0, q.y*3.5, q.z*30.0)));
+  moss = clamp(smoothstep(.3,.9, n.y*.7 + fbm(q*9.0)*.8 - .15)*(1.0-smoothstep(1.48,1.58,q.y)) + vine*smoothstep(1.5,.2,q.y), 0.0, 1.0);
+  spec=.08; rough=.6;
+  // glowing cracks
+  float cn = fbm(q*vec3(9.0,4.0,9.0)+vec3(2.0));
+  float crack = smoothstep(.012,.0,abs(cn-.5))*smoothstep(.62,.75,noise(q*5.0+5.0));
+  emis += TEAL*crack*2.5*(1.0-moss)*step(.45,q.y);
+  // berries on vines
+  float ber = step(.992, h31(floor(q*90.0)))*step(.5,moss);
+  emis += mix(TEAL, vec3(.5,.9,1.0), .5)*ber*1.5;
+ } else if(m<4.5){ alb = vec3(.16,.1,.06)*(.7+.6*noise(p*vec3(1,8,1)));
+ } else if(m<5.5){ // roofs
+  float tile = smoothstep(.0,.1,fract(p.y*3.0+noise(p*2.0)*.3));
+  alb = mix(vec3(.08,.12,.14), vec3(.14,.13,.14), noise(p*3.0))*(.6+.4*tile);
+  moss = smoothstep(.5,.8,fbm(p*.7))*.8;
+ } else if(m<6.5){ emis = TEAL*3.2; alb=vec3(.05);
+ } else if(m<7.5){ emis = vec3(.75,1.0,.95)*9.0; alb=vec3(0);
+ } else if(m<8.5){ emis = AMBER*7.0; alb=vec3(0);
+ } else if(m<9.5){ // plaster wall with windows
+  alb = mix(vec3(.34,.3,.25), vec3(.42,.38,.31), noise(p*1.5));
+  float u = (abs(n.x)>.5)?p.z:p.x;
+  float cw = abs(fract(u/1.7)-.5); float yy = fract(p.y/2.7);
+  float win = smoothstep(.2,.17,cw)*smoothstep(.22,.18,abs(yy-.55));
+  float lit = step(.3, h21(vec2(floor(u/1.7), floor(p.y/2.7))+floor(p.xz*.01)));
+  float mull = smoothstep(.015,.035,abs(cw))*smoothstep(.015,.035,abs(yy-.55));
+  if(abs(n.y)<.5){
+   alb = mix(alb, vec3(.03), win);
+   emis += AMBER*vec3(1.0,.9,.8)*win*lit*mull*(2.2+1.2*noise(p*3.0));
+  }
+ } else if(m<11.5 && m>9.5){ // canopies
+  float stripe = step(.5, fract(p.x*1.2+p.z*1.2));
+  alb = m<10.5 ? mix(vec3(.45,.08,.06), vec3(.55,.45,.3), stripe) : mix(vec3(.05,.3,.3), vec3(.5,.45,.32), stripe);
+  if(m>10.5 && m<11.2) alb=vec3(.2,.25,.25);
+ } else if(m<11.5){ alb = vec3(.5,.55,.5);
+ } else if(m<12.5){ alb = vec3(.1); emis = mix(TEAL, vec3(.4,.6,1.0), noise(p*2.0))*.75*(.6+.4*n.y);
+ } else { // player
+  float hood = smoothstep(1.3,1.45,p.y);
+  alb = mix(vec3(.5,.14,.07), vec3(.35,.1,.06), hood);
+  emis += TEAL*.5*smoothstep(.04,.0,abs(p.y-.55))*.0;
+ }
+ // stall canopy 10/11 handled above; mushroom stem id 11 collides with canopy col 1 -> fine
+ alb = mix(alb, vec3(.06,.13,.05)*(.7+.6*noise(p*6.0)), moss);
+
+ // ---- lighting
+ float ao = calcAO(p,n);
+ vec3 col = vec3(0);
+ vec3 skyAmb = vec3(.022,.036,.065);
+ col += alb*skyAmb*(.55+.45*n.y)*ao*2.0;
+ // moon rim/back light
+ vec3 md = normalize(vec3(-.55,.62,-.56));
+ float ms = softShadow(p+n*.05, md, 40.0, 10.0);
+ col += alb*vec3(.18,.26,.42)*max(dot(n,md),0.0)*ms*1.1;
+ // orb light (key)
+ vec3 L = ORB-p; float dl = length(L); L/=dl;
+ float os = softShadow(p+n*.05, L, dl-1.0, 14.0);
+ float att = 1.0/(1.0+dl*dl*.0045);
+ vec3 h = normalize(L-rd);
+ vec3 ocol = vec3(.45,1.0,.9);
+ col += alb*ocol*max(dot(n,L),0.0)*att*os*2.2;
+ col += ocol*spec*pow(max(dot(n,h),0.0), mix(8.0,180.0,1.0-rough))*att*os*2.0;
+ // lanterns
+ for(int i=0;i<NL;i++){
+  vec3 l = LAMP[i]-p; float d2=dot(l,l); float dd=sqrt(d2); l/=dd;
+  float a = 1.0/(1.0+d2*.12);
+  float diff = max(dot(n,l),0.0);
+  float s = 1.0;
+  if(i<4 || i==10) s = softShadow(p+n*.05, l, dd-.4, 8.0);
+  col += alb*AMBER*diff*a*s*(i==10?2.0:3.2);
+  vec3 hh = normalize(l-rd);
+  col += AMBER*spec*pow(max(dot(n,hh),0.0), mix(8.0,160.0,1.0-rough))*a*s*3.0;
+ }
+ // conduit light pools
+ float dc = conduits(p);
+ col += alb*TEAL*exp(-dc*1.1)*1.6*(.4+.6*max(dot(n,vec3(0,1,0)),0.3));
+ col += TEAL*spec*exp(-dc*2.0)*.6;
+ // mushroom glow spill on ground
+ return col + emis;
+}
+
+vec3 aces(vec3 x){return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.0,1.0);}
+
+// analytic in-scatter of a point light along the ray
+float inscatter(vec3 ro, vec3 rd, vec3 L, float t){
+ vec3 q = ro-L; float b = dot(rd,q); float c = dot(q,q);
+ float h2 = max(c-b*b, 1e-4); float h=max(sqrt(h2),1.2);
+ return (atan((t+b)/h)-atan(b/h))/h;
+}
+
+void main(){
+ initLamps();
+ ORB = SPOS + SK*vec3(0);
+ { vec3 lo = vec3(-.572, 2.02, .09); lo.xz = rot(-SROT)*lo.xz; ORB = SPOS + lo*SK; }
+ vec2 uv = (gl_FragCoord.xy - uRes*.5)/uRes.y*2.0*HALFH;
+ vec3 fwd = normalize(vec3(-cos(EL)*sin(AZ), -sin(EL), -cos(EL)*cos(AZ)));
+ vec3 right = normalize(cross(fwd, vec3(0,1,0)));
+ vec3 up = cross(right, fwd);
+ vec3 ro = TGT + right*uv.x + up*uv.y - fwd*120.0;
+ vec3 rd = fwd;
+ float s0 = (ro.y-34.0)/(-rd.y); ro += rd*s0;
+ float t = 0.0; vec2 h = vec2(0); bool hit=false;
+ float cglow = 0.0;
+ for(int i=0;i<220;i++){
+  vec3 p = ro+rd*t;
+  h = mapS(p);
+  float dc = conduits(p);
+  cglow += exp(-dc*2.2)*min(h.x,1.0)*.35;
+  if(h.x<0.002*max(1.0,t*.02)){hit=true;break;}
+  t += h.x*.85;
+  if(p.y<-0.5 || t>200.0) break;
+ }
+ vec3 p = ro+rd*t;
+ vec3 col;
+ vec3 fogCol = vec3(.012,.024,.04);
+ if(hit){
+  vec3 n = calcN(p);
+  vec3 em;
+  col = shade(p,n,h.y,rd,em);
+ } else col = fogCol;
+ // height fog (ground hugging, patchy)
+ float fh = 2.6; float dens = .022;
+ float y0 = ro.y; float dy = rd.y;
+ float fint = exp(-y0/fh)*(1.0-exp(-dy*t/fh))*fh/dy*(-1.0);
+ fint = abs(fint);
+ float fpatch = .55+.9*fbm(vec3(p.xz*.08, 2.0));
+ float fogA = 1.0-exp(-fint*dens*fpatch*fpatch*3.0 - t*.0012);
+ vec3 fogTint = mix(fogCol, vec3(.03,.08,.09), .45);
+ col = mix(col, fogTint, clamp(fogA,0.0,.9));
+ // volumetric glow: orb + lanterns + conduits
+ float ins = inscatter(ro,rd,ORB,t);
+ col += vec3(.3,.95,.85)*ins*.32*(.4+.6*fpatch);
+ for(int i=0;i<NL;i++){ float k = inscatter(ro,rd,LAMP[i],t); float fd = exp(-max(LAMP[i].y,0.)/6.0); col += AMBER*k*.035*fd; }
+ col += TEAL*cglow*.05;
+ col *= 0.95;
+ col = aces(col);
+ col = pow(col, vec3(1.0/2.2));
+ fragColor = vec4(col,1.0);
+}
+</script>
+<script id="vs" type="x-shader">#version 300 es
+in vec2 a;void main(){gl_Position=vec4(a,0,1);}
+</script>
+<script>
+const W=1600,H=900;
+// camera mirror of shader for 2D overlays
+const AZ=0.7854,EL=0.58,HALFH=17.6,TGT=[0,11,0];
+const fwd=[-Math.cos(EL)*Math.sin(AZ),-Math.sin(EL),-Math.cos(EL)*Math.cos(AZ)];
+function cross(a,b){return[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
+function norm(a){const l=Math.hypot(...a);return a.map(x=>x/l)}
+const right=norm(cross(fwd,[0,1,0])),camUp=cross(right,fwd);
+function proj(P){const d=[P[0]-TGT[0],P[1]-TGT[1],P[2]-TGT[2]];const x=d[0]*right[0]+d[1]*right[1]+d[2]*right[2];const y=d[0]*camUp[0]+d[1]*camUp[1]+d[2]*camUp[2];return[W/2+x/(2*HALFH)*H,H/2-y/(2*HALFH)*H];}
+window.proj=proj;
+let seed=7;function rnd(){seed=(seed*16807)%2147483647;return(seed-1)/2147483646;}
+
+async function render(){
+ const c=document.getElementById('gl');
+ const gl=c.getContext('webgl2',{preserveDrawingBuffer:true,antialias:false});
+ function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src.trim());gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))console.log(gl.getShaderInfoLog(s));return s;}
+ const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,document.getElementById('vs').textContent));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,document.getElementById('fs').textContent));gl.linkProgram(pr);
+ if(!gl.getProgramParameter(pr,gl.LINK_STATUS))console.log(gl.getProgramInfoLog(pr));
+ gl.useProgram(pr);
+ const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+ const loc=gl.getAttribLocation(pr,'a');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+ gl.uniform2f(gl.getUniformLocation(pr,'uRes'),W,H);
+ gl.enable(gl.SCISSOR_TEST);
+ const TS=100;const t0=performance.now();
+ for(let y=0;y<H;y+=TS){for(let x=0;x<W;x+=TS*2){gl.scissor(x,y,TS*2,TS);gl.drawArrays(gl.TRIANGLES,0,3);}
+  const px=new Uint8Array(4);gl.readPixels(0,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);
+  await new Promise(r=>setTimeout(r,0));}
+ console.log('gl ms',Math.round(performance.now()-t0));
+ post(c);
+}
+function blurCopy(src,r){const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.filter='blur('+r+'px)';x.drawImage(src,0,0);return c;}
+function post(glc){
+ const out=document.getElementById('out');const ctx=out.getContext('2d');
+ ctx.drawImage(glc,0,0);
+ // bright pass
+ const bp=document.createElement('canvas');bp.width=W;bp.height=H;const bx=bp.getContext('2d');bx.drawImage(glc,0,0);
+ const id=bx.getImageData(0,0,W,H);const d=id.data;
+ for(let i=0;i<d.length;i+=4){const l=Math.max(d[i],d[i+1],d[i+2]);const k=Math.max(0,l-185)/70;const f=k*k;d[i]*=f;d[i+1]*=f;d[i+2]*=f;}
+ bx.putImageData(id,0,0);
+ ctx.globalCompositeOperation='lighter';
+ [[3,.6],[10,.5],[30,.4],[80,.3]].forEach(([r,a])=>{ctx.globalAlpha=a;ctx.drawImage(blurCopy(bp,r),0,0);});
+ ctx.globalAlpha=1;
+ // motes & fireflies
+ const orb=proj(orbWorld());
+ for(let i=0;i<260;i++){
+  let P;if(i<150){const a=rnd()*6.28,r=3+rnd()*16;P=[Math.cos(a)*r,0.5+rnd()*rnd()*20,Math.sin(a)*r];}else{P=[(rnd()-.5)*70,0.3+rnd()*5,(rnd()-.5)*70];}
+  const [sx,sy]=proj(P);const s=(0.6+rnd()*1.8);const warm=rnd()<.25;
+  const g=ctx.createRadialGradient(sx,sy,0,sx,sy,s*6);const c=warm?'255,170,90':'110,255,225';
+  g.addColorStop(0,'rgba('+c+',0.9)');g.addColorStop(.25,'rgba('+c+',0.25)');g.addColorStop(1,'rgba('+c+',0)');
+  ctx.fillStyle=g;ctx.fillRect(sx-s*6,sy-s*6,s*12,s*12);
+ }
+ // string lights (festoons) between dwellings
+ const strings=[[[-15.2,4.6,3.4],[-9.2,3.2,4.5]],[[-14.8,3.8,10],[-4.5,3.2,9.2]],[[12.2,2.9,9.4],[16.6,2.9,4.6]],[[12.6,3.4,-16.4],[9.2,3.2,-4.5]],[[16.6,2.9,4.6],[9.2,3.2,-4.5]]];
+ strings.forEach(([a,b])=>{const n=14;let prev=null;ctx.strokeStyle='rgba(20,25,30,0.8)';ctx.lineWidth=1;ctx.beginPath();
+  for(let i=0;i<=n;i++){const t=i/n;const P=[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t-Math.sin(t*Math.PI)*1.1,a[2]+(b[2]-a[2])*t];const [x,y]=proj(P);if(i==0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
+  ctx.globalCompositeOperation='source-over';ctx.stroke();ctx.globalCompositeOperation='lighter';
+  for(let i=1;i<n;i++){const t=i/n;const P=[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t-Math.sin(t*Math.PI)*1.1,a[2]+(b[2]-a[2])*t];const [x,y]=proj(P);
+   const col=i%3==0?'120,255,230':'255,190,110';const g=ctx.createRadialGradient(x,y,0,x,y,9);g.addColorStop(0,'rgba(255,245,220,1)');g.addColorStop(.18,'rgba('+col+',.7)');g.addColorStop(1,'rgba('+col+',0)');ctx.fillStyle=g;ctx.fillRect(x-9,y-9,18,18);}
+ });
+ ctx.globalCompositeOperation='source-over';
+ // vignette
+ const v=ctx.createRadialGradient(W/2,H*.45,H*.35,W/2,H*.5,H*1.05);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(2,4,10,0.75)');ctx.fillStyle=v;ctx.fillRect(0,0,W,H);
+ // grain
+ const gi=ctx.getImageData(0,0,W,H);const gd=gi.data;for(let i=0;i<gd.length;i+=4){const n=(rnd()-.5)*7;gd[i]+=n;gd[i+1]+=n;gd[i+2]+=n;}ctx.putImageData(gi,0,0);
+ hud(ctx);
+ window.DONE=true;
+}
+function orbWorld(){const lo=[-.572,2.02,.09];const a=0.62;const c=Math.cos(a),s=Math.sin(a);
+ // GLSL mat2(c,-s,s,c)*v : column-major => x' = c*x + s*z ; z' = -s*x + c*z
+ const x=c*lo[0]+s*lo[2],z=-s*lo[0]+c*lo[2];return[x*10,5.55+lo[1]*10,z*10];}
+function hud(ctx){
+ ctx.save();
+ // location banner
+ const bx=60,by=58;
+ ctx.font='500 13px Georgia, serif';ctx.fillStyle='rgba(140,255,230,0.85)';ctx.letterSpacing='6px';
+ ctx.fillText('THE SECOND AGE  ·  YEAR 1004',bx,by);
+ ctx.letterSpacing='3px';ctx.font='600 40px Georgia, "Times New Roman", serif';
+ ctx.shadowColor='rgba(0,0,0,.8)';ctx.shadowBlur=12;ctx.fillStyle='#f4e6c8';ctx.fillText('Mudwich Hollow',bx,by+46);
+ ctx.shadowBlur=0;
+ const lg=ctx.createLinearGradient(bx,0,bx+420,0);lg.addColorStop(0,'rgba(255,190,110,.9)');lg.addColorStop(1,'rgba(255,190,110,0)');
+ ctx.fillStyle=lg;ctx.fillRect(bx,by+62,420,1.5);
+ ctx.font='italic 15px Georgia, serif';ctx.letterSpacing='1px';ctx.fillStyle='rgba(230,220,200,.75)';
+ ctx.fillText('Where the Wardens still keep watch',bx,by+86);
+ // quest tracker
+ const qx=W-380,qy=70;
+ ctx.fillStyle='rgba(6,14,20,.55)';roundRect(ctx,qx-18,qy-28,340,92,8);ctx.fill();
+ ctx.strokeStyle='rgba(120,255,225,.25)';ctx.lineWidth=1;ctx.stroke();
+ ctx.font='600 11px Georgia, serif';ctx.letterSpacing='3px';ctx.fillStyle='rgba(255,190,110,.95)';ctx.fillText('MAIN QUEST',qx,qy-6);
+ ctx.font='600 18px Georgia, serif';ctx.letterSpacing='0.5px';ctx.fillStyle='#f4e6c8';ctx.fillText('The Light Ellie Carried',qx,qy+18);
+ ctx.font='14px Georgia, serif';ctx.fillStyle='rgba(200,235,228,.85)';
+ ctx.fillText('◇  Touch the Wardens’ plinth  0 / 1',qx,qy+42);
+ // nameplate over player
+ const [px,py]=proj([8.7,2.35,8.4]);
+ ctx.textAlign='center';ctx.font='600 13px Georgia, serif';ctx.letterSpacing='1px';ctx.fillStyle='#ffe9c4';ctx.shadowColor='rgba(0,0,0,.9)';ctx.shadowBlur=6;
+ ctx.fillText('Wren',px,py-6);ctx.font='10px Georgia, serif';ctx.fillStyle='rgba(140,255,230,.9)';ctx.fillText('Lv 1  ·  Wayfarer',px,py+8);
+ // interaction prompt near plinth
+ const [ix,iy]=proj([7.0,3.2,4.0]);
+ ctx.shadowBlur=8;ctx.fillStyle='rgba(6,14,20,.6)';roundRect(ctx,ix-62,iy-14,124,26,13);ctx.fill();ctx.strokeStyle='rgba(120,255,225,.6)';ctx.stroke();
+ ctx.fillStyle='#e9fff9';ctx.font='12px Georgia, serif';ctx.fillText('[E]  Read inscription',ix,iy+4);
+ ctx.restore();
+ // bottom hint
+ ctx.save();ctx.textAlign='center';ctx.font='11px Georgia, serif';ctx.letterSpacing='4px';ctx.fillStyle='rgba(200,230,225,.45)';ctx.textAlign='right';ctx.fillText('KAETRAM II  ·  TARGET RENDER',W-40,H-26);ctx.restore();
+}
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+render();
+</script></body></html>
