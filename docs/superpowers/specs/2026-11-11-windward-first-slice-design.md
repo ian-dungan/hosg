@@ -6,6 +6,10 @@ Date: 2026-11-11. Status: awaiting owner review.
 
 Prove that Windward feels like a next-gen sequel: a bright 3D world in the browser, deep combat, parties, and many players online together. This slice is the foundation every later round builds on. Story source: `concepts/02-skybound/PITCH.md`.
 
+## World shape
+
+The player starts on solid ground. The first game was a small corner of a much larger continent, which is the main game. The floating islands are the endgame: they are where Ellie and Felix went, visible in the sky from the opening quest and reached only late.
+
 ## Hard requirements
 
 - Runs in a web browser on phones, tablets and computers. No install.
@@ -15,9 +19,9 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 
 ## In scope
 
-1. **Shady Grove** (starting town): a quaint terraced town on the island that carries the original grove, with the Plaza of the Two and the statue of Ellie (pointing) and Felix (spyglass).
-2. **Opening quest, "The Solstice Crossing"**: talk to Old Marrow, watch the beam leave the statue and the Beacon island rise, meet Pim, take the ferry to the Beacon Shelf.
-3. **The Beacon Shelf**: one combat zone with ordinary enemies, a few side quests, and the mega boss arena at the lighthouse.
+1. **Shady Grove** (starting town): a quaint town on solid ground in a green valley, under the old trees it is named for. The statue of Ellie (pointing at the sky) and Felix (spyglass) stands in its square, the Plaza of the Two.
+2. **Opening quest, "The Solstice Crossing"**: talk to Old Marrow, find Pim, read the plaque. The beam leaves the statue and a floating island, the Beacon, appears far off in the sky. Something falls from it into the woods.
+3. **The Greenway**: the woods and old road outside town. One combat zone with ordinary enemies, a few side quests, and the mega boss arena where the thing from the sky landed.
 4. **Controls**
    - Touch: virtual joystick to move, tap to target, ability buttons under the right thumb.
    - Computer: WASD to move, click to target, keys 1 to 5 for abilities.
@@ -33,7 +37,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 6. **Parties**
    - Up to 4 players. Invite by tapping a player. Party health bars. Shared loot rolls.
    - No fixed classes: gear and loadout decide whether you lean damage, healing or tanking.
-7. **Mega boss: the Lighthouse Warden**
+7. **Mega boss: the Fallen Warden** (a stone-and-brass lighthouse keeper that fell from the Beacon)
    - Tuned for 3 average players. It does not get weaker for fewer players; a 4th player adds 25% health.
    - Three phases; each one changes the arena.
    - Fought in a private arena per party (or per solo player) so tuning stays fair.
@@ -44,7 +48,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 
 ## Out of scope (later rounds, each with its own design)
 
-Normandy (the capital sky-port), ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets, player-versus-player, further zones.
+Normandy (the capital), the wider continent, and the endgame sky region (floating islands, ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets), player-versus-player, further zones.
 
 ## Architecture
 

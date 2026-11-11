@@ -105,12 +105,12 @@ async function boot(): Promise<void> {
         await say('Old Marrow', [
           'The greatest adventurers Shady Grove ever raised. Ellie found the way; Felix made it possible.',
           'She never went anywhere without a charcoal stick and a half-drawn map. He mended whatever she broke, and could talk a frightened town into courage.',
-          'When the old land broke apart and rose into the sky, they sailed up past the clouds to hold it together. Nobody here calls them lost.',
+          'When the sky-lands tore loose and drifted off, they built a ship that could sail the wind and went up after them. Nobody here calls them lost.',
         ]);
       } else if (pick === 1) {
         await say('Old Marrow', [
-          'Shady Grove. The very same one, or what is left of it. The old trees came up with us when the land lifted.',
-          'One day there will be ships at that dock again, bound for Normandy and the wide sky. For now it is a quiet town with a good statue.',
+          'Shady Grove. The very same one. Those old trees were shading this square before either of them could walk.',
+          'The east road runs all the way to Normandy, the capital, and the world is a hundred times wider than folk here think. For now it is a quiet town with a good statue.',
         ]);
       } else break;
     }
@@ -118,10 +118,10 @@ async function boot(): Promise<void> {
 
   addNpc(2, 'groveDock', 'Talk to Tamsin', '#3FB0A6', new Vector3(1.5, 0, -1.5), async () => {
     await say('Tamsin, the ferrywoman', [
-      'No ferry today, friend. Nowhere to ferry to. Just cloud, all the way down.',
+      'No ferry today, friend. The river is running high, and the road to Normandy is a long one on foot.',
       done.beacon
-        ? 'Well. There was just cloud. Now there is an island out there, and I have a boat to patch. Come back soon.'
-        : 'My gran swore there was land out where the statue points. Gran also swore gulls could read.',
+        ? 'Well. There is an island. In the sky. I am going to need a much better boat.'
+        : 'My gran swore there was land up where the statue points. In the sky! Gran also swore gulls could read.',
     ]);
   });
 
@@ -164,10 +164,10 @@ async function boot(): Promise<void> {
     }
     hud.setVisible(true);
     done.beacon = true;
-    hud.banner('The Beacon', 'An island rises');
+    hud.banner('The Beacon', 'An island appears in the sky');
     await say('Old Marrow', [
       'Seventy years. They were pointing at something after all.',
-      'That is the end of this little demo, wayfarer. The ships, the Beacon and the wide sky come next.',
+      'That is the end of this little demo, wayfarer. The road, the wide world and, one day, the sky come next.',
     ]);
   }
 
