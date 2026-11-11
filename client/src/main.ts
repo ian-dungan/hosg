@@ -1,7 +1,7 @@
 // Shady Grove 2 — walkable town demo.
 // Joins the world, the player rig, the NPCs and the HUD. No combat, no server.
 import { Color3, Engine, MeshBuilder, Scene, StandardMaterial, Vector3 } from '@babylonjs/core';
-import type { AnchorName, CharacterView, HudState, PlayerRig, TapInfo } from './core/contracts';
+import type { Quality, AnchorName, CharacterView, HudState, PlayerRig, TapInfo } from './core/contracts';
 import { buildWorld } from './world/index';
 import { BEACON_DIR } from './world/layout';
 import { createPlayerRig } from './player/rig';
@@ -36,7 +36,10 @@ async function boot(): Promise<void> {
   const scene = new Scene(engine);
 
   const world = buildWorld(scene);
-  world.setQuality(touch ? 'med' : 'high');
+  // Every device starts on full settings; a device that cannot keep up steps down by itself (see the render loop).
+  let quality: Quality = 'high';
+  world.setQuality(quality);
+  let slowTime = 0, fpsSettle = 4;
   const hud = createHud(hudRoot);
 
   const interactables: Interactable[] = [];
@@ -294,11 +297,23 @@ async function boot(): Promise<void> {
   }
 
   let last = performance.now();
+  let lastFrameMs = last;
   engine.runRenderLoop(() => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
+    // If the frame rate stays under ~28 fps for 4 seconds, drop one quality level.
+    if (fpsSettle > 0) fpsSettle -= dt;
+    else if (quality !== 'low') {
+      slowTime = now - lastFrameMs > 36 ? slowTime + dt : Math.max(0, slowTime - dt * 2);
+      if (slowTime > 4) {
+        quality = quality === 'high' ? 'med' : 'low';
+        world.setQuality(quality);
+        slowTime = 0; fpsSettle = 4;
+      }
+    }
+    lastFrameMs = now;
     rig.update(dt);
     if (walkTarget) {
       // give up if blocked by an obstacle for a moment
