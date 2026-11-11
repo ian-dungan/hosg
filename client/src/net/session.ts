@@ -1,7 +1,8 @@
 // Talking to the Shady Grove 2 server: the accounts API and joining the grove room.
-// The server is the origin that served the page; `?server=http://host:port` points the room
-// connection somewhere else during development (the /api requests stay on the page's origin,
-// which the dev server proxies; see vite.config.ts).
+// The server is the origin that served the page. In development builds only, `?server=http://host:port`
+// points the room connection somewhere else (the /api requests stay on the page's origin, which the
+// dev server proxies; see vite.config.ts). Production builds never read it: a crafted link must not
+// send the player's token to another server.
 import { Client, type Room } from '@colyseus/sdk';
 
 /** One adventurer as the room state shows it (the server's PlayerState). */
@@ -29,16 +30,22 @@ const TOKEN_KEY = 'sg2.token';
 const TIMEOUT_MS = 15_000;
 const UNREACHABLE = 'Cannot reach the server';
 
-/** The room server: `?server=` when it is a valid http(s) URL, else the page's own origin. */
-function serverUrl(): string {
-  const override = new URLSearchParams(location.search).get('server');
-  if (override) {
-    try {
-      const url = new URL(override);
-      if (url.protocol === 'http:' || url.protocol === 'https:') return url.origin;
-    } catch { /* not a URL: use the page's origin */ }
+/**
+ * The room server: the page's own origin, or in a development build `?server=` when it is a valid
+ * http(s) URL. `import.meta.env.DEV` is the constant false in production, so the bundler drops the
+ * override branch entirely.
+ */
+export function serverUrl(page: { origin: string; search: string } = location): string {
+  if (import.meta.env.DEV) {
+    const override = new URLSearchParams(page.search).get('server');
+    if (override) {
+      try {
+        const url = new URL(override);
+        if (url.protocol === 'http:' || url.protocol === 'https:') return url.origin;
+      } catch { /* not a URL: use the page's origin */ }
+    }
   }
-  return location.origin;
+  return page.origin;
 }
 
 /** The token saved for this tab, so a reload resumes; null when there is none or storage is blocked. */
