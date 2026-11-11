@@ -22,3 +22,19 @@ export const CHAT_MAX = 200;
 export const CHAT_MIN_INTERVAL_MS = 1000;
 /** Where new adventurers appear in the grove (south side of the plaza). */
 export const SPAWN = { x: 0, z: -11, facing: 0 } as const;
+/** Downward acceleration in m/s². */
+export const GRAVITY = 22;
+/** Upward speed a jump starts with, in m/s (apex ≈ JUMP_SPEED² / 2·GRAVITY ≈ 1.45 m). */
+export const JUMP_SPEED = 8;
+/** Highest rise an adventurer walks up without jumping, in m. */
+export const STEP_UP = 0.35;
+/** Longest fall that does no damage, in m. */
+export const SAFE_FALL = 3;
+/** Health lost per metre fallen beyond SAFE_FALL. */
+export const FALL_DAMAGE_PER_M = 10;
+/** Full health. */
+export const MAX_HP = 100;
+/** Health regained per second once regeneration starts. */
+export const HP_REGEN_PER_S = 2;
+/** Seconds after taking damage before health starts to regenerate. */
+export const HP_REGEN_DELAY_S = 6;

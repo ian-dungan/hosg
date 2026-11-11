@@ -2,8 +2,10 @@
 // Pure maths — no Babylon imports — so it is cheap and testable, and shared by client and server.
 import { GROVE_OBSTACLES } from './obstacles';
 
-export interface Circle { kind: 'c'; x: number; z: number; r: number }
-export interface Rect { kind: 'r'; x: number; z: number; hw: number; hd: number; c: number; s: number } // yaw rotated
+// `top` is the obstacle's top height in world Y: with it the obstacle is a platform you can stand on
+// (surfaceAt), without it a wall that is never enterable. groundAt treats both as blocked.
+export interface Circle { kind: 'c'; x: number; z: number; r: number; top?: number }
+export interface Rect { kind: 'r'; x: number; z: number; hw: number; hd: number; c: number; s: number; top?: number } // yaw rotated
 export type Obstacle = Circle | Rect;
 
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -181,21 +183,34 @@ export class Walk {
       for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) this.grid[j * GN + i].push(o);
     }
   }
-  private blocked(x: number, z: number) {
+  /** What covers (x, z): -Infinity for nothing, Infinity for a wall, else the highest platform top. */
+  private cover(x: number, z: number): number {
     const i = Math.floor((x - GMIN) / CELL), j = Math.floor((z - GMIN) / CELL);
-    if (i < 0 || j < 0 || i >= GN || j >= GN) return false;
+    if (i < 0 || j < 0 || i >= GN || j >= GN) return -Infinity;
+    let top = -Infinity;
     for (const o of this.grid[j * GN + i]) {
       const dx = x - o.x, dz = z - o.z;
-      if (o.kind === 'c') { if (dx * dx + dz * dz < o.r * o.r) return true; }
+      let inside: boolean;
+      if (o.kind === 'c') inside = dx * dx + dz * dz < o.r * o.r;
       else {
         // local coords: +X right, +Z front for yaw (c = cos yaw, s = sin yaw)
         const lx = dx * o.c - dz * o.s, lz = dx * o.s + dz * o.c;
-        if (Math.abs(lx) < o.hw && Math.abs(lz) < o.hd) return true;
+        inside = Math.abs(lx) < o.hw && Math.abs(lz) < o.hd;
       }
+      if (!inside) continue;
+      if (o.top === undefined) return Infinity;
+      if (o.top > top) top = o.top;
     }
-    return false;
+    return top;
   }
-  groundAt(x: number, z: number): number | null {
+  /** Ground height where an adventurer can stand, or null (out of bounds, water, or any obstacle — platforms included). */
+  groundAt(x: number, z: number): number | null { return this.ground(x, z, false); }
+  /**
+   * Height of whatever an adventurer would stand on at (x, z): the higher of the terrain and the highest
+   * platform top covering the point, or null where groundAt is null for any reason other than a platform.
+   */
+  surfaceAt(x: number, z: number): number | null { return this.ground(x, z, true); }
+  private ground(x: number, z: number, platforms: boolean): number | null {
     const r2 = x * x + z * z;
     if (r2 < TOWN_R * TOWN_R) {
       // ferry jetty over the river
@@ -206,8 +221,10 @@ export class Walk {
       if (r > 86 && r > bandR(Math.atan2(z, x)) - 1) return null;
       const h = groundHeight(x, z);
       if (h < WATER_Y + 0.25 && x < riverX(z) + 22) return null;
-      if (this.blocked(x, z)) return null;
-      return h;
+      const top = this.cover(x, z);
+      if (top === -Infinity) return h;
+      if (!platforms || top === Infinity) return null;
+      return Math.max(h, top);
     }
     if (!this.beaconUp) return null;
     const bx = x - BEACON_C.x, bz = z - BEACON_C.z;
@@ -233,3 +250,7 @@ export function groveGroundY(x: number, z: number): number | null { return defau
 export function groveWalkable(x: number, z: number): boolean { return groveGroundY(x, z) !== null; }
 /** True if an adventurer can stand at (x, z) in the grove town area, which is all the online zone allows (not the Beacon clearing). */
 export function groveTownWalkable(x: number, z: number): boolean { return x * x + z * z < TOWN_R * TOWN_R && groveWalkable(x, z); }
+/** Height of what an adventurer stands on at (x, z) in the grove (terrain or a platform top), or null. */
+export function groveSurface(x: number, z: number): number | null { return defaultWalk().surfaceAt(x, z); }
+/** groveSurface limited to the grove town area (null outside the radius groveTownWalkable uses). */
+export function groveTownSurface(x: number, z: number): number | null { return x * x + z * z < TOWN_R * TOWN_R ? groveSurface(x, z) : null; }
