@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { matchMaker } from '@colyseus/core';
 import { Client } from '@colyseus/sdk';
-import { SPAWN } from '@sg2/shared';
+import { SPAWN, TICK_HZ } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -302,12 +302,21 @@ describe('sessions', () => {
 });
 
 describe('health', () => {
-  it('GET /healthz reports the number of adventurers online', async () => {
+  it('GET /healthz reports adventurers online, the measured patch rate and memory', async () => {
     const { url, store, app } = await start();
-    expect(await (await fetch(`${url}/healthz`)).json()).toEqual({ ok: true, players: 0 });
+    const health = async (): Promise<any> => (await fetch(`${url}/healthz`)).json();
+    expect(await health()).toMatchObject({ ok: true, players: 0 });
     await joinGrove(url, (await accountFor(store, 'Alice')).token);
-    expect(await (await fetch(`${url}/healthz`)).json()).toEqual({ ok: true, players: 1 });
-    expect(app.stats()).toEqual({ players: 1, tickHz: 15 });
+    await sleep(1000);
+    const report = await health();
+    expect(report).toMatchObject({ ok: true, players: 1 });
+    expect(report.tickHz).toBeGreaterThan(TICK_HZ - 2);
+    expect(report.tickHz).toBeLessThanOrEqual(TICK_HZ + 1);
+    expect(report.peakRssMb).toBeGreaterThanOrEqual(report.rssMb);
+    expect(report.rssMb).toBeGreaterThan(0);
+    const stats = app.stats();
+    expect(stats.players).toBe(1);
+    expect(Math.abs(stats.tickHz - report.tickHz)).toBeLessThan(2);
   });
 
   it('serves the client files from clientDir, and the accounts API under /api', async () => {

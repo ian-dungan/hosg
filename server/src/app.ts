@@ -4,7 +4,7 @@ import type { Server as HttpServer } from 'node:http';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, TICK_HZ } from '@sg2/shared';
+import { MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
 import { zoneRoomFor, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
@@ -23,6 +23,7 @@ export interface AppOptions {
 export interface App {
   listen(port: number): Promise<void>;
   close(): Promise<void>;
+  /** Adventurers online, and state patches sent per second over the last 5 s. */
   stats(): { players: number; tickHz: number };
 }
 
@@ -32,6 +33,8 @@ const MAX_WS_PAYLOAD = 16 * 1024;
 export function createApp(opts: AppOptions): App {
   const live = new Set<ZoneRoom>();
   const players = () => [...live].reduce((n, room) => n + room.playerCount, 0);
+  const tickHz = () => Math.round(([...live][0]?.measuredPatchHz ?? 0) * 10) / 10;
+  const stats = () => ({ players: players(), tickHz: tickHz() });
 
   const transport = new WebSocketTransport({ maxPayload: MAX_WS_PAYLOAD });
   const gameServer = new Server({
@@ -41,7 +44,10 @@ export function createApp(opts: AppOptions): App {
     express: (app) => {
       app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute }));
       app.get('/healthz', (_req, res) => {
-        res.json({ ok: true, players: players() });
+        // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
+        const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
+        const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
+        res.json({ ok: true, ...stats(), rssMb, peakRssMb });
       });
       if (opts.clientDir) app.use(express.static(opts.clientDir));
     },
@@ -72,8 +78,6 @@ export function createApp(opts: AppOptions): App {
       await closed;
     },
 
-    stats() {
-      return { players: players(), tickHz: TICK_HZ };
-    },
+    stats,
   };
 }

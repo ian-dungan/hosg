@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "bots": "tsx scripts/bots.ts"
   },
   "devDependencies": {
     "@colyseus/sdk": "^0.18.10",

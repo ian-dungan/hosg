@@ -14,6 +14,7 @@ import {
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
 import type { Store } from '../store/types';
+import { PatchRateMeter } from './patchRate';
 import { PlayerState, ZoneState } from './state';
 
 export interface ZoneRoomOptions {
@@ -89,6 +90,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private sessionByAccount = new Map<string, string>(); // accountId -> sessionId
   /** Movement allowances by account id, kept across kick and re-join so a new session gets no fresh budget. */
   private allowances = new Map<string, Allowance>();
+  private patchMeter = new PatchRateMeter(Date.now());
 
   onCreate(options: ZoneRoomOptions) {
     if (options.live.size > 0) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON); // never a second grove
@@ -174,6 +176,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** Whether an account may join: it is already here (its old session will be kicked), or there is space. */
   canAdmit(accountId: string): boolean {
     return this.sessionByAccount.has(accountId) || this.sessionByAccount.size < this.maxPlayers;
+  }
+
+  /** State patches actually sent per second over the last 5 s (TICK_HZ when the server keeps up). */
+  get measuredPatchHz(): number {
+    return this.patchMeter.rate(Date.now());
+  }
+
+  broadcastPatch(): boolean {
+    this.patchMeter.record(Date.now());
+    return super.broadcastPatch();
   }
 
   /** Adventurers in this room, including ones inside their reconnect window. */
