@@ -31,10 +31,10 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
 
   const sunDir = new Vector3(-SUN_DIR[0], -SUN_DIR[1], -SUN_DIR[2]);
   const sun = new DirectionalLight('world_sun', sunDir, scene);
-  sun.diffuse = C3('#ffe2b8'); sun.specular = new Color3(0, 0, 0); sun.intensity = 0.95;
+  sun.diffuse = C3('#ffe2b8'); sun.specular = new Color3(0, 0, 0); sun.intensity = 0.88;
   sun.position = new Vector3(SUN_DIR[0] * 90, SUN_DIR[1] * 90, SUN_DIR[2] * 90);
   const hemi = new HemisphericLight('world_fill', new Vector3(0.1, 1, 0.2), scene);
-  hemi.diffuse = C3('#b9cdf0'); hemi.groundColor = C3('#8a6f9a'); hemi.specular = new Color3(0, 0, 0); hemi.intensity = 0.62;
+  hemi.diffuse = C3('#d2dcf2'); hemi.groundColor = C3('#a7889f'); hemi.specular = new Color3(0, 0, 0); hemi.intensity = 0.78;
 
   // ───── materials ─────
   const litMat = (name: string, emissive = 0) => {
@@ -44,7 +44,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     return m;
   };
   const mLit = litMat('world_lit');
-  const mCloud = litMat('world_cloud', 0.5); mCloud.diffuseColor = new Color3(0.62, 0.6, 0.62);
+  const mCloud = litMat('world_cloud', 0.84); mCloud.diffuseColor = new Color3(0.24, 0.22, 0.24);
   const mWater = litMat('world_water', 0.65); mWater.diffuseColor = new Color3(0.4, 0.4, 0.4);
   const mGlow = new StandardMaterial('world_glow', scene);
   mGlow.disableLighting = true; mGlow.emissiveColor = new Color3(1, 1, 1);
@@ -164,7 +164,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
         shadow = new ShadowGenerator(size, sun);
         shadow.usePercentageCloserFiltering = true;
         shadow.filteringQuality = q === 'high' ? ShadowGenerator.QUALITY_MEDIUM : ShadowGenerator.QUALITY_LOW;
-        shadow.bias = 0.002; shadow.normalBias = 0.02; shadow.darkness = 0.35;
+        shadow.bias = 0.006; shadow.normalBias = 0.05; shadow.darkness = 0.35;
         for (const c of casters) shadow.addShadowCaster(c, false);
         sun.autoCalcShadowZBounds = true;
         for (const m of [mTown, mStatue, mProps, beaconRoot, beaconRing]) m.receiveShadows = true;

@@ -228,8 +228,8 @@ const CSS = /* css */ `
   background:linear-gradient(90deg,rgba(255,226,160,0),rgba(255,226,160,.9),rgba(255,226,160,0))}
 .sg-banner-rule i{position:absolute;left:50%;top:50%;width:9px;height:9px;background:var(--goldl);transform:translate(-50%,-50%) rotate(45deg)}
 .sg-toasts{position:absolute;left:0;right:0;top:calc(var(--st) + 31%);display:flex;flex-direction:column;align-items:center;gap:6px;padding:0 var(--g)}
-.sg-toast{padding:7px 16px;border-radius:16px;background:rgba(20,25,50,.62);font-size:14px;font-weight:500;
-  box-shadow:0 0 0 1px rgba(255,226,160,.22);text-align:center;max-width:100%}
+.sg-toast{padding:8px 18px;border-radius:18px;background:rgba(20,25,50,.74);font-size:15px;font-weight:500;
+  box-shadow:0 0 0 1px rgba(255,226,160,.4),0 4px 14px rgba(10,10,40,.2);text-align:center;max-width:100%}
 
 /* ───────── modal shared ───────── */
 .sg-modals>*{position:absolute;inset:0;opacity:0;transition:opacity .35s ease}
@@ -250,7 +250,7 @@ const CSS = /* css */ `
 .sg-dlg{display:flex;align-items:flex-end;justify-content:center;
   padding:0 calc(var(--sr) + var(--g)) calc(var(--sb) + var(--g) + 8px) calc(var(--sl) + var(--g));
   background:linear-gradient(180deg,transparent 45%,rgba(14,14,36,.4))}
-.sg-dlg-panel{position:relative;width:min(760px,100%);padding:26px 28px 14px;border-radius:18px;
+.sg-dlg-panel{position:relative;width:min(820px,100%);padding:30px 32px 14px;border-radius:18px;
   background:linear-gradient(180deg,rgba(26,30,64,.86),rgba(16,18,42,.92));
   box-shadow:0 0 0 1px rgba(255,214,140,.32),0 12px 40px rgba(10,10,40,.4);
   transform:translateY(16px);transition:transform .35s cubic-bezier(.2,.8,.2,1)}
@@ -258,9 +258,9 @@ const CSS = /* css */ `
 .sg-dlg-panel::before{content:"";position:absolute;left:18px;right:18px;top:7px;height:1px;
   background:linear-gradient(90deg,transparent,rgba(255,226,160,.35),transparent)}
 .sg-dlg-name{position:absolute;left:22px;top:0;transform:translateY(-55%);padding:5px 18px 6px;border-radius:16px;
-  font:italic 600 19px/1 var(--serif);color:#3a2508;text-shadow:none;
+  font:italic 600 21px/1 var(--serif);color:#3a2508;text-shadow:none;
   background:linear-gradient(180deg,#ffe49a,#F2B742);box-shadow:0 3px 10px rgba(10,10,40,.3)}
-.sg-dlg-text{font:400 18px/1.55 var(--serif);color:#fffaf0;min-height:3.1em}
+.sg-dlg-text{font:400 21px/1.55 var(--serif);color:#fffaf0;min-height:3.1em}
 .sg-dlg-ghost{color:transparent;text-shadow:none}
 .sg-dlg-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px;min-height:20px}
 .sg-dlg-pips{display:flex;gap:5px}
@@ -344,7 +344,7 @@ const CSS = /* css */ `
   .sg-tl{width:calc(50vw - 1.5 * var(--g))}
   .sg-quest{top:calc(var(--st) + var(--g) + 64px)}
   .sg-toasts{top:calc(var(--st) + 44%)}
-  .sg-banner{top:calc(var(--st) + 22vh)}
+  .sg-banner{top:calc(var(--st) + 30vh)}
   .sg-pf{padding:6px 10px 7px 6px;gap:8px}
   .sg-pf-emblem{width:38px;height:38px}.sg-pf-emblem span{font-size:16px}
   .sg-pf-name{font-size:15px}
@@ -359,6 +359,7 @@ const CSS = /* css */ `
   .sg-banner-kicker{font-size:12px;letter-spacing:.34em}
   .sg-dlg-panel{padding:24px 18px 12px}
   .sg-dlg-text{font-size:17px}
+  .sg-dlg-name{font-size:18px}
   .sg-title-credit{font-size:14px}
 }
 @media (max-width:700px),(max-height:500px){
@@ -376,8 +377,13 @@ const CSS = /* css */ `
   .sg-tl{width:220px}
   .sg-tf{left:calc(var(--sl) + var(--g) + 232px);width:210px}
   .sg-pf-emblem{width:36px;height:36px}
-  .sg-banner{top:calc(var(--st) + 8vh)}
-  .sg-banner-title{font-size:30px}
+  .sg-banner{top:calc(var(--st) + 28vh)}
+  .sg-banner-title{font-size:27px}
+  .sg-banner-kicker{font-size:11px;letter-spacing:.34em;margin-bottom:2px}
+  .sg-banner-rule{margin-top:8px}
+  .sg-dlg-panel{padding:20px 20px 10px}
+  .sg-dlg-choices{flex-direction:row;flex-wrap:wrap}
+  .sg-choice{flex:1 1 30%;min-height:44px;font-size:15px}
   .sg-touch .sg-castslot{bottom:calc(var(--sb) + 104px)}
   .sg-touch .sg-promptrow{bottom:calc(var(--sb) + 18px)}
   .sg-joyzone{height:72vh}

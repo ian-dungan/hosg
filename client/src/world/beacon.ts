@@ -41,7 +41,7 @@ export function buildBeacon(k: Kit, ring: Builder, water: Builder) {
   // gate pillars
   const gx = ax + BEACON_U.x * 15.8, gz = az + BEACON_U.z * 15.8;
   for (const s of [-3, 3]) b.box(gx + BEACON_PERP.x * s, T + 2.5, gz + BEACON_PERP.z * s, 1.0, 5, 1.0, PAL.plinth, PAL.gold);
-  b.box(gx, T + 5.3, gz, 0.8 + Math.abs(BEACON_PERP.x) * 6.4, 0.6, 0.8 + Math.abs(BEACON_PERP.z) * 6.4, PAL.roof1);
+  b.prism([gx - BEACON_PERP.x * 3.6, T + 5.3, gz - BEACON_PERP.z * 3.6], [gx + BEACON_PERP.x * 3.6, T + 5.3, gz + BEACON_PERP.z * 3.6], 0.5, 0.5, 4, PAL.roof1, { rot: Math.PI / 4 });
   // striped lighthouse
   const [lx, lz] = L(LIGHTHOUSE.x, LIGHTHOUSE.z);
   lighthouse(k, lx, T, lz, 2.8, 16);

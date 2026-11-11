@@ -52,9 +52,10 @@ export class Joystick {
     this.knob.style.transform = `translate(-50%,-50%) translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`;
     const m = Math.min(1, d / R);
     if (m < DEAD) { this.vx = 0; this.vy = 0; return; }
-    const k = (m - DEAD) / (1 - DEAD) / (d || 1) * R;
-    this.vx = Math.max(-1, Math.min(1, (dx / R) * k));
-    this.vy = Math.max(-1, Math.min(1, (-dy / R) * k));
+    const sc = (m - DEAD) / (1 - DEAD);
+    const len = Math.hypot(dx, dy) || 1;
+    this.vx = Math.max(-1, Math.min(1, (dx / len) * sc));
+    this.vy = Math.max(-1, Math.min(1, (-dy / len) * sc));
   }
   reset(): void {
     this.pid = null; this.vx = 0; this.vy = 0;

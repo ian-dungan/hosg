@@ -52,18 +52,21 @@ const H = (deg: number, r: number, w: number, d: number, h: number, roof: HouseD
   const a = deg * Math.PI / 180, x = Math.cos(a) * r, z = Math.sin(a) * r;
   return { x, z, w, d, h, yaw: Math.atan2(-x, -z) + yawOff, roof, wall, chimney };
 };
+const streetHouse = (t: number, w: number, d: number, h: number, roof: HouseDef['roof'], wall: HouseDef['wall'], chimney = false): HouseDef => ({
+  x: BEACON_DIR.x * t - PERP.x * 8.4, z: BEACON_DIR.z * t - PERP.z * 8.4, w, d, h, yaw: Math.atan2(PERP.x, PERP.z), roof, wall, chimney,
+});
 export const HOUSES: HouseDef[] = [
-  H(70, 25, 5.2, 4.4, 4.2, 'roof', 0, true),
-  H(93, 27, 4.6, 4.2, 5.4, 'teal', 1),
-  H(117, 24, 5.0, 4.4, 4.0, 'roof2', 2, true, 0.15),
-  H(82, 39, 5.6, 4.6, 4.6, 'orange', 1, true),
-  H(105, 39, 4.8, 4.4, 5.6, 'roof', 0),
-  H(192, 25, 5.0, 4.4, 4.4, 'teal', 0, true, -0.1),
-  H(216, 30, 5.4, 4.6, 4.0, 'roof', 2),
-  H(242, 26, 4.6, 4.2, 5.2, 'roof2', 1, true),
-  H(270, 32, 5.6, 4.6, 4.2, 'orange', 0, true),
-  H(300, 25, 4.8, 4.4, 4.6, 'teal', 2),
-  H(200, 40, 5.0, 4.4, 4.2, 'roof', 1, true, 0.2),
+  H(64, 21, 5.2, 4.4, 4.2, 'roof', 0, true),
+  H(119, 20.5, 5.0, 4.4, 4.0, 'roof2', 2, true, 0.1),
+  H(80, 32, 5.6, 4.6, 4.6, 'orange', 1, true),
+  H(103, 31, 4.6, 4.2, 5.4, 'teal', 1),
+  streetHouse(35, 5.4, 4.6, 5.2, 'teal', 0, true),
+  H(196, 21.5, 5.0, 4.4, 4.4, 'teal', 0, true, -0.1),
+  H(218, 30, 5.4, 4.6, 4.0, 'roof', 2),
+  H(243, 21, 4.6, 4.2, 5.2, 'roof2', 1, true),
+  H(284, 31, 5.6, 4.6, 4.2, 'orange', 0, true),
+  H(304, 21.5, 4.8, 4.4, 4.6, 'teal', 2),
+  H(201, 40, 5.0, 4.4, 4.2, 'roof', 1, true, 0.2),
 ];
 
 export const STALLS = [

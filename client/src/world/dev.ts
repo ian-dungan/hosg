@@ -1,7 +1,7 @@
 // Dev harness for the world: free camera + debug keys. Open /dev/world.html.
 // Keys: B raise Beacon, 1/2/3 arena phase, G walkability overlay, L/M/H quality.
 // URL: ?cam=alpha,beta,radius,tx,ty,tz&q=low|med|high&beacon=1&phase=2&grid=1
-import { Engine, Scene, ArcRotateCamera, Vector3, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
+import { SceneInstrumentation, Engine, Scene, ArcRotateCamera, Vector3, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
 import { buildWorld } from './index';
 import type { Quality } from '../core/contracts';
 
@@ -9,6 +9,7 @@ const canvas = document.getElementById('c') as HTMLCanvasElement;
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
 const scene = new Scene(engine);
 const world = buildWorld(scene);
+const instr = new SceneInstrumentation(scene); instr.captureFrameTime = false;
 const qs = new URLSearchParams(location.search);
 
 const start = world.anchor('playerStart');
@@ -55,24 +56,25 @@ window.addEventListener('keydown', e => {
 
 const info = document.getElementById('info')!;
 let fastForward = 0;
-if (qs.get('beacon')) { world.raiseBeacon(); fastForward = 9; }
+if (qs.get('beacon')) { world.raiseBeacon(); fastForward = Number(qs.get('beacon')) || 9; }
 if (qs.get('phase')) world.setArenaPhase(Number(qs.get('phase')) as 1 | 2 | 3);
 if (qs.get('grid')) setTimeout(toggleGrid, fastForward ? 50 : 0);
 let frames = 0;
 engine.runRenderLoop(() => {
   const dt = engine.getDeltaTime() / 1000;
-  if (fastForward > 0) { for (let i = 0; i < 90; i++) world.update(0.1); fastForward = 0; }
+  if (fastForward > 0) { for (let i = 0; i < fastForward * 10; i++) world.update(0.1); fastForward = 0; }
   world.update(Math.min(dt, 0.1));
   scene.render();
   if (++frames % 15 === 0) {
     const active = scene.getActiveMeshes();
     let tris = 0; for (let i = 0; i < active.length; i++) tris += active.data[i].getTotalIndices() / 3;
-    const st = { fps: Math.round(engine.getFps()), draws: (engine as any)._drawCalls?.current ?? 0, activeMeshes: active.length, tris: Math.round(tris), q };
+    const st = { fps: Math.round(engine.getFps()), draws: instr.drawCallsCounter.current, activeMeshes: active.length, tris: Math.round(tris), q };
     (window as any).__stats = st;
     info.textContent = `fps ${st.fps}  meshes ${st.activeMeshes}  tris ${st.tris}  q ${q}\nB beacon  1/2/3 phase  G grid  L/M/H quality\ncam ${cam.alpha.toFixed(2)},${cam.beta.toFixed(2)},${cam.radius.toFixed(1)},${cam.target.x.toFixed(1)},${cam.target.y.toFixed(1)},${cam.target.z.toFixed(1)}`;
   }
   (window as any).__frames = frames;
 });
 (window as any).__world = world;
+(window as any).__totals = () => { let t = 0; for (const m of scene.meshes) if (m.isEnabled() && m.name !== 'grid') t += m.getTotalIndices() / 3; return { meshes: scene.meshes.filter(m => m.isEnabled()).length, tris: Math.round(t) }; };
 (window as any).__scene = scene;
 window.addEventListener('resize', () => engine.resize());

@@ -168,7 +168,7 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   b.box(2.6, 2.75, tv.d / 2 + 1.15, 0.08, 1.0, 1.25, PAL.roof3);
   b.box(2.6, 2.75, tv.d / 2 + 1.15, 0.12, 0.5, 0.36, PAL.gold);
   // Pim: carved figurehead above the door, leaning out over the street
-  b.push(); b.T(0, 3.9, tv.d / 2 + 0.15); b.RX(0.7); b.SC(1.35);
+  b.push(); b.T(0, 4.1, tv.d / 2 + 0.2); b.RX(0.62); b.SC(2.0);
   b.box(0, -0.1, -0.1, 0.5, 0.25, 0.25, PAL.woodDark); // bracket
   b.taperBox([0, -0.2, 0.08], 0.36, 0.26, [0, 0.55, 0.18], 0.46, 0.3, PAL.woodLight);
   b.prism([0, 0.15, 0.14], [0, 0.42, 0.2], 0.25, 0.25, 8, PAL.roof3, { caps: false }); // teal sash
@@ -220,20 +220,18 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   // bunting across the plaza between lamps, and over the main street
   const lp = (i: number, y: number): V3 => [LAMPS[i].x, y, LAMPS[i].z];
   const bcols = [PAL.roof1, hex('#ffd36a'), PAL.roof3, PAL.sail];
-  bunting(props.b, lp(0, 3.2), lp(1, 3.2), 0.6, 12, bcols);
-  bunting(props.b, lp(1, 3.2), lp(2, 3.2), 0.7, 14, bcols);
-  bunting(props.b, lp(2, 3.2), lp(3, 3.2), 0.6, 10, bcols);
-  bunting(props.b, lp(4, 3.2), lp(5, 3.2), 0.6, 10, bcols);
-  bunting(props.b, lp(5, 3.2), lp(6, 3.2), 0.6, 10, bcols);
-  bunting(props.b, lp(6, 3.2), lp(7, 3.2), 0.6, 10, bcols);
-  bunting(props.b, lp(7, 3.2), lp(0, 3.2), 0.6, 10, bcols);
-  // bunting from the plinth to some lamps (festival)
-  for (const i of [0, 2, 4, 6]) bunting(props.b, [Math.cos(Math.atan2(LAMPS[i].z, LAMPS[i].x)) * 2.4, 3.0, Math.sin(Math.atan2(LAMPS[i].z, LAMPS[i].x)) * 2.4], lp(i, 3.25), 0.8, 9, bcols);
+  bunting(b, lp(0, 3.2), lp(1, 3.2), 0.6, 12, bcols);
+  bunting(b, lp(1, 3.2), lp(2, 3.2), 0.7, 14, bcols);
+  bunting(b, lp(2, 3.2), lp(3, 3.2), 0.6, 10, bcols);
+  bunting(b, lp(4, 3.2), lp(5, 3.2), 0.6, 10, bcols);
+  bunting(b, lp(5, 3.2), lp(6, 3.2), 0.6, 10, bcols);
+  bunting(b, lp(6, 3.2), lp(7, 3.2), 0.6, 10, bcols);
+  bunting(b, lp(7, 3.2), lp(0, 3.2), 0.6, 10, bcols);
   for (const t of [22, 32, 42]) {
     const a: V3 = [BEACON_DIR.x * t + PERP.x * 3.6, 0, BEACON_DIR.z * t + PERP.z * 3.6], c: V3 = [BEACON_DIR.x * t - PERP.x * 3.6, 0, BEACON_DIR.z * t - PERP.z * 3.6];
     a[1] = H(a[0], a[2]) + 4.6; c[1] = H(c[0], c[2]) + 4.6;
     for (const p of [a, c]) { b.prism([p[0], p[1] - 4.9, p[2]], [p[0], p[1] + 0.1, p[2]], 0.08, 0.06, 5, PAL.woodDark); obs.push(circ(p[0], p[2], 0.3)); }
-    bunting(props.b, a, c, 0.7, 11, bcols);
+    bunting(b, a, c, 0.7, 11, bcols);
   }
   // flags on the plaza rim
   flag(b, [Math.cos(DOCK_ANGLE + 0.45) * 13.0, 0, Math.sin(DOCK_ANGLE + 0.45) * 13.0], 6.5, PAL.roof3, -1);
@@ -241,7 +239,7 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   obs.push(circ(Math.cos(DOCK_ANGLE + 0.45) * 13.0, Math.sin(DOCK_ANGLE + 0.45) * 13.0, 0.3));
   obs.push(circ(Math.cos(DOCK_ANGLE - 0.45) * 13.0, Math.sin(DOCK_ANGLE - 0.45) * 13.0, 0.3));
   // benches around the plaza
-  for (const a of [0.2, 1.4, 2.6, 4.7, 5.4]) {
+  for (const a of [0.2, 1.4, 2.6, 4.25, 5.4]) {
     const x = Math.cos(a) * 9.4, z = Math.sin(a) * 9.4, yaw = Math.atan2(-x, -z);
     b.push(); b.T(x, 0.04, z); b.RY(yaw);
     b.box(0, 0.45, 0, 1.8, 0.1, 0.5, PAL.woodLight); b.box(0, 0.8, -0.25, 1.8, 0.4, 0.08, PAL.woodLight);
@@ -318,6 +316,48 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   const fp = dp(DOCK_START + DOCK_LEN - 4.5, DOCK_HW + 3.0, DOCK_Y - 1.4);
   ship(k, fp[0], fp[1], fp[2], Math.atan2(du.x, du.z), 0.55, { masts: 1, stripe: PAL.roof3, wing: hex('#ff9a6a') });
 
+  // ───── cosy extras: well, kitchen gardens, hay, lane lamps ─────
+  {
+    const wx = -14, wz = -28, wy = H(wx, wz);
+    b.prism([wx, wy - 0.3, wz], [wx, wy + 0.9, wz], 1.1, 1.1, 10, PAL.plinth, { capB: hex('#3f6f9a') });
+    for (const s of [-0.9, 0.9]) b.prism([wx + s, wy + 0.9, wz], [wx + s, wy + 2.6, wz], 0.08, 0.08, 4, PAL.woodDark);
+    b.prism([wx - 1.3, wy + 2.5, wz], [wx, wy + 3.3, wz], 0.05, 0.05, 4, PAL.roof1); b.prism([wx + 1.3, wy + 2.5, wz], [wx, wy + 3.3, wz], 0.05, 0.05, 4, PAL.roof1);
+    b.withHint([wx, wy + 2.4, wz], () => { b.quad([wx - 1.4, wy + 2.45, wz - 0.9], [wx, wy + 3.35, wz - 0.9], [wx, wy + 3.35, wz + 0.9], [wx - 1.4, wy + 2.45, wz + 0.9], PAL.roof1); b.quad([wx + 1.4, wy + 2.45, wz - 0.9], [wx, wy + 3.35, wz - 0.9], [wx, wy + 3.35, wz + 0.9], [wx + 1.4, wy + 2.45, wz + 0.9], PAL.roof1); });
+    b.prism([wx, wy + 1.9, wz], [wx, wy + 1.4, wz], 0.22, 0.2, 6, PAL.wood);
+    obs.push(circ(wx, wz, 1.4));
+  }
+  for (const h of HOUSES) {
+    // kitchen garden behind each house: low fence + rows of greens
+    const c = Math.cos(h.yaw), s = Math.sin(h.yaw);
+    const L = (lx: number, lz: number): [number, number] => [h.x + c * lx + s * lz, h.z - s * lx + c * lz];
+    const gz0 = -h.d / 2 - 1.2, gz1 = gz0 - 3.2, gw = h.w / 2;
+    const [mx, mz] = L(0, (gz0 + gz1) / 2);
+    if (Math.hypot(mx, mz) > groveR(Math.atan2(mz, mx)) - 3 || onPath(mx, mz, 2)) continue;
+    for (let r = 0; r < 3; r++) for (let q = 0; q < 5; q++) {
+      const [px, pz] = L(-gw + 0.6 + q * (2 * gw - 1.2) / 4, gz0 - 0.6 - r * 1.0);
+      props.b.ball([px, H(px, pz) + 0.18, pz], 0.26, r === 1 ? hex('#ff8a3c') : PAL.leaf1, 1, 0.7, 1, 0, 0.3, PAL.grassDark);
+    }
+    const corners = [L(-gw, gz0), L(-gw, gz1), L(gw, gz1), L(gw, gz0)];
+    for (let i = 0; i < 3; i++) {
+      const [ax, az] = corners[i], [bx, bz] = corners[i + 1];
+      const ya = H(ax, az), yb = H(bx, bz);
+      props.b.prism([ax, ya + 0.55, az], [bx, yb + 0.55, bz], 0.04, 0.04, 4, PAL.wall, { caps: false });
+      const n = Math.max(2, Math.round(Math.hypot(bx - ax, bz - az) / 0.8));
+      for (let j = 0; j <= n; j++) { const px = ax + (bx - ax) * j / n, pz = az + (bz - az) * j / n; props.b.prism([px, H(px, pz) - 0.1, pz], [px, H(px, pz) + 0.75, pz], 0.06, 0.03, 4, PAL.wall); }
+    }
+  }
+  // hay bales by the windmill
+  for (const [ox, oz] of [[3, 2], [3.6, 3.4], [2.2, 3.6]]) { const x = WINDMILL.x + ox, z = WINDMILL.z + oz; b.prism([x - 0.5, H(x, z) + 0.45, z], [x + 0.5, H(x, z) + 0.45, z], 0.5, 0.5, 8, hex('#f2c66a')); obs.push(circ(x, z, 0.7)); }
+  // lamps along the lanes
+  for (const p of PATHS.slice(1)) {
+    for (const t of [0.45, 0.9]) {
+      const x = p.a[0] + (p.b[0] - p.a[0]) * t, z = p.a[1] + (p.b[1] - p.a[1]) * t;
+      const L = Math.hypot(p.b[0] - p.a[0], p.b[1] - p.a[1]); const nx = -(p.b[1] - p.a[1]) / L, nz = (p.b[0] - p.a[0]) / L;
+      const lx = x + nx * (p.w / 2 + 0.6), lz = z + nz * (p.w / 2 + 0.6);
+      lantern(k, lx, H(lx, lz), lz, 3.0, Math.atan2(-nx, -nz) - Math.PI / 2); obs.push(circ(lx, lz, 0.35));
+    }
+  }
+
   // ───── scatter: shrubs, flowers, grass tufts (props mesh) ─────
   const pb = props.b; const rng = pb.rng;
   const blocked = (x: number, z: number, pad: number) => {
@@ -329,13 +369,13 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     }
     return false;
   };
-  for (let i = 0; i < 520; i++) {
+  for (let i = 0; i < 420; i++) {
     const a = rng.r(0, 6.283), r = Math.sqrt(rng.next()) * 50; const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (blocked(x, z, 0.3)) continue;
     const y = H(x, z); const q = rng.next();
     if (q < 0.22) pb.ball([x, y + 0.3, z], rng.r(0.5, 0.85), PAL.leaf2, 1.2, 0.75, 1, 0, 0.3, PAL.grassDark);
-    else if (q < 0.5) for (let j = 0; j < 4; j++) pb.ball([x + rng.r(-0.45, 0.45), y + 0.2, z + rng.r(-0.45, 0.45)], 0.16, [PAL.blossom, hex('#ffd36a'), PAL.white, hex('#ff7a5c')][Math.floor(rng.r(0, 4))], 1, 0.8, 1, 0);
-    else for (let j = 0; j < 3; j++) pb.prism([x + rng.r(-0.3, 0.3), y - 0.05, z + rng.r(-0.3, 0.3)], [x + rng.r(-0.45, 0.45), y + rng.r(0.45, 0.85), z + rng.r(-0.45, 0.45)], 0.12, 0, 3, j % 2 ? PAL.grass2 : PAL.grassDark);
+    else if (q < 0.36) for (let j = 0; j < 5; j++) pb.ball([x + rng.r(-0.45, 0.45), y + 0.2, z + rng.r(-0.45, 0.45)], 0.16, [PAL.blossom, hex('#ffd36a'), PAL.white, hex('#ff7a5c')][Math.floor(rng.r(0, 4))], 1, 0.8, 1, 0);
+    else for (let j = 0; j < 3; j++) pb.prism([x + rng.r(-0.3, 0.3), y - 0.05, z + rng.r(-0.3, 0.3)], [x + rng.r(-0.45, 0.45), y + rng.r(0.3, 0.55), z + rng.r(-0.45, 0.45)], 0.1, 0, 3, j % 2 ? PAL.grass2 : PAL.grassDark);
   }
   void tint;
   return { obstacles: obs, pimGround, pimFacing, windmillHub: hub, windmillYaw: wyaw, ferry: fp };

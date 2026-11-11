@@ -57,7 +57,7 @@ export class Overlays {
       const next = h('div', 'sg-dlg-next', foot);
       next.textContent = this.isTouch() ? 'Tap to continue' : 'Enter to continue';
       const chWrap = h('div', 'sg-dlg-choices', panel);
-      let li = 0, chars = 0, typing = false, raf = 0, last = 0, sel = 0, finished = false;
+      let li = 0, chars = 0, typing = false, raf = 0, last = 0, sel = 0, finished = false, shownAt = 0;
       let choiceEls: HTMLElement[] = [];
       const CPS = 48;
       const tick = (t: number) => {
@@ -86,13 +86,14 @@ export class Overlays {
       };
       const showChoices = () => {
         root.classList.add('choosing');
+        shownAt = performance.now();
         choiceEls = choices.map((c, i) => {
           const b = h('div', 'sg-choice', chWrap);
           if (!this.isTouch()) h('span', 'sg-choice-key', b, String(i + 1));
           h('span', '', b, c);
           b.style.animationDelay = i * 70 + 'ms';
           b.addEventListener('pointerenter', () => setSel(i));
-          b.addEventListener('click', (e) => { e.stopPropagation(); finish(i); });
+          b.addEventListener('click', (e) => { e.stopPropagation(); if (performance.now() - shownAt > 350) finish(i); });
           b.addEventListener('pointerdown', (e) => e.stopPropagation());
           return b;
         });
