@@ -143,8 +143,8 @@ export class Overlays {
       const play = h('div', 'sg-btn sg-btn-gold sg-title-play', box, 'Play');
       const hint = h('div', 'sg-title-hint', box);
       const items = this.isTouch()
-        ? [['Left thumb', 'move'], ['Drag', 'look around'], ['Tap', 'talk & target'], ['Pinch', 'zoom']]
-        : [['WASD', 'move'], ['Drag', 'look around'], ['E', 'talk'], ['Click', 'target'], ['Wheel', 'zoom']];
+        ? [['Left thumb', 'move'], ['Drag', 'look around'], ['Tap', 'walk & talk'], ['Pinch', 'zoom']]
+        : [['WASD', 'move'], ['Drag', 'look around'], ['E', 'talk'], ['Click', 'walk & talk'], ['Wheel', 'zoom']];
       for (const [k, v] of items) { const s = h('span', '', hint); h('b', '', s, k); s.append(' ' + v); }
       const go = () => { off(); this.close(root); resolve(); };
       play.addEventListener('click', go);
