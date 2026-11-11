@@ -163,11 +163,6 @@ function win(L,E,x,y,lit,shut){
   L.rect(x-1,y+6,6,1,'#4a3026');
   for(let i=0;i<6;i++){const r=hash(x+i,y);L.px(x-1+i,y+5+(r>.5?0:-0),r>.66?'#d8506a':r>.33?'#f0b24a':'#3e6a44');}
 }
-function roofTiles(L,pts,top,bot,base,dark,lite,rim){
-  rPoly(pts,(x,y)=>{const r=(y-top)%3;let c=r===2?dark:base;if(r===0&&((x+Math.floor((y-top)/3)*2)%4===0))c=dark;if(r===1&&hash(x,y)>.93)c=lite;L.px(x,y,c);});
-  // sky rim along the top edge
-  for(let x=0;x<W;x++)for(let y=top-1;y<bot;y++){if(L.al(x,y)&&!L.al(x,y-1)){/* only on this roof */let inside=false;rPoly(pts,()=>{});L.px(x,y,rim);break;}}
-}
 function sideRoof(L,x,w,top,rh,pal){
   const pts=[[x-4,top+1],[x+w+4,top+1],[x+w+1,top-rh],[x-1,top-rh]];
   const tmp=new Layer();
@@ -359,7 +354,7 @@ function sculpt(){
     if(over){const i=Math.max(0,RAMP.indexOf(c)-2);c=p.kind==='metal'?MRAMP[Math.max(0,MRAMP.indexOf(c)-2)]:RAMP[i];}
     if(rim>.62)c=col('#fff3cc');else if(rim>.48)c=col('#ffcf8e');else if(rim>.36)c=col('#d88a7a');
     main.px(x,y,c);if(rim>.48)eMain.px(x,y,c);}
-  light(LANTERN.x,LANTERN.y,70,[120,80,30]);light(LANTERN.x,LANTERN.y,22,[110,80,40]);
+  light(LANTERN.x,LANTERN.y,70,[120,80,30]);light(214,112,46,[90,55,25]);light(LANTERN.x,LANTERN.y,22,[110,80,40]);
 }
 
 // ============================== PROPS ======================================
@@ -581,11 +576,7 @@ X.drawImage(E,0,0);
   const N=64;for(let i=0;i<N;i++){const s=1+i*.03,a=.06*(1-i/N);rg.globalAlpha=a;rg.setTransform(s,0,0,s,SUN.x*2*(1-s),SUN.y*2*(1-s));rg.drawImage(c,0,0);}
   const sm0=new Layer();for(let i=0;i<W*H;i++)if(statueMask[i])sm0.d[i*4+3]=255;
   const rr=mk(FW,FH),rq=rr.getContext('2d');rq.drawImage(r,0,0,FW,FH);rq.globalCompositeOperation='destination-out';rq.globalAlpha=.85;rq.drawImage(blurred(up(sm0),3),0,0);
-  X.save();X.globalCompositeOperation='lighter';X.globalAlpha=.8;X.drawImage(rr,0,0);X.restore();
-  // keep the statue silhouette crisp: knock rays back over its body
-  const sm=new Layer();for(let i=0;i<W*H;i++)if(statueMask[i]){sm.d[i*4+3]=255;}
-  const smc=blurred(up(sm),3);const t=mk(FW,FH),tg=t.getContext('2d');tg.drawImage(r,0,0,FW,FH);tg.globalCompositeOperation='destination-in';tg.drawImage(smc,0,0);
-  X.save();X.globalCompositeOperation='difference';X.globalAlpha=0;X.restore();
+  X.save();X.globalCompositeOperation='lighter';X.globalAlpha=.95;X.drawImage(rr,0,0);X.restore();
 })();
 // 8 bloom
 X.save();X.globalCompositeOperation='lighter';

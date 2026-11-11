@@ -170,7 +170,7 @@ float pillar(vec3 p, float h, float tilt){
  float d = sdCyl(p-vec3(0,h*.5,0), .85, h*.5);
  // fluting
  float a = atan(p.z,p.x);
- d += .05*smoothstep(.3,1.0,sin(a*12.0));
+ d += .025*smoothstep(.3,1.0,sin(a*12.0));
  vec3 n = normalize(vec3(sin(tilt),1.0,cos(tilt*1.7)));
  d = max(d, dot(p-vec3(0,h,0), n));
  d = min(d, sdBox(p-vec3(0,.3,0), vec3(1.15,.3,1.15)));
@@ -267,7 +267,7 @@ void initLamps(){
  LAMP[4]=vec3(12.2,2.7,9.4); LAMP[5]=vec3(16.6,2.7,4.6);  // stalls
  LAMP[6]=vec3(-17.5,5.6,4.0); LAMP[7]=vec3(-15.2,3.4,14.2);
  LAMP[8]=vec3(13.6,3.0,-14.6); LAMP[9]=vec3(-6.0,3.2,-19.5);
- LAMP[10]=vec3(9.35,1.15,9.0); // player's lantern
+ LAMP[10]=vec3(9.55,1.4,9.15); // player's lantern
  LAMP[11]=vec3(-22.0,3.0,-6.0);
 }
 float lampPosts(vec3 p){
@@ -299,15 +299,15 @@ vec2 shrooms(vec3 p){
  return U(vec2(st,11.0), vec2(cap,12.0));
 }
 float player(vec3 p){
- vec3 q = p-vec3(8.7,0,8.4);
- if(length(q-vec3(0,1,0))>1.6) return length(q-vec3(0,1,0))-1.2;
+ vec3 q = (p-vec3(8.7,0,8.4))/1.3;
+ if(length(q-vec3(0,1,0))>1.6) return (length(q-vec3(0,1,0))-1.2)*1.3;
  q.xz = rot(-0.75)*q.xz;
  float d = sdRC(q, vec3(0,.1,0), vec3(0,1.35,0), .32, .17);      // cloak
  d = smin(d, length(q-vec3(0,1.55,-.02))-.16, .06);              // hooded head
  d = smin(d, sdEll(q-vec3(0,1.6,-.08), vec3(.19,.2,.21)), .05);
  d = min(d, sdCap(q, vec3(.25,1.25,0), vec3(.45,.9,.2), .07));   // arm with lantern
  d = min(d, sdBox(q-vec3(-.12,1.1,-.28), vec3(.16,.28,.08))-.03); // pack
- return d;
+ return d*1.3;
 }
 vec2 dwellings(vec3 p){
  vec2 r = vec2(1e5,0);
@@ -435,7 +435,7 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   float crack = smoothstep(.009,.002,abs(cx))*step(0.08,q.z)*smoothstep(.75,.85,q.y)*smoothstep(1.4,1.3,q.y)*.7;
   float cn = fbm(q*vec3(9.0,4.0,9.0)+vec3(2.0));
   crack += .5*smoothstep(.008,.0,abs(cn-.5))*smoothstep(.7,.8,noise(q*5.0+5.0));
-  emis += TEAL*crack*2.5*(1.0-moss)*step(.45,q.y);
+  emis += TEAL*crack*2.5*(1.0-moss)*step(.45,q.y)*smoothstep(1.4,1.3,q.y);
   // berries on vines
   float ber = step(.992, h31(floor(q*90.0)))*step(.5,moss);
   emis += mix(TEAL, vec3(.5,.9,1.0), .5)*ber*1.5;
@@ -455,8 +455,10 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   float win = smoothstep(.2,.17,cw)*smoothstep(.22,.18,abs(yy-.55));
   float lit = step(.3, h21(vec2(floor(u/1.7), floor(p.y/2.7))+floor(p.xz*.01)));
   float mull = smoothstep(.015,.035,abs(cw))*smoothstep(.015,.035,abs(yy-.55));
+  float grime = smoothstep(.5,.8,fbm(p*.5+2.0))*(1.0-win);
   if(abs(n.y)<.5){
    alb = mix(alb, vec3(.03), win);
+   moss = grime*.85;
    emis += AMBER*vec3(1.0,.9,.8)*win*lit*mull*(2.2+1.2*noise(p*3.0));
   }
  } else if(m<11.5 && m>9.5){ // canopies
@@ -471,8 +473,8 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   emis += TEAL*.5*smoothstep(.04,.0,abs(p.y-.55))*.0;
  } else { // foliage
   alb = mix(vec3(.02,.06,.06), vec3(.05,.12,.08), noise(p*1.7));
-  float fr = step(.975, h31(floor(p*2.2)));
-  emis += mix(TEAL, vec3(.6,.8,1.0), h31(floor(p*2.2)+.5))*fr*1.6;
+  float fr = smoothstep(.16,.06,length(fract(p*1.6)-.5))*step(.86,h31(floor(p*1.6)));
+  emis += mix(TEAL, vec3(.6,.8,1.0), h31(floor(p*1.6)+.5))*fr*.9;
   emis += TEAL*.06*smoothstep(.2,-.6,n.y);
  }
  // stall canopy 10/11 handled above; mushroom stem id 11 collides with canopy col 1 -> fine
@@ -618,6 +620,11 @@ function post(glc){
  ctx.globalCompositeOperation='lighter';
  [[3,.6],[10,.5],[30,.4],[80,.3]].forEach(([r,a])=>{ctx.globalAlpha=a;ctx.drawImage(blurCopy(bp,r),0,0);});
  ctx.globalAlpha=1;
+ // god rays from the orb (radial smear of the bright pass)
+ { const [ox,oy]=proj(orbWorld()); const src=blurCopy(bp,3);
+   const rc=document.createElement('canvas');rc.width=W;rc.height=H;const rx=rc.getContext('2d');rx.globalCompositeOperation='lighter';
+   for(let i=0;i<28;i++){const sc=1+i*0.035;rx.globalAlpha=0.05*(1-i/28);rx.setTransform(sc,0,0,sc,ox*(1-sc),oy*(1-sc));rx.drawImage(src,0,0);}
+   ctx.globalAlpha=.9;ctx.drawImage(blurCopy(rc,6),0,0);ctx.globalAlpha=1; }
  // motes & fireflies
  const orb=proj(orbWorld());
  for(let i=0;i<260;i++){
@@ -675,7 +682,7 @@ function hud(ctx){
  ctx.font='14px Georgia, serif';ctx.fillStyle='rgba(200,235,228,.85)';
  ctx.fillText('◇  Touch the Wardens’ plinth  0 / 1',qx,qy+42);
  // nameplate over player
- const [px,py]=proj([8.7,2.35,8.4]);
+ const [px,py]=proj([8.7,3.0,8.4]);
  ctx.textAlign='center';ctx.font='600 13px Georgia, serif';ctx.letterSpacing='1px';ctx.fillStyle='#ffe9c4';ctx.shadowColor='rgba(0,0,0,.9)';ctx.shadowBlur=6;
  ctx.fillText('Wren',px,py-6);ctx.font='10px Georgia, serif';ctx.fillStyle='rgba(140,255,230,.9)';ctx.fillText('Lv 1  ·  Wayfarer',px,py+8);
  // interaction prompt near plinth
