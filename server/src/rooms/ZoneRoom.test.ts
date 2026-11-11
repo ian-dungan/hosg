@@ -381,27 +381,27 @@ describe('sessions', () => {
     });
   }
 
-  it('tells a client that was kicked while away why, when it comes back within the window', async () => {
-    vi.spyOn(console, 'info').mockImplementation(() => {}); // the SDK narrates each reconnection step
-    vi.spyOn(console, 'warn').mockImplementation(() => {}); // Colyseus logs the refused reconnection
-    const { url, store } = await start();
-    const alice = await accountFor(store, 'Alice');
-    const a = await joinGrove(url, alice.token);
-    reconnectLikeTheBrowser(a.room);
-    a.room.reconnection.minDelay = 500; // stay away long enough for the second sign-in to land
-    const errors: string[] = [];
-    a.room.onError((_code: number, message?: string) => errors.push(message ?? ''));
-    const left = new Promise<number>((resolve) => a.room.onLeave((code: number) => resolve(code)));
-    const dropped = nextDrop(a.room);
-    cutSocket(a.room);
-    await dropped;
-
-    const elsewhere = await joinGrove(url, alice.token); // kicks A's session inside its reconnect window
-    expect(elsewhere.room.state.players.size).toBe(1);
-    expect(await left).toBe(CloseCode.FAILED_TO_RECONNECT);
-    expect(errors).toEqual(['Signed in somewhere else']);
-    expect(elsewhere.room.state.players.size).toBe(1);
-    expect(elsewhere.room.state.players.get(elsewhere.room.sessionId)?.name).toBe('Alice');
+  it('frees the reconnect seat of an away session it kicks, so one account cannot fill the grove', async () => {
+    const { url, store } = await start({ maxPlayers: 2 }); // Colyseus maxClients = 4; windows last 30 s
+    const looper = await accountFor(store, 'Mallory');
+    const grove = () => matchMaker.getLocalRoomById(rooms[0]!) as any;
+    const rooms: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      // Join, then cut the socket abruptly: the server opens a reconnect window (a reserved seat).
+      const { room } = await joinGrove(url, looper.token);
+      rooms[0] = room.roomId;
+      const left = new Promise<void>((resolve) => room.onLeave(() => resolve()));
+      cutSocket(room);
+      await left;
+      await waitFor(() => Object.prototype.hasOwnProperty.call(grove()._reservedSeats, room.sessionId));
+      // The next join of the same account kicks that away session.
+    }
+    const last = await joinGrove(url, looper.token);
+    expect(Object.keys(grove()._reservedSeats).length).toBe(0); // every kicked window gave its seat back
+    expect(grove().hasReachedMaxClients()).toBe(false);
+    const other = await joinGrove(url, (await accountFor(store, 'Bob')).token);
+    await waitFor(() => other.room.state.players.size === 2);
+    expect(last.room.state.players.get(last.room.sessionId)?.name).toBe('Mallory');
   });
 });
 

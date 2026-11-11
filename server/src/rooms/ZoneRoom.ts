@@ -88,8 +88,6 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private maxPlayers!: number;
   private sessions = new Map<string, Session>(); // key: sessionId
   private sessionByAccount = new Map<string, string>(); // accountId -> sessionId
-  /** Sessions kicked during their reconnect window, whose window is left to run so a returning client learns why. */
-  private kickedAway = new Set<string>();
   /** Movement allowances by account id, kept across kick and re-join so a new session gets no fresh budget. */
   private allowances = new Map<string, Allowance>();
   private patchMeter = new PatchRateMeter(Date.now());
@@ -164,8 +162,6 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   onReconnect(client: Client) {
-    // Refusing the reconnection sends this reason to the client (its room's onError), then closes it.
-    if (this.kickedAway.delete(client.sessionId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_SIGNED_IN_ELSEWHERE);
     const session = this.sessions.get(client.sessionId);
     if (!session) return;
     session.client = client;
@@ -173,7 +169,6 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   async onLeave(client: Client) {
-    this.kickedAway.delete(client.sessionId); // a kicked session's window ran out, or its return was refused
     await this.removeSession(client.sessionId);
   }
 
@@ -235,12 +230,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private async kick(sessionId: string) {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    // Away: the reconnect window is left open, so a client that comes back within it is told why
-    // (onReconnect) instead of finding its session missing. Marked before the save, which may take a while.
-    const away = session.reconnection !== undefined;
-    if (away) this.kickedAway.add(sessionId);
+    // Away: end the reconnect window at once, which frees its reserved seat (Colyseus counts reserved
+    // seats toward maxClients, so a window left open would let one account fill the room). Ended
+    // before the save, so a reconnection cannot slip in meanwhile; a client that comes back finds
+    // its session gone ("Connection lost").
+    if (session.reconnection) session.reconnection.reject(new Error(REASON_SIGNED_IN_ELSEWHERE));
     await this.removeSession(sessionId);
-    if (!away) {
+    if (!session.reconnection) {
       this.sendTo(session.client, 'kicked', { reason: REASON_SIGNED_IN_ELSEWHERE });
       session.client.leave(CloseCode.CONSENTED);
     }

@@ -5,7 +5,6 @@ import {
   CLIENT_RECONNECTION,
   REASON_GROVE_FULL,
   REASON_NAME_FIRST,
-  REASON_SIGNED_IN_ELSEWHERE,
   RECONNECT_SECONDS,
   TICK_HZ,
   type C2S,
@@ -117,8 +116,6 @@ function boot(): void {
         sent.x = NaN; // the server may have missed the last pose: send it again
       });
       r.onMessage('kicked', (m: S2C['kicked']) => { kickedFor = m.reason; });
-      // Kicked while away: the server refuses the reconnection with the reason.
-      r.onError((_code, message) => { if (message === REASON_SIGNED_IN_ELSEWHERE) kickedFor = message; });
       r.onMessage('chat', (m: S2C['chat']) => chat.add(m.from, m.text));
       r.onMessage('correct', (m: S2C['correct']) => {
         game.walkTo(null);
