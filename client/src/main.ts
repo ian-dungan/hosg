@@ -40,6 +40,7 @@ async function boot(): Promise<void> {
   let quality: Quality = 'high';
   world.setQuality(quality);
   let slowTime = 0, fpsSettle = 4;
+  const lockQuality = /[?&]lockq/.test(location.search);   // playtests keep full settings even when slow
   const hud = createHud(hudRoot);
 
   const interactables: Interactable[] = [];
@@ -305,7 +306,7 @@ async function boot(): Promise<void> {
 
     // If the frame rate stays under ~28 fps for 4 seconds, drop one quality level.
     if (fpsSettle > 0) fpsSettle -= dt;
-    else if (quality !== 'low') {
+    else if (quality !== 'low' && !lockQuality) {
       slowTime = now - lastFrameMs > 36 ? slowTime + dt : Math.max(0, slowTime - dt * 2);
       if (slowTime > 4) {
         quality = quality === 'high' ? 'med' : 'low';
