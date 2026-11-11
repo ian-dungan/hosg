@@ -85,6 +85,8 @@ float ellie(vec3 q){
  d = smin(d, sdEll(q-vec3(0,1.635,-0.016), vec3(.104,.1,.112)), .03);
  d = smin(d, sdEll(q-vec3(0,1.595,.104), vec3(.017,.03,.026)), .012);
  d = smin(d, sdRC(q, vec3(0,1.6,-.06), vec3(0,1.36,-.1), .1,.075), .04);
+ d = smin(d, sdRC(q, vec3(-.075,1.63,.0), vec3(-.1,1.45,-.01), .045,.03), .03);
+ d = smin(d, sdRC(q, vec3(.075,1.63,.0), vec3(.1,1.45,-.01), .045,.03), .03);
  // ponytail streaming in the wind
  d = smin(d, sdRC(q, vec3(0,1.67,-.08), vec3(-.14,1.48,-.24), .055,.04), .04);
  d = smin(d, sdRC(q, vec3(-.14,1.48,-.24), vec3(-.33,1.37,-.31), .04,.012), .03);
@@ -156,7 +158,8 @@ float plinth(vec3 p){
  d = min(d, sdBox(p-vec3(0,1.5,0), vec3(5.8,.5,5.8))-.05);
  float m = sdBox(p-vec3(0,3.5,0), vec3(4.6,1.9,4.6))-.05;
  // recessed panels
- m = max(m, -sdBox(vec3(abs(p.x),p.y,abs(p.z))-vec3(4.65,3.2,4.65), vec3(4.0,1.0,4.0)*vec3(1,1,1)+vec3(-0.0,0,-0.0)) );
+ m = max(m, -sdBox(vec3(abs(p.x)-4.68,p.y-3.3,p.z), vec3(.18,1.1,3.4)));
+ m = max(m, -sdBox(vec3(p.x,p.y-3.3,abs(p.z)-4.68), vec3(3.4,1.1,.18)));
  d = min(d, m);
  d = min(d, sdBox(p-vec3(0,5.32,0), vec3(4.95,.24,4.95))-.04);
  // broken chunk on corner
@@ -198,7 +201,7 @@ float ruins(vec3 p){
  tor = max(tor, -(q.y-12.0));
  tor = max(tor, -(-q.x+1.0+ (q.y-12.)*0.4)); // broken right half
  ar = min(ar, tor);
- d = min(d, ar);
+ // (arch removed: confused the statue silhouette)
  // low ruined walls
  d = min(d, sdBox(p-vec3(-12,1.0,20), vec3(5,1.0+0.6*sin(p.x*.9),.7)));
  d = min(d, sdBox(p-vec3(21,1.2,-3), vec3(.7,1.2+.8*sin(p.z*.7),5)));
@@ -325,6 +328,32 @@ vec2 dwellings(vec3 p){
  r = U(r, walkways(p));
  return r;
 }
+const int NT=8;
+vec4 TREE[NT];
+void initTrees(){
+ TREE[0]=vec4(-26.,0,-12.,1.1); TREE[1]=vec4(-5.,0,-31.,1.0); TREE[2]=vec4(19.,0,-25.,1.2); TREE[3]=vec4(-29.,0,2.,.9);
+ TREE[4]=vec4(25.,0,1.,1.0); TREE[5]=vec4(5.,0,23.,.8); TREE[6]=vec4(-20.,0,21.,1.0); TREE[7]=vec4(26.,0,-9.,.75);
+}
+vec2 trees(vec3 p){
+ vec2 r=vec2(1e5,0);
+ for(int i=0;i<NT;i++){
+  vec4 T=TREE[i]; vec3 q=p-T.xyz; float s=T.w;
+  float bb = length((q-vec3(0,5.5*s,0))/vec3(1.0,1.3,1.0))-5.5*s;
+  if(bb>1.0){ r.x=min(r.x,bb); continue; }
+  float tr = sdRC(q, vec3(0,0,0), vec3(.3*s,5.5*s,.2*s), .75*s,.35*s);
+  tr = min(tr, sdRC(q, vec3(.2*s,4.*s,0), vec3(2.0*s,6.*s,1.*s), .3*s,.15*s));
+  tr = min(tr, sdRC(q, vec3(0,4.5*s,0), vec3(-1.8*s,6.5*s,-.6*s), .3*s,.15*s));
+  tr = smin(tr, sdRC(q, vec3(0,.3*s,0), vec3(1.4*s,0,.6*s), .4*s,.15*s), .4);
+  tr = smin(tr, sdRC(q, vec3(0,.3*s,0), vec3(-.9*s,0,1.2*s), .4*s,.15*s), .4);
+  r = U(r, vec2(tr,4.0));
+  float c = sdEll(q-vec3(0,7.*s,0), vec3(3.,2.1,3.)*s);
+  c = smin(c, sdEll(q-vec3(2.*s,6.1*s,1.*s), vec3(2.2,1.6,2.2)*s), 1.0);
+  c = smin(c, sdEll(q-vec3(-1.8*s,6.5*s,-.6*s), vec3(2.2,1.7,2.2)*s), 1.0);
+  c += (noise(q*1.4)-.5)*1.1*s + (noise(q*4.0)-.5)*.3;
+  r = U(r, vec2(c*.7,14.0));
+ }
+ return r;
+}
 vec2 mapS(vec3 p){
  vec2 r = vec2(p.y, 1.0);
  r = U(r, vec2(plinth(p), 2.0));
@@ -336,6 +365,7 @@ vec2 mapS(vec3 p){
  r = U(r, vec2(lanterns(p), 8.0));
  r = U(r, dwellings(p));
  r = U(r, shrooms(p));
+ r = U(r, trees(p));
  r = U(r, vec2(player(p), 13.0));
  return r;
 }
@@ -363,7 +393,7 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   float plaza = 1.0-smoothstep(10.0,15.0,rp+3.0*noise2(p.xz*.15));
   vec3 flag = mix(vec3(.17,.18,.2), vec3(.25,.24,.23), stone);
   flag *= mix(.55,1.0,smoothstep(0.02,0.07,gap));
-  vec3 grass = mix(vec3(.04,.08,.05), vec3(.07,.13,.07), noise2(p.xz*.9));
+  vec3 grass = mix(vec3(.025,.05,.045), vec3(.06,.11,.07), noise2(p.xz*.9)*fbm(vec3(p.xz*2.5,3.0)));
   float mm = smoothstep(.45,.75, fbm(vec3(p.xz*.25,1.0)));
   alb = mix(grass, flag, plaza*(1.0-mm*.6));
   alb = mix(alb, vec3(.06,.12,.06), (1.0-smoothstep(0.0,0.06,gap))*plaza*.7);
@@ -371,14 +401,17 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   alb *= 1.0-.4*pud; spec = .25+.75*pud; rough = mix(.35,.04,pud);
   // tiny glowing sprouts in grass
   float sp = step(.985, h21(floor(p.xz*3.0)))*(1.0-plaza)*smoothstep(.3,.6,noise2(p.xz*.3));
-  emis += TEAL*sp*1.4;
+  emis += TEAL*sp*0.0;
+  float dcg = conduits(p);
+  float road = smoothstep(2.6,1.4,dcg+1.2*noise2(p.xz*.4));
+  alb = mix(alb, flag*.85, road*(1.0-plaza));
   // player selection ring
   float pr = length(p.xz-vec2(8.7,8.4));
   emis += TEAL*1.6*smoothstep(.07,0.0,abs(pr-1.05)) + TEAL*.25*smoothstep(1.05,.2,pr);
   moss = 0.0;
  } else if(m<2.5){ // ruin stone
   float f = fbm(p*.6);
-  alb = mix(vec3(.2,.21,.22), vec3(.32,.3,.28), f);
+  alb = mix(vec3(.17,.19,.21), vec3(.29,.3,.31), f);
   moss = smoothstep(.35,.85, n.y*.6+fbm(p*.45+3.0)*.9-.1);
   spec=.1; rough=.6;
   // glowing glyph band on plinth
@@ -392,14 +425,16 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
  } else if(m<3.5){ // statue
   vec3 q = toStatue(p);
   float f = fbm(q*14.0);
-  alb = mix(vec3(.30,.31,.31), vec3(.42,.41,.38), f);
+  alb = mix(vec3(.30,.34,.35), vec3(.46,.49,.48), f);
   alb *= .8+.2*smoothstep(0.0,1.0,q.y);  // darker grime low
   float vine = smoothstep(.62,.8, noise(vec3(q.x*30.0, q.y*3.5, q.z*30.0)));
   moss = clamp(smoothstep(.3,.9, n.y*.7 + fbm(q*9.0)*.8 - .15)*(1.0-smoothstep(1.48,1.58,q.y)) + vine*smoothstep(1.5,.2,q.y), 0.0, 1.0);
   spec=.08; rough=.6;
   // glowing cracks
+  float cx = q.x-.31+.07 - .05*(noise(vec3(q.y*22.0,1.,1.))-.5) - .02*(noise(vec3(q.y*70.0,3.,3.))-.5);
+  float crack = smoothstep(.009,.002,abs(cx))*step(0.08,q.z)*smoothstep(.75,.85,q.y)*smoothstep(1.4,1.3,q.y)*.7;
   float cn = fbm(q*vec3(9.0,4.0,9.0)+vec3(2.0));
-  float crack = smoothstep(.012,.0,abs(cn-.5))*smoothstep(.62,.75,noise(q*5.0+5.0));
+  crack += .5*smoothstep(.008,.0,abs(cn-.5))*smoothstep(.7,.8,noise(q*5.0+5.0));
   emis += TEAL*crack*2.5*(1.0-moss)*step(.45,q.y);
   // berries on vines
   float ber = step(.992, h31(floor(q*90.0)))*step(.5,moss);
@@ -407,7 +442,8 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
  } else if(m<4.5){ alb = vec3(.16,.1,.06)*(.7+.6*noise(p*vec3(1,8,1)));
  } else if(m<5.5){ // roofs
   float tile = smoothstep(.0,.1,fract(p.y*3.0+noise(p*2.0)*.3));
-  alb = mix(vec3(.08,.12,.14), vec3(.14,.13,.14), noise(p*3.0))*(.6+.4*tile);
+  float cu = step(.5, h21(floor(p.xz/7.0)+.3));
+  alb = mix(mix(vec3(.08,.1,.13), vec3(.15,.12,.12), noise(p*3.0)), mix(vec3(.1,.26,.24),vec3(.16,.32,.28),noise(p*3.0)), cu)*(.6+.4*tile);
   moss = smoothstep(.5,.8,fbm(p*.7))*.8;
  } else if(m<6.5){ emis = TEAL*3.2; alb=vec3(.05);
  } else if(m<7.5){ emis = vec3(.75,1.0,.95)*9.0; alb=vec3(0);
@@ -428,11 +464,16 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   alb = m<10.5 ? mix(vec3(.45,.08,.06), vec3(.55,.45,.3), stripe) : mix(vec3(.05,.3,.3), vec3(.5,.45,.32), stripe);
   if(m>10.5 && m<11.2) alb=vec3(.2,.25,.25);
  } else if(m<11.5){ alb = vec3(.5,.55,.5);
- } else if(m<12.5){ alb = vec3(.1); emis = mix(TEAL, vec3(.4,.6,1.0), noise(p*2.0))*.75*(.6+.4*n.y);
- } else { // player
+ } else if(m<12.5){ alb = vec3(.1); emis = mix(TEAL, vec3(.4,.6,1.0), noise(p*2.0))*.45*(.6+.4*n.y);
+ } else if(m<13.5){ // player
   float hood = smoothstep(1.3,1.45,p.y);
   alb = mix(vec3(.5,.14,.07), vec3(.35,.1,.06), hood);
   emis += TEAL*.5*smoothstep(.04,.0,abs(p.y-.55))*.0;
+ } else { // foliage
+  alb = mix(vec3(.02,.06,.06), vec3(.05,.12,.08), noise(p*1.7));
+  float fr = step(.975, h31(floor(p*2.2)));
+  emis += mix(TEAL, vec3(.6,.8,1.0), h31(floor(p*2.2)+.5))*fr*1.6;
+  emis += TEAL*.06*smoothstep(.2,-.6,n.y);
  }
  // stall canopy 10/11 handled above; mushroom stem id 11 collides with canopy col 1 -> fine
  alb = mix(alb, vec3(.06,.13,.05)*(.7+.6*noise(p*6.0)), moss);
@@ -461,7 +502,7 @@ vec3 shade(vec3 p, vec3 n, float m, vec3 rd, out vec3 emis){
   float diff = max(dot(n,l),0.0);
   float s = 1.0;
   if(i<4 || i==10) s = softShadow(p+n*.05, l, dd-.4, 8.0);
-  col += alb*AMBER*diff*a*s*(i==10?2.0:3.2);
+  col += alb*AMBER*diff*a*s*(i==10?2.6:4.2);
   vec3 hh = normalize(l-rd);
   col += AMBER*spec*pow(max(dot(n,hh),0.0), mix(8.0,160.0,1.0-rough))*a*s*3.0;
  }
@@ -483,7 +524,7 @@ float inscatter(vec3 ro, vec3 rd, vec3 L, float t){
 }
 
 void main(){
- initLamps();
+ initLamps(); initTrees();
  ORB = SPOS + SK*vec3(0);
  { vec3 lo = vec3(-.572, 2.02, .09); lo.xz = rot(-SROT)*lo.xz; ORB = SPOS + lo*SK; }
  vec2 uv = (gl_FragCoord.xy - uRes*.5)/uRes.y*2.0*HALFH;
@@ -519,7 +560,7 @@ void main(){
  fint = abs(fint);
  float fpatch = .55+.9*fbm(vec3(p.xz*.08, 2.0));
  float fogA = 1.0-exp(-fint*dens*fpatch*fpatch*3.0 - t*.0012);
- vec3 fogTint = mix(fogCol, vec3(.03,.08,.09), .45);
+ vec3 fogTint = mix(fogCol, vec3(.025,.055,.085), .45);
  col = mix(col, fogTint, clamp(fogA,0.0,.9));
  // volumetric glow: orb + lanterns + conduits
  float ins = inscatter(ro,rd,ORB,t);
@@ -595,10 +636,17 @@ function post(glc){
    const col=i%3==0?'120,255,230':'255,190,110';const g=ctx.createRadialGradient(x,y,0,x,y,9);g.addColorStop(0,'rgba(255,245,220,1)');g.addColorStop(.18,'rgba('+col+',.7)');g.addColorStop(1,'rgba('+col+',0)');ctx.fillStyle=g;ctx.fillRect(x-9,y-9,18,18);}
  });
  ctx.globalCompositeOperation='source-over';
+ // drifting fog wisps
+ ctx.globalCompositeOperation='screen';
+ for(let i=0;i<70;i++){const x=rnd()*W,y=H*.25+rnd()*H*.8,rw=120+rnd()*360,rh=rw*(.12+rnd()*.1);
+  ctx.save();ctx.translate(x,y);ctx.rotate(-.12+rnd()*.24);ctx.scale(1,rh/rw);
+  const g=ctx.createRadialGradient(0,0,0,0,0,rw);const a=.02+rnd()*.035;g.addColorStop(0,'rgba(70,140,150,'+a+')');g.addColorStop(1,'rgba(70,140,150,0)');
+  ctx.fillStyle=g;ctx.fillRect(-rw,-rw,rw*2,rw*2);ctx.restore();}
+ ctx.globalCompositeOperation='source-over';
  // vignette
  const v=ctx.createRadialGradient(W/2,H*.45,H*.35,W/2,H*.5,H*1.05);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(2,4,10,0.75)');ctx.fillStyle=v;ctx.fillRect(0,0,W,H);
  // grain
- const gi=ctx.getImageData(0,0,W,H);const gd=gi.data;for(let i=0;i<gd.length;i+=4){const n=(rnd()-.5)*7;gd[i]+=n;gd[i+1]+=n;gd[i+2]+=n;}ctx.putImageData(gi,0,0);
+ const gi=ctx.getImageData(0,0,W,H);const gd=gi.data;for(let i=0;i<gd.length;i+=4){const n=(rnd()-.5)*6;for(let k=0;k<3;k++){let v=gd[i+k]/255;v=v+(v*v*(3-2*v)-v)*.35;gd[i+k]=v*255+n;}const L=(gd[i]+gd[i+1]+gd[i+2])/765;const sh=Math.max(0,.25-L)*4;gd[i]-=3*sh;gd[i+2]+=5*sh;}ctx.putImageData(gi,0,0);
  hud(ctx);
  window.DONE=true;
 }
@@ -608,7 +656,7 @@ function orbWorld(){const lo=[-.572,2.02,.09];const a=0.62;const c=Math.cos(a),s
 function hud(ctx){
  ctx.save();
  // location banner
- const bx=60,by=58;
+ const bx=56,by=H-150;
  ctx.font='500 13px Georgia, serif';ctx.fillStyle='rgba(140,255,230,0.85)';ctx.letterSpacing='6px';
  ctx.fillText('THE SECOND AGE  ·  YEAR 1004',bx,by);
  ctx.letterSpacing='3px';ctx.font='600 40px Georgia, "Times New Roman", serif';
@@ -639,5 +687,5 @@ function hud(ctx){
  ctx.save();ctx.textAlign='center';ctx.font='11px Georgia, serif';ctx.letterSpacing='4px';ctx.fillStyle='rgba(200,230,225,.45)';ctx.textAlign='right';ctx.fillText('KAETRAM II  ·  TARGET RENDER',W-40,H-26);ctx.restore();
 }
 function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
-render();
+setTimeout(render,50);
 </script></body></html>
