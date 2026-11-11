@@ -168,6 +168,47 @@ describe('entries across word boundaries', () => {
     expect(failures).toEqual([]);
   });
 
+  it('lets an allowed word share its first or last letter with a neighbouring name', () => {
+    const NAMES = [
+      'Les', 'Gus', 'Ross', 'Pip', 'Marc', 'Rose', 'Jane', 'Drew', 'Tom', 'Sam', 'Ed', 'Ted', 'Seth', 'Beth', 'Rob',
+      'Bob', 'Ida', 'Ana', 'Ann', 'Wren', 'Kit', 'Pat', 'Eve', 'Xander', 'Xia', 'Ned', 'Nell', 'Ada', 'Sue', 'Kay',
+      'Otto', 'Oak', 'Ode', 'Lee', 'Liz', 'Ivy', 'Ira', 'Ty', 'Max', 'Mia', 'Cal', 'Dot', 'Hal', 'Wil', 'Ben', 'Nan',
+      'Tess', 'Abe', 'Will', 'Zed',
+    ];
+    const blocked = BAD_WORDS.map(collapse);
+    const count = (text: string, entry: string) => {
+      let n = 0;
+      for (let i = text.indexOf(entry); i !== -1; i = text.indexOf(entry, i + 1)) n++;
+      return n;
+    };
+    // The pair really forms an entry across the join when the joined letters hold more of it than the two words do.
+    const formsEntry = (left: string, right: string) => {
+      const [l, r, both] = [collapse(left.toLowerCase()), collapse(right.toLowerCase()), collapse((left + right).toLowerCase())];
+      return blocked.some((b) => count(both, b) > count(l, b) + count(r, b));
+    };
+    const failures: string[] = [];
+    let pairs = 0;
+    ALLOWED_WORDS.forEach((allowed, ai) => {
+      const after = NAMES.filter((n) => n[0]!.toLowerCase() === allowed.at(-1));
+      const before = NAMES.filter((n) => n.at(-1) === allowed[0]);
+      if (after.length === 0 || before.length === 0) failures.push(`allowed #${ai}: no neighbour names to test`);
+      for (const sep of [' ', '-']) {
+        for (const n of after) {
+          pairs++;
+          const name = capitalise(allowed) + sep + n;
+          if (isOffensive(name) !== formsEntry(allowed, n)) failures.push(`allowed #${ai} then ${n} '${sep}'`);
+        }
+        for (const n of before) {
+          pairs++;
+          const name = n + sep + capitalise(allowed);
+          if (isOffensive(name) !== formsEntry(n, allowed)) failures.push(`${n} then allowed #${ai} '${sep}'`);
+        }
+      }
+    });
+    expect(pairs).toBeGreaterThan(100);
+    expect(failures).toEqual([]);
+  });
+
   it('still lets innocent names of several words, and allowed words next to innocent ones, through', () => {
     const innocent = [
       'Mary Ann', 'Jo Ann Lee', 'Al Capone', 'Van Der Berg', 'De La Cruz', "Mary-Ann O'Neil", 'Ash of Elm',

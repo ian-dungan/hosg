@@ -96,8 +96,10 @@ function holdsBlocked(words: string[], exempt: boolean[], read: (w: string) => s
   const text = runs.map((r) => r.ch).join('');
   return blocked.some((entry) => {
     for (let i = text.indexOf(entry); i !== -1; i = text.indexOf(entry, i + 1)) {
-      const from = runs[i]!.start;
-      const to = runs[i + entry.length - 1]!.end;
+      // The narrowest raw letters the match needs: a run of one letter can cross a word join ("Kay"
+      // after "…k"), and either end of it will do, so a match inside an allowed word stays excused.
+      const from = runs[i]!.end - 1;
+      const to = runs[i + entry.length - 1]!.start + 1;
       if (!exemptRanges.some(([a, b]) => a <= from && to <= b)) return true;
     }
     return false;
