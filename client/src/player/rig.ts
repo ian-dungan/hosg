@@ -12,13 +12,13 @@ import { makeCharacter } from './character';
 const RUN_SPEED = 6;
 const ACCEL = 14;             // exponential approach rate toward target velocity (1/s)
 const TURN_RATE = 12;         // rad/s max turn speed
-const DEFAULT_RADIUS = 18;
-const DEFAULT_BETA = (40 * Math.PI) / 180;   // 50 degrees down from horizontal
-const MIN_BETA = 0.3, MAX_BETA = 1.25;
+const DEFAULT_RADIUS = 20;
+const DEFAULT_BETA = (62 * Math.PI) / 180;   // 28 degrees down from horizontal, so the statue and sky are in view
+const MIN_BETA = 0.3, MAX_BETA = 1.42;
 const MIN_RADIUS = 7, MAX_RADIUS = 34;
 const TAP_MS = 300;
 const ROT_SENS = 0.0065;      // rad per CSS pixel
-const TARGET_LIFT = 1.0;      // camera looks at chest height
+const TARGET_LIFT = 1.8;      // camera looks at chest height
 
 const wrapAngle = (a: number) => { a = (a + Math.PI) % (Math.PI * 2); if (a < 0) a += Math.PI * 2; return a - Math.PI; };
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
