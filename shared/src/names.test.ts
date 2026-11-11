@@ -131,6 +131,56 @@ describe('allowed words', () => {
   });
 });
 
+describe('entries across word boundaries', () => {
+  const SEPS = [' ', '-', "'", '_'];
+  const collapse = (w: string) => w.replace(/(.)\1+/g, '$1');
+
+  it('finds a blocked entry that runs out of an allowed word into its neighbour, either way round', () => {
+    const failures: string[] = [];
+    BAD_WORDS.forEach((entry, bi) => {
+      ALLOWED_WORDS.forEach((allowed, ai) => {
+        const plain = collapse(allowed);
+        for (let k = 1; k < entry.length; k++) {
+          const head = entry.slice(0, k);
+          const tail = entry.slice(k);
+          for (const sep of SEPS) {
+            if (plain.endsWith(head) && !isOffensive(capitalise(allowed) + sep + tail)) failures.push(`#${bi} at ${k} after allowed #${ai} '${sep}'`);
+            if (plain.startsWith(tail) && !isOffensive(capitalise(head) + sep + allowed)) failures.push(`#${bi} at ${k} before allowed #${ai} '${sep}'`);
+          }
+        }
+      });
+    });
+    expect(failures).toEqual([]);
+  });
+
+  it('finds a short word split across neighbouring words, alone or after another word', () => {
+    const failures: string[] = [];
+    SHORT_BAD_WORDS.forEach((word, i) => {
+      for (let k = 1; k < word.length; k++) {
+        for (const sep of SEPS) {
+          const split = capitalise(word.slice(0, k)) + sep + word.slice(k);
+          for (const [label, name] of [['alone', split], ['after', `Rook ${split}`], ['plural', `${split}s`]]) {
+            if (!isOffensive(name!)) failures.push(`#${i} at ${k} '${sep}' ${label}`);
+          }
+        }
+      }
+    });
+    expect(failures).toEqual([]);
+  });
+
+  it('still lets innocent names of several words, and allowed words next to innocent ones, through', () => {
+    const innocent = [
+      'Mary Ann', 'Jo Ann Lee', 'Al Capone', 'Van Der Berg', 'De La Cruz', "Mary-Ann O'Neil", 'Ash of Elm',
+      'Rook the Bold', 'Le Fay', 'Mac Tavish', 'Da Silva', 'Di Maggio', 'El Cid', 'Bo Peep', 'Tom Thumb', 'Ann Marie',
+      'Sue Ellen', 'Kit Fox', 'Pip Ash', 'Tam Lin', 'Cass Moon', 'Jo March', 'Ty Rowan', 'Li Wei', 'Ma Ra', 'Abe Lin',
+      'Ada Lovelace', 'Ivy Rose', 'Ora Lee', 'Bea Thorn', 'Dot Cotton', 'Kay Wren', 'Una Brook', 'Wil Wheaton',
+      'Rook Essex', 'Essex Rook', 'Sir Hancock', 'Hancock the Bold', 'Peacock Wren', 'Dickens Rowe', 'Lady Sussex',
+    ];
+    expect(innocent.filter((n) => validateAdventurerName(n) !== null)).toEqual([]);
+    expect(ALLOWED_WORDS.filter((w) => w.length <= 16 && validateAdventurerName(capitalise(w)) !== null)).toEqual([]);
+  });
+});
+
 describe('SHORT_BAD_WORDS', () => {
   const failingShort = (check: (word: string) => boolean) => SHORT_BAD_WORDS.flatMap((w, i) => (check(w) ? [] : [i]));
   const refused = (name: string) => name.length > 16 || validateAdventurerName(name) === NOT_ALLOWED;
@@ -163,6 +213,7 @@ describe('reserved words', () => {
       'Admin Rook', 'Rook the Admin', 'Administrator Jo', 'GM Rook', 'Rook-GM', 'Gamemaster Jo', 'Game Master Jo',
       'Rook Game-Master', 'Moderator Jo', 'Mod Rook', "Rook o'Mod", 'Staff Rook', 'System Rook', 'Server Rook',
     ];
+    names.push('A-d-m-i-n', 'Ga Me Master', 'Admins', 'Mods', 'GMs', 'Moderators', 'Staffs', 'Sys Tem Rook');
     for (const n of names) expect(validateAdventurerName(n), n).toBe(NOT_ALLOWED);
     expect(validateUsername('admin_rook')).toBe(NOT_ALLOWED);
   });

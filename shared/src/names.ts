@@ -41,11 +41,6 @@ function normalise(s: string): string {
   return collapse(s.toLowerCase().replace(/[0-9@$]/g, (c) => LOOK_ALIKES[c] ?? '').replace(/[^a-z]/g, ''));
 }
 
-/** Like normalise, but digits are read as separators rather than letters ("f8u8c8k"). */
-function normaliseDigitsAsSeparators(s: string): string {
-  return collapse(s.toLowerCase().replace(/[@$]/g, (c) => LOOK_ALIKES[c]!).replace(/[^a-z]/g, ''));
-}
-
 /** Separators between the words of a name or username. */
 const SEPARATORS = /[\s'_-]+/;
 
@@ -74,46 +69,77 @@ const lists = () =>
 /** The words of `s` (split at separators), empty ones dropped. */
 const wordsOf = (s: string) => s.split(SEPARATORS).filter((w) => w !== '');
 
+/** Lower case, @ and $ mapped, everything else that is not a letter dropped (digits read as separators); repeats kept. */
+const looseLetters = (s: string) => s.toLowerCase().replace(/[@$]/g, (c) => LOOK_ALIKES[c]!).replace(/[^a-z]/g, '');
+
 /**
- * Whether `s` holds a blocked word, ignoring case, separators, look-alike characters and repeated
- * letters. Long entries are searched for across the whole name, words joined ("f-u-c-k" is caught);
- * a word that is exactly an allowed one ("Dickens") is left out of that search, splitting the name
- * there, while "Dick-ens" is searched as a whole. Short entries are matched as whole words only.
+ * Whether one reading of the name (each word turned into letters by `read`) holds a blocked entry
+ * anywhere in its joined, repeat-collapsed letters, except where a match lies entirely inside one
+ * exempt (allowed) word: "Dickens" is fine, but an entry that runs out of an allowed word into its
+ * neighbour ("…cock Sucker"-style) is still found.
  */
-export function isOffensive(s: string): boolean {
-  const { blocked, short, allowed } = lists();
-  const contains = (text: string) => {
-    const plain = normalise(text);
-    const loose = normaliseDigitsAsSeparators(text);
-    return blocked.some((word) => plain.includes(word) || loose.includes(word));
-  };
-  let run: string[] = [];
-  const runs: string[][] = [];
-  for (const word of wordsOf(s)) {
-    if (allowed.has(letters(word))) {
-      runs.push(run);
-      run = [];
-    } else {
-      run.push(word);
+function holdsBlocked(words: string[], exempt: boolean[], read: (w: string) => string, blocked: string[]): boolean {
+  // The joined letters, collapsed to runs of one letter, each run remembering where it lies in the raw letters.
+  const runs: { ch: string; start: number; end: number }[] = [];
+  const exemptRanges: [number, number][] = [];
+  let at = 0;
+  words.forEach((word, i) => {
+    const raw = read(word);
+    if (exempt[i]) exemptRanges.push([at, at + raw.length]);
+    for (const ch of raw) {
+      const last = runs.at(-1);
+      if (last && last.ch === ch) last.end = at + 1;
+      else runs.push({ ch, start: at, end: at + 1 });
+      at++;
     }
-  }
-  runs.push(run);
-  if (runs.some((r) => r.length > 0 && contains(r.join('')))) return true;
-  return wordsOf(s).some((word) => {
-    if (allowed.has(letters(word))) return false;
-    const forms = [letters(word), word.toLowerCase().replace(/[@$]/g, (c) => LOOK_ALIKES[c]!).replace(/[^a-z]/g, '')];
-    return short.some((pattern) => forms.some((form) => pattern.test(form)));
+  });
+  const text = runs.map((r) => r.ch).join('');
+  return blocked.some((entry) => {
+    for (let i = text.indexOf(entry); i !== -1; i = text.indexOf(entry, i + 1)) {
+      const from = runs[i]!.start;
+      const to = runs[i + entry.length - 1]!.end;
+      if (!exemptRanges.some(([a, b]) => a <= from && to <= b)) return true;
+    }
+    return false;
   });
 }
 
-/** Whether `s` is a name only the game itself uses, or has a staff word as one of its words. */
+/**
+ * Whether `s` holds a blocked word, ignoring case, separators, look-alike characters and repeated
+ * letters. Long entries are searched for across the whole name, words joined ("f-u-c-k" is caught),
+ * except inside a word that is exactly an allowed one ("Dickens"). Short entries must be a whole word,
+ * or a run of neighbouring words joined ("A ss"), so they never match inside a longer word (Thomas).
+ */
+export function isOffensive(s: string): boolean {
+  const { blocked, short, allowed } = lists();
+  const words = wordsOf(s);
+  const exempt = words.map((w) => allowed.has(letters(w)));
+  if (holdsBlocked(words, exempt, letters, blocked) || holdsBlocked(words, exempt, looseLetters, blocked)) return true;
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 1; j <= words.length; j++) {
+      const run = words.slice(i, j);
+      if (run.length === 1 && exempt[i]) continue;
+      const forms = [run.map(letters).join(''), run.map(looseLetters).join('')];
+      if (short.some((pattern) => forms.some((form) => pattern.test(form)))) return true;
+    }
+  }
+  return false;
+}
+
+/** Whether `s` is a name only the game itself uses, or has a staff word as a word (or run of words) of its own. */
 export function isReserved(s: string): boolean {
   const { reservedWords, reservedNames } = lists();
   const plain = normalise(s);
   if (reservedNames.has(plain) || plain.startsWith('guest')) return true;
-  const words = wordsOf(s).map(normalise);
-  // Each word, and each pair of neighbours ("Game Master").
-  return words.some((w, i) => reservedWords.has(w) || (i > 0 && reservedWords.has(collapse(words[i - 1]! + w))));
+  // Each word, and each run of neighbouring words joined ("Game Master", "A-d-m-i-n"), also as a plural.
+  const words = wordsOf(s).map(letters);
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 1; j <= words.length; j++) {
+      const joined = collapse(words.slice(i, j).join(''));
+      if (reservedWords.has(joined) || reservedWords.has(joined.replace(/s$/, ''))) return true;
+    }
+  }
+  return false;
 }
 
 /** An error message for a name a player chose for their adventurer, or null when it is fine. */
