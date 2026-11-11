@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Walk, createGroveWalk, groveSurface, groveTownSurface, groveGroundY, BEACON_C, type Obstacle } from './layout';
+import { GROVE_OBSTACLES } from './obstacles';
+import { Walk, groveSurface, groveTownSurface, groveGroundY, BEACON_C, type Obstacle } from './layout';
 
 // A 2 m x 2 m box on the flat plaza (the plaza is at terrain height 0).
 const box = (top?: number): Obstacle => ({ kind: 'r', x: 6, z: -6, hw: 1, hd: 1, c: 1, s: 0, ...(top === undefined ? {} : { top }) });
@@ -35,12 +36,13 @@ describe('Walk.surfaceAt', () => {
     expect(w.groundAt(6, -6)).toBeNull();
   });
   it('with no platforms, surfaceAt equals groundAt everywhere (grove sample grid)', () => {
-    const w = createGroveWalk();
+    // the grove's obstacles with every platform turned back into a wall
+    const w = new Walk(GROVE_OBSTACLES.map(({ top: _top, ...o }) => o));
     let nonNull = 0;
     for (let x = -130; x <= 130; x += 1.7) for (let z = -130; z <= 130; z += 1.7) {
       const g = w.groundAt(x, z);
       if (g !== null) { nonNull++; expect(w.surfaceAt(x, z)).toBe(g); }
-      else expect(w.surfaceAt(x, z)).toBeNull(); // no obstacle has a top yet
+      else expect(w.surfaceAt(x, z)).toBeNull(); // no obstacle has a top here
     }
     expect(nonNull).toBeGreaterThan(1000);
     expect(w.surfaceAt(BEACON_C.x, BEACON_C.z)).toBe(w.groundAt(BEACON_C.x, BEACON_C.z));

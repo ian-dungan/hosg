@@ -6,7 +6,7 @@
 //   npx vitest run src/world/obstacles.test.ts -u
 import { expect, it } from 'vitest';
 import { GROVE_OBSTACLES } from '@sg2/shared/world/obstacles';
-import { Walk, createGroveWalk, type Obstacle } from './layout';
+import { Walk, createGroveWalk, groundHeight, type Obstacle } from './layout';
 import { Builder } from './mesh';
 import { Kit } from './parts';
 import { buildTown } from './town';
@@ -39,13 +39,44 @@ it('baked GROVE_OBSTACLES match the obstacles the client world builds', async ()
   expect(GROVE_OBSTACLES).toEqual(live);
 });
 
-it('the shared grove walk answers groundAt exactly like a Walk over the live obstacles', () => {
+it('the shared grove walk answers groundAt and surfaceAt exactly like a Walk over the live obstacles', () => {
   const live = new Walk(buildObstacles()), shared = createGroveWalk();
-  let walkable = 0;
+  let walkable = 0, onPlatform = 0;
   for (let x = -120; x <= 120; x += 0.7) for (let z = -120; z <= 120; z += 0.7) {
-    const y = live.groundAt(x, z);
+    const y = live.groundAt(x, z), s = live.surfaceAt(x, z);
     if (y !== null) walkable++;
+    if (y === null && s !== null) onPlatform++;
     expect(shared.groundAt(x, z)).toBe(y);
+    expect(shared.surfaceAt(x, z)).toBe(s);
   }
   expect(walkable).toBeGreaterThan(1000);
+  expect(onPlatform).toBeGreaterThan(50);
+});
+
+it('the town props you can jump on are platforms at their heights; everything else stays a wall', () => {
+  const walk = createGroveWalk();
+  const platforms = GROVE_OBSTACLES.filter(o => o.top !== undefined);
+  // how high each platform stands above the terrain at its centre, in centimetres
+  const rise = (o: Obstacle) => Math.round((o.top! - groundHeight(o.x, o.z)) * 100);
+  const counts = new Map<number, number>();
+  for (const o of platforms) counts.set(rise(o), (counts.get(rise(o)) ?? 0) + 1);
+  expect(counts.get(50), 'plaza benches').toBe(5);
+  expect(counts.get(80), 'planters (not the two inside market stalls)').toBe(3);
+  expect(counts.get(70), 'market crates').toBe(3);
+  expect(counts.get(90), 'well rim, Lookout tier 1').toBe(2);
+  expect(counts.get(40), 'first plinth step').toBe(1);
+  // every platform is inside the town radius and somewhere on it surfaceAt reads its top
+  for (const o of platforms) {
+    expect(Math.hypot(o.x, o.z)).toBeLessThan(110);
+    const ext = o.kind === 'c' ? o.r : Math.min(o.hw, o.hd);
+    let seen = false;
+    for (let k = 0; k < 64 && !seen; k++) {
+      const a = k * 2.399, r = ext * 0.95 * Math.sqrt(k / 64);
+      if (walk.surfaceAt(o.x + Math.cos(a) * r, o.z + Math.sin(a) * r) === o.top) seen = true;
+    }
+    expect(seen, JSON.stringify(o)).toBe(true);
+  }
+  // the statue itself (above its first step) is still a wall
+  expect(walk.surfaceAt(0, 0)).toBeNull();
+  expect(walk.surfaceAt(3, 0)).toBeNull();
 });

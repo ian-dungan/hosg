@@ -4,6 +4,7 @@
 // Units: metres, seconds, radians. Babylon left-handed, Y up. Ground plane is X/Z.
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
+import type { Body } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
@@ -40,6 +41,9 @@ export interface WorldApi {
   /** Ground height under (x,z), or null where the player may not stand
    *  (off the island edge, inside a house/tree trunk/plinth, outside the arena disc while in it). */
   groundAt(x: number, z: number): number | null;
+  /** Height of whatever the player would stand on at (x,z): the terrain or a platform top (bench, crate,
+   *  Lookout tier...), or null where groundAt is null for any other reason. Drives the character controller. */
+  surfaceAt(x: number, z: number): number | null;
   anchor(name: AnchorName): Anchor;
   /** 6-10 spawn points for ordinary enemies on the Beacon, between dock and arena gate. */
   enemySpawns(): Vector3[];
@@ -95,12 +99,16 @@ export interface PlayerRigOpts {
   joystick: () => { x: number; y: number };
   /** A short tap/click on the 3D view (not a drag, not on HUD). */
   onTap: (tap: TapInfo) => void;
+  /** Called when the player lands, with how far they fell (metres from the highest point of the jump or fall). */
+  onLand?: (drop: number) => void;
 }
 export interface PlayerRig {
   readonly view: CharacterView;
   readonly camera: ArcRotateCamera;
-  /** Feet position, owned by the rig. */
+  /** Feet position, owned by the rig (the body's x, y, z). */
   readonly position: Vector3;
+  /** The live character-controller body (shared stepBody over WorldApi.surfaceAt). */
+  readonly body: Readonly<Body>;
   readonly facing: number;
   /** True while the player is providing movement input. */
   readonly moving: boolean;
@@ -111,7 +119,7 @@ export interface PlayerRig {
   faceTowards(x: number, z: number): void;
   /** When true the camera stops following the player (cutscenes drive camera.target/alpha/beta/radius). */
   setCinematic(on: boolean): void;
-  /** Jump if on the ground (Space also does this). */
+  /** Jump on the next step if on the ground (Space also does this). */
   jump(): void;
   update(dt: number): void;
 }

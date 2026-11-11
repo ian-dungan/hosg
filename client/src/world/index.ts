@@ -283,6 +283,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     },
     attachCamera: (c: ArcRotateCamera) => { cam = c; applyShadows(quality); applyPost(); },
     groundAt: (x, z) => walk.groundAt(x, z),
+    surfaceAt: (x, z) => walk.surfaceAt(x, z),
     anchor: (name) => { const a = anchors[name]; return { pos: a.pos.clone(), facing: a.facing }; },
     enemySpawns: () => spawns.map(p => p.clone()),
     raiseBeacon: () => {
@@ -313,7 +314,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
       river.update(time, camPos, phase === 3 ? 1 : 0);
       life.update(dt, time, WFX.target);
       sails.rotation.z = time * 0.6;
-      for (const b of blobs) { const p = b.root.position; b.disc.position.set(p.x, (walk.groundAt(p.x, p.z) ?? p.y) + 0.04, p.z); }
+      for (const b of blobs) { const p = b.root.position; b.disc.position.set(p.x, (walk.surfaceAt(p.x, p.z) ?? p.y) + 0.04, p.z); }
       if (rise) {
         rise.t += dt;
         const t = Math.min(1, rise.t / RISE_TIME);

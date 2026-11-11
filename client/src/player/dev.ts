@@ -59,6 +59,7 @@ function fakeWorld(): WorldApi {
       if (Math.abs(z) < 4 && x > 14) return rampH(x);
       return 0;
     },
+    surfaceAt(x, z) { return this.groundAt(x, z); },
     anchor() { return { pos: new Vector3(0, 0, 0), facing: 0 }; },
     enemySpawns() { return []; },
     raiseBeacon() { return Promise.resolve(); },

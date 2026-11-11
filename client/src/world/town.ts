@@ -5,6 +5,7 @@ import {
   groundHeight, riverX, bandR, WATER_Y, PLAZA_R, PLINTH_R, HOUSES, STALLS, LAMPS, GROVE_TREES, TOWN_TREES, WINDMILL, TAVERN, TAVERN_YAW,
   BEACON_DIR, DOCK_ANGLE, DOCK_START, DOCK_LEN, DOCK_HW, DOCK_Y, GROVE_CENTER, type Obstacle,
 } from './layout';
+import { buildLookout } from './lookout';
 
 const PERP = { x: -BEACON_DIR.z, z: BEACON_DIR.x };
 const H = groundHeight;
@@ -13,6 +14,8 @@ export interface TownOut { obstacles: Obstacle[]; pimGround: V3; pimFacing: numb
 
 const circ = (x: number, z: number, r: number): Obstacle => ({ kind: 'c', x, z, r });
 const rect = (x: number, z: number, hw: number, hd: number, yaw: number): Obstacle => ({ kind: 'r', x, z, hw, hd, c: Math.cos(yaw), s: Math.sin(yaw) });
+/** A platform: an obstacle you can stand on, its top `rise` metres above the terrain at its centre. */
+const onTop = (o: Obstacle, rise: number): Obstacle => ({ ...o, top: H(o.x, o.z) + rise });
 
 /** Distance from point to segment, and along-param. */
 function segDist(px: number, pz: number, ax: number, az: number, bx: number, bz: number) {
@@ -61,7 +64,8 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   b.prism([0, -0.2, 0], [0, 0.03, 0], PLAZA_R, PLAZA_R, 48, PAL.plinth, { capB: hex('#c9b591') });
   // plaza kerb
   b.prism([0, -0.3, 0], [0, 0.12, 0], PLAZA_R + 0.25, PLAZA_R + 0.2, 48, PAL.plinth, { caps: false });
-  obs.push(circ(0, 0, PLINTH_R));
+  // the statue's first plinth step is a platform (+0.4 m); the drum above it stays a wall
+  obs.push(onTop(circ(0, 0, PLINTH_R - 0.15), 0.4), circ(0, 0, 3.75));
 
   // ───── cobbled paths ─────
   for (const p of PATHS) {
@@ -160,7 +164,11 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     for (let i = 0; i < 6; i++) { const x0 = -1.35 + i * 2.7 / 6, x1 = x0 + 2.7 / 6; b.withHint(null, () => b.quad([x0, 2.65, -0.95], [x1, 2.65, -0.95], [x1, 2.1, 1.3], [x0, 2.1, 1.3], i % 2 ? PAL.sail : stallCols[st.color])); }
     b.box(-1.7, 0.35, 0.6, 0.7, 0.7, 0.7, PAL.wood, hex('#b07a50'));
     b.pop();
-    obs.push(rect(st.x, st.z, 1.75 + 0.6, 1.0, st.yaw));
+    // the stall and its canopy stay a wall (as before, except on the crate's side); the crate is a platform (+0.7 m)
+    const c = Math.cos(st.yaw), s = Math.sin(st.yaw);
+    const at = (lx: number, lz: number): [number, number] => [st.x + c * lx + s * lz, st.z - s * lx + c * lz];
+    obs.push(rect(...at(0.45, 0), 1.9, 1.0, st.yaw));
+    obs.push(onTop(rect(...at(-1.7, 0.6), 0.45, 0.45, st.yaw), 0.7));
   }
   // ───── lamps ─────
   for (const l of LAMPS) { lantern(k, l.x, 0.04, l.z, 3.1, Math.atan2(-l.x, -l.z) - Math.PI / 2); obs.push(circ(l.x, l.z, 0.35)); }
@@ -197,14 +205,16 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     b.push(); b.T(x, 0.04, z); b.RY(yaw);
     b.box(0, 0.45, 0, 1.8, 0.1, 0.5, PAL.woodLight); b.box(0, 0.8, -0.25, 1.8, 0.4, 0.08, PAL.woodLight);
     for (const sx of [-0.75, 0.75]) b.box(sx, 0.22, 0, 0.12, 0.45, 0.45, PAL.woodDark);
-    b.pop(); obs.push(rect(x, z, 1.0, 0.4, yaw));
+    b.pop(); obs.push(onTop(rect(x, z, 1.0, 0.35, yaw), 0.5));
   }
   // planters
   for (const a of [0.85, 2.2, 3.6, 4.15, 5.85]) {
     const x = Math.cos(a) * 11.3, z = Math.sin(a) * 11.3;
     b.box(x, 0.4, z, 1.3, 0.8, 1.3, PAL.plinth, hex('#6b4a36'));
     for (let i = 0; i < 5; i++) b.ball([x + b.rng.r(-0.45, 0.45), 0.9, z + b.rng.r(-0.45, 0.45)], 0.28, [PAL.blossom, hex('#ffd36a'), hex('#ff7a5c'), PAL.leaf1][i % 4], 1, 0.8, 1, 0);
-    obs.push(circ(x, z, 0.95));
+    // (two planters stand inside market stalls: those stay part of the stall's wall)
+    const inStall = STALLS.some(st => Math.hypot(st.x - x, st.z - z) < 2);
+    obs.push(inStall ? rect(x, z, 0.75, 0.75, 0) : onTop(rect(x, z, 0.75, 0.75, 0), 0.8));
   }
 
   // ───── the grove: big old shady trees ─────
@@ -264,7 +274,8 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     b.prism([wx - 1.3, wy + 2.5, wz], [wx, wy + 3.3, wz], 0.05, 0.05, 4, PAL.roof1); b.prism([wx + 1.3, wy + 2.5, wz], [wx, wy + 3.3, wz], 0.05, 0.05, 4, PAL.roof1);
     b.withHint([wx, wy + 2.4, wz], () => { b.quad([wx - 1.4, wy + 2.45, wz - 0.9], [wx, wy + 3.35, wz - 0.9], [wx, wy + 3.35, wz + 0.9], [wx - 1.4, wy + 2.45, wz + 0.9], PAL.roof1); b.quad([wx + 1.4, wy + 2.45, wz - 0.9], [wx, wy + 3.35, wz - 0.9], [wx, wy + 3.35, wz + 0.9], [wx + 1.4, wy + 2.45, wz + 0.9], PAL.roof1); });
     b.prism([wx, wy + 1.9, wz], [wx, wy + 1.4, wz], 0.22, 0.2, 6, PAL.wood);
-    obs.push(circ(wx, wz, 1.4));
+    obs.push(onTop(circ(wx, wz, 1.2), 0.9));                                   // the rim
+    for (const s of [-0.9, 0.9]) obs.push(circ(wx + s, wz, 0.16));          // the roof posts
   }
   for (const h of HOUSES) {
     // kitchen garden behind each house: low fence + rows of greens
@@ -297,6 +308,9 @@ export function buildTown(k: Kit, props: Kit): TownOut {
       lantern(k, lx, H(lx, lz), lz, 3.0, Math.atan2(-nx, -nz) - Math.PI / 2); obs.push(circ(lx, lz, 0.35));
     }
   }
+
+  // ───── the Old Lookout (before the scatter, so nothing grows inside it) ─────
+  obs.push(...buildLookout(k));
 
   // ───── scatter: shrubs, flowers, grass tufts (props mesh) ─────
   const pb = props.b; const rng = pb.rng;

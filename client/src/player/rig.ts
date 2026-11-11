@@ -5,10 +5,13 @@
 //  - short tap/click -> onTap (picked entityId and/or ground point)
 //  - wheel           -> zoom
 //  - WASD / arrows   -> camera-relative movement (merged with the HUD joystick vector)
+//  - Space           -> jump
+// Position comes from the shared character controller (stepBody over world.surfaceAt): the same walking,
+// stepping, jumping and falling the server checks.
 import { Scene, ArcRotateCamera, Vector3, Plane, type AbstractMesh, type Node } from '@babylonjs/core';
 import type { CreatePlayerRig, PlayerRig, PlayerRigOpts, TapInfo } from '../core/contracts';
 import { makeCharacter } from './character';
-import { RUN_SPEED } from '@sg2/shared';
+import { RUN_SPEED, STEP_UP, makeBody, stepBody, type Body, type Surface } from '@sg2/shared';
 
 const ACCEL = 14;             // exponential approach rate toward target velocity (1/s)
 const TURN_RATE = 12;         // rad/s max turn speed
@@ -40,9 +43,11 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
   let moveScale = 1;
   let cinematic = false;
   let moving = false;
-  let jumpY = 0, jumpV = 0;          // height above the ground and vertical speed while airborne
-  const JUMP_SPEED = 8, GRAVITY = 22;
-  const doJump = () => { if (jumpY === 0 && moveScale > 0 && !cinematic) jumpV = JUMP_SPEED; };
+  const surface: Surface = (x, z) => world.surfaceAt(x, z);
+  let body: Body = makeBody(0, 0, surface);
+  let jumpWanted = false;            // a jump requested since the last step
+  let showY = body.y;                // the character's drawn height: eases over small steps, else body.y
+  const doJump = () => { if (moveScale > 0 && !cinematic) jumpWanted = true; };
   const vel = { x: 0, z: 0 };
   let running = false;
 
@@ -169,19 +174,19 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
     opts.onTap(tap);
   };
 
-  // ── movement ──
-  const canStand = (x: number, z: number) => world.groundAt(x, z) !== null;
-
   const rig: PlayerRig = {
     view,
     camera,
     position,
     get facing() { return facing; },
     get moving() { return moving; },
+    get body() { return body; },
     teleport(pos: Vector3, f: number) {
-      position.copyFrom(pos);
-      const g = world.groundAt(pos.x, pos.z);
-      if (g !== null) position.y = g;
+      body = makeBody(pos.x, pos.z, surface);
+      if (surface(pos.x, pos.z) === null) body.y = body.peakY = pos.y;
+      position.set(body.x, body.y, body.z);
+      showY = body.y;
+      jumpWanted = false;
       facing = facingGoal = f;
       vel.x = vel.z = 0;
       view.root.position.copyFrom(position);
@@ -220,14 +225,22 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       vel.x += (tx - vel.x) * k; vel.z += (tz - vel.z) * k;
       if (moveScale === 0) { vel.x = vel.z = 0; }
 
-      // slide along obstacles: try full step, then each axis separately
-      const nx = position.x + vel.x * dt, nz = position.z + vel.z * dt;
-      if (canStand(nx, nz)) { position.x = nx; position.z = nz; }
-      else if (Math.abs(vel.x) > 1e-4 && canStand(nx, position.z)) { position.x = nx; vel.z *= 0.5; }
-      else if (Math.abs(vel.z) > 1e-4 && canStand(position.x, nz)) { position.z = nz; vel.x *= 0.5; }
-      else { vel.x = vel.z = 0; }
-      const g = world.groundAt(position.x, position.z);
-      if (g !== null) position.y += (g - position.y) * (1 - Math.exp(-14 * dt));
+      // the shared controller: walk (sliding along whatever blocks), step, jump, fall
+      const jump = jumpWanted && moveScale > 0 && !cinematic;
+      jumpWanted = false;
+      const x0 = body.x, z0 = body.z;
+      const res = stepBody(body, { vx: vel.x, vz: vel.z, jump }, dt, surface);
+      if (dt > 0) {
+        // keep only the velocity that was actually achieved (blocked or sliding along a wall)
+        const ax = (body.x - x0) / dt, az = (body.z - z0) / dt;
+        if (Math.abs(ax - vel.x) > 1e-3) vel.x = ax;
+        if (Math.abs(az - vel.z) > 1e-3) vel.z = az;
+      }
+      position.set(body.x, body.y, body.z);
+      // drawn height: ease over small steps (kerbs, a step down) so the character does not pop; exact otherwise
+      if (body.grounded && Math.abs(body.y - showY) <= STEP_UP + 0.01) showY += (body.y - showY) * (1 - Math.exp(-14 * dt));
+      else showY = body.y;
+      if (res.landed) opts.onLand?.(res.drop);
 
       // facing: toward movement while moving, else toward faceTowards goal
       const sp = Math.hypot(vel.x, vel.z);
@@ -239,13 +252,8 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       // animation
       const nowRunning = sp > 0.8;
       if (nowRunning !== running) { running = nowRunning; view.setPose(running ? 'run' : 'idle'); }
-      // jump: simple gravity arc on top of the ground height
-      if (jumpV !== 0 || jumpY > 0) {
-        jumpY += jumpV * dt; jumpV -= GRAVITY * dt;
-        if (jumpY <= 0) { jumpY = 0; jumpV = 0; }
-      }
       view.root.position.copyFrom(position);
-      view.root.position.y += jumpY;
+      view.root.position.y = showY;
       view.root.rotation.y = facing;
       view.update(dt);
 
