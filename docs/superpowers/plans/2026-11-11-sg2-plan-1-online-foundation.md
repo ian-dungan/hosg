@@ -19,6 +19,8 @@
 5. **Progression and gear** — levels 1–10, armour types and nine sets, unique weapons, visible gear, costumes and the gold costume shop, GM tools.
 6. **Opening quest online** — "The Solstice Crossing" as a saved, per-adventurer quest.
 
+Tabled by the owner for later (can be added at any time): party voice chat. It needs HTTPS, so it can only follow the move to `shadygrove2.mooo.com`.
+
 ## Global Constraints
 
 - Player characters are called **adventurers** in all player-facing text.
