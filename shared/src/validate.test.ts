@@ -35,6 +35,13 @@ describe('cleanChat', () => {
     expect(cleanChat('a\u0007b\u007fc\u0085d')).toBe('abcd');
     expect(cleanChat('line1\r\nline2\tend')).toBe('line1 line2 end');
   });
+  it('strips bidi and zero-width format characters', () => {
+    expect(cleanChat('a\u200bb\u200cc\u200dd\u200ee\u200ff')).toBe('abcdef');
+    expect(cleanChat('\u202aa\u202bb\u202cc\u202dd\u202ee')).toBe('abcde');
+    expect(cleanChat('\u2066a\u2067b\u2068c\u2069d\ufeffe')).toBe('abcde');
+    expect(cleanChat('hi \u202e there')).toBe('hi there');
+    expect(cleanChat('\u200b\ufeff')).toBeNull();
+  });
   it('cuts to CHAT_MAX', () => {
     expect(cleanChat('a'.repeat(5000))!.length).toBe(200);
     expect(cleanChat('a'.repeat(199) + ' b')).toBe('a'.repeat(199));

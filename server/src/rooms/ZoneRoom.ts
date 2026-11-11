@@ -1,6 +1,16 @@
 // The grove zone room: validated movement, periodic saving, reconnect window, one session per account.
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
-import { MAX_PLAYERS, SPAWN, TICK_HZ, checkStep, groveTownWalkable, parsePose, type S2C } from '@sg2/shared';
+import {
+  CHAT_MIN_INTERVAL_MS,
+  MAX_PLAYERS,
+  SPAWN,
+  TICK_HZ,
+  checkStep,
+  cleanChat,
+  groveTownWalkable,
+  parsePose,
+  type S2C,
+} from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
 import type { Store } from '../store/types';
 import { PlayerState, ZoneState } from './state';
@@ -22,6 +32,8 @@ interface Session {
   /** Last accepted position, and when it was accepted (ms). */
   lastGood: { x: number; z: number };
   lastMoveAt: number;
+  /** When this adventurer's last chat line went out (ms), or -Infinity. */
+  lastChatAt: number;
   /** Set while the client is away and may reconnect. */
   reconnection?: Deferred<Client>;
 }
@@ -60,6 +72,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.setPatchRate(1000 / TICK_HZ);
 
     this.onMessage('move', this.guard('move', (client, message) => this.onMove(client, message)));
+    this.onMessage('chat', this.guard('chat', (client, message) => this.onChat(client, message)));
     this.clock.setInterval(() => void this.saveAll(), options.saveSeconds * 1000);
   }
 
@@ -91,6 +104,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       player,
       lastGood: { x: start.x, z: start.z },
       lastMoveAt: Date.now(),
+      lastChatAt: -Infinity,
     });
     this.state.players.set(client.sessionId, player);
   }
@@ -137,6 +151,18 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.lastGood = { x: pose.x, z: pose.z };
     session.lastMoveAt = now;
     Object.assign(session.player, pose);
+  }
+
+  /** Cleaned text goes to everyone, sender included; empty text and lines within CHAT_MIN_INTERVAL_MS are dropped. */
+  private onChat(client: Client, message: unknown) {
+    const session = this.sessions.get(client.sessionId);
+    const text = cleanChat((message as { text?: unknown } | null)?.text);
+    if (!session || text === null) return;
+    const now = Date.now();
+    if (now - session.lastChatAt < CHAT_MIN_INTERVAL_MS) return;
+    session.lastChatAt = now;
+    const chat: S2C['chat'] = { from: session.player.name, text };
+    this.broadcast('chat', chat);
   }
 
   /** Disconnects an account's older session (or ends its reconnect window); it is saved and removed at once. */
