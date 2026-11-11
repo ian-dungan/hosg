@@ -58,7 +58,7 @@ The player starts on solid ground. The first game was a small corner of a much l
    - **Weapons**: each weapon has its own look wherever possible (shape, colour, glow or trail), so a named or rare weapon is recognisable in another adventurer's hands. Boss drops and quest rewards always get a unique model; only common starter weapons may share one. The first slice has about six blades and six bows.
    - **Costumes**: purely cosmetic outfits worn over your gear in a separate costume slot, so they never change stats. Adventurers buy them from a costume shop for in-game gold (never real money) or win them at GM-run events.
    - **GM tools**: game masters can start an event, announce it to the server and award a costume or item to the winners.
-10. **Online**: accounts (username and password, or play as guest), saved characters, chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
+10. **Online**: accounts (username and password, or play as guest), saved characters with a name the player chooses (no bad words, no impersonating staff or the heroes), chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
 
 ## Out of scope (later rounds, each with its own design)
 
@@ -72,7 +72,7 @@ Normandy (the capital), the wider continent, and the later-game sky region (floa
 - **Database**: PostgreSQL for accounts, characters, inventory and leaderboards. Passwords hashed with argon2.
 - **Hosting**: Docker Compose on the Hetzner server on its own port, so the existing Shady Grove game keeps running beside it.
 - **Address**: to begin with, players open the server's IP address and port directly over plain HTTP. Later it moves to `shadygrove2.mooo.com` with HTTPS (Caddy), which needs the DNS name pointed at the server; nothing in the game depends on which address is used.
-- **Art**: models built in code or taken from CC0 low-poly packs, then recoloured to the game palette. The statue is modelled specially.
+- **Art**: everything is built in code for now (owner decision); bought or generated 3D model files may be revisited later. The statue is modelled specially.
 
 ## Error handling
 
