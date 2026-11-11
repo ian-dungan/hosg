@@ -8,6 +8,12 @@ export const RUN_SPEED = 6;
 export const MAX_PLAYERS = 100;
 /** How long a dropped adventurer stays in the world while the client reconnects. */
 export const RECONNECT_SECONDS = 30;
+/**
+ * The client's automatic reconnection (the Colyseus SDK's `room.reconnection` settings): retry at
+ * once however long the room has been up, at least every 2 s, until RECONNECT_SECONDS runs out
+ * (the client gives up then, so the retry count is never the limit).
+ */
+export const CLIENT_RECONNECTION = { minUptime: 0, maxRetries: 1000, maxDelay: 2000 } as const;
 /** How often online adventurers are saved. */
 export const SAVE_SECONDS = 60;
 /** Longest chat message, in characters. */

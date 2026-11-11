@@ -2,6 +2,9 @@
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import {
   CHAT_MIN_INTERVAL_MS,
+  REASON_GROVE_FULL,
+  REASON_NAME_FIRST,
+  REASON_SIGNED_IN_ELSEWHERE,
   SPAWN,
   STEP_SLACK,
   TICK_HZ,
@@ -65,9 +68,6 @@ async function authenticate(store: Store, jwtSecret: string, options: unknown): 
   return account ? { accountId: account.id } : false;
 }
 
-const KICK_REASON = 'Signed in somewhere else';
-const NAME_FIRST = 'Name your adventurer first';
-const FULL_REASON = 'Shady Grove is full, try again soon';
 /**
  * Per-client message budget (token bucket): refills at 3 * TICK_HZ a second and holds about 4 s of
  * normal traffic, so a catch-up burst after a stall is absorbed. Messages beyond it are dropped
@@ -88,12 +88,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private maxPlayers!: number;
   private sessions = new Map<string, Session>(); // key: sessionId
   private sessionByAccount = new Map<string, string>(); // accountId -> sessionId
+  /** Sessions kicked during their reconnect window, whose window is left to run so a returning client learns why. */
+  private kickedAway = new Set<string>();
   /** Movement allowances by account id, kept across kick and re-join so a new session gets no fresh budget. */
   private allowances = new Map<string, Allowance>();
   private patchMeter = new PatchRateMeter(Date.now());
 
   onCreate(options: ZoneRoomOptions) {
-    if (options.live.size > 0) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON); // never a second grove
+    if (options.live.size > 0) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_GROVE_FULL); // never a second grove
     this.store = options.store;
     this.maxPlayers = options.maxPlayers;
     // Admission is decided by canAdmit, so Colyseus must never see the room as full (it would open
@@ -115,7 +117,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   async onJoin(client: Client) {
     const { accountId } = client.auth as JoinAuth;
     // Checked again here because two joins can pass onAuth at the same time.
-    if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
+    if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_GROVE_FULL);
     // Claim the account before any await, so a third join of the same account kicks this one.
     const previous = this.sessionByAccount.get(accountId);
     this.sessionByAccount.set(accountId, client.sessionId);
@@ -126,7 +128,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     try {
       adventurer = await this.store.getOrCreateAdventurer(accountId);
       // onAuth refused unnamed adventurers already; names are never taken away, so this is a safeguard.
-      if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, NAME_FIRST);
+      if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
       name = adventurer.name;
     } catch (err) {
       if (this.sessionByAccount.get(accountId) === client.sessionId) this.sessionByAccount.delete(accountId);
@@ -134,7 +136,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
     // The same account joined again while this join was loading: the newer one wins.
     if (this.sessionByAccount.get(accountId) !== client.sessionId) {
-      throw new ServerError(ErrorCode.APPLICATION_ERROR, KICK_REASON);
+      throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_SIGNED_IN_ELSEWHERE);
     }
 
     const start = groveTownWalkable(adventurer.x, adventurer.z) ? adventurer : SPAWN;
@@ -162,6 +164,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   onReconnect(client: Client) {
+    // Refusing the reconnection sends this reason to the client (its room's onError), then closes it.
+    if (this.kickedAway.delete(client.sessionId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_SIGNED_IN_ELSEWHERE);
     const session = this.sessions.get(client.sessionId);
     if (!session) return;
     session.client = client;
@@ -169,6 +173,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   async onLeave(client: Client) {
+    this.kickedAway.delete(client.sessionId); // a kicked session's window ran out, or its return was refused
     await this.removeSession(client.sessionId);
   }
 
@@ -226,15 +231,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.broadcast('chat', chat);
   }
 
-  /** Disconnects an account's older session (or ends its reconnect window); it is saved and removed at once. */
+  /** Ends an account's older session, connected or away; its adventurer is saved and removed at once. */
   private async kick(sessionId: string) {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    // Away: the reconnect window is left open, so a client that comes back within it is told why
+    // (onReconnect) instead of finding its session missing. Marked before the save, which may take a while.
+    const away = session.reconnection !== undefined;
+    if (away) this.kickedAway.add(sessionId);
     await this.removeSession(sessionId);
-    if (session.reconnection) {
-      session.reconnection.reject(new Error(KICK_REASON));
-    } else {
-      this.sendTo(session.client, 'kicked', { reason: KICK_REASON });
+    if (!away) {
+      this.sendTo(session.client, 'kicked', { reason: REASON_SIGNED_IN_ELSEWHERE });
       session.client.leave(CloseCode.CONSENTED);
     }
   }
@@ -319,10 +326,10 @@ export function zoneRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof
       const auth = await authenticate(options.store, jwtSecret, joinOptions);
       if (!auth) return false;
       if ((await options.store.getOrCreateAdventurer(auth.accountId)).name === null) {
-        throw new ServerError(ErrorCode.APPLICATION_ERROR, NAME_FIRST);
+        throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
       }
       const [room] = options.live;
-      if (room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
+      if (room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_GROVE_FULL);
       return auth;
     }
   };

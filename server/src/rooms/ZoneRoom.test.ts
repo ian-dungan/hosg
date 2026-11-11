@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { matchMaker } from '@colyseus/core';
-import { Client } from '@colyseus/sdk';
-import { SPAWN, TICK_HZ } from '@sg2/shared';
+import { CloseCode, matchMaker } from '@colyseus/core';
+import { Client, type Room } from '@colyseus/sdk';
+import { CLIENT_RECONNECTION, SPAWN, TICK_HZ } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -24,6 +24,20 @@ async function start(opts?: Parameters<typeof startServer>[0]): Promise<TestServ
 }
 
 const pose = (x: number, z: number) => ({ x, z, facing: 0, moving: true });
+
+/** Turns automatic reconnection back on (joinGrove turns it off), with the browser client's settings. */
+function reconnectLikeTheBrowser(room: Room<any, any>): void {
+  Object.assign(room.reconnection, { enabled: true, ...CLIENT_RECONNECTION });
+}
+
+/** Cuts a client's socket the way a lost network does: the server destroys it, and both ends see 1006. */
+function cutSocket(room: Room<any, any>): void {
+  const serverClient = matchMaker.getLocalRoomById(room.roomId).clients.get(room.sessionId) as any;
+  serverClient.ref.terminate();
+}
+
+/** Resolves with the next onDrop's close code. */
+const nextDrop = (room: Room<any, any>) => new Promise<number>((resolve) => room.onDrop((code: number) => resolve(code)));
 
 describe('joining the grove', () => {
   it('rejects a join without a valid token', async () => {
@@ -331,6 +345,63 @@ describe('sessions', () => {
     expect(b.room.state.players.get(a.room.sessionId)).toBeDefined();
     await waitFor(() => !b.room.state.players.get(a.room.sessionId), 2000);
     expect((await store.getOrCreateAdventurer(alice.accountId)).x).toBe(0.8);
+  });
+
+  // The path the browser takes (client/src/online.ts): the SDK's own automatic reconnection.
+  for (const [how, drop, expectedCode] of [
+    ['the network is lost', cutSocket, CloseCode.ABNORMAL_CLOSURE],
+    ['the browser goes offline', (room: Room<any, any>) => room.connection.close(CloseCode.MAY_TRY_RECONNECT), CloseCode.MAY_TRY_RECONNECT],
+  ] as const) {
+    it(`reconnects the same room object by itself when ${how}`, async () => {
+      vi.spyOn(console, 'info').mockImplementation(() => {}); // the SDK narrates each reconnection step
+      const { url, store } = await start();
+      const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
+      const b = await joinGrove(url, (await accountFor(store, 'Bob')).token);
+      reconnectLikeTheBrowser(a.room);
+      const sessionId = a.room.sessionId;
+      const dropped = nextDrop(a.room);
+      const reconnected = new Promise<void>((resolve) => a.room.onReconnect(() => resolve()));
+      let left = false;
+      a.room.onLeave(() => (left = true));
+
+      drop(a.room);
+      expect(await dropped).toBe(expectedCode);
+      expect(a.room.reconnection.isReconnecting).toBe(true);
+      await reconnected;
+      expect(a.room.reconnection.isReconnecting).toBe(false);
+      expect(a.room.sessionId).toBe(sessionId);
+
+      // State patches flow again: B's move shows up on A, and A's move on B.
+      b.room.send('move', pose(0.4, -11));
+      await waitFor(() => a.room.state.players.get(b.room.sessionId)?.x === 0.4);
+      a.room.send('move', pose(-0.4, -11));
+      await waitFor(() => b.room.state.players.get(sessionId)?.x === -0.4);
+      expect(b.room.state.players.size).toBe(2);
+      expect(left).toBe(false);
+    });
+  }
+
+  it('tells a client that was kicked while away why, when it comes back within the window', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => {}); // the SDK narrates each reconnection step
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // Colyseus logs the refused reconnection
+    const { url, store } = await start();
+    const alice = await accountFor(store, 'Alice');
+    const a = await joinGrove(url, alice.token);
+    reconnectLikeTheBrowser(a.room);
+    a.room.reconnection.minDelay = 500; // stay away long enough for the second sign-in to land
+    const errors: string[] = [];
+    a.room.onError((_code: number, message?: string) => errors.push(message ?? ''));
+    const left = new Promise<number>((resolve) => a.room.onLeave((code: number) => resolve(code)));
+    const dropped = nextDrop(a.room);
+    cutSocket(a.room);
+    await dropped;
+
+    const elsewhere = await joinGrove(url, alice.token); // kicks A's session inside its reconnect window
+    expect(elsewhere.room.state.players.size).toBe(1);
+    expect(await left).toBe(CloseCode.FAILED_TO_RECONNECT);
+    expect(errors).toEqual(['Signed in somewhere else']);
+    expect(elsewhere.room.state.players.size).toBe(1);
+    expect(elsewhere.room.state.players.get(elsewhere.room.sessionId)?.name).toBe('Alice');
   });
 });
 
