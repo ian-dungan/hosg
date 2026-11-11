@@ -95,7 +95,7 @@ void main(){
     float toI = max(dot(normalize(d), normalize(uIsl)), 0.);
     float bank = smoothstep(0.96, 0.995, toI);
     n += bank * (0.32 * (1. - uP.y)) - bank * 0.5 * uP.y;
-    float m = smoothstep(0.52, 0.66, n) * smoothstep(-0.01, 0.1, h) * (1. - smoothstep(0.55, 0.85, h));
+    float m = smoothstep(0.6, 0.72, n) * smoothstep(-0.01, 0.1, h) * (1. - smoothstep(0.55, 0.85, h));
     float lit = smoothstep(0.5, 0.85, fbm(q * 0.9 + drift + vec2(3.06, 1.05) - uSun.xz * 0.12));
     vec3 base = mix(vec3(0.80,0.78,0.92), vec3(0.97,0.90,0.88), sa * 0.6);
     vec3 top = mix(vec3(1.0,0.98,0.95), vec3(1.0,0.90,0.74), pow(sa, 1.5));

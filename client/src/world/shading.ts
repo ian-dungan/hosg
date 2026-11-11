@@ -16,6 +16,7 @@ export class WorldFxPlugin extends MaterialPluginBase {
   constructor(material: Material, private o: WfxOpts) {
     super(material, 'WorldFx', 210, { WFX_WIND: false, WFX_FADE: false, WFX_NOISE: false, WFX_RIM: false, WFX_CLOUDSH: false, WFX_FLICKER: false });
     this.doNotSerialize = true;
+    this.registerForExtraEvents = true;
     this._enable(true);
   }
   getClassName() { return 'WorldFxPlugin'; }
@@ -82,9 +83,9 @@ float wfxBayer(vec2 p) { return fract(52.9829189 * fract(dot(floor(p), vec2(0.06
 if (wfxTarget.w > 0.0) {
   vec3 wCam = vEyePosition.xyz; vec3 wD = wfxTarget.xyz - wCam; float wL2 = dot(wD, wD);
   if (wL2 < 1700.0) {
-    float wt = clamp(dot(vPositionW - wCam, wD) / wL2, 0.0, 1.0);
+    float wt = dot(vPositionW - wCam, wD) / wL2;
     float wDist = length(vPositionW - (wCam + wD * wt));
-    float wA = (1.0 - smoothstep(wfxTarget.w * 0.5, wfxTarget.w, wDist)) * (1.0 - smoothstep(0.82, 0.95, wt))
+    float wA = (1.0 - smoothstep(wfxTarget.w * 0.5, wfxTarget.w, wDist)) * (1.0 - smoothstep(0.8, 0.93, wt)) * step(0.0, wt)
              * smoothstep(wfxTarget.y + 0.6, wfxTarget.y + 2.0, vPositionW.y);
     if (wA * 0.9 > wfxBayer(gl_FragCoord.xy)) discard;
   }

@@ -54,11 +54,11 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     return m;
   };
   const mLit = litMat('world_lit', { noise: 0.2, rim: 0.22, cloudShadow: 0.16, fade: true, wind: true });
-  const mTerrainMat = litMat('world_terrainmat', { noise: 0.34, cloudShadow: 0.18 });
-  const mGrass = litMat('world_grassmat', { noise: 0.25, cloudShadow: 0.18, wind: true }); mGrass.backFaceCulling = false;
+  const mTerrainMat = litMat('world_terrainmat', { noise: 0.34, cloudShadow: 0.18 }); mTerrainMat.diffuseColor = new Color3(0.93, 0.9, 0.78);
+  const mGrass = litMat('world_grassmat', { noise: 0.25, cloudShadow: 0.18, wind: true }); mGrass.backFaceCulling = false; mGrass.diffuseColor = new Color3(0.94, 0.91, 0.8);
   const mCountry = litMat('world_countrymat', { noise: 0.22, cloudShadow: 0.18, wind: true });
-  const mStatueMat = litMat('world_statuemat', { noise: 0.3, rim: 0.32, cloudShadow: 0.12 });
-  mStatueMat.specularColor = C3('#3a3328'); mStatueMat.specularPower = 18;
+  const mStatueMat = litMat('world_statuemat', { noise: 0.32, rim: 0.16, cloudShadow: 0.12 });
+  mStatueMat.specularColor = C3('#2a251d'); mStatueMat.specularPower = 14; mStatueMat.diffuseColor = new Color3(0.93, 0.91, 0.88);
   const mBronze = litMat('world_bronzemat', { noise: 0.25, rim: 0.4 }); mBronze.specularColor = C3('#c8a060'); mBronze.specularPower = 40;
   const mGlow = new StandardMaterial('world_glow', scene);
   mGlow.disableLighting = true; mGlow.emissiveColor = new Color3(1, 1, 1);

@@ -80,12 +80,12 @@ function ellie(b: Builder, c: Cols) {
   b.prism([-0.105, 0.42, -0.2], [-0.105, 0.22, -0.33], 0.07, 0.066, SIDES, SH, { caps: false });
   b.prism([-0.105, 0.2, -0.39], [-0.105, 0.03, -0.22], 0.062, 0.052, 7, SH);
   // pleated tunic skirt, flaring back in the wind
-  pleat(b, [0, 1.0, 0.01], [0, 0.6, -0.06], 0.17, 0.3, 18, 0.08, S, 0.1);
+  pleat(b, [0, 1.0, 0.01], [0, 0.6, -0.06], 0.17, 0.29, 22, 0.045, S, 0.1);
   // torso + belt with buckle
-  b.taperBox([0, 0.9, 0], 0.28, 0.18, [0, 1.36, 0.05], 0.34, 0.19, S);
-  b.ball([0, 1.2, 0.08], 0.13, S, 1.25, 0.9, 0.7, 1); // chest volume
-  b.taperBox([0, 0.9, 0], 0.31, 0.21, [0, 0.97, 0.005], 0.31, 0.21, SH);
-  b.box(0, 0.935, 0.11, 0.07, 0.06, 0.02, acc);
+  b.push(); b.SC(1, 1, 0.62); b.prism([0, 0.88, 0], [0, 1.37, 0.08], 0.15, 0.18, 14, S); b.pop();
+  b.push(); b.SC(1, 1, 0.62); b.ball([0, 1.33, 0.07], 0.18, S, 1, 0.45, 1, 1); b.pop();
+  b.push(); b.SC(1, 1, 0.68); b.prism([0, 0.9, 0], [0, 0.97, 0.005], 0.165, 0.165, 14, SH); b.pop();
+  b.box(0, 0.935, 0.115, 0.07, 0.06, 0.02, acc);
   b.box(-0.19, 0.86, -0.02, 0.09, 0.17, 0.2, SH); // satchel
   b.prism([0.15, 1.34, 0.05], [-0.17, 0.92, -0.02], 0.024, 0.024, 4, SH);
   // neck, head looking up toward the far sky
@@ -124,10 +124,10 @@ function felix(b: Builder, g: Builder, c: Cols, cloak: RGB): V3 {
   limb(b, [-0.17, 0.52, -0.12], [-0.19, 0.15, -0.2], 0.072, 0.057, S2);
   b.prism([-0.19, 0.42, -0.18], [-0.19, 0.16, -0.2], 0.085, 0.08, SIDES, SH, { caps: false });
   b.taperBox([-0.19, 0.0, -0.15], 0.14, 0.3, [-0.19, 0.2, -0.18], 0.15, 0.17, SH);
-  pleat(b, [0, 1.02, 0], [0, 0.64, -0.04], 0.21, 0.29, 16, 0.06, S2, 0.06);
-  b.taperBox([0, 0.95, 0], 0.37, 0.24, [0, 1.47, 0.02], 0.56, 0.29, S);
-  b.ball([0, 1.26, 0.07], 0.17, S, 1.35, 0.85, 0.7, 1);
-  b.taperBox([0, 0.94, 0], 0.4, 0.27, [0, 1.02, 0.0], 0.4, 0.27, SH);
+  pleat(b, [0, 1.02, 0], [0, 0.64, -0.04], 0.21, 0.29, 20, 0.04, S2, 0.06);
+  b.push(); b.SC(1, 1, 0.55); b.prism([0, 0.94, 0], [0, 1.47, 0.04], 0.2, 0.285, 14, S); b.pop();
+  b.push(); b.SC(1, 1, 0.55); b.ball([0, 1.44, 0.04], 0.285, S, 1, 0.3, 1, 1); b.pop();
+  b.push(); b.SC(1, 1, 0.68); b.prism([0, 0.94, 0], [0, 1.02, 0], 0.21, 0.21, 14, SH); b.pop();
   b.box(0, 0.98, 0.14, 0.1, 0.09, 0.02, acc);
   for (const sd of [-1, 1]) { b.ball([sd * 0.28, 1.45, 0.0], 0.115, cloak, 1.15, 0.8, 1.15, 1); b.ball([sd * 0.28, 1.47, 0.0], 0.06, acc, 1, 0.6, 1, 0); }
   // collar strap across the chest
@@ -139,13 +139,13 @@ function felix(b: Builder, g: Builder, c: Cols, cloak: RGB): V3 {
   const eye: V3 = [-0.05, 1.72, 0.16];
   const D = GLASS_DIR_LOCAL;
   const sgA = add(eye, mul(D, 0.02)), sgB = add(eye, mul(D, 0.55));
-  b.prism(sgA, add(sgA, mul(D, 0.2)), 0.04, 0.04, 12, acc);
-  b.prism(add(sgA, mul(D, 0.2)), add(sgA, mul(D, 0.215)), 0.05, 0.05, 12, mix(acc, PAL.white, 0.25));
-  b.prism(add(sgA, mul(D, 0.215)), sgB, 0.05, 0.06, 12, acc);
-  b.prism(add(sgA, mul(D, 0.38)), add(sgA, mul(D, 0.395)), 0.062, 0.062, 12, mix(acc, PAL.white, 0.25));
-  b.prism(sgB, add(sgB, mul(D, 0.04)), 0.072, 0.072, 12, acc);
+  b.prism(sgA, add(sgA, mul(D, 0.2)), 0.03, 0.03, 12, acc);
+  b.prism(add(sgA, mul(D, 0.2)), add(sgA, mul(D, 0.215)), 0.038, 0.038, 12, mix(acc, PAL.white, 0.25));
+  b.prism(add(sgA, mul(D, 0.215)), sgB, 0.036, 0.044, 12, acc);
+  b.prism(add(sgA, mul(D, 0.38)), add(sgA, mul(D, 0.395)), 0.047, 0.047, 12, mix(acc, PAL.white, 0.25));
+  b.prism(sgB, add(sgB, mul(D, 0.04)), 0.054, 0.054, 12, acc);
   g.M = b.M;
-  g.prism(add(sgB, mul(D, 0.035)), add(sgB, mul(D, 0.05)), 0.06, 0.06, 12, hex('#fff2c0'));
+  g.prism(add(sgB, mul(D, 0.035)), add(sgB, mul(D, 0.05)), 0.045, 0.045, 12, hex('#fff2c0'));
   const lens = add(sgB, mul(D, 0.05));
   const ls: V3 = [0.27, 1.42, 0.0], le: V3 = [0.2, 1.38, 0.3], lh = add(eye, mul(D, 0.3));
   limb(b, ls, le, 0.066, 0.056, S); limb(b, le, lh, 0.056, 0.046, S); hand(b, lh, D, S, 'fist');
@@ -214,7 +214,6 @@ export function buildStatue(b: Builder, g: Builder, x: number, y: number, z: num
   b.aoFn = (p: V3) => 0.8 + 0.2 * Math.min(1, Math.max(0, (p[1] - y - PLINTH_TOP) / 2.5));
   b.push(); b.T(x, y + PLINTH_TOP, z); b.RY(FIG_YAW); b.SC(FIG_S); b.SC(-1, 1, 1);
   b.taperBox([0.0, -0.04, -0.1], 1.35, 1.6, [0.0, 0.06, -0.1], 1.25, 1.5, stoneD);
-  b.ball([0.45, 0.06, 0.4], 0.12, stone, 1.3, 0.5, 1, 1); b.ball([-0.5, 0.06, -0.6], 0.14, stone, 1.3, 0.5, 1, 1); // carved rocks
   const ellieCols: Cols = { S: hex('#f1e4cc'), S2: hex('#e6d5b8'), SH: hex('#d9b98a'), acc: hex('#c98a4e'), dark: hex('#a99478') };
   const felixCols: Cols = { S: hex('#e9dcc4'), S2: hex('#d9c8aa'), SH: hex('#c8b08a'), acc: hex('#c98a4e'), dark: hex('#a08c70') };
   b.push(); b.T(-0.3, 0.06, 0.2); ellie(b, ellieCols); b.pop();

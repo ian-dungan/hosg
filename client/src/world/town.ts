@@ -315,7 +315,7 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     const y = H(x, z); const q = rng.next();
     if (q < 0.22) pb.ball([x, y + 0.3, z], rng.r(0.5, 0.85), PAL.leaf2, 1.2, 0.75, 1, 0, 0.3, PAL.grassDark);
     else if (q < 0.36) for (let j = 0; j < 5; j++) pb.ball([x + rng.r(-0.45, 0.45), y + 0.2, z + rng.r(-0.45, 0.45)], 0.16, [PAL.blossom, hex('#ffd36a'), PAL.white, hex('#ff7a5c')][Math.floor(rng.r(0, 4))], 1, 0.8, 1, 0);
-    else for (let j = 0; j < 3; j++) pb.prism([x + rng.r(-0.3, 0.3), y - 0.05, z + rng.r(-0.3, 0.3)], [x + rng.r(-0.45, 0.45), y + rng.r(0.3, 0.55), z + rng.r(-0.45, 0.45)], 0.1, 0, 3, j % 2 ? PAL.grass2 : PAL.grassDark);
+
   }
   void tint;
   return { obstacles: obs, pimGround, pimFacing, windmillHub: hub, windmillYaw: wyaw, ferry: fp };

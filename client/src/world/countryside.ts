@@ -93,15 +93,16 @@ export function buildCountryside(terrain: Builder, band: Kit, far: Kit, water: B
     }
     return out;
   });
+  const ringCol = ring.map(rr => rr.map(p => groundCol(p[0], p[2], p[1])));
+  terrain.cj = 0.012;
   terrain.withHint('up', () => {
     for (let j = 0; j < ring.length - 1; j++) for (let i = 0; i < NA; i++) {
       const k = (i + 1) % NA;
       const A = ring[j][i], B = ring[j][k], C = ring[j + 1][i], D = ring[j + 1][k];
-      if (j === 0) { const c = groundCol((C[0] + D[0]) / 3, (C[2] + D[2]) / 3, (A[1] + C[1] + D[1]) / 3); terrain.tri(A, D, C, c); continue; }
-      const c1 = groundCol((A[0] + B[0] + D[0]) / 3, (A[2] + B[2] + D[2]) / 3, (A[1] + B[1] + D[1]) / 3);
-      const c2 = groundCol((A[0] + C[0] + D[0]) / 3, (A[2] + C[2] + D[2]) / 3, (A[1] + C[1] + D[1]) / 3);
-      if ((i + j) % 2) { terrain.tri(A, B, D, c1); terrain.tri(A, D, C, tint(c2, 0.97)); }
-      else { terrain.tri(A, B, C, c1); terrain.tri(B, D, C, tint(c2, 0.97)); }
+      const cA = ringCol[j][i], cB = ringCol[j][k], cC = ringCol[j + 1][i], cD = ringCol[j + 1][k];
+      if (j === 0) { terrain.tri(A, D, C, cA, cD, cC); continue; }
+      if ((i + j) % 2) { terrain.tri(A, B, D, cA, cB, cD); terrain.tri(A, D, C, cA, cD, cC); }
+      else { terrain.tri(A, B, C, cA, cB, cC); terrain.tri(B, D, C, cB, cD, cC); }
     }
   });
 
