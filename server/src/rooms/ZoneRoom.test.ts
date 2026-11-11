@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { matchMaker } from '@colyseus/core';
 import { Client } from '@colyseus/sdk';
 import { SPAWN } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
@@ -88,11 +89,31 @@ describe('movement', () => {
     expect(corrections).toEqual([]);
   });
 
+  it('limits speed over a burst: many small steps in under 1 s cannot outrun the allowance', async () => {
+    const { url, store } = await start();
+    const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
+    const corrections = collect(a.room, 'correct');
+    for (let i = 1; i <= 40; i++) a.room.send('move', pose(SPAWN.x + i * 0.4, SPAWN.z)); // 16 m at once
+    await waitFor(() => corrections.length > 0);
+    await sleep(100);
+    const me = a.room.state.players.get(a.room.sessionId);
+    expect(me.x - SPAWN.x).toBeLessThanOrEqual(6 * 1.3 + 0.5 + 0.2); // one second's worth plus slack, no more
+    expect(corrections.at(-1)).toEqual({ x: me.x, z: SPAWN.z });
+  });
+
+  it('disconnects a client that floods the room with messages', async () => {
+    const { url, store } = await start();
+    const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
+    const left = new Promise<number>((resolve) => a.room.onLeave((code) => resolve(code)));
+    for (let i = 0; i < 200; i++) a.room.send('move', pose(SPAWN.x, SPAWN.z));
+    expect(await left).toBe(4002);
+  });
+
   it('corrects a move into the statue plinth', async () => {
     const { url, store } = await start();
     const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
     const corrections = collect(a.room, 'correct');
-    walk(a.room, SPAWN, { x: 0, z: -4.6 });
+    await walk(a.room, SPAWN, { x: 0, z: -4.6 });
     await waitFor(() => a.room.state.players.get(a.room.sessionId)?.z === -4.6);
     a.room.send('move', pose(0, -4.2)); // a short step onto the plinth
     await sleep(1000); // long enough that (0, 0) is in range: only the plinth blocks it
@@ -142,11 +163,36 @@ describe('sessions', () => {
     expect(room.state.players.get(room.sessionId)?.name).toBe('Alice');
   });
 
+  it('refuses a join when the grove is full, and never opens a second grove room', async () => {
+    const { url, store } = await start({ maxPlayers: 2 });
+    await joinGrove(url, (await accountFor(store, 'Alice')).token);
+    await joinGrove(url, (await accountFor(store, 'Bob')).token);
+    const carol = await accountFor(store, 'Carol');
+    await expect(new Client(url).joinOrCreate('grove', { token: carol.token })).rejects.toThrow(
+      'Shady Grove is full, try again soon',
+    );
+    expect(await matchMaker.query({ name: 'grove' })).toHaveLength(1);
+  });
+
+  it('still admits an account that is already in a full grove, kicking its old session', async () => {
+    const { url, store } = await start({ maxPlayers: 2 });
+    const alice = await accountFor(store, 'Alice');
+    const first = await joinGrove(url, alice.token);
+    await joinGrove(url, (await accountFor(store, 'Bob')).token);
+    const kicked = collect(first.room, 'kicked');
+    const again = await joinGrove(url, alice.token);
+    await waitFor(() => kicked.length === 1);
+    expect(kicked).toEqual([{ reason: 'Signed in somewhere else' }]);
+    await waitFor(() => again.room.state.players.size === 2);
+    expect(again.room.state.players.get(again.room.sessionId)?.name).toBe('Alice');
+    expect(await matchMaker.query({ name: 'grove' })).toHaveLength(1);
+  });
+
   it('restores the last position after leaving and joining again', async () => {
     const { url, store } = await start();
     const { accountId, token } = await accountFor(store, 'Alice');
     const first = await joinGrove(url, token);
-    walk(first.room, SPAWN, { x: 1.2, z: -10 });
+    await walk(first.room, SPAWN, { x: 1.2, z: -10 });
     await waitFor(() => first.room.state.players.get(first.room.sessionId)?.x === 1.2);
     await first.room.leave();
     await waitFor(async () => (await store.getOrCreateAdventurer(accountId, 'Alice')).x === 1.2);

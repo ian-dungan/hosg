@@ -2,9 +2,9 @@
 import { once } from 'node:events';
 import type { Server as HttpServer } from 'node:http';
 import express from 'express';
-import { Server } from '@colyseus/core';
+import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { RECONNECT_SECONDS, SAVE_SECONDS, TICK_HZ } from '@sg2/shared';
+import { MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, TICK_HZ } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
 import { zoneRoomFor, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
@@ -16,6 +16,8 @@ export interface AppOptions {
   reconnectSeconds?: number;
   saveSeconds?: number;
   authRatePerMinute?: number;
+  /** Test-only: a smaller grove (default MAX_PLAYERS). */
+  maxPlayers?: number;
 }
 
 export interface App {
@@ -49,13 +51,16 @@ export function createApp(opts: AppOptions): App {
     store: opts.store,
     reconnectSeconds: opts.reconnectSeconds ?? RECONNECT_SECONDS,
     saveSeconds: opts.saveSeconds ?? SAVE_SECONDS,
+    maxPlayers: opts.maxPlayers ?? MAX_PLAYERS,
     live,
   };
-  gameServer.define('grove', zoneRoomFor(opts.store, opts.jwtSecret), roomOptions);
+  gameServer.define('grove', zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions);
 
   return {
     async listen(port) {
       await gameServer.listen(port);
+      // The one grove room, made up front so joins find it (a join that got in first already made it).
+      if (live.size === 0) await matchMaker.createRoom('grove', {});
     },
 
     /** Saves and disconnects everyone, then closes the HTTP server and its open connections. */

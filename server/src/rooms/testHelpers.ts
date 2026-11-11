@@ -2,6 +2,7 @@
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { Client, type Room } from '@colyseus/sdk';
+import { TICK_HZ } from '@sg2/shared';
 import { createApp } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
@@ -25,7 +26,7 @@ async function freePort(): Promise<number> {
 
 /** Starts an app on a free port; the caller must `app.close()` it. */
 export async function startServer(
-  opts: { store?: Store; reconnectSeconds?: number; saveSeconds?: number; clientDir?: string } = {},
+  opts: { store?: Store; reconnectSeconds?: number; saveSeconds?: number; clientDir?: string; maxPlayers?: number } = {},
 ): Promise<TestServer> {
   const store = opts.store ?? createMemoryStore();
   const app = createApp({ ...opts, store, jwtSecret: SECRET });
@@ -69,12 +70,13 @@ export function collect(room: Room<any, any>, type: string): any[] {
   return seen;
 }
 
-/** Sends `move` steps of at most 0.4 m along a straight line from `from` to `to` (each is legal even with no time between). */
-export function walk(room: Room<any, any>, from: { x: number; z: number }, to: { x: number; z: number }): void {
+/** Walks in a straight line from `from` to `to` at running speed: steps of at most 0.4 m, one per tick. */
+export async function walk(room: Room<any, any>, from: { x: number; z: number }, to: { x: number; z: number }): Promise<void> {
   const steps = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / 0.4);
   for (let i = 1; i <= steps; i++) {
     const x = i === steps ? to.x : from.x + ((to.x - from.x) * i) / steps;
     const z = i === steps ? to.z : from.z + ((to.z - from.z) * i) / steps;
     room.send('move', { x, z, facing: 0, moving: i < steps });
+    await sleep(1000 / TICK_HZ);
   }
 }

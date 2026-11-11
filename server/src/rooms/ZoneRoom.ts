@@ -2,13 +2,14 @@
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import {
   CHAT_MIN_INTERVAL_MS,
-  MAX_PLAYERS,
+  MAX_MOVE_ALLOWANCE,
   SPAWN,
   TICK_HZ,
-  checkStep,
+  checkMove,
   cleanChat,
   groveTownWalkable,
   parsePose,
+  refillAllowance,
   type S2C,
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
@@ -19,7 +20,9 @@ export interface ZoneRoomOptions {
   store: Store;
   reconnectSeconds: number;
   saveSeconds: number;
-  /** Live rooms, so the app can count adventurers online. */
+  /** Most adventurers in the room (including ones inside their reconnect window). */
+  maxPlayers: number;
+  /** The live grove room (there is only ever one), so the app can count adventurers online. */
   live: Set<ZoneRoom>;
 }
 
@@ -29,9 +32,11 @@ interface Session {
   accountId: string;
   adventurerId: string;
   player: PlayerState;
-  /** Last accepted position, and when it was accepted (ms). */
+  /** Last accepted position. */
   lastGood: { x: number; z: number };
-  lastMoveAt: number;
+  /** Metres this adventurer may still move, and when it was last refilled (ms). */
+  allowance: number;
+  allowanceAt: number;
   /** When this adventurer's last chat line went out (ms), or -Infinity. */
   lastChatAt: number;
   /** Set while the client is away and may reconnect. */
@@ -53,19 +58,29 @@ async function authenticate(store: Store, jwtSecret: string, options: unknown): 
 }
 
 const KICK_REASON = 'Signed in somewhere else';
+const FULL_REASON = 'Shady Grove is full, try again soon';
+/** Moves at TICK_HZ with room to spare for jitter, plus chat. More than this and Colyseus drops the client. */
+const MAX_MESSAGES_PER_SECOND = 3 * TICK_HZ + 5;
 
 export class ZoneRoom extends Room<{ state: ZoneState }> {
-  maxClients = MAX_PLAYERS;
   state = new ZoneState();
+  autoDispose = false; // the one grove room lives as long as the server
+  maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
 
   private store!: Store;
   private reconnectSeconds!: number;
   private live!: Set<ZoneRoom>;
+  private maxPlayers!: number;
   private sessions = new Map<string, Session>(); // key: sessionId
   private sessionByAccount = new Map<string, string>(); // accountId -> sessionId
 
   onCreate(options: ZoneRoomOptions) {
+    if (options.live.size > 0) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON); // never a second grove
     this.store = options.store;
+    this.maxPlayers = options.maxPlayers;
+    // Admission is decided by canAdmit, so Colyseus must never see the room as full (it would open
+    // a second one): leave room for an account's new session joining before its old one is kicked.
+    this.maxClients = options.maxPlayers * 2;
     this.reconnectSeconds = options.reconnectSeconds;
     this.live = options.live;
     this.live.add(this);
@@ -78,6 +93,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   async onJoin(client: Client) {
     const { accountId, username } = client.auth as JoinAuth;
+    // Checked again here because two joins can pass onAuth at the same time.
+    if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
     // Claim the account before any await, so a third join of the same account kicks this one.
     const previous = this.sessionByAccount.get(accountId);
     this.sessionByAccount.set(accountId, client.sessionId);
@@ -103,7 +120,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       adventurerId: adventurer.id,
       player,
       lastGood: { x: start.x, z: start.z },
-      lastMoveAt: Date.now(),
+      allowance: MAX_MOVE_ALLOWANCE,
+      allowanceAt: Date.now(),
       lastChatAt: -Infinity,
     });
     this.state.players.set(client.sessionId, player);
@@ -122,7 +140,6 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (!session) return;
     session.client = client;
     session.reconnection = undefined;
-    session.lastMoveAt = Date.now();
   }
 
   async onLeave(client: Client) {
@@ -132,6 +149,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   async onDispose() {
     this.live.delete(this);
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.removeSession(sessionId)));
+  }
+
+  /** Whether an account may join: it is already here (its old session will be kicked), or there is space. */
+  canAdmit(accountId: string): boolean {
+    return this.sessionByAccount.has(accountId) || this.sessionByAccount.size < this.maxPlayers;
   }
 
   /** Adventurers in this room, including ones inside their reconnect window. */
@@ -144,12 +166,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const pose = parsePose(message);
     if (!session || !pose) return;
     const now = Date.now();
-    if (checkStep(session.lastGood, pose, (now - session.lastMoveAt) / 1000, groveTownWalkable) !== 'ok') {
+    session.allowance = refillAllowance(session.allowance, (now - session.allowanceAt) / 1000);
+    session.allowanceAt = now;
+    if (checkMove(session.lastGood, pose, session.allowance, groveTownWalkable) !== 'ok') {
       this.sendTo(client, 'correct', { ...session.lastGood });
       return;
     }
+    session.allowance -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
     session.lastGood = { x: pose.x, z: pose.z };
-    session.lastMoveAt = now;
     Object.assign(session.player, pose);
   }
 
@@ -219,12 +243,15 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
 /**
  * The grove room class for one app. Joins are checked during matchmaking (static onAuth), so a bad
- * token is refused over HTTP before any seat or socket is opened.
+ * token or a full grove is refused over HTTP before any seat or socket is opened.
  */
-export function zoneRoomFor(store: Store, jwtSecret: string): typeof ZoneRoom {
+export function zoneRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof ZoneRoom {
   return class GroveRoom extends ZoneRoom {
-    static async onAuth(_token: string, options: unknown, _context: AuthContext) {
-      return authenticate(store, jwtSecret, options);
+    static async onAuth(_token: string, joinOptions: unknown, _context: AuthContext) {
+      const auth = await authenticate(options.store, jwtSecret, joinOptions);
+      const [room] = options.live;
+      if (auth && room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, FULL_REASON);
+      return auth;
     }
   };
 }
