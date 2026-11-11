@@ -3,6 +3,7 @@
 import { Engine, Scene, Vector3 } from '@babylonjs/core';
 import type { AnchorName, CharacterView, HudState, TapInfo } from './core/contracts';
 import { buildWorld } from './world/index';
+import { BEACON_DIR } from './world/layout';
 import { createPlayerRig } from './player/rig';
 import { makeCharacter } from './player/character';
 import { createHud } from './hud/index';
@@ -15,6 +16,13 @@ interface Interactable {
   pos: Vector3;
   view: CharacterView | null;
   talk: () => Promise<void>;
+}
+
+/** Horizontal direction from the statue toward the sky island (the way Ellie points). */
+function beaconDir(scene: Scene): Vector3 {
+  const d = new Vector3(BEACON_DIR.x, 0, BEACON_DIR.z);
+  void scene;
+  return d.normalize();
 }
 
 async function boot(): Promise<void> {
@@ -47,6 +55,7 @@ async function boot(): Promise<void> {
       else hud.toast('Move closer');
     },
   });
+  rig.camera.maxZ = 8000;   // the sky dome must never be clipped, even when the camera looks up
   const start = world.anchor('playerStart');
   rig.teleport(start.pos, start.facing);
 
@@ -158,9 +167,33 @@ async function boot(): Promise<void> {
     await say('Old Marrow', ['Wait. Look at the spyglass. The bronze is humming!']);
     hud.setVisible(false);
     try {
+      // Turn the camera to look along Ellie's pointing arm, up at the sky.
+      rig.setCinematic(true);
+      const cam = rig.camera;
+      const look = beaconDir(scene);
+      cam.upperBetaLimit = Math.PI;
+      // Camera goes behind the statue, above the roofs, looking up along the beam.
+      const TILT = 0.14, BACK = 24, HEIGHT = 12, R = 40;
+      const camPos = new Vector3(-look.x * BACK, HEIGHT, -look.z * BACK);
+      const t1 = camPos.add(new Vector3(look.x * Math.cos(TILT) * R, Math.sin(TILT) * R, look.z * Math.cos(TILT) * R));
+      const tStart = cam.target.clone();
+      const a0 = cam.alpha, b0 = cam.beta, r0 = cam.radius;
+      const a1 = Math.atan2(-look.z, -look.x), b1 = Math.PI / 2 + TILT, r1 = R;
+      const t0 = performance.now();
+      const ease = () => {
+        const k = Math.min(1, (performance.now() - t0) / 2200), e = k * k * (3 - 2 * k);
+        let da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        cam.alpha = a0 + da * e; cam.beta = b0 + (b1 - b0) * e; cam.radius = r0 + (r1 - r0) * e;
+        Vector3.LerpToRef(tStart, t1, e, cam.target);
+        if (k < 1) requestAnimationFrame(ease);
+      };
+      ease();
       await world.raiseBeacon();
+      await new Promise((r) => setTimeout(r, 2500));
+      rig.setCinematic(false);
     } catch (e) {
       console.warn('raiseBeacon failed', e);
+      rig.setCinematic(false);
     }
     hud.setVisible(true);
     done.beacon = true;
@@ -198,6 +231,14 @@ async function boot(): Promise<void> {
   hud.on((e) => {
     if (e.type === 'interact' && nearest && !busy) void run(nearest);
   });
+
+  if (touch) {
+    const jb = document.createElement('div');
+    jb.textContent = 'Jump';
+    jb.style.cssText = 'position:fixed;right:max(18px,env(safe-area-inset-right));bottom:calc(max(18px,env(safe-area-inset-bottom)) + 96px);width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 15px system-ui,sans-serif;color:#3a2a08;background:rgba(242,183,66,.88);box-shadow:0 2px 10px rgba(0,0,0,.3);pointer-events:auto;touch-action:none;';
+    jb.addEventListener('pointerdown', (e) => { e.preventDefault(); if (!busy) rig.jump(); });
+    hudRoot.appendChild(jb);
+  }
 
   let last = performance.now();
   engine.runRenderLoop(() => {

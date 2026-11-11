@@ -7,8 +7,8 @@ import { BEACON_DIR } from './layout';
 export const PLINTH_TOP = 2.95;
 export const FIG_S = 2.95;           // ~1.7 m model units -> ~5 m figures
 // Local (pre-mirror) directions, as in the concept render.
-const POINT_DIR_LOCAL = norm([-0.78, 0.5, 0.4]);
-const GLASS_DIR_LOCAL = norm([-0.62, 0.62, 0.48]);
+const POINT_DIR_LOCAL = norm([-0.78, 0.27, 0.4]);
+const GLASS_DIR_LOCAL = norm([-0.66, 0.36, 0.5]);
 // We mirror X (concept was right-handed) so the local pointing direction becomes (+0.78, .., 0.4).
 export const FIG_YAW = Math.atan2(BEACON_DIR.x, BEACON_DIR.z) - Math.atan2(-POINT_DIR_LOCAL[0], POINT_DIR_LOCAL[2]);
 

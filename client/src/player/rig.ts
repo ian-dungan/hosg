@@ -40,6 +40,9 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
   let moveScale = 1;
   let cinematic = false;
   let moving = false;
+  let jumpY = 0, jumpV = 0;          // height above the ground and vertical speed while airborne
+  const JUMP_SPEED = 8, GRAVITY = 22;
+  const doJump = () => { if (jumpY === 0 && moveScale > 0 && !cinematic) jumpV = JUMP_SPEED; };
   const vel = { x: 0, z: 0 };
   let running = false;
 
@@ -62,6 +65,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
   };
   const onKeyDown = (e: KeyboardEvent) => {
     if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space' && !e.repeat) { doJump(); e.preventDefault(); }
     if (KEYMAP[e.code]) { keys.add(e.code); if (e.code.startsWith('Arrow')) e.preventDefault(); }
   };
   const onKeyUp = (e: KeyboardEvent) => { keys.delete(e.code); };
@@ -192,6 +196,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       const dx = x - position.x, dz = z - position.z;
       if (dx * dx + dz * dz > 1e-6) facingGoal = Math.atan2(dx, dz);
     },
+    jump() { doJump(); },
     setCinematic(on: boolean) { cinematic = on; if (on) ptrs.forEach((p) => (p.moved = true)); },
     update(rawDt: number) {
       const dt = Math.min(0.1, Math.max(0, rawDt));
@@ -234,7 +239,13 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       // animation
       const nowRunning = sp > 0.8;
       if (nowRunning !== running) { running = nowRunning; view.setPose(running ? 'run' : 'idle'); }
+      // jump: simple gravity arc on top of the ground height
+      if (jumpV !== 0 || jumpY > 0) {
+        jumpY += jumpV * dt; jumpV -= GRAVITY * dt;
+        if (jumpY <= 0) { jumpY = 0; jumpV = 0; }
+      }
       view.root.position.copyFrom(position);
+      view.root.position.y += jumpY;
       view.root.rotation.y = facing;
       view.update(dt);
 

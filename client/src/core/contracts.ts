@@ -107,6 +107,8 @@ export interface PlayerRig {
   faceTowards(x: number, z: number): void;
   /** When true the camera stops following the player (cutscenes drive camera.target/alpha/beta/radius). */
   setCinematic(on: boolean): void;
+  /** Jump if on the ground (Space also does this). */
+  jump(): void;
   update(dt: number): void;
 }
 /** Implemented in src/player/rig.ts. Desktop: WASD/arrows move, drag rotates, wheel zooms.

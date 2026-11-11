@@ -13,7 +13,7 @@ const instr = new SceneInstrumentation(scene); instr.captureFrameTime = false;
 const qs = new URLSearchParams(location.search);
 
 const start = world.anchor('playerStart');
-const cam = new ArcRotateCamera('devcam', -Math.PI / 2, 0.87, 18, start.pos.add(new Vector3(0, 1, 0)), scene);
+const cam = new ArcRotateCamera('devcam', -Math.PI / 2, 1.08, 20, start.pos.add(new Vector3(0, 1, 0)), scene);
 cam.minZ = 0.3; cam.maxZ = 6000; cam.wheelPrecision = 20; cam.panningSensibility = 60;
 cam.attachControl(canvas, true);
 const c = qs.get('cam');
@@ -31,15 +31,15 @@ function toggleGrid() {
     for (let x = x0; x < x1; x += 1) for (let z = z0; z < z1; z += 1) {
       const h = world.groundAt(x + 0.5, z + 0.5);
       const y = h === null ? 0.3 : h + 0.12; const ok = h !== null;
-      if (!ok && Math.hypot(x, z) > 62 && h === null && !(world.beaconRaised)) continue;
+      if (!ok && Math.hypot(x, z) > 112) continue;
       const n = pos.length / 3; const s = 0.42;
       pos.push(x + 0.5 - s, y, z + 0.5 - s, x + 0.5 + s, y, z + 0.5 - s, x + 0.5 + s, y, z + 0.5 + s, x + 0.5 - s, y, z + 0.5 + s);
       for (let i = 0; i < 4; i++) col.push(ok ? 0.1 : 1, ok ? 0.9 : 0.1, 0.2, 1);
       idx.push(n, n + 2, n + 1, n, n + 3, n + 2);
     }
   };
-  add(-66, 66, -66, 66);
-  if (world.beaconRaised) add(-185, -85, 10, 115);
+  add(-116, 116, -116, 116);
+  if (world.beaconRaised) { const c = world.anchor('arenaCenter').pos; add(Math.round(c.x) - 45, Math.round(c.x) + 45, Math.round(c.z) - 45, Math.round(c.z) + 45); }
   overlay = new Mesh('grid', scene);
   const vd = new VertexData(); vd.positions = pos; vd.colors = col; vd.indices = idx; vd.applyToMesh(overlay);
   const m = new StandardMaterial('gridm', scene); m.disableLighting = true; m.emissiveColor = new Color3(1, 1, 1); m.alpha = 0.55; m.backFaceCulling = false;

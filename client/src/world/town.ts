@@ -2,12 +2,12 @@
 import { Builder, hex, tint, mix, add, vnoise, hash, type RGB, type V3 } from './mesh';
 import { Kit, PAL, ROOFS, WALLS, house, tree, lantern, bunting, flag, ship, windmillBody } from './parts';
 import {
-  groveR, groveHeight, PLAZA_R, PLINTH_R, HOUSES, STALLS, LAMPS, GROVE_TREES, TOWN_TREES, WINDMILL, TAVERN, TAVERN_YAW,
-  BEACON_DIR, DOCK_ANGLE, DOCK_RIM, DOCK_START, DOCK_LEN, DOCK_HW, DOCK_Y, GROVE_CENTER, type Obstacle,
+  groundHeight, riverX, bandR, WATER_Y, PLAZA_R, PLINTH_R, HOUSES, STALLS, LAMPS, GROVE_TREES, TOWN_TREES, WINDMILL, TAVERN, TAVERN_YAW,
+  BEACON_DIR, DOCK_ANGLE, DOCK_START, DOCK_LEN, DOCK_HW, DOCK_Y, GROVE_CENTER, type Obstacle,
 } from './layout';
 
 const PERP = { x: -BEACON_DIR.z, z: BEACON_DIR.x };
-const H = groveHeight;
+const H = groundHeight;
 
 export interface TownOut { obstacles: Obstacle[]; pimGround: V3; pimFacing: number; windmillHub: V3; windmillYaw: number; ferry: V3 }
 
@@ -21,7 +21,7 @@ function segDist(px: number, pz: number, ax: number, az: number, bx: number, bz:
   return Math.hypot(px - ax - dx * t, pz - az - dz * t);
 }
 export const PATHS: { a: [number, number]; b: [number, number]; w: number }[] = [
-  { a: [BEACON_DIR.x * (PLAZA_R - 1), BEACON_DIR.z * (PLAZA_R - 1)], b: [BEACON_DIR.x * (DOCK_RIM - 1), BEACON_DIR.z * (DOCK_RIM - 1)], w: 4.2 }, // main street
+  { a: [BEACON_DIR.x * (PLAZA_R - 1), BEACON_DIR.z * (PLAZA_R - 1)], b: [BEACON_DIR.x * (DOCK_START + 1), BEACON_DIR.z * (DOCK_START + 1)], w: 4.2 }, // main street
   { a: [PLAZA_R - 1, 0.5], b: [GROVE_CENTER.x - 6, 2.5], w: 3.0 },   // grove lane
   { a: [-1.5, PLAZA_R - 1], b: [-4, 40], w: 3.0 },                    // north lane
   { a: [-2.5, -PLAZA_R + 1], b: [-6, -40], w: 2.6 },                  // south lane
@@ -34,63 +34,6 @@ export function onPath(x: number, z: number, pad = 0) {
 export function buildTown(k: Kit, props: Kit): TownOut {
   const b = k.b;
   const obs: Obstacle[] = [];
-
-  // ───── island top (polar mesh following groveHeight) ─────
-  const NA = 96, NR = 22;
-  const rim: number[] = []; for (let i = 0; i <= NA; i++) rim.push(groveR(i / NA * Math.PI * 2));
-  const P = (i: number, j: number): V3 => {
-    const a = i / NA * Math.PI * 2, t = j / NR;
-    const tt = j === NR ? 1 : t * (0.97 + 0.03 * hash(i % NA, j)); // tiny jitter for facets
-    const r = rim[i] * tt; const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    return [x, H(x, z), z];
-  };
-  const shadeAt = (x: number, z: number) => { let s = 0; for (const [tx, tz, sc] of GROVE_TREES) { const d = Math.hypot(x - tx, z - tz); s = Math.max(s, 1 - Math.min(1, Math.max(0, (d - sc * 1.6) / (sc * 1.8)))); } return s; };
-  const grassCol = (x: number, z: number): RGB => {
-    const n = vnoise(x * 0.06 + 3, z * 0.06 + 7);
-    let c = mix(PAL.grass2, PAL.grass, n);
-    c = mix(c, hex('#a5d873'), Math.max(0, vnoise(x * 0.11, z * 0.11) - 0.55) * 1.4);
-    c = mix(c, PAL.shade, shadeAt(x, z) * 0.75);
-    return c;
-  };
-  const verts: V3[][] = []; for (let i = 0; i <= NA; i++) { verts.push([]); for (let j = 0; j <= NR; j++) verts[i].push(P(i % NA === 0 ? 0 : i, j)); }
-  // make the seam exact
-  for (let j = 0; j <= NR; j++) verts[NA][j] = verts[0][j];
-  b.withHint('up', () => {
-    for (let i = 0; i < NA; i++) for (let j = 0; j < NR; j++) {
-      const a = verts[i][j], bb = verts[i + 1][j], c = verts[i + 1][j + 1], d = verts[i][j + 1];
-      const cx = (a[0] + c[0]) / 2, cz = (a[2] + c[2]) / 2;
-      const col = grassCol(cx, cz);
-      if (j === 0) b.tri(a, c, d, col);
-      else { b.tri(a, bb, c, col); b.tri(a, c, d, tint(col, 0.97)); }
-    }
-  });
-  // ───── rocky underside ─────
-  const under: [number, number, RGB][] = [[-1.2, 1.015, PAL.soil], [-4.5, 0.95, PAL.rock1], [-11, 0.8, PAL.rock2], [-20, 0.58, PAL.rock2], [-31, 0.34, PAL.rock3], [-42, 0.14, PAL.rock4], [-52, 0.0, PAL.rock4]];
-  const NU = 48;
-  const ring = (k2: number): V3[] => {
-    const out: V3[] = [];
-    for (let i = 0; i <= NU; i++) {
-      const ii = i % NU, a = ii / NU * Math.PI * 2;
-      if (k2 < 0) { const r = groveR(a); const x = Math.cos(a) * r, z = Math.sin(a) * r; out.push([x, H(x, z), z]); continue; }
-      const [dy, f] = under[k2];
-      const r = groveR(a) * f * (1 + (vnoise(Math.cos(a) * 3 + k2, Math.sin(a) * 3) - 0.5) * 0.25);
-      const tip = k2 >= 4 ? [-4 * (k2 - 3), 3 * (k2 - 3)] : [0, 0];
-      out.push([Math.cos(a) * r + tip[0], dy + (k2 > 0 ? (hash(ii, k2) - 0.5) * 2.5 : 0), Math.sin(a) * r + tip[1]]);
-    }
-    return out;
-  };
-  let prev = ring(-1);
-  for (let k2 = 0; k2 < under.length; k2++) {
-    const cur = ring(k2);
-    b.withHint([0, -18 + k2 * 0, 0], () => {
-      for (let i = 0; i < NU; i++) b.quad(prev[i], prev[i + 1], cur[i + 1], cur[i], under[k2][2]);
-    });
-    prev = cur;
-  }
-  // a couple of small rock spurs hanging below
-  for (const [ax, az, len] of [[18, -20, 16], [-22, -14, 12], [10, 26, 20]] as [number, number, number][]) {
-    b.prism([ax, -6, az], [ax * 0.8, -6 - len, az * 0.8], 6, 0, 6, PAL.rock3);
-  }
 
   // ───── Plaza of the Two ─────
   const ringsR = [PLINTH_R - 0.2, 4.9, 5.5, 6.4, 7.3, 8.2, 8.7, 9.6, 10.5, 11.4, 12.3, PLAZA_R];
@@ -273,19 +216,6 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   obs.push(circ(WINDMILL.x, WINDMILL.z, 1.9));
   const hub: V3 = [WINDMILL.x + Math.sin(wyaw) * 1.9 * 1.1, wy + 6.3 * 1.1, WINDMILL.z + Math.cos(wyaw) * 1.9 * 1.1];
 
-  // ───── rim fence (skips the dock mouth) ─────
-  const NF = 120;
-  let lastP: V3 | null = null;
-  for (let i = 0; i <= NF; i++) {
-    const a = i / NF * Math.PI * 2; const r = groveR(a) - 0.7; const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const dA = Math.abs(Math.atan2(Math.sin(a - DOCK_ANGLE), Math.cos(a - DOCK_ANGLE))) * r;
-    if (dA < 3) { lastP = null; continue; }
-    const p: V3 = [x, H(x, z), z];
-    b.prism([x, p[1] - 0.2, z], [x, p[1] + 1.05, z], 0.09, 0.08, 4, PAL.timber);
-    if (lastP) { b.prism(add(lastP, [0, 0.95, 0]), add(p, [0, 0.95, 0]), 0.06, 0.06, 4, PAL.woodLight, { caps: false }); b.prism(add(lastP, [0, 0.5, 0]), add(p, [0, 0.5, 0]), 0.05, 0.05, 4, PAL.woodLight, { caps: false }); }
-    lastP = p;
-  }
-
   // ───── ferry dock ─────
   const du = BEACON_DIR, dv = PERP;
   const dp = (u: number, v: number, y: number): V3 => [du.x * u + dv.x * v, y, du.z * u + dv.z * v];
@@ -296,7 +226,7 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     }
   });
   for (let u = DOCK_START + 2; u <= DOCK_START + DOCK_LEN; u += 3) for (const v of [-DOCK_HW, DOCK_HW]) {
-    const p = dp(u, v, DOCK_Y); b.prism([p[0], DOCK_Y - (u > DOCK_RIM ? 4 : 1.5), p[2]], [p[0], DOCK_Y + 1.1, p[2]], 0.15, 0.13, 5, PAL.woodDark);
+    const p = dp(u, v, DOCK_Y); b.prism([p[0], -3.2, p[2]], [p[0], DOCK_Y + 1.1, p[2]], 0.15, 0.13, 5, PAL.woodDark);
   }
   b.prism(dp(DOCK_START, -DOCK_HW, DOCK_Y + 0.95), dp(DOCK_START + DOCK_LEN, -DOCK_HW, DOCK_Y + 0.95), 0.06, 0.06, 4, PAL.woodLight);
   b.prism(dp(DOCK_START, DOCK_HW, DOCK_Y + 0.95), dp(DOCK_START + DOCK_LEN, DOCK_HW, DOCK_Y + 0.95), 0.06, 0.06, 4, PAL.woodLight);
@@ -305,16 +235,16 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   const lampP = dp(DOCK_START + DOCK_LEN - 0.4, DOCK_HW + 0.3, DOCK_Y);
   lantern(k, lampP[0], DOCK_Y, lampP[2], 3.2, Math.atan2(dv.x, dv.z) + Math.PI / 2);
   // dock crane
-  const cr = dp(DOCK_RIM - 4, -DOCK_HW - 2.2, 0); cr[1] = H(cr[0], cr[2]);
+  const cr = dp(DOCK_START + 0.5, -DOCK_HW - 2.2, 0); cr[1] = H(cr[0], cr[2]);
   b.prism([cr[0], cr[1] - 0.3, cr[2]], [cr[0], cr[1] + 5.5, cr[2]], 0.25, 0.2, 6, PAL.wood);
-  const arm = dp(DOCK_RIM + 3, -DOCK_HW + 0.5, cr[1] + 5.2);
+  const arm = dp(DOCK_START + 6, -DOCK_HW + 0.5, cr[1] + 5.2);
   b.prism([cr[0], cr[1] + 5.3, cr[2]], arm, 0.14, 0.1, 5, PAL.wood);
   b.prism(arm, [arm[0], arm[1] - 2.5, arm[2]], 0.02, 0.02, 3, PAL.woodDark);
   b.box(arm[0], arm[1] - 3.0, arm[2], 0.7, 0.6, 0.7, PAL.wood, hex('#b07a50'));
   obs.push(circ(cr[0], cr[2], 0.5));
   // little ferry moored alongside the pier
-  const fp = dp(DOCK_START + DOCK_LEN - 4.5, DOCK_HW + 3.0, DOCK_Y - 1.4);
-  ship(k, fp[0], fp[1], fp[2], Math.atan2(du.x, du.z), 0.55, { masts: 1, stripe: PAL.roof3, wing: hex('#ff9a6a') });
+  const fp = dp(DOCK_START + DOCK_LEN - 5, DOCK_HW + 2.4, WATER_Y + 0.55);
+  ship(k, fp[0], fp[1], fp[2], Math.atan2(du.x, du.z), 0.5, { masts: 1, stripe: PAL.roof3, noWings: true });
 
   // ───── cosy extras: well, kitchen gardens, hay, lane lamps ─────
   {
@@ -332,7 +262,7 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     const L = (lx: number, lz: number): [number, number] => [h.x + c * lx + s * lz, h.z - s * lx + c * lz];
     const gz0 = -h.d / 2 - 1.2, gz1 = gz0 - 3.2, gw = h.w / 2;
     const [mx, mz] = L(0, (gz0 + gz1) / 2);
-    if (Math.hypot(mx, mz) > groveR(Math.atan2(mz, mx)) - 3 || onPath(mx, mz, 2)) continue;
+    if (onPath(mx, mz, 2)) continue;
     for (let r = 0; r < 3; r++) for (let q = 0; q < 5; q++) {
       const [px, pz] = L(-gw + 0.6 + q * (2 * gw - 1.2) / 4, gz0 - 0.6 - r * 1.0);
       props.b.ball([px, H(px, pz) + 0.18, pz], 0.26, r === 1 ? hex('#ff8a3c') : PAL.leaf1, 1, 0.7, 1, 0, 0.3, PAL.grassDark);
@@ -361,7 +291,7 @@ export function buildTown(k: Kit, props: Kit): TownOut {
   // ───── scatter: shrubs, flowers, grass tufts (props mesh) ─────
   const pb = props.b; const rng = pb.rng;
   const blocked = (x: number, z: number, pad: number) => {
-    const r = Math.hypot(x, z); if (r < PLAZA_R + 1 || r > groveR(Math.atan2(z, x)) - 1.6) return true;
+    const r = Math.hypot(x, z); if (r < PLAZA_R + 1 || r > bandR(Math.atan2(z, x)) - 3 || x < riverX(z) + 12) return true;
     if (onPath(x, z, 0.6)) return true;
     for (const o of obs) {
       if (o.kind === 'c') { if (Math.hypot(x - o.x, z - o.z) < o.r + pad) return true; }
@@ -369,8 +299,8 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     }
     return false;
   };
-  for (let i = 0; i < 420; i++) {
-    const a = rng.r(0, 6.283), r = Math.sqrt(rng.next()) * 50; const x = Math.cos(a) * r, z = Math.sin(a) * r;
+  for (let i = 0; i < 700; i++) {
+    const a = rng.r(0, 6.283), r = i < 380 ? Math.sqrt(rng.next()) * 50 : rng.r(50, 100); const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (blocked(x, z, 0.3)) continue;
     const y = H(x, z); const q = rng.next();
     if (q < 0.22) pb.ball([x, y + 0.3, z], rng.r(0.5, 0.85), PAL.leaf2, 1.2, 0.75, 1, 0, 0.3, PAL.grassDark);

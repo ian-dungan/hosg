@@ -151,7 +151,7 @@ export function flag(b: Builder, base: V3, h: number, col: RGB, dir = 1) {
   b.sheet((u, v) => [base[0] + dir * u * 1.7, base[1] + h - 0.1 - v * 0.95 + Math.sin(u * 4) * 0.12, base[2] + Math.sin(u * 5 + v) * 0.18 * u], 4, 1, (i) => i % 2 ? col : tint(col, 0.9));
 }
 
-export function ship(k: Kit, x: number, y: number, z: number, yaw: number, s: number, opt: { hull?: RGB; stripe?: RGB; sail?: RGB; wing?: RGB; masts?: number } = {}) {
+export function ship(k: Kit, x: number, y: number, z: number, yaw: number, s: number, opt: { hull?: RGB; stripe?: RGB; sail?: RGB; wing?: RGB; masts?: number; noWings?: boolean } = {}) {
   const b = k.b;
   b.push(); b.T(x, y, z); b.RY(yaw); b.SC(s, s, s);
   const NS = 9, L = 12;
@@ -188,7 +188,7 @@ export function ship(k: Kit, x: number, y: number, z: number, yaw: number, s: nu
   }
   b.prism([0, 2.4, L / 2 - 0.4], [0, 4.0, L / 2 + 3.2], 0.1, 0.06, 5, PAL.woodDark);
   b.withHint(null, () => b.tri([0, 3.9, L / 2 + 3.0], [0, 9.5, 1.3], [0, 2.6, 1.6], opt.sail || PAL.sail));
-  for (const sd of [-1, 1]) {
+  if (!opt.noWings) for (const sd of [-1, 1]) {
     const base: V3 = [sd * 1.6, 1.8, 0.3];
     for (let f = 0; f < 4; f++) {
       const a0 = 0.15 + f * 0.24, a1 = a0 + 0.22, r = 5.2 - f * 0.5;

@@ -7,17 +7,26 @@ export type Obstacle = Circle | Rect;
 
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-// ───────── Shady Grove island (centre at origin) ─────────
+// ───────── noise (pure copies so this file has no imports) ─────────
+function hash(x: number, y: number) { const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); }
+export function vnoise(x: number, y: number) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const a = hash(ix, iy), b = hash(ix + 1, iy), c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+export { smooth };
+
+// ───────── Shady Grove (town centre at origin) ─────────
 export const PLAZA_R = 13.5;
 export const PLINTH_R = 4.4;
-/** Island rim radius at angle a (atan2(z, x)). */
+/** Old island rim, still used to place the dock/street constants. */
 export function groveR(a: number) {
   return 49 + 3.2 * Math.sin(3 * a + 0.7) + 2.0 * Math.sin(5 * a + 2.1) + 1.2 * Math.sin(9 * a + 0.3);
 }
-export const EDGE_MARGIN = 1.4; // walkable up to rim - margin (fence sits at rim - 0.7)
 export const GROVE_CENTER = { x: 29, z: 3 };
 
-/** Terrain height of Shady Grove (also used for the mesh, so the two agree). */
+/** Town-core terrain (flat plaza, grove knoll, gentle undulation). */
 export function groveHeight(x: number, z: number) {
   const r = Math.hypot(x, z);
   const f = smooth(PLAZA_R + 0.5, PLAZA_R + 10, r);
@@ -26,6 +35,62 @@ export function groveHeight(x: number, z: number) {
   const north = 0.9 * smooth(16, 40, z);
   const und = 0.45 * Math.sin(x * 0.09 + 1.3) * Math.cos(z * 0.08 - 0.4) + 0.25 * Math.sin(x * 0.17 + z * 0.13);
   return f * (knoll + north + und);
+}
+
+// ───────── countryside ─────────
+export const WATER_Y = -1.3;
+const BED_Y = -2.7;
+/** River centre line (runs north-south past the west edge of town). */
+export function riverX(z: number) { return -58 + 3 * Math.sin(z * 0.03 + 0.2) + 14 * Math.sin(z * 0.004); }
+/** East dirt road toward Normandy: z of the road centre at x (x >= 23). */
+export function roadZ(x: number) { return 2.5 + 6 * Math.sin((x - 23) * 0.012); }
+export const ROAD_X0 = 23;
+/** Walkable band boundary radius at angle a. */
+export function bandR(a: number) { return 100 + 6 * Math.sin(3 * a + 1) + 4 * Math.sin(7 * a + 2); }
+
+// Out-of-play clearing for the Beacon/arena anchors (far south-east, behind hills).
+export const BEACON_C = { x: 420, z: -260 };
+export const BEACON_TOP = 12;
+export const BEACON_R = 36;
+
+/** Flattened pads (farms, the clearing): x, z, radius. Heights filled in lazily. */
+export const FARMS: { x: number; z: number; yaw: number }[] = [
+  { x: 165, z: 85, yaw: 2.4 }, { x: -20, z: 205, yaw: 3.4 }, { x: 150, z: -120, yaw: 0.6 }, { x: -175, z: -50, yaw: 1.2 },
+];
+const PADS: { x: number; z: number; r: number; y: number }[] = [
+  ...FARMS.map(f => ({ x: f.x, z: f.z, r: 26, y: NaN })),
+  { x: BEACON_C.x, z: BEACON_C.z, r: 50, y: BEACON_TOP },
+];
+
+function rawHeight(x: number, z: number) {
+  const r = Math.hypot(x, z);
+  let h = groveHeight(x, z);
+  const c = smooth(42, 95, r);
+  if (c > 0) h += c * 1.8 * (vnoise(x * 0.025 + 11, z * 0.025 + 3) - 0.5) * 2;
+  const f = smooth(92, 190, r);
+  if (f > 0) {
+    let hill = 4 + 26 * vnoise(x * 0.006 + 5, z * 0.006 + 9) + 9 * vnoise(x * 0.021, z * 0.021);
+    if (r > 80) { const a = Math.atan2(z, x); hill += 5 * smooth(bandR(a) - 4, bandR(a) + 22, r); }
+    hill += smooth(450, 1500, r) * 70 * vnoise(x * 0.003 + 1, z * 0.003 + 2);
+    // valleys along the river and the road
+    const dr = Math.abs(x - riverX(z));
+    let damp = smooth(14, 110, dr);
+    if (x > ROAD_X0) damp *= smooth(5, 45, Math.abs(z - roadZ(x)));
+    h += f * hill * damp;
+  }
+  const d = Math.abs(x - riverX(z));
+  if (d < 16) { const t = smooth(5, 15, d); h = BED_Y + (h - BED_Y) * t; }
+  return h;
+}
+for (const p of PADS) if (Number.isNaN(p.y)) p.y = rawHeight(p.x, p.z);
+/** Full terrain height (town + countryside + river + pads). Used by the mesh and groundAt. */
+export function groundHeight(x: number, z: number) {
+  let h = rawHeight(x, z);
+  for (const p of PADS) {
+    const dx = x - p.x, dz = z - p.z; const d2 = dx * dx + dz * dz; const R = p.r + 30;
+    if (d2 < R * R) h = p.y + (h - p.y) * smooth(p.r, R, Math.sqrt(d2));
+  }
+  return h;
 }
 
 // Direction Ellie points (horizontal unit vector from the statue toward the Beacon).
@@ -37,10 +102,10 @@ const PERP = { x: -BEACON_DIR.z, z: BEACON_DIR.x }; // 90° left of BEACON_DIR
 // Dock: on the rim in the Beacon direction.
 export const DOCK_ANGLE = Math.atan2(BEACON_DIR.z, BEACON_DIR.x);
 export const DOCK_RIM = groveR(DOCK_ANGLE);
-export const DOCK_LEN = 15;      // from rim - 3 outwards
+export const DOCK_LEN = 19;
 export const DOCK_HW = 1.7;
-export const DOCK_START = DOCK_RIM - 3;
-export const DOCK_Y = groveHeight(BEACON_DIR.x * DOCK_RIM, BEACON_DIR.z * DOCK_RIM) + 0.22;
+export const DOCK_START = 41;
+export const DOCK_Y = groundHeight(BEACON_DIR.x * DOCK_START, BEACON_DIR.z * DOCK_START) + 0.12;
 
 // Main street from the plaza to the dock runs along BEACON_DIR. Tavern beside it.
 export const TAVERN = { x: BEACON_DIR.x * 31 + PERP.x * 8.2, z: BEACON_DIR.z * 31 + PERP.z * 8.2, w: 8.5, d: 6.5 };
@@ -78,7 +143,7 @@ export const LAMPS: { x: number; z: number }[] = [0.95, 1.85, 3.1, 3.95, 4.35, 5
 
 /** The big old trees of the original grove: x, z, scale (trunk radius = 0.42 * scale). */
 export const GROVE_TREES: [number, number, number][] = [
-  [24, -9, 2.3], [33, -3, 2.7], [25.5, 6.5, 2.4], [37, 10, 2.2], [21, 17, 2.0], [41, -11, 2.0], [31, 19, 2.3], [43, 2, 1.9], [30.5, -15, 1.9],
+  [24, -9, 2.3], [33, -3, 2.7], [25.5, 6.5, 2.4], [37, 10, 2.2], [21, 17, 2.0], [41, -11, 2.0], [31, 19, 2.3], [46, 14, 1.9], [30.5, -15, 1.9],
 ];
 /** Other smaller trees around town. */
 export const TOWN_TREES: [number, number, number, number][] = [
@@ -86,26 +151,23 @@ export const TOWN_TREES: [number, number, number, number][] = [
 ];
 export const WINDMILL = { x: Math.cos(1.05) * 41, z: Math.sin(1.05) * 41 };
 
-// ───────── The Beacon (minimal) ─────────
-export const BEACON_DIST = 150;
-export const BEACON_R = 36;
-export const BEACON_TOP = 3;
-export const BEACON_C = { x: BEACON_DIR.x * BEACON_DIST, z: BEACON_DIR.z * BEACON_DIST };
-const U = { x: -BEACON_DIR.x, z: -BEACON_DIR.z }; // from beacon centre toward the grove
+// ───────── The Beacon anchors (out-of-play clearing, no polish) ─────────
+const U = (() => { const l = Math.hypot(BEACON_C.x, BEACON_C.z); return { x: -BEACON_C.x / l, z: -BEACON_C.z / l }; })(); // toward town
 export const BEACON_U = U;
-export const BEACON_PERP = PERP;
+export const BEACON_PERP = { x: -U.z, z: U.x };
 export const ARENA_C = { x: BEACON_C.x - U.x * 12, z: BEACON_C.z - U.z * 12 };
 export const ARENA_Y = BEACON_TOP + 0.3;
-export const LIGHTHOUSE = { x: BEACON_C.x - U.x * 30, z: BEACON_C.z - U.z * 30 };
-export const B_DOCK_START = BEACON_R - 3;
-export const B_DOCK_LEN = 12;
-export const B_DOCK_Y = BEACON_TOP + 0.2;
+export const B_DOCK_U = 31;
+export const B_DOCK_Y = BEACON_TOP;
+
+// The floating Beacon island that appears in the sky where Ellie points.
+export const SKY_ISLAND = { dist: 950, y: 168, r: 55 };
 
 // ───────── walkability ─────────
-const CELL = 4, GMIN = -64, GN = 32; // grid over [-64, 64]^2 for Shady Grove
+const CELL = 4, GMIN = -116, GN = 58; // grid over [-116, 116]^2 for the town + band
 export class Walk {
   private grid: Obstacle[][] = [];
-  beaconUp = false;
+  beaconUp = true; // the arena clearing is always standable (anchors stay valid)
   arenaRadius = 15;
   constructor(obs: Obstacle[]) {
     for (let i = 0; i < GN * GN; i++) this.grid.push([]);
@@ -132,28 +194,27 @@ export class Walk {
   }
   groundAt(x: number, z: number): number | null {
     const r2 = x * x + z * z;
-    if (r2 < 70 * 70) {
-      // ferry pier
+    if (r2 < 118 * 118) {
+      // ferry jetty over the river
       const u = x * BEACON_DIR.x + z * BEACON_DIR.z, v = x * PERP.x + z * PERP.z;
       if (u > DOCK_START && u < DOCK_START + DOCK_LEN && Math.abs(v) < DOCK_HW - 0.3) return DOCK_Y;
+      if (x < riverX(z) + 2) return null;
       const r = Math.sqrt(r2);
-      if (r > 40) { if (r > groveR(Math.atan2(z, x)) - EDGE_MARGIN) return null; }
+      if (r > 86 && r > bandR(Math.atan2(z, x)) - 1) return null;
+      const h = groundHeight(x, z);
+      if (h < WATER_Y + 0.25 && x < riverX(z) + 22) return null;
       if (this.blocked(x, z)) return null;
-      return groveHeight(x, z);
+      return h;
     }
     if (!this.beaconUp) return null;
     const bx = x - BEACON_C.x, bz = z - BEACON_C.z;
-    const bu = bx * U.x + bz * U.z, bv = bx * PERP.x + bz * PERP.z;
-    if (bu > B_DOCK_START && bu < B_DOCK_START + B_DOCK_LEN && Math.abs(bv) < DOCK_HW - 0.3) return B_DOCK_Y;
+    if (bx * bx + bz * bz > (BEACON_R - 2) * (BEACON_R - 2)) return null;
     const ax = x - ARENA_C.x, az = z - ARENA_C.z, ad = Math.hypot(ax, az);
     if (ad < 15.6) {
       if (ad <= this.arenaRadius) return ARENA_Y;
       if (this.arenaRadius < 15) return null; // crumbled ring: a gap you cannot cross
-      return ARENA_Y; // rim of the disc in phase 1
+      return ARENA_Y;
     }
-    const lx = x - LIGHTHOUSE.x, lz = z - LIGHTHOUSE.z;
-    if (lx * lx + lz * lz < 3.2 * 3.2) return null;
-    if (Math.hypot(bx, bz) > BEACON_R - 2) return null;
     return BEACON_TOP;
   }
 }

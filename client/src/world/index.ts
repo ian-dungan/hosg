@@ -6,27 +6,28 @@ import {
 import type { BuildWorld, WorldApi, AnchorName, Anchor, Quality } from '../core/contracts';
 import { ARENA_RADIUS } from '../core/contracts';
 import { Builder, hex } from './mesh';
-import { Kit, windmillSails, ship } from './parts';
+import { Kit, windmillSails } from './parts';
+import { buildCountryside } from './countryside';
 import { buildTown } from './town';
 import { buildStatue } from './statue';
-import { buildSkyDome, buildClouds, buildVista, vistaShipPath, SUN_DIR } from './sky';
-import { buildBeacon } from './beacon';
+import { buildSkyDome, buildSkyClouds, SUN_DIR, HAZE } from './sky';
+import { buildArenaClearing, buildSkyIsland, buildCloudBank } from './beacon';
 import {
-  Walk, groveHeight, BEACON_DIR, BEACON_C, BEACON_U, BEACON_PERP, ARENA_C, ARENA_Y, BEACON_TOP, B_DOCK_START, B_DOCK_Y,
+  Walk, groundHeight, BEACON_DIR, BEACON_C, BEACON_U, BEACON_PERP, ARENA_C, ARENA_Y, BEACON_TOP, B_DOCK_U, B_DOCK_Y, SKY_ISLAND,
   DOCK_START, DOCK_LEN, DOCK_Y,
 } from './layout';
 
 const C3 = (h: string) => { const c = hex(h); return new Color3(c[0], c[1], c[2]); };
-const HIDDEN_Y = -140;
+const HIDDEN_Y = -110;
 const RISE_TIME = 8;
 
 export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   // ───── atmosphere ─────
-  const fogCol = C3('#f6cfae');
+  const fogCol = C3(HAZE);
   scene.clearColor = new Color4(fogCol.r, fogCol.g, fogCol.b, 1);
   scene.fogMode = Scene.FOGMODE_LINEAR;
   scene.fogColor = fogCol;
-  scene.fogStart = 220; scene.fogEnd = 1250;
+  scene.fogStart = 140; scene.fogEnd = 1900;
   scene.ambientColor = new Color3(0, 0, 0);
 
   const sunDir = new Vector3(-SUN_DIR[0], -SUN_DIR[1], -SUN_DIR[2]);
@@ -53,6 +54,13 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   const mBeam = new StandardMaterial('world_beam', scene);
   mBeam.disableLighting = true; mBeam.emissiveColor = C3('#ffd56a'); mBeam.alpha = 0.0; mBeam.fogEnabled = false; mBeam.backFaceCulling = false;
 
+  // fog-free variants for the sky (clouds, the floating Beacon) so they stay crisp
+  const mFar = litMat('world_far', 0); mFar.fogEnabled = false; mFar.diffuseColor = new Color3(0.72, 0.74, 0.8); mFar.emissiveColor = C3('#6b5a66');
+  const mFarGlow = mGlow.clone('world_far_glow'); mFarGlow.fogEnabled = false;
+  const mFarWater = litMat('world_far_water', 0.7); mFarWater.diffuseColor = new Color3(0.35, 0.35, 0.35); mFarWater.fogEnabled = false;
+  const mMountMat = litMat('world_mount', 0); mMountMat.fogEnabled = false; mMountMat.diffuseColor = new Color3(0.42, 0.42, 0.46); mMountMat.emissiveColor = C3('#8d8aa0');
+  const mSkyCloud = litMat('world_skycloud', 0.82); mSkyCloud.diffuseColor = new Color3(0.26, 0.24, 0.26); mSkyCloud.fogEnabled = false;
+
   // ───── build geometry ─────
   const town = new Kit(new Builder(11), new Builder(12));
   const props = new Kit(new Builder(13), town.g);
@@ -61,60 +69,69 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   const lensArr = buildStatue(statueB, town.g, 0, 0.04, 0);
   const statueLens = new Vector3(lensArr[0], lensArr[1], lensArr[2]);
 
-  const vista = new Kit(new Builder(31), new Builder(32));
-  const water = new Builder(33);
-  buildVista(vista, water);
+  const terrainB = new Builder(31);
+  const band = new Kit(new Builder(32), town.g);
+  const far = new Kit(new Builder(33), new Builder(34));
+  const river = new Builder(35), mount = new Builder(36);
+  const cOut = buildCountryside(terrainB, band, far, river, mount);
+
+  const bdA = Math.atan2(BEACON_DIR.z, BEACON_DIR.x);
   const cloudsA = new Builder(41), cloudsB = new Builder(42);
-  buildClouds(cloudsA, cloudsB);
+  buildSkyClouds(cloudsA, cloudsB, bdA);
   const sky = new Builder(51); buildSkyDome(sky, 2400);
 
-  const beacon = new Kit(new Builder(61), new Builder(62));
-  const ringB = new Builder(63), beaconWater = new Builder(64);
-  buildBeacon(beacon, ringB, beaconWater);
+  const arenaB = new Builder(61), ringB = new Builder(63);
+  buildArenaClearing(arenaB, ringB);
+  const isl = new Kit(new Builder(65), new Builder(66)), islWater = new Builder(67);
+  buildSkyIsland(isl, islWater);
+  const bankL = new Builder(68), bankR = new Builder(69);
+  buildCloudBank(bankL, bankR);
 
   const sail = new Builder(71); windmillSails(sail);
-  const shipKit = new Kit(new Builder(72), new Builder(73));
-  ship(shipKit, 0, 0, 0, 0, 1.6, {});
-  const ship2 = new Kit(new Builder(74), shipKit.g);
-  ship(ship2, 0, 0, 0, 0, 2.6, { stripe: C3ToRgb('#3fb0a6'), wing: C3ToRgb('#ff9a6a') });
 
   const statics: Mesh[] = [];
-  const mk = (b: Builder, name: string, mat: StandardMaterial) => { const m = b.build(scene, name, mat); return m; };
+  const mk = (b: Builder, name: string, mat: StandardMaterial) => b.build(scene, name, mat);
+  const mTerrain = mk(terrainB, 'world_terrain', mLit);
   const mTown = mk(town.b, 'world_town', mLit);
   const mProps = mk(props.b, 'world_props', mLit);
   const mStatue = mk(statueB, 'world_statue', mLit);
+  const mBand = mk(band.b, 'world_band', mLit);
   const mTownGlow = mk(town.g, 'world_town_glow', mGlow);
-  const mVista = mk(vista.b, 'world_vista', mLit);
-  const mVistaGlow = mk(vista.g, 'world_vista_glow', mGlow);
-  const mWaterM = mk(water, 'world_water', mWater);
-  const mCloudA = mk(cloudsA, 'world_clouds', mCloud);
-  const mCloudB = mk(cloudsB, 'world_clouds_extra', mCloud);
+  const mFarM = mk(far.b, 'world_country', mLit);
+  const mFarGlowM = mk(far.g, 'world_country_glow', mGlow);
+  const mRiver = mk(river, 'world_river', mWater);
+  const mMount = mk(mount, 'world_mountains', mMountMat);
+  const mCloudA = mk(cloudsA, 'world_clouds', mSkyCloud);
+  const mCloudB = mk(cloudsB, 'world_clouds_extra', mSkyCloud);
   const mSkyM = mk(sky, 'world_sky', mSky);
   mSkyM.infiniteDistance = true; mSkyM.applyFog = false;
-  statics.push(mTown, mProps, mStatue, mTownGlow, mVista, mVistaGlow, mWaterM, mCloudA, mCloudB, mSkyM);
+  const mArena = mk(arenaB, 'world_arena', mLit);
+  const beaconRing = mk(ringB, 'world_arena_ring', mLit);
+  statics.push(mMount, mTerrain, mTown, mProps, mStatue, mBand, mTownGlow, mFarM, mFarGlowM, mRiver, mCloudA, mCloudB, mSkyM, mArena, beaconRing);
   for (const m of statics) { m.freezeWorldMatrix(); m.doNotSyncBoundingInfo = true; }
 
-  // beacon (moves while rising)
-  const beaconRoot = mk(beacon.b, 'world_beacon', mLit);
-  const beaconGlow = mk(beacon.g, 'world_beacon_glow', mGlow);
-  const beaconRing = mk(ringB, 'world_beacon_ring', mLit);
-  const beaconFall = mk(beaconWater, 'world_beacon_water', mWater);
-  for (const m of [beaconGlow, beaconRing, beaconFall]) m.parent = beaconRoot;
-  beaconRoot.position.set(BEACON_C.x, HIDDEN_Y, BEACON_C.z);
-  beaconRoot.setEnabled(false);
+  // the floating Beacon in the sky (hidden until raiseBeacon) and the cloud bank that parts for it
+  const islandPos = new Vector3(BEACON_DIR.x * SKY_ISLAND.dist, SKY_ISLAND.y, BEACON_DIR.z * SKY_ISLAND.dist);
+  const beaconRoot = mk(isl.b, 'world_beacon', mFar);
+  const beaconGlow = mk(isl.g, 'world_beacon_glow', mFarGlow);
+  const beaconFall = mk(islWater, 'world_beacon_water', mFarWater);
+  for (const m of [beaconGlow, beaconFall]) m.parent = beaconRoot;
+  beaconRoot.position.copyFrom(islandPos).addInPlace(new Vector3(0, HIDDEN_Y, 0));
+  beaconRoot.setEnabled(false); beaconRoot.visibility = beaconGlow.visibility = beaconFall.visibility = 0;
+  const bankYaw = Math.atan2(BEACON_DIR.x, BEACON_DIR.z);
+  const bankLM = mk(bankL, 'world_bank_l', mSkyCloud), bankRM = mk(bankR, 'world_bank_r', mSkyCloud);
+  for (const m of [bankLM, bankRM]) { m.position.copyFrom(islandPos); m.rotation.y = bankYaw; }
+  const bankSide = new Vector3(Math.cos(bankYaw), 0, -Math.sin(bankYaw)); // local +X in world
 
   // animated bits
   const sails = mk(sail, 'world_windmill_sails', mLit);
   sails.position.set(tOut.windmillHub[0], tOut.windmillHub[1], tOut.windmillHub[2]);
   sails.rotation.y = tOut.windmillYaw;
-  const shipA = mk(shipKit.b, 'world_ship_a', mLit), shipAG = mk(shipKit.g, 'world_ship_glow', mGlow);
-  const shipB = mk(ship2.b, 'world_ship_b', mLit);
-  shipAG.parent = shipA;
 
-  // beam from the lens to the sky above the Beacon
-  const skyPoint = new Vector3(BEACON_C.x, 70, BEACON_C.z);
+  // beam from the lens along Ellie's arm to the island
+  const skyPoint = islandPos.add(new Vector3(0, -25, 0));
   const beamLen = Vector3.Distance(statueLens, skyPoint);
-  const beam = MeshBuilder.CreateCylinder('world_beam', { height: beamLen, diameterTop: 2.4, diameterBottom: 0.3, tessellation: 8 }, scene);
+  const beam = MeshBuilder.CreateCylinder('world_beam', { height: beamLen, diameterTop: 14, diameterBottom: 0.3, tessellation: 8 }, scene);
   beam.bakeTransformIntoVertices(Matrix.Translation(0, beamLen / 2, 0));
   beam.material = mBeam; beam.isPickable = false; beam.setEnabled(false);
   beam.position.copyFrom(statueLens);
@@ -124,10 +141,10 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     beam.rotationQuaternion = Quaternion.RotationAxis(axis, Math.acos(Vector3.Dot(Vector3.Up(), d)));
   }
 
-  const walk = new Walk(tOut.obstacles);
+  const walk = new Walk([...tOut.obstacles, ...cOut.obstacles]);
 
   // ───── anchors ─────
-  const v = (x: number, z: number, y?: number) => new Vector3(x, y ?? groveHeight(x, z), z);
+  const v = (x: number, z: number, y?: number) => new Vector3(x, y ?? groundHeight(x, z), z);
   const yawTo = (fx: number, fz: number, tx: number, tz: number) => Math.atan2(tx - fx, tz - fz);
   const bu = (u: number, s: number) => ({ x: BEACON_C.x + BEACON_U.x * u + BEACON_PERP.x * s, z: BEACON_C.z + BEACON_U.z * u + BEACON_PERP.z * s });
   const dockU = DOCK_START + DOCK_LEN - 1.5;
@@ -140,9 +157,9 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     marrow: { pos: v(-3.3, -6.4), facing: yawTo(-3.3, -6.4, 0, -11) },
     pim: { pos: new Vector3(...tOut.pimGround), facing: tOut.pimFacing },
     groveDock: { pos: v(BEACON_DIR.x * dockU, BEACON_DIR.z * dockU, DOCK_Y), facing: towardBeacon },
-    beaconDock: { pos: new Vector3(BEACON_C.x + BEACON_U.x * (B_DOCK_START + 3), B_DOCK_Y, BEACON_C.z + BEACON_U.z * (B_DOCK_START + 3)), facing: towardBeacon },
-    arenaGate: { pos: new Vector3(gate.x, BEACON_TOP, gate.z), facing: towardBeacon },
-    arenaCenter: { pos: new Vector3(ARENA_C.x, ARENA_Y, ARENA_C.z), facing: towardBeacon + Math.PI },
+    beaconDock: { pos: new Vector3(BEACON_C.x + BEACON_U.x * B_DOCK_U, B_DOCK_Y, BEACON_C.z + BEACON_U.z * B_DOCK_U), facing: Math.atan2(-BEACON_U.x, -BEACON_U.z) },
+    arenaGate: { pos: new Vector3(gate.x, BEACON_TOP, gate.z), facing: Math.atan2(-BEACON_U.x, -BEACON_U.z) },
+    arenaCenter: { pos: new Vector3(ARENA_C.x, ARENA_Y, ARENA_C.z), facing: Math.atan2(BEACON_U.x, BEACON_U.z) },
     arenaExit: { pos: new Vector3(exitP.x, BEACON_TOP, exitP.z), facing: yawTo(exitP.x, exitP.z, BEACON_C.x + BEACON_U.x * 40, BEACON_C.z + BEACON_U.z * 40) },
   };
   const spawns: Vector3[] = [];
@@ -151,11 +168,11 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   // ───── quality ─────
   let shadow: ShadowGenerator | null = null;
   let glow: GlowLayer | null = null;
-  const casters: AbstractMesh[] = [mTown, mStatue, mProps, beaconRoot];
+  const casters: AbstractMesh[] = [mTown, mStatue, mProps, mBand];
   const setQuality = (q: Quality) => {
     mCloudB.setEnabled(q !== 'low');
     mProps.setEnabled(q !== 'low');
-    mVistaGlow.setEnabled(q !== 'low');
+    mFarGlowM.setEnabled(q !== 'low');
     if (q === 'low') { shadow?.dispose(); shadow = null; }
     else {
       const size = q === 'high' ? 2048 : 1024;
@@ -167,7 +184,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
         shadow.bias = 0.006; shadow.normalBias = 0.05; shadow.darkness = 0.35;
         for (const c of casters) shadow.addShadowCaster(c, false);
         sun.autoCalcShadowZBounds = true;
-        for (const m of [mTown, mStatue, mProps, beaconRoot, beaconRing]) m.receiveShadows = true;
+        for (const m of [mTerrain, mTown, mStatue, mProps, mBand]) m.receiveShadows = true;
       }
     }
     if (q === 'high' && !glow) {
@@ -180,7 +197,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     } else if (q !== 'high' && glow) { glow.dispose(); glow = null; }
   };
   // the sun shadow frustum should cover Shady Grove; keep it tight
-  sun.shadowMinZ = 1; sun.shadowMaxZ = 260;
+  sun.shadowMinZ = 1; sun.shadowMaxZ = 400;
   setQuality('med');
 
   // ───── runtime ─────
@@ -213,18 +230,25 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     update: (dt) => {
       time += dt;
       sails.rotation.z = time * 0.6;
-      const pa = vistaShipPath(time, 0), pb = vistaShipPath(time, 1);
-      shipA.position.set(pa.x, pa.y, pa.z); shipA.rotation.y = pa.yaw;
-      shipB.position.set(pb.x, pb.y, pb.z); shipB.rotation.y = pb.yaw;
       if (rise) {
         rise.t += dt;
         const t = Math.min(1, rise.t / RISE_TIME);
         const e = t * t * (3 - 2 * t);
-        beaconRoot.position.y = HIDDEN_Y * (1 - e) + Math.sin(t * Math.PI) * 1.5 * (1 - t);
-        mBeam.alpha = Math.min(1, rise.t * 2) * (t < 0.85 ? 0.85 : 0.85 * (1 - (t - 0.85) / 0.15));
-        beam.scaling.set(1, Math.min(1, rise.t * 1.5), 1);
+        // clouds part over the first 60%, the island emerges from 25% on
+        const part = Math.min(1, t / 0.6); const pe = part * part * (3 - 2 * part);
+        bankLM.position.copyFrom(islandPos).addInPlace(bankSide.scale(-110 * pe));
+        bankRM.position.copyFrom(islandPos).addInPlace(bankSide.scale(110 * pe));
+        bankLM.visibility = bankRM.visibility = 1 - 0.55 * pe;
+        const it = Math.max(0, Math.min(1, (t - 0.25) / 0.75)); const ie = it * it * (3 - 2 * it);
+        beaconRoot.position.y = islandPos.y + HIDDEN_Y * (1 - ie);
+        const vis = Math.min(1, it * 1.6);
+        beaconRoot.visibility = beaconGlow.visibility = beaconFall.visibility = vis;
+        mBeam.alpha = Math.min(1, rise.t * 2) * (t < 0.8 ? 0.8 : 0.8 * (1 - (t - 0.8) / 0.2));
+        beam.scaling.set(1, Math.min(1, rise.t * 1.2), 1);
+        void e;
         if (t >= 1) {
-          beaconRoot.position.y = 0; beam.setEnabled(false);
+          beaconRoot.position.y = islandPos.y; beam.setEnabled(false);
+          beaconRoot.visibility = beaconGlow.visibility = beaconFall.visibility = 1;
           raised = true; walk.beaconUp = true;
           const r = rise; rise = null; r.resolve();
         }
@@ -236,4 +260,3 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   return api;
 };
 
-function C3ToRgb(h: string): [number, number, number] { return hex(h); }
