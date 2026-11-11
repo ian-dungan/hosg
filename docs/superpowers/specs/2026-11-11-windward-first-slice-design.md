@@ -15,7 +15,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 
 ## In scope
 
-1. **Normandy** (starting town): the terraced sky-port, with the Plaza of the Two and the statue of Ellie (pointing) and Felix (spyglass).
+1. **Shady Grove** (starting town): a quaint terraced town on the island that carries the original grove, with the Plaza of the Two and the statue of Ellie (pointing) and Felix (spyglass).
 2. **Opening quest, "The Solstice Crossing"**: talk to Old Marrow, watch the beam leave the statue and the Beacon island rise, meet Pim, take the ferry to the Beacon Shelf.
 3. **The Beacon Shelf**: one combat zone with ordinary enemies, a few side quests, and the mega boss arena at the lighthouse.
 4. **Controls**
@@ -44,7 +44,7 @@ Prove that Windward feels like a next-gen sequel: a bright 3D world in the brows
 
 ## Out of scope (later rounds, each with its own design)
 
-The capital island of Shady Grove (the largest surviving piece of the old land, with the original grove on it), ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets, player-versus-player, further zones.
+Normandy (the capital sky-port), ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets, player-versus-player, further zones.
 
 ## Architecture
 
