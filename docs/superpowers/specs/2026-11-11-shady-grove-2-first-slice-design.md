@@ -70,7 +70,7 @@ Normandy (the capital), the wider continent, and the endgame sky region (floatin
 - **Server**: Node.js with TypeScript and Colyseus. The server owns all game state; clients only send inputs. One room per zone, one room per boss arena. 15 updates per second, with the client smoothing movement between them.
 - **Shared rules package**: combat maths, ability and item data live in one package used by both client and server, so they can never disagree.
 - **Database**: PostgreSQL for accounts, characters, inventory and leaderboards. Passwords hashed with argon2.
-- **Hosting**: Docker Compose on the Hetzner server with Caddy for HTTPS, on its own subdomain and port so the existing Shady Grove game keeps running beside it.
+- **Hosting**: Docker Compose on the Hetzner server with Caddy for HTTPS, at `shadygrove2.mooo.com`, on its own port, so the existing Shady Grove game keeps running beside it.
 - **Art**: models built in code or taken from CC0 low-poly packs, then recoloured to the game palette. The statue is modelled specially.
 
 ## Error handling
@@ -86,7 +86,3 @@ Normandy (the capital), the wider continent, and the endgame sky region (floatin
 - A bot script that connects 100 simulated players and checks the server holds 15 updates per second.
 - Browser smoke tests at phone, tablet and desktop sizes: log in, move, fight, form a party.
 - A scripted solo run and a scripted 3-player run of the Fallen Warden to check tuning.
-
-## Open questions for the owner
-
-1. The web address to use. (Server: Ubuntu, 16 GB RAM, which is enough.)
