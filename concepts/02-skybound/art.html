@@ -635,7 +635,7 @@ function buildScene() {
   EMI = 0.9; newId();
   for (let i = 0; i < 24; i++) { const a0 = i / 24 * Math.PI * 2, a1 = (i + 0.6) / 24 * Math.PI * 2; quad([4.4 + Math.cos(a0) * 0.75, 0.03, 7.4 + Math.sin(a0) * 0.75], [4.4 + Math.cos(a1) * 0.75, 0.03, 7.4 + Math.sin(a1) * 0.75], [4.4 + Math.cos(a1) * 0.6, 0.03, 7.4 + Math.sin(a1) * 0.6], [4.4 + Math.cos(a0) * 0.6, 0.03, 7.4 + Math.sin(a0) * 0.6], hex('#7fe0ff')); }
   EMI = 0;
-  newId(); push(); T(0.2, 0, 5.4); RY(-0.2); npcElder(); pop();
+  newId(); push(); T(-2.6, 0, 6.6); RY(0.3); npcElder(); pop();
   // a few townsfolk silhouettes
   const folk = [[8.2, 0, -3.5, '#e66a5a'], [9.0, 0, -2.6, '#4aa6a0'], [-7.5, 0, 6.5, '#e0a040'], [6.5, 0, -8.5, '#7a6ac8'], [-10.5, 0, 2.6, '#ff8a66'], [10.8, 0, 4.0, '#5a8ae0'], [-3.5, 0, 10.0, '#c06aa0']];
   for (const [fx, fy, fz, c] of folk) {
@@ -684,7 +684,7 @@ function buildScene() {
   house(26, Y2, -33, 4.0, 3.8, 5.0, -0.15, PAL.wall2, PAL.roof1);
   house(32, Y2, -37, 4.6, 4.0, 4.0, -0.4, PAL.wall3, PAL.roof4);
   // crown: the lantern tower that names the town
-  tower(15, 9.85, -58, 2.3, 12);
+  tower(15, 9.85, -58, 2.3, 10);
   windmill(7, Y1, -34, 0.7, 1.0);
   windmill(35, Y2, -45, -0.3, 0.85);
   // trees
@@ -826,13 +826,13 @@ vec3 skyCol(vec3 d){
   float sa=max(dot(hz,sz),0.);
   float s=max(dot(d,uGlow),0.);
   vec3 zen=vec3(0.09,0.33,0.82), mid=vec3(0.28,0.60,0.95);
-  vec3 horCool=vec3(0.72,0.84,0.97), horWarm=vec3(1.0,0.76,0.56);
+  vec3 horCool=vec3(0.70,0.82,0.97), horWarm=vec3(0.99,0.70,0.50);
   vec3 hor=mix(horCool,horWarm,pow(sa,2.2));
   float hh=max(h,0.);
   vec3 c=mix(hor,mid,smoothstep(0.0,0.20,hh));
   c=mix(c,zen,smoothstep(0.16,0.7,hh));
   c+=vec3(1.0,0.55,0.30)*pow(s,6.)*0.16+vec3(1.,0.85,0.6)*pow(s,60.)*0.35;
-  if(h<0.) c=mix(c, mix(vec3(0.86,0.88,0.97),vec3(1.0,0.88,0.76),pow(sa,2.)), smoothstep(0.,-0.15,h));
+  if(h<0.) c=mix(c, mix(vec3(0.84,0.86,0.97),vec3(0.99,0.82,0.70),pow(sa,2.)), smoothstep(0.,-0.15,h));
   return c;
 }`;
 
@@ -1094,14 +1094,14 @@ function hud(VP) {
     c.fillStyle = 'rgba(255,248,225,0.9)';
     for (const [w, h] of [[34, 1.6], [1.6, 22]]) { c.beginPath(); c.ellipse(gx, gy, w, h, 0, 0, Math.PI * 2); c.fill(); } }
   // --- NPC marker + interact prompt
-  const np = toS([0.2, 2.45, 5.4]);
+  const np = toS([-2.6, 2.45, 6.6]);
   c.save(); c.shadowColor = 'rgba(255,190,60,0.9)'; c.shadowBlur = 12; { const rg = c.createRadialGradient(np[0], np[1] - 10, 0, np[0], np[1] - 10, 22); rg.addColorStop(0, 'rgba(255,214,110,0.55)'); rg.addColorStop(1, 'rgba(255,214,110,0)'); c.fillStyle = rg; c.fillRect(np[0] - 24, np[1] - 34, 48, 48); }
-  c.fillStyle = '#ffd35a'; c.font = `800 38px ${serif}`; c.textAlign = 'center'; c.fillText('!', np[0], np[1]); c.restore();
+  c.font = `800 38px ${serif}`; c.textAlign = 'center'; c.shadowBlur = 0; c.lineJoin = 'round'; c.lineWidth = 5; c.strokeStyle = 'rgba(60,30,50,0.9)'; c.strokeText('!', np[0], np[1]); c.shadowBlur = 14; c.fillStyle = '#ffd35a'; c.fillText('!', np[0], np[1]); c.restore();
   const pp = toS([4.4, 2.3, 7.4]);
   c.textAlign = 'center'; c.font = `600 12px ${sans}`;
   c.save(); c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 4; c.fillStyle = '#eaf8ff'; c.fillText('Wren', pp[0], pp[1]); c.restore();
   // interact prompt
-  const ip = toS([0.2, 1.0, 5.4]);
+  const ip = toS([-2.6, 1.0, 6.6]);
   const bx = ip[0] - 172, by = ip[1] - 22;
   c.fillStyle = 'rgba(20,25,50,0.55)'; c.beginPath(); c.roundRect(bx, by, 132, 26, 13); c.fill();
   c.fillStyle = '#fff6e6'; c.beginPath(); c.roundRect(bx + 4, by + 4, 18, 18, 4); c.fill();
