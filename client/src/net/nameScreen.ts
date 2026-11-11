@@ -28,13 +28,17 @@ function cleaned(value: string): string {
   return value.replace(/[‘’ʼ]/g, "'").trim();
 }
 
+/** Thrown by a name screen's `submit` to close the screen: showNameScreen then rejects with it. */
+export class LeaveNameScreen extends Error {}
+
 /**
  * Shows the name screen over `root` until `submit` accepts a name; resolves with the name `submit`
- * resolves with. When `submit` throws, its message is shown and the player can try again.
+ * resolves with. When `submit` throws, its message is shown and the player can try again, except
+ * for a LeaveNameScreen, which closes the screen and rejects with it.
  */
 export function showNameScreen(root: HTMLElement, submit: (name: string) => Promise<string>): Promise<string> {
   injectStyles();
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const wrap = h('div', 'sg-hud', root);
     const screen = h('div', 'sg-login sg-name', wrap);
     const box = h('div', 'sg-login-box', screen);
@@ -75,13 +79,21 @@ export function showNameScreen(root: HTMLElement, submit: (name: string) => Prom
       busy = true;
       screen.classList.add('busy');
       err.textContent = '';
-      try {
-        const chosen = await submit(name);
+      const close = () => {
         (document.activeElement as HTMLElement | null)?.blur?.();
         screen.classList.remove('in');
         window.setTimeout(() => wrap.remove(), 350);
+      };
+      try {
+        const chosen = await submit(name);
+        close();
         resolve(chosen);
       } catch (e) {
+        if (e instanceof LeaveNameScreen) {
+          close();
+          reject(e);
+          return;
+        }
         err.textContent = e instanceof Error ? e.message : String(e);
         busy = false;
         screen.classList.remove('busy');

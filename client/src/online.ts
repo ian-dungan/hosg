@@ -7,7 +7,7 @@ import { bootGame } from './boot';
 import { h } from './hud/dom';
 import { createChat } from './net/chatBox';
 import { showLogin } from './net/loginScreen';
-import { showNameScreen } from './net/nameScreen';
+import { LeaveNameScreen, showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
 import { connect, forgetToken, nameAdventurer, savedToken, type GroveRoom } from './net/session';
 
@@ -155,14 +155,31 @@ function boot(): void {
   void (async () => {
     let notice = '';
     let resume = savedToken(); // a reload carries on with this tab's account
-    const chooseName = (token: string) => showNameScreen(hudRoot, (name) => nameAdventurer(token, name));
+    /** Shows the name screen until the adventurer has a name; false when the player must sign in again (`notice` says why). */
+    const chooseName = async (token: string): Promise<boolean> => {
+      try {
+        await showNameScreen(hudRoot, async (name) => {
+          const result = await nameAdventurer(token, name);
+          if (result.kind === 'named') return result.name;
+          if (result.kind === 'alreadyNamed') return name; // named in another tab: just join, the room shows the real name
+          if (result.kind === 'signIn') throw new LeaveNameScreen(result.error);
+          throw new Error(result.error);
+        });
+        return true;
+      } catch (err) {
+        if (!(err instanceof LeaveNameScreen)) throw err;
+        forgetToken();
+        notice = err.message;
+        return false;
+      }
+    };
     for (;;) {
       let token = resume;
       resume = null;
       if (!token) {
         const session = await showLogin(hudRoot, notice);
         token = session.token;
-        if (session.name === null) await chooseName(token);
+        if (session.name === null && !(await chooseName(token))) continue;
       }
       let r: GroveRoom;
       try {
@@ -171,8 +188,7 @@ function boot(): void {
         const message = err instanceof Error ? err.message : CONNECTION_LOST;
         if (message === NAME_FIRST) {
           // A reload while choosing a name: carry on choosing it, then join.
-          await chooseName(token);
-          resume = token;
+          if (await chooseName(token)) resume = token;
           continue;
         }
         forgetToken();

@@ -33,3 +33,14 @@ export const BAD_WORDS: readonly string[] = [
   'gypo', 'pikey', 'lesbo', 'homo', 'spaz', 'spastic', 'mongoloid', 'criple',
   'nazi', 'hitler', 'siegheil', 'heilhitler', 'whitepower', 'kukluxklan',
 ];
+
+/**
+ * Short words refused as a word of their own (in a name, a word is what lies between spaces, hyphens,
+ * apostrophes or underscores), with any letter repeated and with a plural "s" or "es", but not inside a
+ * longer word, so Thomas, Grape and Raccoon stay fine. Lower-case letters, written normally ("ass").
+ */
+export const SHORT_BAD_WORDS: readonly string[] = [
+  'ass', 'arse', 'cum', 'tit', 'anus', 'anal', 'rape', 'spic', 'coon', 'paki', 'turd', 'crap', 'semen', 'gook',
+  'orgy', 'wank', 'piss', 'fag', 'knob', 'damn', 'slag', 'wog', 'wop', 'kkk', 'jap', 'nig', 'hoe', 'thot', 'tard',
+  'pimp', 'pube', 'boob', 'bum', 'poof', 'nonce', 'minge', 'cunty', 'jism', 'spunk', 'bellend', 'bint',
+];

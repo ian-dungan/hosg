@@ -1,8 +1,8 @@
 // Adventurer names and the bad-word filter. Failures name a list entry by its index, never by the
 // word itself, so the blocklist is not printed into test output.
 import { describe, expect, it } from 'vitest';
-import { BAD_WORDS } from './badwords';
-import { isOffensive, validateAdventurerName } from './names';
+import { BAD_WORDS, SHORT_BAD_WORDS } from './badwords';
+import { ALLOWED_WORDS, isOffensive, validateAdventurerName } from './names';
 import { validateUsername } from './validate';
 
 const NOT_ALLOWED = 'That name is not allowed';
@@ -100,6 +100,78 @@ describe('isOffensive', () => {
   it('is false for ordinary words', () => {
     expect(isOffensive('Elowen')).toBe(false);
     expect(isOffensive('Mary-Ann')).toBe(false);
+  });
+});
+
+describe('allowed words', () => {
+  it('exempt only a whole word of the name: the rest of the name is still checked', () => {
+    expect(validateAdventurerName('Sir Essex')).toBeNull();
+    expect(validateAdventurerName('Dickens Rowe')).toBeNull();
+    const word = BAD_WORDS.find((w) => w.length >= 4 && w.length <= 6)!;
+    expect(validateAdventurerName(`Essex ${capitalise(word)}`)).toBe(NOT_ALLOWED);
+    expect(validateAdventurerName(`${capitalise(word)}-Dickens`)).toBe(NOT_ALLOWED);
+  });
+
+  it('give no cover when split at any point with a space or a hyphen', () => {
+    const blocked = BAD_WORDS.map((w) => w.replace(/(.)\1+/g, '$1'));
+    const failures: string[] = [];
+    ALLOWED_WORDS.forEach((allowed, i) => {
+      const plain = allowed.replace(/(.)\1+/g, '$1');
+      if (!blocked.some((w) => plain.includes(w))) return; // nothing to expose
+      for (let at = 1; at < allowed.length; at++) {
+        for (const sep of [' ', '-']) {
+          const name = capitalise(allowed.slice(0, at)) + sep + allowed.slice(at);
+          // "W essex" only shows another allowed word, not a blocked one.
+          if (ALLOWED_WORDS.includes(allowed.slice(0, at)) || ALLOWED_WORDS.includes(allowed.slice(at))) continue;
+          if (!isOffensive(name) || validateAdventurerName(name) === null) failures.push(`#${i} at ${at} '${sep}'`);
+        }
+      }
+    });
+    expect(failures).toEqual([]);
+  });
+});
+
+describe('SHORT_BAD_WORDS', () => {
+  const failingShort = (check: (word: string) => boolean) => SHORT_BAD_WORDS.flatMap((w, i) => (check(w) ? [] : [i]));
+  const refused = (name: string) => name.length > 16 || validateAdventurerName(name) === NOT_ALLOWED;
+
+  it('refuses each as a word of its own: alone, capitalised, plural, stretched, and inside a longer name', () => {
+    expect(failingShort((w) => /^[a-z]+$/.test(w))).toEqual([]);
+    expect(failingShort((w) => refused(w.padEnd(3, w.at(-1)!)))).toEqual([]);
+    expect(failingShort((w) => refused(capitalise(w) + 's'))).toEqual([]);
+    expect(failingShort((w) => refused(w.replace(/./g, '$&$&')))).toEqual([]);
+    expect(failingShort((w) => refused(`Sir ${capitalise(w)}`))).toEqual([]);
+    expect(failingShort((w) => refused(`${capitalise(w)}-Rook`))).toEqual([]);
+    expect(failingShort((w) => refused(`Rook o'${w}`))).toEqual([]);
+    expect(failingShort((w) => isOffensive(`big_${w}_1`))).toEqual([]);
+  });
+
+  it('lets longer innocent names that contain those letters through', () => {
+    const innocent = [
+      'Thomas', 'Lucas', 'Cassius', 'Grape', 'Raccoon', 'Pakistan', 'Spicer', 'Janus', 'Canal', 'Cucumber', 'Titus',
+      'Titania', 'Georgy', 'Basement', 'Pimpernel', 'Japan', 'Nigel', 'Bumble', 'Saturday', 'Damned Rook', 'Crapaud',
+      'Hoel', 'Poofle', 'Slagle', 'Wogan', 'Knobel', 'Tardis', 'Thoth', 'Pubert', 'Analise', 'Arsenal', 'Boobook',
+    ];
+    const blocked = innocent.filter((n) => validateAdventurerName(n) !== null);
+    expect(blocked).toEqual([]);
+  });
+});
+
+describe('reserved words', () => {
+  it('refuses a staff word anywhere in the name as a word of its own', () => {
+    const names = [
+      'Admin Rook', 'Rook the Admin', 'Administrator Jo', 'GM Rook', 'Rook-GM', 'Gamemaster Jo', 'Game Master Jo',
+      'Rook Game-Master', 'Moderator Jo', 'Mod Rook', "Rook o'Mod", 'Staff Rook', 'System Rook', 'Server Rook',
+    ];
+    for (const n of names) expect(validateAdventurerName(n), n).toBe(NOT_ALLOWED);
+    expect(validateUsername('admin_rook')).toBe(NOT_ALLOWED);
+  });
+
+  it('refuses the heroes and the game only as the whole name', () => {
+    for (const n of ['Felix', 'Ellie', 'Shady Grove', 'Shadygrove']) expect(validateAdventurerName(n), n).toBe(NOT_ALLOWED);
+    for (const n of ['Felix Stone', 'Ellie Rose', 'Shady Glen', 'Modesty', 'Systema', 'Staffordshire', 'Adminah']) {
+      expect(validateAdventurerName(n), n).toBeNull();
+    }
   });
 });
 

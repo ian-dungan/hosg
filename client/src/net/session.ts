@@ -104,13 +104,38 @@ export async function login(
   return { token: body.token, name };
 }
 
-/** Gives the account's adventurer its permanent name; resolves with it, or throws an Error with the server's reason. */
-export async function nameAdventurer(token: string, name: string): Promise<string> {
-  const { res, body } = await postApi('name', { name }, { Authorization: `Bearer ${token}` });
-  if (!res.ok || typeof body?.name !== 'string') {
-    throw new Error(typeof body?.error === 'string' ? body.error : `The server could not save the name (${res.status})`);
+/** The server's answer when the adventurer was named meanwhile (another tab or device). */
+const ALREADY_NAMED = 'Your adventurer already has a name';
+
+/**
+ * What an answer to POST /api/name means for the name screen:
+ * - `named`: done, with the name the server stored;
+ * - `alreadyNamed`: done too, the name was chosen elsewhere (the room will show it);
+ * - `signIn`: the token is no good any more (401), so back to the login screen with `error`;
+ * - `retry`: `error` is shown on the name screen and the player can try another name.
+ */
+export type NameResult =
+  | { kind: 'named'; name: string }
+  | { kind: 'alreadyNamed' }
+  | { kind: 'signIn'; error: string }
+  | { kind: 'retry'; error: string };
+
+export function nameResult(status: number, body: Record<string, unknown> | null): NameResult {
+  const error = typeof body?.error === 'string' ? body.error : null;
+  if (status >= 200 && status < 300 && typeof body?.name === 'string') return { kind: 'named', name: body.name };
+  if (status === 409 && error === ALREADY_NAMED) return { kind: 'alreadyNamed' };
+  if (status === 401) return { kind: 'signIn', error: error ?? 'Please sign in again' };
+  return { kind: 'retry', error: error ?? `The server could not save the name (${status})` };
+}
+
+/** Asks the server to give the account's adventurer its permanent name; an unreachable server is a `retry`. */
+export async function nameAdventurer(token: string, name: string): Promise<NameResult> {
+  try {
+    const { res, body } = await postApi('name', { name }, { Authorization: `Bearer ${token}` });
+    return nameResult(res.status, body);
+  } catch (err) {
+    return { kind: 'retry', error: err instanceof Error ? err.message : UNREACHABLE };
   }
-  return body.name;
 }
 
 /** Joins the grove with a token. Throws an Error with the server's reason if the join is refused. */
