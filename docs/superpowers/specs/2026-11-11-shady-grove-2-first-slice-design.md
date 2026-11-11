@@ -26,7 +26,13 @@ The player starts on solid ground. The first game was a small corner of a much l
    - Touch: virtual joystick to move, tap to target, ability buttons under the right thumb.
    - Computer: WASD to move, click to target, keys 1 to 5 for abilities.
    - Overhead three-quarter camera that rotates and zooms.
-5. **Combat**
+5. **Physical movement**
+   - Jumping (Space on a computer, a jump button on touch), gravity and falling, with ledges you can drop from and low obstacles you can hop over.
+   - Knockback and launches in combat: heavy hits push characters, and being knocked off a ledge matters.
+   - Short falls are free; long falls cost some health but never kill outright.
+   - Built as simple character physics that the server checks, not a full physics engine, so it stays fair online and smooth on phones.
+   - Gliding is saved for the sky endgame.
+6. **Combat**
    - Tap-target lock-on with automatic basic attacks in range.
    - Loadout of 5 abilities chosen from a pool of about 12, including heals.
    - Stagger bar on bosses and elites: hit weak points or interrupt marked attacks to fill it; a break stuns and adds bonus damage.
@@ -34,17 +40,17 @@ The player starts on solid ground. The first game was a small corner of a much l
    - Two weapon types with their own rhythm: Blade (parry) and Bow (charged shot).
    - Every dangerous attack is telegraphed on the ground and can be dodged.
    - Wind is not a standing combat mechanic. A few set-piece battles may use it as their special twist, where it is done well.
-6. **Parties**
+7. **Parties**
    - Up to 4 players. Invite by tapping a player. Party health bars. Shared loot rolls.
    - No fixed classes: gear and loadout decide whether you lean damage, healing or tanking.
-7. **Mega boss: the Fallen Warden** (a stone-and-brass lighthouse keeper that fell from the Beacon)
+8. **Mega boss: the Fallen Warden** (a stone-and-brass lighthouse keeper that fell from the Beacon)
    - Tuned for 3 average players. It does not get weaker for fewer players; a 4th player adds 25% health.
    - Three phases; each one changes the arena.
    - Fought in a private arena per party (or per solo player) so tuning stays fair.
    - No "party required" gate. Solo is possible with top gear and near-perfect play.
    - A solo kill grants a unique title and a place on the boss leaderboard.
-8. **Progression**: levels 1 to 10, three gear tiers, abilities unlocked by level and quest.
-9. **Online**: accounts (username and password, or play as guest), saved characters, chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
+9. **Progression**: levels 1 to 10, three gear tiers, abilities unlocked by level and quest.
+10. **Online**: accounts (username and password, or play as guest), saved characters, chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
 
 ## Out of scope (later rounds, each with its own design)
 
