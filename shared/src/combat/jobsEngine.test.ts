@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hurtAdventurer } from './adventurer';
 import type { Loadout } from './abilities';
-import { BUFF_BITS, DEBUFF_BITS } from './abilities';
+import { ABILITIES, BUFF_BITS, DEBUFF_BITS, damageCoef } from './abilities';
+import { hitDamage } from './stats';
 import { DODGE_REFILL_S, REVIVE_IFRAMES_S } from './constants';
 import type { Intent } from './engine';
 import { Rig, camp } from './testRig';
@@ -199,8 +200,9 @@ describe('effects', () => {
     Object.assign(w.adventurers.get(b)!, { shield: 15, shieldUntil: 20 });
     Object.assign(w.adventurers.get(c)!, { shield: 25, shieldUntil: 3 });
     expect(r.press(a, 3)).toBeNull();
-    expect([a, b, c].map((id) => r.c.get(id)!.shield)).toEqual([20, 20, 25]);
-    expect(r.fx('shield').map((f) => [f.src, f.dst, f.amount])).toEqual([[a, a, 20], [a, b, 20]]);
+    const dw = (ABILITIES.dawn_ward.effects[0] as { amount: number }).amount; // 16 after the Task 4 tuning (> 15, < 25)
+    expect([a, b, c].map((id) => r.c.get(id)!.shield)).toEqual([dw, dw, 25]);
+    expect(r.fx('shield').map((f) => [f.src, f.dst, f.amount])).toEqual([[a, a, dw], [a, b, dw]]);
     r.at(3.1);
     expect(r.c.get(c)!.shield).toBe(0); // its own expiry
     r.at(6.1);
@@ -232,8 +234,10 @@ describe('effects', () => {
     expect(r.hits().filter((h) => h.dst === a)).toEqual([]);
     r.i(a, { t: 'target', id: d });
     r.at(1);
-    expect(r.press(a, 0)).toBeNull(); // Grim Rend at 1 hp: the cost takes nothing; Crimson Tithe heals 20% of 16
-    expect(r.c.get(a)!.hp).toBeCloseTo(1 + 0.2 * 16, 9);
+    expect(r.press(a, 0)).toBeNull(); // Grim Rend at 1 hp: the cost takes nothing; Crimson Tithe heals 20% of the hit
+    const rend = r.hits(a).find((h) => h.by === 'grim_rend')!.amount;
+    expect(rend).toBe(hitDamage(damageCoef(ABILITIES.grim_rend), 10, 0));
+    expect(r.c.get(a)!.hp).toBeCloseTo(1 + 0.2 * rend, 9);
     expect(r.hits(a).some((h) => h.by === 'grim_rend' && h.dst === d)).toBe(true);
     expect(r.c.get(a)!.alive).toBe(true);
   });

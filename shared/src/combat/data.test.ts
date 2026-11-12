@@ -15,9 +15,9 @@ describe('weapons and abilities', () => {
     expect(WEAPONS.blade).toMatchObject({ autoEvery: 1.2, autoCoef: 1.0, autoRange: MELEE_REACH });
     expect(WEAPONS.bow).toMatchObject({ autoEvery: 1.5, autoCoef: 1.1, autoRange: 18 });
     expect(WEAPONS.sword).toMatchObject({ autoEvery: 1.4, autoCoef: 1.0, autoRange: MELEE_REACH });
-    expect(WEAPONS.greatsword).toMatchObject({ autoEvery: 1.8, autoCoef: 1.2, autoRange: MELEE_REACH });
-    expect(WEAPONS.daggers).toMatchObject({ autoEvery: 0.9, autoCoef: 0.6, autoRange: MELEE_REACH });
-    expect(WEAPONS.staff).toMatchObject({ autoEvery: 1.6, autoCoef: 1.0, autoRange: 16 });
+    expect(WEAPONS.greatsword).toMatchObject({ autoEvery: 1.8, autoCoef: 1.05, autoRange: MELEE_REACH }); // Task 4 tuning: 1.2 → 1.05
+    expect(WEAPONS.daggers).toMatchObject({ autoEvery: 0.9, autoCoef: 0.5, autoRange: MELEE_REACH }); // 0.6 → 0.5
+    expect(WEAPONS.staff).toMatchObject({ autoEvery: 1.6, autoCoef: 0.85, autoRange: 16 }); // 1.0 → 0.85
   });
   it('ids match their keys; the Plan 3 table values', () => {
     for (const [k, a] of Object.entries(ABILITIES)) expect(a.id).toBe(k);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Loadout } from './abilities';
+import { ABILITIES, WEAPONS, damageCoef, type AbilityId, type Loadout } from './abilities';
 import { hurtAdventurer, damageEnemy, killEnemy } from './adventurer';
 import {
   AEGIS_ALLY_TAKEN, AEGIS_TAKEN, AUTO_MOMENTUM, BEHIND_MULT, BLOOD_LIFESTEAL, CAST_BREAK_LOCK_S, FONT_HEAL_MULT, PACT_MULT, PINPOINT_MULT,
@@ -19,6 +19,9 @@ const BLACK: Loadout = { job: 'black_mage', picks: ['rootbreak', 'stormcage'] };
 const WHITE: Loadout = { job: 'white_mage', picks: ['soft_rain', 'mistveil'] }; // tidelash, lantern_flare, wellspring, soft_rain, mistveil
 const th = (coef: number, mult = 1) => hitDamage(coef, 10, 6, mult);
 const taken = (raw: number, mult = 1) => enemyHit(raw, 10, mult);
+/** Numbers from the data (Task 4 tunes them): a damage coefficient, and the k-th heal amount. */
+const c = (id: AbilityId) => damageCoef(ABILITIES[id]);
+const healOf = (id: AbilityId, k = 0) => (ABILITIES[id].effects.filter((e) => e.k === 'heal')[k] as { amount: number }).amount;
 
 function setup(kind: 'thornling' | 'mossback' = 'thornling') {
   const r = new Rig([camp(kind, 0, 0)]);
@@ -82,10 +85,10 @@ describe('job traits', () => {
     expect([en().threat.get(war), en().threat.get(pal)]).toEqual([20, 30]);
     expect(en().threat.choose(war, r.now, () => true)).toBe(pal); // 30 ≥ 20 × TARGET_SWITCH_MULT
     expect(en().threat.choose(pal, r.now, () => true)).toBe(pal);
-    // heal threat too: Kindle heals the Paladin's ally 25, then itself 10
+    // heal threat too: Kindle heals the Paladin's ally, then itself
     st(war).hp = 50;
     expect(r.press(pal, 4, war)).toBeNull();
-    expect(en().threat.get(pal)).toBeCloseTo(30 + (25 + 10) * THREAT_PER_HEAL * 1.5, 9);
+    expect(en().threat.get(pal)).toBeCloseTo(30 + (healOf('kindle', 0) + healOf('kindle', 1)) * THREAT_PER_HEAL * 1.5, 9);
   });
 
   it('Paladin +5 Momentum per hit taken, shield-absorbed hits included', () => {
@@ -124,8 +127,8 @@ describe('job traits', () => {
     const dk = r.add(0, -1.5, DARK, 50), low = r.add(5, -5, WARRIOR, 40), lower = r.add(0, -20, WARRIOR, 10), high = r.add(-5, -5, WARRIOR, 80);
     aim(dk);
     const heals = () => r.fx('heal').filter((h) => h.src === dk);
-    expect(r.press(dk, 0)).toBeNull(); // Grim Rend: hp-cost 3, damage 1.6
-    const rend = th(1.6);
+    expect(r.press(dk, 0)).toBeNull(); // Grim Rend: hp-cost 3, damage from the data
+    const rend = th(c('grim_rend'));
     expect(heals().map((h) => [h.dst, h.amount])).toEqual([[dk, rend * BLOOD_LIFESTEAL]]);
     expect(st(dk).hp).toBeCloseTo(50 - 3 + rend * BLOOD_LIFESTEAL, 9);
     r.until('hit'); // an auto
@@ -138,7 +141,7 @@ describe('job traits', () => {
     r.ready(dk);
     const before = heals().length;
     expect(r.press(dk, 0)).toBeNull();
-    const pactRend = th(1.6, PACT_MULT);
+    const pactRend = th(c('grim_rend'), PACT_MULT);
     const ls = pactRend * BLOOD_LIFESTEAL * 2;
     expect(heals().slice(before).map((h) => [h.dst, h.amount])).toEqual([[dk, ls], [low, ls]]);
     expect([st(lower).hp, st(high).hp]).toEqual([10, 80]);
@@ -167,22 +170,22 @@ describe('job traits', () => {
       expect(r.press(n, 0)).toBeNull(); // Crossed Fangs
       return r.hits(n)[0];
     };
-    expect(at(115)).toMatchObject({ amount: th(1.3, BEHIND_MULT), behind: true });
-    expect(at(-115)).toMatchObject({ amount: th(1.3, BEHIND_MULT), behind: true });
+    expect(at(115)).toMatchObject({ amount: th(c('crossed_fangs'), BEHIND_MULT), behind: true });
+    expect(at(-115)).toMatchObject({ amount: th(c('crossed_fangs'), BEHIND_MULT), behind: true });
     const front = at(100);
-    expect(front.amount).toBe(th(1.3));
+    expect(front.amount).toBe(th(c('crossed_fangs')));
     expect(front.behind).toBeUndefined();
     const { r, aim } = setup();
     const n = r.add(0, 1.5, NINJA);
     aim(n);
     expect(r.press(n, 2)).toBeNull(); // Ghost Edge, from the front
-    expect(r.hits(n)[0]).toMatchObject({ by: 'ghost_edge', amount: th(2.4, BEHIND_MULT), behind: true });
+    expect(r.hits(n)[0]).toMatchObject({ by: 'ghost_edge', amount: th(c('ghost_edge'), BEHIND_MULT), behind: true });
     // autos too
     const r2 = setup();
     const n2 = r2.r.add(0, -1.5, NINJA);
     r2.aim(n2);
     r2.r.until('hit');
-    expect(r2.r.hits(n2)[0]).toMatchObject({ by: 'auto', amount: th(0.6, BEHIND_MULT), behind: true });
+    expect(r2.r.hits(n2)[0]).toMatchObject({ by: 'auto', amount: th(WEAPONS.daggers.autoCoef, BEHIND_MULT), behind: true });
   });
 
   it('Ninja perfect dodge +25 Momentum', () => {
@@ -249,10 +252,10 @@ describe('job traits', () => {
       r.until('castEnd');
       return r.fx('heal').at(-1)!;
     };
-    expect(cast(ally)).toMatchObject({ dst: ally, amount: 45 * FONT_HEAL_MULT });
+    expect(cast(ally)).toMatchObject({ dst: ally, amount: healOf('wellspring') * FONT_HEAL_MULT });
     expect(r.c.self(wm)!.momentum).toBe(20); // 27, capped
-    expect(cast(wm)).toMatchObject({ dst: wm, amount: 45 });
-    expect(r.c.self(wm)!.momentum).toBe(20);
+    expect(cast(wm)).toMatchObject({ dst: wm, amount: healOf('wellspring') });
+    expect(r.c.self(wm)!.momentum).toBe(Math.min(20, healOf('wellspring') * 0.5));
     r.w.adventurers.get(ally)!.hp = 95;
     expect(cast(ally)).toMatchObject({ dst: ally, amount: 5 });
     expect(r.c.self(wm)!.momentum).toBe(2.5);
@@ -270,7 +273,7 @@ describe('job traits', () => {
     st(war).hp = 30;
     expect(r.press(wm, 2, war)).toBeNull();
     r.until('castEnd');
-    expect(en().threat.get(wm)).toBe(45 * FONT_HEAL_MULT * THREAT_PER_HEAL * 0.5);
+    expect(en().threat.get(wm)).toBe(healOf('wellspring') * FONT_HEAL_MULT * THREAT_PER_HEAL * 0.5);
   });
 
   it('Black Mage +10 Momentum per completed cast, none on fizzle', () => {

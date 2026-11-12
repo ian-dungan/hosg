@@ -1,7 +1,7 @@
 // Task 3 review round 1: revive safety, the Paladin's taunt, Font on steam, Rooted immunity, per-enemy
 // splash, and elite conduct without an interrupt's stagger.
 import { describe, expect, it } from 'vitest';
-import type { Loadout } from './abilities';
+import { ABILITIES, damageCoef, type Loadout } from './abilities';
 import {
   BREAK_DAMAGE_MULT, ELEMENT_WEAK_MULT, ELITE_ROOT_MULT, FONT_HEAL_MULT, INTERRUPT_STAGGER, MARK_S, OVERFLOW_MULT, ROOT_IMMUNE_S,
   STEADFAST_THREAT, STEAM_HEAL, TAUNT_BONUS, TAUNT_MULT,
@@ -119,8 +119,9 @@ describe('Task 3 review round 1', () => {
     r.until('castEnd');
     const hits = r.hits(bm);
     const mult = ELEMENT_WEAK_MULT * OVERFLOW_MULT; // both are weak to fire
-    expect(hits.find((h) => h.dst === t)!.amount).toBe(hitDamage(5.5, 10, 6, mult));
-    expect(hits.find((h) => h.dst === m)!.amount).toBe(hitDamage(5.5 * 0.5, 10, 15, mult * BREAK_DAMAGE_MULT));
+    const coef = damageCoef(ABILITIES.hearthfall);
+    expect(hits.find((h) => h.dst === t)!.amount).toBe(hitDamage(coef, 10, 6, mult));
+    expect(hits.find((h) => h.dst === m)!.amount).toBe(hitDamage(coef * 0.5, 10, 15, mult * BREAK_DAMAGE_MULT));
   });
 
   it('elite conduct from a non-interrupting hit interrupts without INTERRUPT_STAGGER', () => {

@@ -173,3 +173,57 @@ describe('adventurerBrain (fix round 1)', () => {
     expect(weak.intents.map((i) => i.t)).toEqual(['dodge']);
   });
 });
+
+// ═════════ Plan 3b: the Plan 3 bands as jobs (the Plan 3 tests above stay as they were) ═════════
+describe('the Plan 3 bands as the Warrior and the Ranger, with their solo picks', () => {
+  const JOBS2 = ['warrior', 'ranger'] as const;
+  const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+  for (const enemy of ORDINARY) for (const job of JOBS2) {
+    // Ruling P3b-e: the Ranger's Pinning Shot combo puts it under Plan 3's 10 s floor; its band is a mean in [8.5, 15]
+    it(`${job} vs ${enemy}, careful: ${job === 'warrior' ? 'dies in 10–15 s' : 'a mean of 8.5–15 s'} and the adventurer survives`, () => {
+      const rs = SEEDS.map((seed) => simulateFight({ seed, job, enemy, careful: true }));
+      rs.forEach((r, i) => {
+        expect(r.died, `seed ${SEEDS[i]}`).toBe(false);
+        expect(r.ttk, `seed ${SEEDS[i]}`).not.toBeNull();
+        if (job === 'warrior') {
+          expect(r.ttk!, `seed ${SEEDS[i]}`).toBeGreaterThanOrEqual(10);
+          expect(r.ttk!, `seed ${SEEDS[i]}`).toBeLessThanOrEqual(15);
+        }
+      });
+      if (job === 'ranger') {
+        expect(avg(rs.map((r) => r.ttk!))).toBeGreaterThanOrEqual(8.5);
+        expect(avg(rs.map((r) => r.ttk!))).toBeLessThanOrEqual(15);
+      }
+    });
+    it(`${job} vs ${enemy}, careless: the adventurer still survives`, () => {
+      for (const seed of SEEDS) {
+        const r = simulateFight({ seed, job, enemy, careful: false });
+        expect(r.died, `seed ${seed}`).toBe(false);
+        expect(r.killedAt, `seed ${seed}`).not.toBeNull();
+      }
+    });
+  }
+  for (const job of JOBS2) {
+    it(`${job} vs the Mossback, careful: wins with ≥ 25 hp in 36–75 s`, () => {
+      for (const seed of SEEDS) {
+        const r = simulateFight({ seed, job, enemy: 'mossback', careful: true });
+        expect(r.died, `seed ${seed}`).toBe(false);
+        expect(r.hpLeft, `seed ${seed}`).toBeGreaterThanOrEqual(25);
+        expect(r.ttk!, `seed ${seed}`).toBeGreaterThanOrEqual(36);
+        expect(r.ttk!, `seed ${seed}`).toBeLessThanOrEqual(75);
+        expect(r.dodges, `seed ${seed}`).toBeGreaterThan(0);
+      }
+    });
+    it(`${job} vs the Mossback, careless: dies before the kill`, () => {
+      for (const seed of SEEDS) {
+        const r = simulateFight({ seed, job, enemy: 'mossback', careful: false });
+        expect(r.died, `seed ${seed}`).toBe(true);
+        expect(r.killedAt, `seed ${seed}`).toBeNull();
+      }
+    });
+  }
+  it('is deterministic for a seed, and a Plan 3 Bow is not the Ranger job', () => {
+    expect(simulateFight({ seed: 9, job: 'ranger', enemy: 'mossback', careful: true })).toEqual(simulateFight({ seed: 9, job: 'ranger', enemy: 'mossback', careful: true }));
+    expect(simulateFight({ seed: 9, job: 'ranger', enemy: 'thornling', careful: true })).not.toEqual(simulateFight({ seed: 9, weapon: 'bow', enemy: 'thornling', careful: true }));
+  });
+});

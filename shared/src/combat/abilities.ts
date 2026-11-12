@@ -198,7 +198,7 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   aegis: {
     id: 'aegis', name: 'Aegis', glyph: '⬡', desc: 'For 4 s you take 60% less damage, and adventurers within 8 m take 30% less.', job: 'paladin',
     role: 'signature', kind: 'defence', aim: 'self', needsTarget: false, cooldown: 16, range: 0,
-    effects: [{ k: 'buff', buff: 'aegis', s: 4, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 4, on: 'others', r: 8 }], ai: 'aegis',
+    effects: [{ k: 'buff', buff: 'aegis', s: 3, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 3, on: 'others', r: 8 }], ai: 'aegis',
   },
   taunt: {
     id: 'taunt', name: 'Taunt', glyph: '!', desc: 'Makes the target attack you for 4 s.', job: 'paladin',
@@ -212,24 +212,24 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   },
   kindle: {
     id: 'kindle', name: 'Kindle', glyph: '✧', desc: 'Heals 25 health on your focused ally, or the most hurt one nearby, then 10 on you.', job: 'paladin',
-    role: 'pick', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 14, range: 18,
-    effects: [{ k: 'heal', amount: 25, on: 'aim' }, { k: 'heal', amount: 10, on: 'self' }], support: true, ai: 'allyHeal',
+    role: 'pick', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 17, range: 18,
+    effects: [{ k: 'heal', amount: 20, on: 'aim' }, { k: 'heal', amount: 10, on: 'self' }], support: true, ai: 'allyHeal',
   },
   dawn_ward: {
     id: 'dawn_ward', name: 'Dawn Ward', glyph: '◎', desc: 'You and adventurers within 8 m gain a shield of 20 for 6 s.', job: 'paladin',
     role: 'pick', kind: 'defence', aim: 'self', needsTarget: false, cooldown: 22, range: 0,
-    effects: [{ k: 'shield', amount: 20, s: 6, on: 'area', r: 8 }], support: true, ai: 'shieldParty',
+    effects: [{ k: 'shield', amount: 16, s: 6, on: 'area', r: 8 }], support: true, ai: 'shieldParty',
   },
   // ───────── Dark Knight ─────────
   grim_rend: {
     id: 'grim_rend', name: 'Grim Rend', glyph: '⟍', desc: 'Costs 3 health: a quick cleave that builds 20 Momentum.', job: 'dark_knight',
     role: 'quick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 4, range: M, momentum: 20,
-    effects: [{ k: 'hp-cost', amount: 3 }, { k: 'damage', coef: 1.6 }], ai: 'damage',
+    effects: [{ k: 'hp-cost', amount: 3 }, { k: 'damage', coef: 1.35 }], ai: 'damage',
   },
   nightfall: {
     id: 'nightfall', name: 'Nightfall', glyph: '☾', desc: 'Spends 50 Momentum on a dark blow that leaves the target Burning.', job: 'dark_knight',
     role: 'finisher', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 6, range: M, cost: 50, mark: 'burning', stagger: 10,
-    effects: [{ k: 'damage', coef: 3.8 }], ai: 'finisher',
+    effects: [{ k: 'damage', coef: 3.2 }], ai: 'finisher',
   },
   crimson_pact: {
     id: 'crimson_pact', name: 'Crimson Pact', glyph: '⊗', desc: 'Costs 15 health: for 6 s you deal 20% more damage and your lifesteal doubles.', job: 'dark_knight',
@@ -260,7 +260,7 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   crossed_fangs: {
     id: 'crossed_fangs', name: 'Crossed Fangs', glyph: '⋎', desc: 'A quick double cut that builds 20 Momentum and leaves the target Marked.', job: 'ninja',
     role: 'quick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 3.5, range: M, momentum: 20, mark: 'marked', primer: true,
-    effects: [{ k: 'damage', coef: 1.3 }], ai: 'damage',
+    effects: [{ k: 'damage', coef: 1.05 }], ai: 'damage',
   },
   hamstring: {
     id: 'hamstring', name: 'Hamstring', glyph: '⊻', desc: 'Spends 50 Momentum on a crippling cut that leaves the target Rooted.', job: 'ninja',
@@ -269,8 +269,8 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   },
   ghost_edge: {
     id: 'ghost_edge', name: 'Ghost Edge', glyph: '⟁', desc: 'A strike that always counts as from behind; builds 15 Momentum.', job: 'ninja',
-    role: 'signature', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 8, range: M, momentum: 15,
-    effects: [{ k: 'damage', coef: 2.4, behind: true }], ai: 'damage',
+    role: 'signature', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 10, range: M, momentum: 15,
+    effects: [{ k: 'damage', coef: 1.8, behind: true }], ai: 'damage',
   },
   ashcloud: {
     id: 'ashcloud', name: 'Ashcloud', glyph: '≈', desc: 'Enemies within 6 m forget you and are Blinded for 3 s.', job: 'ninja',
@@ -296,7 +296,7 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   cinder_dart: {
     id: 'cinder_dart', name: 'Cinder Dart', glyph: '⟡', desc: 'A quick fire dart that builds 20 Momentum.', job: 'black_mage',
     role: 'quick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 4, range: 18, element: 'fire', momentum: 20,
-    effects: [{ k: 'damage', coef: 1.5 }], ai: 'damage',
+    effects: [{ k: 'damage', coef: 1.2 }], ai: 'damage',
   },
   skyfall_arc: {
     id: 'skyfall_arc', name: 'Skyfall Arc', glyph: 'ϟ', desc: 'Cast 1.2 s, spends 50 Momentum: lightning that leaves the target Dazed and interrupts.', job: 'black_mage',
@@ -307,7 +307,7 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   hearthfall: {
     id: 'hearthfall', name: 'Hearthfall', glyph: '⊚', desc: 'Cast 2.5 s: a falling fire that also burns every enemy within 4 m of the target.', job: 'black_mage',
     role: 'signature', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 15, range: 18, cast: 2.5, element: 'fire',
-    effects: [{ k: 'damage', coef: 5.5, splash: { r: 4, frac: 0.5 } }], ai: 'damage',
+    effects: [{ k: 'damage', coef: 4.9, splash: { r: 4, frac: 0.5 } }], ai: 'damage',
   },
   kindred_spark: {
     id: 'kindred_spark', name: 'Kindred Spark', glyph: '✶', desc: 'Gives your focused ally 30 Momentum, and you 10.', job: 'black_mage',
@@ -322,7 +322,7 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   rootbreak: {
     id: 'rootbreak', name: 'Rootbreak', glyph: '⌬', desc: 'Cast 1 s: earth that leaves the target Rooted.', job: 'black_mage',
     role: 'pick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 10, range: 18, cast: 1.0, element: 'earth', mark: 'rooted', primer: true,
-    effects: [{ k: 'damage', coef: 1.6 }], support: true, ai: 'damage',
+    effects: [{ k: 'damage', coef: 1.3 }], support: true, ai: 'damage',
   },
   stormcage: {
     id: 'stormcage', name: 'Stormcage', glyph: '⌗', desc: 'A snap of lightning that staggers and interrupts.', job: 'black_mage',
@@ -333,17 +333,17 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   tidelash: {
     id: 'tidelash', name: 'Tidelash', glyph: '∿', desc: 'A quick lash of water that builds 20 Momentum and leaves the target Soaked.', job: 'white_mage',
     role: 'quick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 4, range: 18, element: 'water', momentum: 20, mark: 'soaked', primer: true,
-    effects: [{ k: 'damage', coef: 1.4 }], ai: 'damage',
+    effects: [{ k: 'damage', coef: 1.2 }], ai: 'damage',
   },
   lantern_flare: {
     id: 'lantern_flare', name: 'Lantern Flare', glyph: '✺', desc: 'Cast 1 s, spends 50 Momentum: light that leaves the target Marked, then heals the most hurt adventurer 20.', job: 'white_mage',
     role: 'finisher', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 6, range: 18, cast: 1.0, school: 'light', cost: 50, mark: 'marked',
-    effects: [{ k: 'damage', coef: 3.6 }, { k: 'heal', amount: 20, on: 'lowest' }], ai: 'finisher',
+    effects: [{ k: 'damage', coef: 3.6 }, { k: 'heal', amount: 15, on: 'lowest' }], ai: 'finisher',
   },
   wellspring: {
     id: 'wellspring', name: 'Wellspring', glyph: '❂', desc: 'Cast 1.5 s: heals your focused ally, or the most hurt one nearby, 45 and cleanses them.', job: 'white_mage',
-    role: 'signature', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 8, range: 18, cast: 1.5, element: 'water',
-    effects: [{ k: 'heal', amount: 45, on: 'aim' }, { k: 'cleanse' }], ai: 'allyBigHeal',
+    role: 'signature', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 10, range: 18, cast: 1.5, element: 'water',
+    effects: [{ k: 'heal', amount: 36, on: 'aim' }, { k: 'cleanse' }], ai: 'allyBigHeal',
   },
   second_dawn: {
     id: 'second_dawn', name: 'Second Dawn', glyph: '☥', desc: 'Cast 3 s: brings a fallen adventurer back with 40% health.', job: 'white_mage',
@@ -363,7 +363,7 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   sun_mote: {
     id: 'sun_mote', name: 'Sun Mote', glyph: '✹', desc: 'Cast 0.8 s: a mote of light that builds 15 Momentum.', job: 'white_mage',
     role: 'pick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 8, range: 18, cast: 0.8, school: 'light', momentum: 15,
-    effects: [{ k: 'damage', coef: 2.2 }], ai: 'damage',
+    effects: [{ k: 'damage', coef: 1.8 }], ai: 'damage',
   },
 });
 
@@ -373,9 +373,9 @@ export const WEAPONS: Readonly<Record<WeaponId, WeaponData>> = deepFreeze({
   blade: { id: 'blade', name: 'Blade', autoEvery: 1.2, autoCoef: 1.0, autoRange: M },
   bow: { id: 'bow', name: 'Bow', autoEvery: 1.5, autoCoef: 1.1, autoRange: 18 },
   sword: { id: 'sword', name: 'Sword and Shield', autoEvery: 1.4, autoCoef: 1.0, autoRange: M },
-  greatsword: { id: 'greatsword', name: 'Greatsword', autoEvery: 1.8, autoCoef: 1.2, autoRange: M },
-  daggers: { id: 'daggers', name: 'Twin Daggers', autoEvery: 0.9, autoCoef: 0.6, autoRange: M },
-  staff: { id: 'staff', name: 'Staff', autoEvery: 1.6, autoCoef: 1.0, autoRange: 16 },
+  greatsword: { id: 'greatsword', name: 'Greatsword', autoEvery: 1.8, autoCoef: 1.05, autoRange: M },
+  daggers: { id: 'daggers', name: 'Twin Daggers', autoEvery: 0.9, autoCoef: 0.5, autoRange: M },
+  staff: { id: 'staff', name: 'Staff', autoEvery: 1.6, autoCoef: 0.85, autoRange: 16 },
 });
 
 /** The damage coefficient of an ability's `damage` effect (0 if it has none). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Loadout } from './abilities';
+import { ABILITIES, damageCoef, type AbilityId, type Loadout } from './abilities';
 import { RUN_SPEED } from '../constants';
 import {
   BEDROCK_S, BEDROCK_SHIELD, BLAST_COEF, BLAST_SPLASH_FRAC, COMBO_COEF, CONDUCT_STUN_S, ELEMENT_RESIST_MULT, ELEMENT_WEAK_MULT,
@@ -18,6 +18,8 @@ const RANGER: Loadout = { job: 'ranger', picks: ['barbed_rain', 'sprint'] };
 const POWER = 10;
 /** A Thornling (defence 6) hit of `coef` × `mult`. */
 const th = (coef: number, mult = 1) => hitDamage(coef, POWER, 6, mult);
+/** An ability's damage coefficient, from the data (Task 4 tunes them). */
+const c = (id: AbilityId) => damageCoef(ABILITIES[id]);
 
 function setup(camps = [camp('thornling', 0, 0)]) {
   const r = new Rig(camps);
@@ -41,7 +43,7 @@ describe('primers and reactions', () => {
     expect(r.press(wm, 0)).toBeNull(); // Tidelash
     const hit = r.hits(wm).find((h) => h.by === 'tidelash')!;
     expect(hit.combo).toBeUndefined();
-    expect(hit.amount).toBe(th(1.4, ELEMENT_RESIST_MULT));
+    expect(hit.amount).toBe(th(c('tidelash'), ELEMENT_RESIST_MULT));
     expect(hit.element).toBe('water');
     expect(Object.keys(en().marks).sort()).toEqual(['marked', 'soaked']);
     expect(en().markBy.soaked).toBe(wm);
@@ -100,8 +102,8 @@ describe('primers and reactions', () => {
     const mult = ELEMENT_WEAK_MULT * OVERFLOW_MULT;
     const blast = th(BLAST_COEF, mult);
     const hits = r.hits(bm);
-    expect(hits.find((h) => h.dst === e)!.amount).toBe(th(1.5, mult) + blast);
-    expect(hits.filter((h) => h.dst === near).map((h) => h.amount)).toEqual([Math.round(blast * BLAST_SPLASH_FRAC)]);
+    expect(hits.find((h) => h.dst === e)!.amount).toBe(th(c('cinder_dart'), mult) + blast);
+    expect(hits.filter((h) => h.dst === near).map((h) => h.amount)).toEqual([th(BLAST_COEF * BLAST_SPLASH_FRAC, mult)]);
     expect(hits.filter((h) => h.dst === far)).toEqual([]);
     expect(r.fx('react').map((x) => x.reaction)).toEqual(['blast']);
     expect(en().marks.marked).toBeUndefined();
@@ -114,7 +116,7 @@ describe('primers and reactions', () => {
     en().marks.burning = r.now + 8;
     en().burning = { src: close, power: POWER, nextAt: r.now + 1 };
     expect(r.press(wm, 0)).toBeNull();
-    expect(r.hits(wm)[0].amount).toBe(th(1.4, ELEMENT_RESIST_MULT) + th(COMBO_COEF, ELEMENT_RESIST_MULT));
+    expect(r.hits(wm)[0].amount).toBe(th(c('tidelash'), ELEMENT_RESIST_MULT) + th(COMBO_COEF, ELEMENT_RESIST_MULT));
     expect(r.fx('react').map((x) => x.reaction)).toEqual(['steam']);
     expect(r.fx('heal').map((h) => [h.src, h.dst, h.amount])).toEqual([[wm, close, STEAM_HEAL * FONT_HEAL_MULT]]);
     expect([r.c.get(close)!.hp, r.c.get(away)!.hp, r.c.get(wm)!.hp]).toEqual([50 + STEAM_HEAL * FONT_HEAL_MULT, 50, 50]);
@@ -167,8 +169,8 @@ describe('primers and reactions', () => {
     expect(r.press(wm, 1)).toBeNull(); // Lantern Flare, 1 s
     r.until('castEnd');
     const by = (id: string) => r.hits().find((h) => h.by === id)!;
-    expect(by('cinder_dart').amount).toBe(th(1.5, ELEMENT_WEAK_MULT * OVERFLOW_MULT));
-    expect(by('tidelash').amount).toBe(th(1.4, ELEMENT_RESIST_MULT));
+    expect(by('cinder_dart').amount).toBe(th(c('cinder_dart'), ELEMENT_WEAK_MULT * OVERFLOW_MULT));
+    expect(by('tidelash').amount).toBe(th(c('tidelash'), ELEMENT_RESIST_MULT));
     expect(by('lantern_flare').amount).toBe(th(3.6));
     expect(by('lantern_flare').element).toBeUndefined();
   });
@@ -199,10 +201,10 @@ describe('primers and reactions', () => {
     aim(r, bm, e);
     expect(r.press(bm, 2)).toBeNull(); // 2.5 s
     r.until('castEnd');
-    const plain = th(5.5, ELEMENT_WEAK_MULT * OVERFLOW_MULT);
+    const plain = th(c('hearthfall'), ELEMENT_WEAK_MULT * OVERFLOW_MULT);
     const hits = r.hits(bm);
     expect(hits.find((h) => h.dst === e)!.amount).toBe(plain);
-    expect(hits.filter((h) => h.dst === near).map((h) => h.amount)).toEqual([Math.round(plain * 0.5)]);
+    expect(hits.filter((h) => h.dst === near).map((h) => h.amount)).toEqual([th(c('hearthfall') * 0.5, ELEMENT_WEAK_MULT * OVERFLOW_MULT)]);
     expect(hits.filter((h) => h.dst === far)).toEqual([]);
     for (const x of r.w.enemies.values()) expect(x.marks).toEqual({});
   });

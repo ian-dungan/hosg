@@ -261,9 +261,9 @@ Every reaction adds `COMBO_STAGGER` (it replaces the plain combo for its mark). 
 | `blade` | Blade | Warrior | 1.2 | 1.0 | melee |
 | `bow` | Bow | Ranger | 1.5 | 1.1 | 18 |
 | `sword` | Sword and Shield | Paladin | 1.4 | 1.0 | melee |
-| `greatsword` | Greatsword | Dark Knight | 1.8 | 1.2 | melee |
-| `daggers` | Twin Daggers | Ninja | 0.9 | 0.6 | melee |
-| `staff` | Staff | White Mage, Black Mage | 1.6 | 1.0 | 16 |
+| `greatsword` | Greatsword | Dark Knight | 1.8 | 1.05 (Task 4: was 1.2) | melee |
+| `daggers` | Twin Daggers | Ninja | 0.9 | 0.5 (Task 4: was 0.6) | melee |
+| `staff` | Staff | White Mage, Black Mage | 1.6 | 0.85 (Task 4: was 1.0) | 16 |
 
 **Jobs** (`JOBS`, `shared/src/combat/jobs.ts`)
 
@@ -299,39 +299,39 @@ Task 1's data test checks the job glyphs. If one renders as an emoji on the targ
 | `barbed_rain` | Barbed Rain | ⋮ | Ranger pick | 0 | 10 | 18 | — | — | damage 1.4 on target and every live enemy within 3 m of it | `damage` |
 | `shield_rap` | Shield Rap | ◐ | Paladin 1 | 0 | 5 | melee | +20 | marked (primer) | damage 1.3; stagger 10 | `damage` |
 | `bright_verdict` | Bright Verdict | ☼ | Paladin 2 | 0 | 6 | melee | cost 50 | dazed | damage 3.4; stagger 10; interrupts | `finisher` |
-| `aegis` | Aegis | ⬡ | Paladin 3 | 0 | 16 | self | — | — | buff aegis 4 s on self; buff aegis_ally 4 s on other adventurers within 8 m | `aegis` |
+| `aegis` | Aegis | ⬡ | Paladin 3 | 0 | 16 | self | — | — | buff aegis 3 s on self; buff aegis_ally 3 s on other adventurers within 8 m (Task 4: was 4 s) | `aegis` |
 | `taunt` S | Taunt | ! | Paladin pick | 0 | 12 | 15 | — | — | Plan 3 taunt on target | `tauntIfNotMe` |
 | `shelter` S | Shelter | ⌂ | Paladin pick | 0 | 20 | 12 | — | — | buff sheltered 8 s on aim (aim `other-ally`), src = Paladin | `shelter` |
-| `kindle` S | Kindle | ✧ | Paladin pick | 0 | 14 | 18 | — | — | heal aim 25 (aim `ally`), then heal self 10 | `allyHeal` |
-| `dawn_ward` S | Dawn Ward | ◎ | Paladin pick | 0 | 22 | self | — | — | shield 20 for 6 s on self and adventurers within 8 m | `shieldParty` |
-| `grim_rend` | Grim Rend | ⟍ | Dark Knight 1 | 0 | 4 | melee | +20 | — | hp-cost 3; damage 1.6 | `damage` |
-| `nightfall` | Nightfall | ☾ | Dark Knight 2 | 0 | 6 | melee | cost 50 | burning | damage 3.8; stagger 10 | `finisher` |
+| `kindle` S | Kindle | ✧ | Paladin pick | 0 | 17 (Task 4: was 14) | 18 | — | — | heal aim 20 (Task 4: was 25) (aim `ally`), then heal self 10 | `allyHeal` |
+| `dawn_ward` S | Dawn Ward | ◎ | Paladin pick | 0 | 22 | self | — | — | shield 16 (Task 4: was 20) for 6 s on self and adventurers within 8 m | `shieldParty` |
+| `grim_rend` | Grim Rend | ⟍ | Dark Knight 1 | 0 | 4 | melee | +20 | — | hp-cost 3; damage 1.35 (Task 4: was 1.6) | `damage` |
+| `nightfall` | Nightfall | ☾ | Dark Knight 2 | 0 | 6 | melee | cost 50 | burning | damage 3.2 (Task 4: was 3.8); stagger 10 | `finisher` |
 | `crimson_pact` | Crimson Pact | ⊗ | Dark Knight 3 | 0 | 24 | self | — | — | hp-cost 15; buff pact 6 s on self (×1.2 damage, lifesteal ×2) | `selfBuff` |
 | `bloodbond` S | Bloodbond | ∞ | Dark Knight pick | 0 | 20 | self | — | — | buff bloodbond 8 s on self: each lifesteal heal also heals the lowest-hp other adventurer within 15 m by the same amount | `buffParty` |
 | `dread_howl` S | Dread Howl | ⁂ | Dark Knight pick | 0 | 20 | self | — | — | taunt every live enemy within 8 m | `tauntIfNotMe` |
 | `umbral_brand` | Umbral Brand | ⌖ | Dark Knight pick | 0 | 10 | melee | — | dazed (primer) | damage 1.2 | `damage` |
 | `grave_ward` | Grave Ward | ▣ | Dark Knight pick | 0 | 18 | self | — | — | hp-cost 10; shield self 30 for 6 s | `shieldSelf` |
-| `crossed_fangs` | Crossed Fangs | ⋎ | Ninja 1 | 0 | 3.5 | melee | +20 | marked (primer) | damage 1.3 | `damage` |
+| `crossed_fangs` | Crossed Fangs | ⋎ | Ninja 1 | 0 | 3.5 | melee | +20 | marked (primer) | damage 1.05 (Task 4: was 1.3) | `damage` |
 | `hamstring` | Hamstring | ⊻ | Ninja 2 | 0 | 6 | melee | cost 50 | rooted | damage 3.2; stagger 10 | `finisher` |
-| `ghost_edge` | Ghost Edge | ⟁ | Ninja 3 | 0 | 8 | melee | +15 | — | damage 2.4, always counts as from behind | `damage` |
+| `ghost_edge` | Ghost Edge | ⟁ | Ninja 3 | 0 | 10 (Task 4: was 8) | melee | +15 | — | damage 1.8 (Task 4: was 2.4), always counts as from behind | `damage` |
 | `ashcloud` S | Ashcloud | ≈ | Ninja pick | 0 | 24 | self | — | — | threat-drop r 6 (the Ninja's threat on each live enemy within 6 m becomes 0); debuff blinded 3 s on each of them | `threatDrop` |
 | `weak_point` S | Weak Point | ⊙ | Ninja pick | 0 | 20 | 12 | — | — | debuff weakpoint 8 s on target | `debuff` |
 | `quickstep` | Quickstep | ⇥ | Ninja pick | 0 | 15 | self | — | — | dodge-refill 1 (capped at the job's charges) | `dodgeRefill` |
 | `mist_form` | Mist Form | ░ | Ninja pick | 0 | 18 | self | — | — | buff mist 5 s on self | `mist` |
-| `cinder_dart` | Cinder Dart | ⟡ | Black Mage 1 | 0 | 4 | 18 | +20 | fire / — | damage 1.5 | `damage` |
+| `cinder_dart` | Cinder Dart | ⟡ | Black Mage 1 | 0 | 4 | 18 | +20 | fire / — | damage 1.2 (Task 4: was 1.5) | `damage` |
 | `skyfall_arc` | Skyfall Arc | ϟ | Black Mage 2 | 1.2 | 6 | 18 | cost 50 | lightning / dazed | damage 4.0; stagger 15; interrupts (at completion) | `finisher` |
-| `hearthfall` | Hearthfall | ⊚ | Black Mage 3 | 2.5 | 15 | 18 | — | fire / — | damage 5.5 on target, plus 0.5 of it to every other live enemy within 4 m | `damage` |
+| `hearthfall` | Hearthfall | ⊚ | Black Mage 3 | 2.5 | 15 | 18 | — | fire / — | damage 4.9 (Task 4: was 5.5) on target, plus 0.5 of it to every other live enemy within 4 m | `damage` |
 | `kindred_spark` S | Kindred Spark | ✶ | Black Mage pick | 0 | 20 | 15 | — | — | Momentum +30 on aim (aim `other-ally`), +10 on self | `momentumGift` |
 | `bastion_stone` S | Bastion Stone | ▲ | Black Mage pick | 1.0 | 18 | 18 | — | earth / — | shield aim 30 for 8 s (aim `ally`) | `shieldAlly` |
-| `rootbreak` S | Rootbreak | ⌬ | Black Mage pick | 1.0 | 10 | 18 | — | earth / rooted (primer) | damage 1.6 | `damage` |
+| `rootbreak` S | Rootbreak | ⌬ | Black Mage pick | 1.0 | 10 | 18 | — | earth / rooted (primer) | damage 1.3 (Task 4: was 1.6) | `damage` |
 | `stormcage` S | Stormcage | ⌗ | Black Mage pick | 0 | 12 | 18 | — | lightning / — | damage 0.8; stagger 20; interrupts | `interrupt` |
-| `tidelash` | Tidelash | ∿ | White Mage 1 | 0 | 4 | 18 | +20 | water / soaked (primer) | damage 1.4 | `damage` |
-| `lantern_flare` | Lantern Flare | ✺ | White Mage 2 | 1.0 | 6 | 18 | cost 50 | light / marked | damage 3.6; then heal 20 on the lowest-hp adventurer within 18 m (self included) | `finisher` |
-| `wellspring` | Wellspring | ❂ | White Mage 3 | 1.5 | 8 | 18 | — | water / — | heal aim 45 (aim `ally`); cleanse aim (clears `afflictions`, empty until Plan 4) | `allyBigHeal` |
+| `tidelash` | Tidelash | ∿ | White Mage 1 | 0 | 4 | 18 | +20 | water / soaked (primer) | damage 1.2 (Task 4: was 1.4) | `damage` |
+| `lantern_flare` | Lantern Flare | ✺ | White Mage 2 | 1.0 | 6 | 18 | cost 50 | light / marked | damage 3.6; then heal 15 (Task 4: was 20) on the lowest-hp adventurer within 18 m (self included) | `finisher` |
+| `wellspring` | Wellspring | ❂ | White Mage 3 | 1.5 | 10 (Task 4: was 8) | 18 | — | water / — | heal aim 36 (Task 4: was 45) (aim `ally`); cleanse aim (clears `afflictions`, empty until Plan 4) | `allyBigHeal` |
 | `second_dawn` S | Second Dawn | ☥ | White Mage pick | 3.0 | 60 | 12 | — | light / — | revive aim at 0.4 × maxHp (aim `dead-ally`) | `revive` |
 | `soft_rain` S | Soft Rain | ⁘ | White Mage pick | 0 | 20 | self | — | water / — | buff rain 6 s on self and adventurers within 10 m: heals 4 at each whole second after it starts | `healParty` |
 | `mistveil` S | Mistveil | ◌ | White Mage pick | 0 | 15 | 18 | — | water / — | shield aim 25 for 6 s (aim `ally`) | `shieldAlly` |
-| `sun_mote` | Sun Mote | ✹ | White Mage pick | 0.8 | 8 | 18 | +15 | light / — | damage 2.2 | `damage` |
+| `sun_mote` | Sun Mote | ✹ | White Mage pick | 0.8 | 8 | 18 | +15 | light / — | damage 1.8 (Task 4: was 2.2) | `damage` |
 
 `✺` is used twice above: Black Mage's job glyph and Lantern Flare's. Job glyphs and ability glyphs are separate namespaces. The data test checks uniqueness within each.
 
@@ -401,6 +401,23 @@ What each job brings a partner:
 | Ninja | +15% damage for everyone on the target (Weak Point); blinds and sheds attention (Ashcloud); strikes from behind while the partner holds the front |
 | Black Mage | +30 Momentum to the partner (Kindred Spark); interrupts (Stormcage); shields (Bastion Stone); slows (Rootbreak); reactions |
 | White Mage | revive in the fight (Second Dawn); party heal over time (Soft Rain); big heals (Wellspring); shields (Mistveil); reactions (Soaked) |
+
+**Task 4 measured bands** (careful, seeds 1–5 solo and 1–3 duo; full tables in the Task 4 report). Solo mean TTK, s:
+
+| job | Thornling | Boar | Archer | Mossback |
+|---|---|---|---|---|
+| Warrior | 12.4 | 11.1 | 13.2 | 61.6 |
+| Ranger | 8.9 | 8.8 | 8.9 | 38.6 |
+| Paladin | 11.0 | 10.1 | 10.4 | 57.1 |
+| Dark Knight | 10.6 | 10.1 | 9.7 | 46.7 |
+| Ninja | 11.3 | 9.3 | 10.7 | 48.4 |
+| White Mage | 11.5 | 9.7 | 10.6 | 54.0 |
+| Black Mage | 10.4 | 10.5 | 11.4 | 50.8 |
+| median | 11.0 | 10.1 | 10.6 | 50.8 |
+
+Duos: every one of the 28 pairs wins every seed with no deaths; Mossback mean TTK 27.4–41.5 s, Paladin + Paladin 53.6 s, White Mage + White Mage 55.9 s. A pair that ignores its team play (no support abilities, no primers before its finisher, no formation, no revive) is ≈ 10% slower overall (39.7 s against 35.8 s) and wins half as many careless Mossback fights (21 of 84 against 41 of 84).
+
+**Ruling P3b-e (Ranger floor):** the Ranger's Pinning Shot primer gives Pitch Arrow a Plan 3 combo no allowed number removes, so the Ranger's ordinary bands are a mean in [8.5, 15] s (S1 floor 8.5 for the Ranger, and the job version of Plan 3's [10, 15] band); the 25%-of-median rule binds it. Plan 3's Bow tests are unchanged.
 
 **Tuning rule (Task 4 only):** if a band fails, change only:
 - the new jobs' ability `coef`, `cooldown`, heal or shield `amount` and buff duration, each within ±25% of the table;

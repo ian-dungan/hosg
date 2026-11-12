@@ -139,20 +139,23 @@ describe('job data', () => {
     expect(FUTURE_JOBS.monk.unlock.quest).toBe('greenway_monk');
     expect(FUTURE_JOBS.sky_lancer.unlock.quest).toBe('reach_the_islands');
   });
-  it('the table rows, spot-checked', () => {
+  it('the table rows, spot-checked (with the Task 4 tuning)', () => {
     expect(ABILITIES.skyfall_arc).toMatchObject({ job: 'black_mage', role: 'finisher', cast: 1.2, cooldown: 6, range: 18, cost: 50, element: 'lightning', mark: 'dazed', stagger: 15, interrupts: true, ai: 'finisher' });
     expect(ABILITIES.skyfall_arc.effects).toEqual([{ k: 'damage', coef: 4.0 }]);
-    expect(ABILITIES.hearthfall.effects).toEqual([{ k: 'damage', coef: 5.5, splash: { r: 4, frac: 0.5 } }]);
+    expect(ABILITIES.hearthfall.effects).toEqual([{ k: 'damage', coef: 4.9, splash: { r: 4, frac: 0.5 } }]);
     expect(ABILITIES.barbed_rain.effects).toEqual([{ k: 'damage', coef: 1.4, splash: { r: 3, frac: 1 } }]);
-    expect(ABILITIES.kindle.effects).toEqual([{ k: 'heal', amount: 25, on: 'aim' }, { k: 'heal', amount: 10, on: 'self' }]);
-    expect(ABILITIES.aegis.effects).toEqual([{ k: 'buff', buff: 'aegis', s: 4, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 4, on: 'others', r: 8 }]);
+    expect(ABILITIES.kindle.effects).toEqual([{ k: 'heal', amount: 20, on: 'aim' }, { k: 'heal', amount: 10, on: 'self' }]);
+    expect(ABILITIES.kindle.cooldown).toBe(17);
+    expect(ABILITIES.aegis.effects).toEqual([{ k: 'buff', buff: 'aegis', s: 3, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 3, on: 'others', r: 8 }]);
     expect(ABILITIES.ashcloud.effects).toEqual([{ k: 'threat-drop', r: 6 }, { k: 'debuff', debuff: 'blinded', s: 3, on: 'area', r: 6 }]);
     expect(ABILITIES.grave_ward.effects).toEqual([{ k: 'hp-cost', amount: 10 }, { k: 'shield', amount: 30, s: 6, on: 'self' }]);
-    expect(ABILITIES.ghost_edge.effects).toEqual([{ k: 'damage', coef: 2.4, behind: true }]);
+    expect(ABILITIES.ghost_edge.effects).toEqual([{ k: 'damage', coef: 1.8, behind: true }]);
+    expect(ABILITIES.ghost_edge.cooldown).toBe(10);
     expect(ABILITIES.second_dawn).toMatchObject({ aim: 'dead-ally', cast: 3.0, cooldown: 60, range: 12, school: 'light', support: true, ai: 'revive' });
     expect(ABILITIES.second_dawn.effects).toEqual([{ k: 'revive', frac: 0.4 }]);
-    expect(ABILITIES.wellspring.effects).toEqual([{ k: 'heal', amount: 45, on: 'aim' }, { k: 'cleanse' }]);
-    expect(ABILITIES.lantern_flare.effects).toEqual([{ k: 'damage', coef: 3.6 }, { k: 'heal', amount: 20, on: 'lowest' }]);
+    expect(ABILITIES.wellspring.effects).toEqual([{ k: 'heal', amount: 36, on: 'aim' }, { k: 'cleanse' }]);
+    expect(ABILITIES.wellspring.cooldown).toBe(10);
+    expect(ABILITIES.lantern_flare.effects).toEqual([{ k: 'damage', coef: 3.6 }, { k: 'heal', amount: 15, on: 'lowest' }]);
     expect(ABILITIES.kindred_spark).toMatchObject({ aim: 'other-ally', range: 15, cooldown: 20 });
     expect(ABILITIES.kindred_spark.effects).toEqual([{ k: 'momentum', amount: 30, on: 'aim' }, { k: 'momentum', amount: 10, on: 'self' }]);
     expect(ABILITIES.shelter).toMatchObject({ aim: 'other-ally', range: 12, ai: 'shelter' });
@@ -170,9 +173,9 @@ describe('job data', () => {
 describe('weapons and the transitional shims', () => {
   it('six weapons, the table autos', () => {
     expect(Object.keys(WEAPONS).sort()).toEqual(['blade', 'bow', 'daggers', 'greatsword', 'staff', 'sword']);
-    expect(WEAPONS.greatsword).toMatchObject({ name: 'Greatsword', autoEvery: 1.8, autoCoef: 1.2 });
-    expect(WEAPONS.daggers).toMatchObject({ name: 'Twin Daggers', autoEvery: 0.9, autoCoef: 0.6 });
-    expect(WEAPONS.staff).toMatchObject({ autoEvery: 1.6, autoCoef: 1.0, autoRange: 16 });
+    expect(WEAPONS.greatsword).toMatchObject({ name: 'Greatsword', autoEvery: 1.8, autoCoef: 1.05 });
+    expect(WEAPONS.daggers).toMatchObject({ name: 'Twin Daggers', autoEvery: 0.9, autoCoef: 0.5 });
+    expect(WEAPONS.staff).toMatchObject({ autoEvery: 1.6, autoCoef: 0.85, autoRange: 16 });
     expect(WEAPONS.sword).toMatchObject({ name: 'Sword and Shield', autoEvery: 1.4, autoCoef: 1.0 });
   });
   it('WEAPON_BARS mirrors the Warrior and Ranger', () => {
