@@ -14,7 +14,8 @@
 
 1. **Online foundation** — this plan. Done.
 2. **Movement** — server-checked jumping, gravity, falling and fall damage; tap-to-walk path-finding; the "Tap to walk" setting. Done (`2026-11-12-sg2-plan-2-movement.md`).
-3. **Combat core** — shared combat rules, 12 abilities, stagger, combos, Blade and Bow, telegraphs, knockback, the Greenway zone and its enemies.
+3. **Combat core** — shared combat rules, targeting and auto-attack, Momentum, Blade and Bow with their five-button bars, dodge roll, marks and combos, telegraphs, stagger, knockback, the Greenway zone with ordinary and elite enemies.
+3b. **Magic and skills** — the Staff and four elements, cast times and interrupts, element reactions, weapon skill levels, talent trees and retraining.
 4. **Parties and the Fallen Warden** — parties of 4, loot rolls, private boss arenas, three phases, solo title and leaderboard.
 5. **Progression and gear** — levels 1–10, armour types and nine sets, unique weapons, visible gear, costumes and the gold costume shop, GM tools.
 6. **Opening quest online** — "The Solstice Crossing" as a saved, per-adventurer quest.

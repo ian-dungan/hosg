@@ -34,13 +34,16 @@ The player starts on solid ground. The first game was a small corner of a much l
    - Short falls are free; long falls cost some health but never kill outright.
    - Built as simple character physics that the server checks, not a full physics engine, so it stays fair online and smooth on phones.
    - Gliding is saved for the later sky region.
-6. **Combat**
-   - Tap-target lock-on with automatic basic attacks in range.
-   - Loadout of 5 abilities chosen from a pool of about 12, including heals.
-   - Stagger bar on bosses and elites: hit weak points or interrupt marked attacks to fill it; a break stuns and adds bonus damage.
-   - Combos: one ability applies a state (Soaked, Burning, Marked), another cashes it in. Any two players' abilities combine.
-   - Two weapon types with their own rhythm: Blade (parry) and Bow (charged shot).
-   - Every dangerous attack is telegraphed on the ground and can be dodged.
+6. **Combat** (revised 2026-11-12, owner direction: solid mechanics, some hard fights, gear that matters, a magic system and a skill system)
+   - **Core loop**: tap an enemy to target it; the adventurer attacks automatically in range; attacks build **Momentum** (one bar, 0 to 100); Momentum is spent on finishers; dangerous attacks are marked on the ground and dodged.
+   - **Five buttons**: three come from the equipped weapon (a quick skill that builds Momentum, a finisher that spends it, a signature move) and two are chosen freely from a shared pool (heal, taunt, shield, speed boost and the like). A **dodge roll** has its own button with two charges that refill over time.
+   - **Weapons**: Blade (signature: parry), Bow (signature: charged shot) and Staff (magic). Weapons can be swapped mid-fight.
+   - **Magic**: the Staff casts spells from the same Momentum bar. Four elements: Fire (damage over time), Water (heals, Soaked), Lightning (bursts, interrupts), Earth (shields, slows). Spells have a cast time; bigger spells take longer and can be interrupted.
+   - **Combos**: every finisher leaves a mark (Soaked, Burning, Marked); a different finisher sets it off for bonus damage, and elements react (Lightning on Soaked stuns, Fire on Marked explodes). A solo player can combo by swapping weapons; a party does it more often and harder.
+   - **Enemies**: ordinary (10 to 15 seconds, one marked attack), elite (dangerous if careless) and boss. Elites and bosses have a stagger bar filled by dodging well, parrying, interrupting and combos; a break stuns and adds bonus damage.
+   - **Difficult fights**: bosses punish mistakes, not low numbers. Each has two or three attacks that must be dodged, interrupted or parried. Mega bosses have an enrage timer. Hard-mode versions, unlocked after the first kill, add a mechanic and give better rewards.
+   - **Skills**: each weapon type has its own skill level, raised by using it and separate from adventurer level, which unlocks that weapon's abilities. Each weapon has a small talent tree (about ten points) with real choices; retraining costs gold.
+   - Left out on purpose: long rotations, a required healer or tank, a second resource bar, split-second timing.
    - Wind is not a standing combat mechanic. A few set-piece battles may use it as their special twist, where it is done well.
    - Being in the air never dodges a ground attack: the server decides hits by position on the ground, because it cannot fully trust a client's reported height (a modified client can float up to one jump high). Knockback and launches are applied by the server, not reported by clients.
 7. **Parties**
@@ -54,9 +57,11 @@ The player starts on solid ground. The first game was a small corner of a much l
    - A solo kill grants a unique title and a place on the boss leaderboard.
 9. **Progression**: levels 1 to 10, three gear tiers, abilities unlocked by level and quest.
    - **Visible gear**: what you equip shows on your character and is seen by every other player. Slots: head, chest, legs, feet, hands, back (cape or pack), main weapon and off-hand.
-   - **Armour types**: cloth (for casters and healers: stronger abilities, low defence), light (speed and critical hits) and heavy (defence and stagger resistance). Any adventurer can wear any type; the choice is how you lean toward a role, since there are no fixed classes.
+   - **Armour types**: cloth (for casters and healers: stronger abilities, low defence), light (faster Momentum and critical hits) and heavy (defence, stagger resistance, and enemies prefer to attack the wearer). Any adventurer can wear any type; the choice is how you lean toward a role, since there are no fixed classes.
+   - **Gear matters**: stats are few and visible (Power, Defence, Health, plus one special stat per armour type). Tier gaps are large: a boss tuned for three players is soloable only in the top tier.
+   - **Set bonuses**: wearing three and five pieces of a set gives a named effect (for example, heals also shield, or dodging refunds Momentum).
    - **Armour sets**: each set has its own style and colours. The first slice has one set per armour type per gear tier (nine sets).
-   - **Weapons**: each weapon has its own look wherever possible (shape, colour, glow or trail), so a named or rare weapon is recognisable in another adventurer's hands. Boss drops and quest rewards always get a unique model; only common starter weapons may share one. The first slice has about six blades and six bows.
+   - **Weapons**: each weapon has its own look wherever possible (shape, colour, glow or trail), so a named or rare weapon is recognisable in another adventurer's hands. Boss drops and quest rewards always get a unique model; only common starter weapons may share one. Named weapons carry a unique effect, not only bigger numbers. The first slice has about six blades, six bows and six staves.
    - **Costumes**: purely cosmetic outfits worn over your gear in a separate costume slot, so they never change stats. Adventurers buy them from a costume shop for in-game gold (never real money) or win them at GM-run events.
    - **GM tools**: game masters can start an event, announce it to the server and award a costume or item to the winners.
 10. **Online**: accounts (username and password, or play as guest), saved characters with a name the player chooses (no bad words, no impersonating staff or the heroes), chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
