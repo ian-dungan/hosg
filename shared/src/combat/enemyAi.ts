@@ -16,11 +16,13 @@ import { findPath, withClearance, type Vec2 } from '../path';
 import {
   AGGRO_THREAT, DISPLACE_SUBSTEP_M, ENEMY_PATH_NODES, ENEMY_REPLAN_S, PARRY_MOMENTUM, PARRY_STAGGER, PARRY_STUN_S, PATHS_PER_TICK,
   PERFECT_DODGE_MOMENTUM, PERFECT_DODGE_STAGGER, PERFECT_DODGE_WINDOW_S, UNREACHABLE_S, EVASION_PERFECT_MOMENTUM, ROOTED_SPEED_SCALE, SHELTER_SHARE,
-  ELITE_SCALE_PER, ELITE_SCALE_CAP,
+  BOSS_SCALE_CAP, ELITE_SCALE_CAP,
 } from './constants';
+import { scaleFactor } from './bosses';
+import { bossAnchored, bossAutoEvery, bossBusy, resetBoss, stepBoss, wakeBoss } from './bossAi';
 import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
-import type { AdventurerState, CombatWorld, CombatZone, EnemyState } from './engine';
+import type { AdventurerState, CombatWorld, CombatZone, EnemyState, TelegraphState } from './engine';
 import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
 import { applyAffliction, hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
 import { breakCast } from './casting';
@@ -291,18 +293,25 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   const ai = aiOf(e, now);
 
   if (e.act === 'return') { walkHome(w, e, ai, now, dt); return; }
-  if (e.act === 'stun' && now < e.actUntil - TIME_EPS) { holdProgress(ai, now); return; }
-
-  if (e.windup) {
-    if (now >= e.windup.endsAt - TIME_EPS) resolveWindup(w, e, now);
-    holdProgress(ai, now);
-    return; // rooted, facing locked
+  const boss = d.boss !== undefined;
+  if (boss) {
+    // the boss script: its clock, transition, Break stun and telegraphs in flight
+    if (bossBusy(w, e, now)) { holdProgress(ai, now); return; }
+  } else {
+    if (e.act === 'stun' && now < e.actUntil - TIME_EPS) { holdProgress(ai, now); return; }
+    if (e.windup) {
+      if (now >= e.windup.endsAt - TIME_EPS) resolveWindup(w, e, now);
+      holdProgress(ai, now);
+      return; // rooted, facing locked
+    }
   }
+  // an arena's enemy (a boss and its adds) neither sees nor keeps anyone outside its arena
+  if (e.camp.arena) dropOutsiders(w, e);
 
   // aggro: an enemy with no target notices adventurers within `aggro` and in sight (y ignored)
   if (e.targetId === null && d.aggro > 0) {
     for (const a of w.adventurers.values()) {
-      if (!a.alive || e.threat.has(a.id)) continue;
+      if (!a.alive || e.threat.has(a.id) || !inArena(e, a)) continue;
       if (hyp(a.x - e.x, a.z - e.z) <= d.aggro && lineOfSight(w.zone.sight, e.x, e.z, a.x, a.z)) e.threat.add(a.id, AGGRO_THREAT * threatMult(w, a.id));
     }
   }
@@ -314,6 +323,7 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
     ai.noTargetSince = null;
     ai.progTarget = null;
     ai.chanceAt = now;
+    if (boss) wakeBoss(w, e, now);
   }
   if (d.elite) scaleElite(w, e, ai);
 
@@ -333,6 +343,9 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
 
   // leash (a stationary enemy, such as a Lens Shard, has none: it never walks)
   if (d.speed > 0 && hyp(e.x - e.camp.x, e.z - e.camp.z) > d.leash) { startReturn(w, e, ai, now); return; }
+  // a boss's rotation starts its telegraphs (rooted while they are in flight)
+  if (boss && stepBoss(w, e, now, dt) === 'handled') { ai.chanceAt = now; holdProgress(ai, now); return; }
+  if (boss && bossAnchored(e)) { anchoredStep(w, e, ai, t, now, dt); return; }
 
   const dist = hyp(t.x - e.x, t.z - e.z);
   const sees = lineOfSight(w.zone.sight, e.x, e.z, t.x, t.z);
@@ -350,11 +363,11 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
 
   // a telegraphed attack, when one is ready and the target is within its useRange (Thorn Hail: aimed at
   // the farthest engaged adventurer within it). A surging enemy with its target in auto reach autos instead.
-  if (!(e.surging && inReach)) {
+  if (!boss && !(e.surging && inReach)) {
     for (const id of d.attacks) {
       const atk = ENEMY_ATTACKS[id];
       if (now < (e.attackReadyAt[id] ?? Infinity) - TIME_EPS) continue;
-      const aim = AIM_FARTHEST.has(id) ? farthestEngaged(w, e, atk.useRange) : dist <= atk.useRange && sees ? t : null;
+      const aim = atk.aimAt === 'farthest' ? farthestEngaged(w, e, atk.useRange) : dist <= atk.useRange && sees ? t : null;
       if (!aim) continue;
       startWindup(w, e, atk, aim, now);
       ai.chanceAt = now;
@@ -386,7 +399,7 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
     holdProgress(ai, now);
     if (dist2 > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
     if (now >= ai.nextAutoAt - TIME_EPS) {
-      ai.nextAutoAt = now + auto.every;
+      ai.nextAutoAt = now + (boss ? bossAutoEvery(e) ?? auto.every : auto.every);
       ai.chanceAt = now;
       resolveHit(w, e, t, auto.raw, 'auto', !auto.ranged, null, now);
     }
@@ -405,14 +418,15 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   }
 }
 
-/** Attacks aimed at the farthest engaged adventurer within their useRange, not the threat target. */
-const AIM_FARTHEST: ReadonlySet<EnemyAttackId> = new Set<EnemyAttackId>(['thorn_hail']);
-/** The live adventurer on e's threat table farthest from it within `range` and in sight (ties: earliest in the table). */
-function farthestEngaged(w: CombatWorld, e: EnemyState, range: number): AdventurerState | null {
+/**
+ * The live adventurer on e's threat table farthest from it within `range` and in sight (ties: earliest in
+ * the table); the aim of `aimAt: 'farthest'` attacks. Anyone beyond `range` is skipped.
+ */
+export function farthestEngaged(w: CombatWorld, e: EnemyState, range: number): AdventurerState | null {
   let best: AdventurerState | null = null, bestD = -1;
   for (const id of e.threat.ids()) {
     const a = liveAdventurer(w, id);
-    if (!a) continue;
+    if (!a || !inArena(e, a)) continue;
     const d = hyp(a.x - e.x, a.z - e.z);
     if (d <= range && d > bestD && lineOfSight(w.zone.sight, e.x, e.z, a.x, a.z)) { best = a; bestD = d; }
   }
@@ -452,11 +466,11 @@ function holdProgress(ai: EnemyAi, now: number): void {
 function scaleElite(w: CombatWorld, e: EnemyState, ai: EnemyAi): void {
   let n = 0;
   for (const id of e.threat.ids()) if (liveAdventurer(w, id)) n++;
-  n = Math.min(ELITE_SCALE_CAP, n);
+  n = Math.min(e.data.boss ? BOSS_SCALE_CAP : ELITE_SCALE_CAP, n);
   if (n <= ai.scaleN) return;
   ai.scaleN = n;
-  // on top of an add's spawn scale (1 for a camp)
-  const f = (1 + ELITE_SCALE_PER * (n - 1)) * e.baseScale;
+  // a boss reads its own table, an elite 1 + ELITE_SCALE_PER × (n − 1); on top of an add's spawn scale (1 for a camp)
+  const f = scaleFactor(e.data, n) * e.baseScale;
   const max = e.data.hp * f;
   e.hp = (e.hp * max) / e.maxHp;
   e.maxHp = max;
@@ -532,8 +546,66 @@ function stepToward(w: CombatWorld, e: EnemyState, ai: EnemyAi, wx: number, wz: 
   return true;
 }
 
+/** The most adventurers engaged at once so far this fight (scaling: never down until it goes home). */
+export function enemyScaleN(e: EnemyState): number {
+  return AI.get(e)?.scaleN ?? 1;
+}
+
+/** An arena enemy: adventurers outside its arena leave its threat table (and its target). */
+function dropOutsiders(w: CombatWorld, e: EnemyState): void {
+  for (const id of e.threat.ids()) {
+    const a = w.adventurers.get(id);
+    if (a && !inArena(e, a)) { e.threat.remove(id); if (e.targetId === id) e.targetId = null; }
+  }
+}
+/** p is inside e's arena (always, for an enemy without one). */
+export function inArena(e: EnemyState, p: { x: number; z: number }): boolean {
+  const f = e.camp.arena;
+  return f === undefined || f(p.x, p.z) === true;
+}
+
+/**
+ * Anchored (a boss phase with `anchor`): it walks to its camp spot and stands there, turning to its
+ * target; it autos its target when in reach, else the nearest engaged adventurer in reach. The leash and
+ * the unreachable rule do not move it.
+ */
+function anchoredStep(w: CombatWorld, e: EnemyState, ai: EnemyAi, t: AdventurerState, now: number, dt: number): void {
+  const c = e.camp, d = e.data, auto = d.auto;
+  holdProgress(ai, now);
+  e.surging = false;
+  if (hyp(c.x - e.x, c.z - e.z) > ARRIVE_M) walk(w, e, ai, c.x, c.z, 0, d.speed, dt, now);
+  else if (t.x !== e.x || t.z !== e.z) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
+  if (auto === null || now < ai.nextAutoAt - TIME_EPS) return;
+  const reachOf = (a: AdventurerState) => hyp(a.x - e.x, a.z - e.z) - d.radius <= auto.reach && (!auto.ranged || lineOfSight(w.zone.sight, e.x, e.z, a.x, a.z));
+  let v: AdventurerState | null = reachOf(t) ? t : null;
+  if (!v) {
+    let best = Infinity;
+    for (const id of e.threat.ids()) {
+      const a = liveAdventurer(w, id);
+      if (!a || !inArena(e, a) || !reachOf(a)) continue;
+      const dd = hyp(a.x - e.x, a.z - e.z);
+      if (dd < best) { best = dd; v = a; }
+    }
+  }
+  if (!v) return;
+  ai.nextAutoAt = now + (bossAutoEvery(e) ?? auto.every);
+  ai.chanceAt = now;
+  resolveHit(w, e, v, auto.raw, 'auto', !auto.ranged, null, now);
+}
+
+/** Sends an engaged enemy home now (the instance's wipe, Task 7): false if it is dead, already going home, or idle at camp. */
+export function sendHome(w: CombatWorld, e: EnemyState, now: number): boolean {
+  if (!e.alive || e.act === 'return') return false;
+  const ai = AI.get(e);
+  if (!ai || (!ai.engaged && e.threat.ids().length === 0)) return false;
+  startReturn(w, e, ai, now);
+  return true;
+}
+
 // ───────── going home ─────────
 function startReturn(w: CombatWorld, e: EnemyState, ai: EnemyAi, now: number): void {
+  // a boss resets its script: adds despawned, fields and telegraphs removed, phase 0, the clock stopped
+  if (e.data.boss) resetBoss(w, e, now);
   cancelWindup(w, e);
   e.act = 'return'; e.actUntil = Infinity; e.targetId = null; e.surging = false;
   e.threat.clear();
@@ -560,7 +632,7 @@ function walkHome(w: CombatWorld, e: EnemyState, ai: EnemyAi, now: number, dt: n
 }
 
 // ───────── attacks ─────────
-function shapeFor(e: EnemyState, atk: EnemyAttackData, t: AdventurerState): Shape {
+export function shapeFor(e: EnemyState, atk: EnemyAttackData, t: AdventurerState): Shape {
   const dir = t.x === e.x && t.z === e.z ? e.facing : Math.atan2(t.x - e.x, t.z - e.z);
   switch (atk.shape) {
     case 'circle-self': return { kind: 'circle', x: e.x, z: e.z, r: atk.r ?? 0 };
@@ -587,13 +659,21 @@ function resolveWindup(w: CombatWorld, e: EnemyState, now: number): void {
   const tg = wu.telegraphId === null ? undefined : w.telegraphs.get(wu.telegraphId);
   cancelWindup(w, e);
   if (!tg) return;
-  const atk = ENEMY_ATTACKS[wu.attack];
+  resolveTelegraph(w, e, tg, ENEMY_ATTACKS[wu.attack].raw, now);
+}
+
+/**
+ * A telegraph of e's resolves (already removed from w.telegraphs by the caller): every live adventurer
+ * inside it (and inside e's arena) is hit for `raw`, or dodged it from inside; a dashing attack then dashes.
+ */
+export function resolveTelegraph(w: CombatWorld, e: EnemyState, tg: TelegraphState, raw: number, now: number): void {
+  const atk = ENEMY_ATTACKS[tg.attack];
   const shape = tg.shape;
   const lineDir = shape.kind === 'line' ? shape.dir : undefined;
   for (const a of w.adventurers.values()) {
-    if (!a.alive || !e.alive) continue;
-    if (inShape(shape, a.x, a.z)) resolveHit(w, e, a, atk.raw, atk.id, atk.parryable, atk.knock ?? null, now, shape, lineDir);
-    else if (isInvulnerable(a, now) && dodgedFrom(a, shape, now)) resolveHit(w, e, a, atk.raw, atk.id, atk.parryable, null, now, shape, lineDir);
+    if (!a.alive || !e.alive || !inArena(e, a)) continue;
+    if (inShape(shape, a.x, a.z)) resolveHit(w, e, a, raw, atk.id, atk.parryable, atk.knock ?? null, now, shape, lineDir);
+    else if (isInvulnerable(a, now) && dodgedFrom(a, shape, now)) resolveHit(w, e, a, raw, atk.id, atk.parryable, null, now, shape, lineDir);
   }
   if (atk.dashToEnd && e.alive && shape.kind === 'line') dash(w, e, shape);
 }

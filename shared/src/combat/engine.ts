@@ -8,7 +8,7 @@ import type { BuffState } from './effects';
 import type { CastState } from './casting';
 import type { AfflictionId } from './afflictions';
 import type { FieldId } from './bosses';
-import type { EnemyAttackId, EnemyKindData, EnemyKindId } from './enemies';
+import type { EnemyAttackId, EnemyKindData, EnemyKindId, EnemyTier } from './enemies';
 import type { FxEvent } from './fx';
 import type { MarkId, Marks } from './marks';
 import { markBits } from './marks';
@@ -16,7 +16,8 @@ import type { Shape } from './shapes';
 import { staggerImmuneLeft, type StaggerBar } from './stagger';
 import type { Stats } from './stats';
 import type { ThreatTable } from './threat';
-import { stepEnemies } from './enemyAi';
+import { sendHome, stepEnemies } from './enemyAi';
+import { bossEnrageIn, bossPhase, bossWarded } from './bossAi';
 import type { Displacement, DisplaceResult } from './displace';
 import {
   abilityIntent, applyCarry, buffBits, carryOfState, currentAct, debuffBits, dodgeIntent, fallDamageTaken, jobIntent, liveShield, loadoutIntent,
@@ -27,7 +28,12 @@ import { tickFields } from './fields';
 import { castView } from './casting';
 
 // ───────── public API ─────────
-export interface CampSpawn { kind: EnemyKindId; x: number; z: number; facing: number }
+/**
+ * arena: a boss encounter's sealed arena (ruling P4-c, from the zone data; absent = no restriction). The
+ * enemy, the adds it spawns and their fields and telegraphs reach only adventurers inside it; an
+ * adventurer outside neither damages them nor stays on their threat tables (nor is noticed).
+ */
+export interface CampSpawn { kind: EnemyKindId; x: number; z: number; facing: number; arena?: (x: number, z: number) => boolean }
 /**
  * surface: where adventurers stand; ground: where enemies walk; sight: true where a line of sight
  * passes; jobSwitch: true where a job may change (the grove, sanctuary circles). Absent = never.
@@ -36,7 +42,8 @@ export interface CombatZone {
   surface: Surface; ground: Surface; sight: (x: number, z: number) => boolean; camps: readonly CampSpawn[];
   jobSwitch?: (x: number, z: number) => boolean;
 }
-export type Act = '' | 'charge' | 'cast' | 'dodge' | 'knock' | 'stun' | 'dead' | 'return';
+/** phase: a boss between phases (invulnerable and still). */
+export type Act = '' | 'charge' | 'cast' | 'dodge' | 'knock' | 'stun' | 'dead' | 'return' | 'phase';
 export type CastView = { ability: AbilityId; total: number; left: number } | null;
 export interface CombatantView {
   id: number; team: 'adventurer' | 'enemy'; kind: 'adventurer' | EnemyKindId;
@@ -55,7 +62,16 @@ export interface CombatantView {
   job?: JobId; buffs?: number; debuffs?: number; cast?: CastView;
   /** Adventurers: Searing stacks (0 when none). Always filled for adventurers; optional only until the server's views carry it. */
   searing?: number;
+  /**
+   * Enemies (always filled for them; optional only so adventurer views and older literals compile): the
+   * kind's tier; the boss's phase (0-based, already the next one during a transition; 0 for non-bosses);
+   * warded: a ward add lives (the boss takes × wardMult); enrageIn: seconds to the enrage (0 once
+   * enraged), null for a boss asleep or without one and for non-bosses.
+   */
+  tier?: EnemyTier; phase?: number; warded?: boolean; enrageIn?: number | null;
 }
+/** A boss's fight events: woke (first engaged), a transition began (phase = the next index), enraged, reset (went home). */
+export interface BossEvent { enemy: number; kind: EnemyKindId; event: 'wake' | 'phase' | 'enrage' | 'reset'; phase?: number; atS: number }
 /**
  * cd: seconds left per slot; gcd, dodgeNextIn: seconds left (0 = ready / full); charge: seconds
  * held, or null; dodgeMax: the job's dodge charges; cast: the cast in progress.
@@ -81,6 +97,8 @@ export interface TickOut {
    * after its death (its kill was credited as usual in `kills`). Their ids are never reused.
    */
   despawned: number[];
+  /** Boss events this tick, in order. */
+  boss: BossEvent[];
 }
 /**
  * ally: the adventurer an ally-aimed ability should land on (else the aim rule picks one).
@@ -137,6 +155,12 @@ export interface Combat {
   carryOf(id: number): Carry | undefined;
   /** Also drops it from every threat table. */
   removeAdventurer(id: number): void;
+  /**
+   * Sends an engaged enemy home now (the instance's wipe): Plan 3's return (invulnerable, healed at
+   * camp); a boss resets (phase 0, adds despawned, fields and telegraphs removed, the enrage clock
+   * stopped, a `reset` event). False when it is dead, already going home, or idle at camp.
+   */
+  resetEnemy(id: number, nowS: number): boolean;
   setPose(id: number, x: number, z: number, y: number, facing: number): void;
   /** null = accepted. */
   intent(id: number, i: Intent, nowS: number): Refusal | null;
@@ -252,7 +276,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [], revived: [], despawned: [] });
+const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [], revived: [], despawned: [], boss: [] });
 
 const worlds = new WeakMap<Combat, CombatWorld>();
 /** The engine's internal state, for the enemy AI and tests. Throws for anything createCombat did not make. */
@@ -282,6 +306,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     windup: e.windup ? { attack: e.windup.attack, total: e.windup.endsAt - e.windup.startedAt, left: Math.max(0, e.windup.endsAt - w.now), interruptible: e.windup.interruptible } : null,
     surging: e.surging, staggerImmune: e.stagger.max > 0 ? staggerImmuneLeft(e.stagger, w.now) : 0,
     buffs: 0, debuffs: debuffBits(e, w.now), cast: null,
+    tier: e.data.tier, phase: bossPhase(e), warded: bossWarded(w, e), enrageIn: bossEnrageIn(e, w.now),
   });
   const advView = (a: AdventurerState): CombatantView => ({
     id: a.id, team: 'adventurer', kind: 'adventurer', x: a.x, z: a.z, y: a.y, facing: a.facing,
@@ -315,6 +340,10 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     removeAdventurer(id) {
       if (!w.adventurers.delete(id)) return;
       removeFromThreat(w, id);
+    },
+    resetEnemy(id, nowS) {
+      const e = w.enemies.get(id);
+      return e ? sendHome(w, e, at(nowS)) : false;
     },
     setPose(id, x, z, y, facing) {
       const a = w.adventurers.get(id);

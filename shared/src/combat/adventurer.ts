@@ -23,7 +23,8 @@ import { AGGRO_THREAT } from './constants';
 import { removeFieldsOf } from './fields';
 import { ThreatTable } from './threat';
 import { REACTIONS, reactionFor, type ElementId } from './elements';
-import { stunEnemy } from './enemyAi';
+import { inArena, stunEnemy } from './enemyAi';
+import { bossDied, bossFloor, bossIncoming, cancelBossAttacks, startTransition } from './bossAi';
 import { JOBS, isJobId, type JobId } from './jobs';
 import { dodgeDisplacement, simulateDisplacement, type Displacement } from './displace';
 import { ENEMY_ATTACKS, ENEMY_KINDS, type EnemyAttackId } from './enemies';
@@ -101,7 +102,7 @@ export function reach(a: { x: number; z: number }, e: EnemyState): number {
 }
 /** An enemy walking home cannot be hurt. */
 export function enemyInvulnerable(e: EnemyState): boolean {
-  return e.act === 'return';
+  return e.act === 'return' || e.act === 'phase';
 }
 export function speedScaleOf(a: AdventurerState, nowS: number): number {
   if (!a.alive) return 1;
@@ -339,9 +340,14 @@ export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
  * now, as an interrupt's does), stunned until the bar recovers.
  */
 export function applyStagger(w: CombatWorld, e: EnemyState, amount: number, nowS: number): boolean {
-  if (!e.alive || !addStagger(e.stagger, amount, nowS)) return false;
+  if (!e.alive || enemyInvulnerable(e) || !addStagger(e.stagger, amount, nowS)) return false;
+  // a boss's own Break length (else BREAK_STUN_S)
+  const breakS = e.data.boss?.breakS;
+  if (breakS !== undefined) e.stagger.brokenUntil = nowS + breakS;
   fx(w, { t: 'break', dst: e.id });
   if (e.windup) e.attackReadyAt[e.windup.attack] = nowS + ENEMY_ATTACKS[e.windup.attack].cooldown;
+  // a boss's Break cancels its entry in flight: every telegraph (Keeper's Toll, a repeat's rest), not just the wind-up's
+  if (e.data.boss) cancelBossAttacks(w, e, nowS, true);
   cancelWindup(w, e);
   e.act = 'stun';
   e.actUntil = e.stagger.brokenUntil;
@@ -375,6 +381,16 @@ export function damageEnemy(
   tag?: { element?: ElementId; behind?: boolean },
 ): void {
   if (!e.alive || enemyInvulnerable(e)) return;
+  const a = w.adventurers.get(src);
+  // an arena's enemy takes nothing from an adventurer outside its arena
+  if (a && e.camp.arena && !inArena(e, a)) return;
+  let floor = 0;
+  if (e.data.boss) {
+    // a boss: × its ward, and never below its phase's floor (the burst that reaches it starts the transition)
+    amount = bossIncoming(w, e, amount);
+    floor = bossFloor(e);
+    if (floor > 0) amount = Math.min(amount, Math.max(0, e.hp - floor));
+  }
   e.hp = Math.max(0, e.hp - amount);
   e.lastDamagedAt = nowS;
   const ev: Extract<FxEvent, { t: 'hit' }> = { t: 'hit', src, dst: e.id, amount, absorbed: 0, by };
@@ -383,13 +399,13 @@ export function damageEnemy(
   if (tag?.behind) ev.behind = true;
   fx(w, ev);
   // a dead source's damage over time still lands, but adds no threat, combat time or kill credit
-  const a = w.adventurers.get(src);
   if (a && a.alive && credit) {
     a.lastDealtAt = nowS;
     a.lastCombatAt = nowS;
     e.threat.add(a.id, amount * THREAT_PER_DAMAGE * threatMult(w, a.id));
   }
-  if (e.hp <= 0) killEnemy(w, e, nowS);
+  if (floor > 0 && e.hp <= floor) startTransition(w, e, nowS);
+  else if (e.hp <= 0) killEnemy(w, e, nowS);
 }
 
 /** An enemy at 0 hp: `death` fx, a kill credited to its threat table, targets dropped, respawn scheduled. */
@@ -402,6 +418,8 @@ export function killEnemy(w: CombatWorld, e: EnemyState, nowS: number): void {
   e.threat.clear(); e.marks = {}; e.markBy = {}; e.burning = null; e.debuffs = {};
   e.stagger = { value: 0, max: e.stagger.max, brokenUntil: -Infinity, lastGainAt: -Infinity };
   removeFieldsOf(w, e.id);
+  // a boss's live adds go with it (despawned: no credit), and its telegraphs
+  if (e.data.boss) bossDied(w, e, nowS);
   for (const a of w.adventurers.values()) if (a.targetId === e.id) a.targetId = null;
   fx(w, { t: 'death', dst: e.id });
   w.out.kills.push({ enemy: e.id, kind: e.kind, credit });

@@ -20,6 +20,7 @@ export * from './engine';
 export { isInCombat, adventurerInCombat, onAnyThreatTable, spawnEnemy, despawnEnemy } from './adventurer';
 export { RAIN_HEAL, allied, applyAffliction } from './effects';
 export { addField, removeFieldsOf, tickFields } from './fields';
+export { bossAiStateOf, stepBoss, resetBoss, type BossAi } from './bossAi';
 export type { CastBreak } from './casting';
 export {
   enemyAiStats, enemyPassable, enemyPathPassable, enemyAiStateOf, resolveHit, type EnemyAi,

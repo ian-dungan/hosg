@@ -10,6 +10,7 @@ import { CATCH_UP_TICKS, FIELD_TICK_S } from './constants';
 import type { CombatWorld, EnemyState, FieldState } from './engine';
 import { hurtAdventurer, TIME_EPS } from './adventurer';
 import { takenMult } from './effects';
+import { inArena } from './enemyAi';
 import { inShape, type Shape } from './shapes';
 import { enemyHit } from './stats';
 
@@ -52,7 +53,7 @@ export function tickFields(w: CombatWorld, nowS: number): void {
       if (n >= CATCH_UP_TICKS) { while (f.nextAt <= nowS + TIME_EPS) f.nextAt += FIELD_TICK_S; break; }
       f.nextAt += FIELD_TICK_S;
       for (const a of w.adventurers.values()) {
-        if (!a.alive || !inShape(f.shape, a.x, a.z)) continue;
+        if (!a.alive || !inShape(f.shape, a.x, a.z) || !inArena(owner, a)) continue;
         if (nowS < a.reviveSafeUntil) { w.out.fx.push({ t: 'miss', src: owner.id, dst: a.id, perfect: false }); continue; }
         hurtAdventurer(w, a, enemyHit(f.raw, a.stats.defence, takenMult(w, a, owner, nowS)), owner.id, 'field', nowS);
       }
