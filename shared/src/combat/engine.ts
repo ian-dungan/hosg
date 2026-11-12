@@ -14,7 +14,7 @@ import type { Stats } from './stats';
 import { ThreatTable } from './threat';
 import type { Displacement, DisplaceResult } from './displace';
 import {
-  abilityIntent, currentAct, dodgeIntent, fallDamageTaken, liveShield, loadoutIntent, newAdventurer, removeFromThreat,
+  abilityIntent, applyCarry, carryOfState, currentAct, dodgeIntent, fallDamageTaken, liveShield, loadoutIntent, newAdventurer, removeFromThreat,
   resetAdventurer, selfView, spawnEnemyState, speedScaleOf, swapIntent, targetIntent, tickAdventurer, tickEnemyStatus,
 } from './adventurer';
 
@@ -47,8 +47,25 @@ export type Intent =
   | { t: 'dodge'; dx: number; dz: number; from: { x: number; z: number; y: number }; grounded: boolean }
   | { t: 'loadout'; free: [AbilityId, AbilityId] };
 export type Refusal = 'dead' | 'busy' | 'invalid' | 'cooldown' | 'momentum' | 'no-target' | 'range' | 'sight' | 'charges' | 'air' | 'in-combat';
+/**
+ * What a relog keeps (seconds remaining, so it does not depend on either clock): per-ability
+ * cooldowns, the GCD, dodge charges and the time to the next refill, and Momentum. The server takes it
+ * with carryOf before removeAdventurer, caches it briefly per account, and passes it back on re-join.
+ */
+export interface Carry {
+  cooldowns: Partial<Record<AbilityId, number>>; gcd: number; dodgeCharges: number; dodgeRefillIn: number; momentum: number;
+}
+/**
+ * Every `nowS` (intents, ticks, damage, revive) is the caller's clock in seconds: it must be monotonic
+ * and room-relative (the server uses its tick count or a monotonic clock, never Date.now). The engine
+ * still never runs backwards: a time earlier than the latest one it has seen counts as that latest
+ * time, so a stale or rewound stamp can neither bypass a cooldown nor rewind a timer.
+ */
 export interface Combat {
-  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Loadout }, nowS: number): number;
+  /** carry: what a relog keeps (see Carry); clamped to the real numbers. Without it everything starts fresh. */
+  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Loadout; carry?: Carry }, nowS: number): number;
+  /** The relog snapshot of a present adventurer (take it before removeAdventurer), else undefined. */
+  carryOf(id: number): Carry | undefined;
   /** Also drops it from every threat table. */
   removeAdventurer(id: number): void;
   setPose(id: number, x: number, z: number, y: number, facing: number): void;
@@ -82,6 +99,8 @@ export interface AdventurerState {
   shield: number; shieldUntil: number; sprintUntil: number; parryUntil: number; iframeUntil: number;
   dodgeCharges: number; dodgeRefillAt: number | null; lastDodgeAt: number; lastDodgeFrom: { x: number; z: number } | null;
   charge: { startedAt: number } | null;
+  /** A swing came due on a tick that could not swing: the next one counts from when it lands. */
+  autoWaiting: boolean;
 }
 export interface EnemyWindup { attack: EnemyAttackId; startedAt: number; endsAt: number; interruptible: boolean; telegraphId: number | null }
 export interface EnemyState {
@@ -93,7 +112,8 @@ export interface EnemyState {
   targetId: number | null;
   threat: ThreatTable; stagger: StaggerBar; marks: Marks;
   /** Burning damage: from `src` with its power, next tick at nextAt (once a second while the mark lives). */
-  burning: { src: number; power: number; nextAt: number } | null;
+  /** orphan: its source died, revived or left since; it still burns but adds no threat, combat time or credit. */
+  burning: { src: number; power: number; nextAt: number; orphan?: boolean } | null;
   windup: EnemyWindup | null;
   /** When each attack may next start (the enemy AI sets these; an interrupt restarts the cooldown). */
   attackReadyAt: Partial<Record<EnemyAttackId, number>>;
@@ -162,7 +182,8 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     adventurers: new Map(), enemies: new Map(), telegraphs: new Map(), out: emptyOut(),
   };
   for (const c of zone.camps) { const e = newEnemy(w, c, start); w.enemies.set(e.id, e); }
-  const at = (nowS: number) => { if (finite(nowS) && nowS > w.now) w.now = nowS; return finite(nowS) ? nowS : w.now; };
+  // the clock never runs backwards: a stale or non-finite nowS is the latest time seen
+  const at = (nowS: number) => { if (finite(nowS) && nowS > w.now) w.now = nowS; return w.now; };
 
   const enemyView = (e: EnemyState): CombatantView => ({
     id: e.id, team: 'enemy', kind: e.kind, x: e.x, z: e.z, y: e.y, facing: e.facing,
@@ -180,8 +201,13 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     addAdventurer(a, nowS) {
       const t = at(nowS);
       const s = newAdventurer(w.nextId++, a, t);
+      if (a.carry) applyCarry(s, a.carry, t);
       w.adventurers.set(s.id, s);
       return s.id;
+    },
+    carryOf(id) {
+      const a = w.adventurers.get(id);
+      return a ? carryOfState(a, w.now) : undefined;
     },
     removeAdventurer(id) {
       if (!w.adventurers.delete(id)) return;
@@ -201,6 +227,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
         case 'target': return targetIntent(w, a, i.id, t);
         case 'ability': return abilityIntent(w, a, i.slot, i.phase, t);
         case 'swap': return swapIntent(w, a, t);
+        // the dodge trusts i.from: the server runs checkPose on it (as on any pose) before passing it on
         case 'dodge': return dodgeIntent(w, a, i, t);
         case 'loadout': return loadoutIntent(w, a, i.free, t);
         default: return a.alive ? 'invalid' : 'dead';
@@ -215,7 +242,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       if (a) resetAdventurer(w, a, pos, at(nowS));
     },
     tick(nowS) {
-      const now = finite(nowS) ? Math.max(nowS, w.lastTick) : w.lastTick;
+      const now = finite(nowS) ? Math.max(nowS, w.now) : w.now;
       const dt = now - w.lastTick;
       w.lastTick = now;
       at(now);
