@@ -3,8 +3,11 @@
 // room that survives nonsense. Timers run on an injected combat clock (testClock), never real time.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Room } from '@colyseus/sdk';
-import { DODGE_DISTANCE, SPAWN, TICK_HZ, fallDamage, worldOf, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { DODGE_DISTANCE, REASON_ELSEWHERE, SPAWN, TICK_HZ, fallDamage, worldOf, zoneDef, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { killAdventurer } from '../../../shared/src/combat/adventurer';
+import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
+import { ageCarry } from './ZoneRoom';
 import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, testClock, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
@@ -52,7 +55,9 @@ describe('enemies in the state', () => {
     const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
     const dummy = await waitFor(() => enemyOf(a.room, 'dummy'));
     expect(dummy).toMatchObject({ kind: 'dummy', hp: 40, maxHp: 40, mode: 'idle', target: -1, x: 3, z: -11 });
-    expect(me(a.room)).toMatchObject({ weapon: 'blade', momentum: 0, target: -1, dead: false, act: '', shield: 0, hp: 100 });
+    expect(me(a.room)).toMatchObject({ weapon: 'blade', target: -1, dead: false, act: '', shield: 0, hp: 100 });
+    expect('momentum' in me(a.room).toJSON()).toBe(false); // the owner gets it in `self`; nobody else needs it
+    expect(dummy).toMatchObject({ surging: false, staggerImmune: 0 });
     expect(me(a.room).eid).toBeGreaterThan(0);
     expect(a.room.state.telegraphs.size).toBe(0);
   });
@@ -64,7 +69,7 @@ describe('enemies in the state', () => {
     for (const zone of ['grove', 'greenway'] as const) {
       expect(Number.isFinite(health.zones[zone].tickMs)).toBe(true);
       expect(health.zones[zone].tickMs).toBeGreaterThanOrEqual(0);
-      expect(health.zones[zone].tickMs).toBeLessThan(15);
+      expect(health.zones[zone].stepErrors).toBe(0);
     }
     expect(app.stats().zones.grove.tickMs).toBeGreaterThanOrEqual(0);
   });
@@ -96,7 +101,7 @@ describe('a fight', () => {
     // standing by holds the respawn; 7 m away it comes back
     await walk(a.room, { x: SPAWN.x, z: SPAWN.z }, { x: SPAWN.x - 4, z: SPAWN.z - 5.8 }, flat);
     await waitFor(() => enemyOf(a.room, 'dummy').mode === 'idle', 3000);
-    expect(clock.now() - diedAt).toBeGreaterThanOrEqual(5);
+    expect(clock.now() - diedAt).toBeGreaterThanOrEqual(5 - 0.5); // diedAt was read up to a patch (×4 clock) late
     expect(enemyOf(a.room, 'dummy')).toMatchObject({ hp: 40, x: 3, z: -11 });
     expect(events().some((e) => e.t === 'spawn' && e.dst === dummy.eid)).toBe(true);
   });
@@ -145,9 +150,10 @@ describe('intent spam and nonsense', () => {
     const uses = fx.flatMap((m) => m.events).filter((e) => e.t === 'use' && e.src === me(a.room).eid);
     expect(uses).toEqual([{ t: 'use', src: me(a.room).eid, ability: 'slash', dst: dummy.eid }]);
     expect(refused.length).toBeGreaterThan(40);
-    expect(refused.every((r) => r.action === 'ability' && (r.reason === 'cooldown' || r.reason === 'busy'))).toBe(true);
+    expect(refused.every((r) => r.action === 'ability' && (r.reason === 'cooldown' || r.reason === 'busy' || r.reason === 'rate'))).toBe(true);
 
     refused.length = 0;
+    await sleep(700); // the intent budget refills (20 a second)
     const before = { ...me(a.room).toJSON() };
     a.room.send('target', { id: 'x' });
     a.room.send('target', { id: 99999 });
@@ -313,8 +319,8 @@ describe('dodge', () => {
     await waitFor(() => refused.length > 0);
     expect(refused).toEqual([{ action: 'dodge', reason: 'stale' }]);
     expect(corrections).toEqual([{ x: d.to.x + 0.4, z: d.to.z, y: 0 }]);
-    // a dodge with an old ack is refused as stale too, with no correction
-    a.room.send('dodge', { ...pose(d.to.x + 0.4, d.to.z, 0), dx: 1, dz: 0 });
+    // a dodge with an ack never issued is refused as stale, with no correction
+    a.room.send('dodge', { ...pose(d.to.x + 0.4, d.to.z, 7), dx: 1, dz: 0 });
     await waitFor(() => refused.length > 1);
     expect(refused[1]).toEqual({ action: 'dodge', reason: 'stale' });
     expect(corrections).toHaveLength(1);
@@ -451,5 +457,295 @@ describe('fx interest', () => {
     await waitFor(() => nearFx.flatMap((m) => m.events).some((e) => e.t === 'hit'));
     await sleep(200);
     expect(farFx).toEqual([]);
+  });
+});
+
+/** The server-side session of a client's adventurer (room internals, for tests that reach in). */
+const sessionOf = (room: Room<any, any>) => (serverRoom(room) as any).sessions.get(room.sessionId);
+
+describe('dodges at higher latency (fix round 1)', () => {
+  it('a second dodge carrying the ack before its own first roll is checked from that roll\'s end and accepted', async () => {
+    const clock = testClock(0); // frozen: the gaps are set by skip
+    const { url, store } = await start({ ...grove([]), combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const displaced = collect(a.room, 'displaced');
+    const refused = collect(a.room, 'refused');
+    const corrections = collect(a.room, 'correct');
+    a.room.send('dodge', { ...pose(SPAWN.x, SPAWN.z), dx: 1, dz: 0 });
+    await waitFor(() => displaced.length === 1);
+    const end = displaced[0].to;
+    clock.skip(0.45);
+    // the client predicted the first roll and rolls again from its end before it heard `displaced`
+    a.room.send('dodge', { ...pose(end.x, end.z, 0), dx: 0, dz: 1 });
+    await waitFor(() => displaced.length === 2);
+    expect(displaced[1]).toMatchObject({ seq: 2, kind: 'dodge', from: { x: end.x, z: end.z } });
+    expect(refused).toEqual([]);
+    expect(corrections).toEqual([]);
+  });
+
+  it('a second dodge arriving up to 0.15 s inside the minimum gap is held and rolled, not refused', async () => {
+    const clock = testClock(0);
+    const { url, store } = await start({ ...grove([]), combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const displaced = collect(a.room, 'displaced');
+    const refused = collect(a.room, 'refused');
+    a.room.send('dodge', { ...pose(SPAWN.x, SPAWN.z), dx: 1, dz: 0 });
+    await waitFor(() => displaced.length === 1);
+    const end = displaced[0].to;
+    clock.skip(0.3); // sent 0.4 s after the first, bunched up by jitter
+    a.room.send('dodge', { ...pose(end.x, end.z, 1), dx: 0, dz: 1 });
+    await sleep(200);
+    expect(displaced).toHaveLength(1); // held
+    clock.skip(0.11);
+    await waitFor(() => displaced.length === 2);
+    expect(refused).toEqual([]);
+  });
+
+  it('a dodge the engine refuses after its pose was accepted comes back refused with a correct to that pose', async () => {
+    const clock = testClock(0);
+    const { url, store } = await start({ ...grove([]), combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const displaced = collect(a.room, 'displaced');
+    const refused = collect(a.room, 'refused');
+    const corrections = collect(a.room, 'correct');
+    a.room.send('dodge', { ...pose(SPAWN.x, SPAWN.z), dx: 1, dz: 0 });
+    await waitFor(() => displaced.length === 1);
+    const end = displaced[0].to;
+    clock.skip(0.1); // still rolling
+    a.room.send('dodge', { ...pose(end.x + 0.2, end.z, 1), dx: 0, dz: 1 });
+    await waitFor(() => refused.length === 1);
+    expect(refused).toEqual([{ action: 'dodge', reason: 'busy' }]);
+    expect(corrections).toEqual([{ x: end.x + 0.2, z: end.z, y: 0 }]);
+    // and out of charges
+    clock.skip(0.5);
+    a.room.send('dodge', { ...pose(end.x + 0.2, end.z, 1), dx: 0, dz: 1 });
+    await waitFor(() => displaced.length === 2);
+    clock.skip(0.5);
+    const end2 = displaced[1].to;
+    a.room.send('dodge', { ...pose(end2.x, end2.z, 2), dx: 0, dz: -1 });
+    await waitFor(() => refused.length === 2);
+    expect(refused[1]).toEqual({ action: 'dodge', reason: 'charges' });
+    expect(corrections[1]).toEqual({ x: end2.x, z: end2.z, y: 0 });
+  });
+
+  it('a displacement while away is sent again on reconnecting', async () => {
+    const clock = testClock(4);
+    const { url, store } = await start({ ...grove([BOAR]), combatClock: clock.now, reconnectSeconds: 10 });
+    const a = await joinAt(url, store, 'Alice', 0, -14);
+    const session = sessionOf(a.room);
+    a.room.connection.close();
+    await waitFor(() => session.displaceSeq > 0, 5000);
+    const resumed = await a.client.reconnect(a.room.reconnectionToken);
+    resumed.reconnection.enabled = false;
+    const displaced = collect(resumed, 'displaced');
+    await waitFor(() => displaced.length > 0);
+    expect(displaced[0]).toMatchObject({ seq: session.displaceSeq >= 1 ? displaced[0].seq : -1, kind: 'knock' });
+    expect(displaced[0].seq).toBeGreaterThanOrEqual(1);
+    resumed.send('move', { ...pose(displaced[0].to.x, displaced[0].to.z + 0.3, displaced[0].seq), y: displaced[0].to.y, moving: true });
+    await waitFor(() => resumed.state.players.get(resumed.sessionId).z === displaced[0].to.z + 0.3 || session.displaceSeq > displaced[0].seq);
+  });
+
+  it('knocked in mid-air: the fall it was in is charged as well', async () => {
+    const { url, store } = await start(grove([]));
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const hurts = collect(a.room, 'hurt');
+    const room = serverRoom(a.room) as any;
+    const session = sessionOf(a.room);
+    session.movement.air = { grounded: false, airStartMs: 0, airStartY: 10, peakY: 10, y: 2 };
+    const from = { x: SPAWN.x, z: SPAWN.z, y: 2 };
+    const at = { x: SPAWN.x + 1, z: SPAWN.z, y: 0 };
+    room.displace(session, {
+      id: session.eid, kind: 'knock', from, d: { vx: 3, vz: 0, vy: 0, seconds: 0.3 },
+      result: { ...at, drop: 2, drops: [2], fallHp: fallDamage(2), seconds: 0.6, grounded: true, path: [{ t: 0, ...from }, { t: 0.6, ...at }] },
+    });
+    await waitFor(() => hurts.length > 0);
+    expect(hurts).toEqual([{ amount: fallDamage(8) + fallDamage(2), cause: 'fall' }]);
+  });
+});
+
+describe('robust steps (fix round 1)', () => {
+  it('a throwing handler for one adventurer does not stop the others; a lost dodge stamp is resynced', async () => {
+    const clock = testClock(0);
+    const { url, store, app } = await start({ ...grove([]), combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const b = await joinAt(url, store, 'Bob', SPAWN.x - 6, SPAWN.z);
+    const room = serverRoom(a.room) as any;
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const displace = room.displace.bind(room);
+    const aEid = me(a.room).eid;
+    vi.spyOn(room, 'displace').mockImplementation((...args: any[]) => {
+      if (args[0].eid === aEid && args[1].kind === 'dodge') throw new Error('boom');
+      return displace(...args);
+    });
+    const aDisplaced = collect(a.room, 'displaced');
+    const bDisplaced = collect(b.room, 'displaced');
+    a.room.send('dodge', { ...pose(SPAWN.x, SPAWN.z), dx: 1, dz: 0 });
+    b.room.send('dodge', { ...pose(SPAWN.x - 6, SPAWN.z), dx: -1, dz: 0 });
+    await waitFor(() => bDisplaced.length === 1);
+    await sleep(150);
+    expect(aDisplaced).toEqual([]);
+    expect(app.stats().zones.grove.stepErrors).toBeGreaterThanOrEqual(1);
+    expect(errors).toHaveBeenCalledTimes(1);
+    clock.skip(2.5); // the stamp never came: resynced at the server's position
+    await waitFor(() => aDisplaced.length === 1);
+    const r = aDisplaced[0];
+    expect(r).toMatchObject({ seq: 1, kind: 'resync' });
+    expect(r.from).toEqual(r.to);
+    a.room.send('move', { ...pose(r.to.x + 0.3, r.to.z, 1), moving: true });
+    await waitFor(() => me(a.room).x === r.to.x + 0.3);
+  });
+
+  it('a death the step lost is reconciled from the engine on the next step', async () => {
+    const { url, store } = await start(grove([]));
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const room = serverRoom(a.room) as any;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const died = room.died.bind(room);
+    let calls = 0;
+    vi.spyOn(room, 'died').mockImplementation((...args: any[]) => {
+      if (calls++ === 0) throw new Error('boom');
+      return died(...args);
+    });
+    killAdventurer(worldOf(room.combat), worldOf(room.combat).adventurers.get(me(a.room).eid)!, room.combat.get(me(a.room).eid).hp);
+    await waitFor(() => me(a.room).dead);
+    await waitFor(() => sessionOf(a.room).dead === true);
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('respawn saves (fix round 1)', () => {
+  it('a respawn from the Greenway whose save fails is tried again no sooner than every 5 s, logging once', async () => {
+    const clock = testClock(10);
+    const base = createMemoryStore();
+    let failing = false, deadSaves = 0;
+    const store: Store = Object.assign(Object.create(base), {
+      saveAdventurer: async (a: any, expect?: any) => {
+        if (failing && a.hp === 100) { deadSaves++; throw new Error('db down'); }
+        return base.saveAdventurer(a, expect);
+      },
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { url } = await start({ store, zones: { greenway: flatZone([THORNLING]) }, combatClock: clock.now, autoRespawnSeconds: 1 });
+    const a = await joinAt(url, store, 'Alice', 0, -18, { hp: 5 }, 'greenway');
+    failing = true;
+    await waitFor(() => me(a.room).dead, 6000);
+    await sleep(1000); // 10 s of combat time: auto respawn is due every step
+    expect(deadSaves).toBeLessThanOrEqual(2); // the death's own save, and one respawn try
+    expect(errors).toHaveBeenCalledTimes(1);
+  });
+
+  it('a respawn travel the store refuses (already saved in the grove) sends the session on', async () => {
+    const clock = testClock(10);
+    const base = createMemoryStore();
+    let failOnce = true;
+    const store: Store = Object.assign(Object.create(base), {
+      saveAdventurer: async (a: any, expect?: any) => {
+        if (a.hp === 100 && failOnce) { failOnce = false; throw new Error('db blip'); }
+        return base.saveAdventurer(a, expect);
+      },
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { url } = await start({ store, zones: { greenway: flatZone([THORNLING]) }, combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', 0, -18, { hp: 5 }, 'greenway');
+    const kicked = collect(a.room, 'kicked');
+    await waitFor(() => me(a.room).dead, 6000);
+    await sleep(100);
+    await saveAs(store, a.accountId, { zone: 'grove', x: SPAWN.x, z: SPAWN.z, hp: 100 }); // written meanwhile, elsewhere
+    clock.skip(3);
+    a.room.send('respawn', {});
+    await waitFor(() => kicked.length > 0);
+    expect(kicked).toEqual([{ reason: REASON_ELSEWHERE }]);
+  });
+
+  it('a death during a travel save is saved again as respawned once the travel lands', async () => {
+    const base = createMemoryStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const store: Store = Object.assign(Object.create(base), {
+      saveAdventurer: async (a: any, expect?: any) => {
+        if (a.zone === 'greenway') await gate;
+        return base.saveAdventurer(a, expect);
+      },
+    });
+    const exit = { to: 'greenway' as const, x: 0, z: -15, r: 1.5, arrive: { ...zoneDef('greenway').spawn }, open: true };
+    const { url } = await start({ store, zones: { grove: { ...flatZone([]), exits: [exit] } } });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const travels = collect(a.room, 'travel');
+    await walk(a.room, { x: 0, z: SPAWN.z }, { x: 0, z: -13.6 }, flat);
+    await waitFor(() => sessionOf(a.room)?.travelling !== undefined);
+    const room = serverRoom(a.room) as any;
+    const w = worldOf(room.combat);
+    killAdventurer(w, w.adventurers.get(me(a.room).eid)!, 1);
+    await waitFor(() => sessionOf(a.room).dead === true);
+    release();
+    await waitFor(() => travels.length > 0);
+    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).zone === 'grove');
+    expect(await store.getOrCreateAdventurer(a.accountId)).toMatchObject({ zone: 'grove', x: SPAWN.x, z: SPAWN.z, hp: 100 });
+  });
+
+  it('someone who died in the Greenway and relogs is admitted to a full grove', async () => {
+    const clock = testClock(10);
+    const { url, store } = await start({ zones: { greenway: flatZone([THORNLING]) }, combatClock: clock.now, maxPlayers: 1 });
+    const a = await joinAt(url, store, 'Alice', 0, -18, { hp: 5 }, 'greenway');
+    await waitFor(() => me(a.room).dead, 6000);
+    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).zone === 'grove');
+    await a.room.leave();
+    await joinAt(url, store, 'Bob', SPAWN.x, SPAWN.z); // the grove is full now
+    const again = await joinZone(url, a.token, 'grove');
+    expect(me(again.room)).toMatchObject({ dead: false, hp: 100, x: SPAWN.x, z: SPAWN.z });
+  });
+
+  it('hp is saved rounded down, so a relog never gains the fraction', async () => {
+    const { url, store } = await start(grove([]));
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z, { hp: 50 });
+    const room = serverRoom(a.room) as any;
+    worldOf(room.combat).adventurers.get(me(a.room).eid)!.hp = 40.6;
+    await waitFor(() => me(a.room).hp === 41); // shown rounded up
+    await a.room.leave();
+    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).hp === 40);
+  });
+});
+
+describe('relog mid-fight (fix round 1)', () => {
+  it('a relog in combat is still in combat (swap refused), and keeps its Bulwark', async () => {
+    const { url, store } = await start(grove([DUMMY]));
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const dummy = await waitFor(() => enemyOf(a.room, 'dummy'));
+    a.room.send('ability', { slot: 4, phase: 'press' }); // Bulwark
+    await waitFor(() => me(a.room).shield === 25);
+    a.room.send('target', { id: dummy.eid });
+    await waitFor(() => enemyOf(a.room, 'dummy').hp < 40); // in combat
+    await a.room.leave();
+    const again = await joinZone(url, a.token, 'grove');
+    const refused = collect(again.room, 'refused');
+    expect(me(again.room).shield).toBe(25);
+    again.room.send('swap', {});
+    await waitFor(() => refused.length > 0);
+    expect(refused).toEqual([{ action: 'swap', reason: 'in-combat' }]);
+  });
+
+  it('ageCarry runs every timer down and every "since" up', () => {
+    const aged = ageCarry({
+      cooldowns: { mend: 10 }, gcd: 0.3, dodgeCharges: 0, dodgeRefillIn: 2, momentum: 50,
+      sinceCombat: 1, sinceHurt: 2, sinceDealt: 3, swapCd: 1.5, shield: 20, shieldLeft: 4, sprintLeft: 1,
+    }, 3);
+    expect(aged).toEqual({
+      cooldowns: { mend: 7 }, gcd: 0, dodgeCharges: 1, dodgeRefillIn: 4, momentum: 20,
+      sinceCombat: 4, sinceHurt: 5, sinceDealt: 6, swapCd: 0, shield: 20, shieldLeft: 1, sprintLeft: 0,
+    });
+    expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0 }, 5)).toEqual({ cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0 });
+  });
+});
+
+describe('intent budget (fix round 1)', () => {
+  it('held keys cannot starve moves: intents past 20 a second (bursts of 30) are refused as rate, moves still count', async () => {
+    const { url, store } = await start(grove([]));
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const refused = collect(a.room, 'refused');
+    for (let i = 0; i < 60; i++) a.room.send('ability', { slot: 3, phase: 'press' });
+    a.room.send('move', { ...pose(SPAWN.x + 0.3, SPAWN.z), moving: true });
+    await waitFor(() => me(a.room).x === SPAWN.x + 0.3);
+    await sleep(100);
+    expect(refused.filter((r) => r.reason === 'rate')).toEqual([{ action: 'ability', reason: 'rate' }]); // once, not 30 times
   });
 });

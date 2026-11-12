@@ -19,7 +19,6 @@ export const PlayerState = schema(
     eid: t.int32(),
     /** The equipped weapon ('blade' | 'bow'). */
     weapon: t.string(),
-    momentum: t.uint8(),
     /** The engine id of the targeted enemy, or -1. */
     target: t.int32(),
     dead: t.boolean(),
@@ -41,6 +40,7 @@ export const EnemyState = schema(
     y: t.float32(),
     facing: t.float32(),
     hp: t.uint16(),
+    /** Scaled with the adventurers it fights (elites): it can change. */
     maxHp: t.uint16(),
     stagger: t.uint8(),
     maxStagger: t.uint8(),
@@ -53,6 +53,10 @@ export const EnemyState = schema(
     /** The attack it is winding up ('' = none), and the wind-up's full length in seconds. */
     windup: t.string(),
     windupTotal: t.float32(),
+    /** The chase surge is on (it runs faster to catch up). */
+    surging: t.boolean(),
+    /** Seconds until its stagger bar can fill again (after a break); 0 = it can. */
+    staggerImmune: t.float32(),
   },
   'EnemyState',
 );

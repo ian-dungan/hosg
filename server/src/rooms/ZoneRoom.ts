@@ -9,6 +9,7 @@ import {
   DEATH_MIN_S,
   DISPLACE_FUZZ_M,
   DODGE_CHARGES,
+  DODGE_MIN_GAP_S,
   DODGE_REFILL_S,
   FX_RADIUS,
   MAX_HP,
@@ -76,6 +77,8 @@ export interface ZoneRoomOptions {
   combatClock?: () => number;
   /** Seconds after a death before the adventurer gets up by itself (AUTO_RESPAWN_S; shorter in tests). */
   autoRespawnSeconds: number;
+  /** Test-only: the wall clock (ms) the movement checks and budgets use (default Date.now). */
+  wallClock?: () => number;
 }
 
 /** Where the dead get up again: the statue in this zone. */
@@ -86,8 +89,29 @@ const MAX_TICKS_PER_STEP = 16;
 const SELF_EVERY_STEPS = 3;
 /** Window over which a room's step time p95 is measured (ms). */
 const TICK_WINDOW_MS = 5000;
-/** A failing step is logged at most this often (ms). */
-const TICK_ERROR_LOG_MS = 60_000;
+/** The same kind of failure (a step phase, a handler, a save) is logged at most this often (ms). */
+const LOG_EVERY_MS = 60_000;
+/**
+ * Arrival jitter a dodge's timers allow for (s): an honest client sends a second dodge at least
+ * DODGE_MIN_GAP_S after the first (or once its own count says a charge is back), but the network can
+ * bunch two messages up by about twice the one-way jitter (±60 ms → 120 ms). A dodge that arrives up
+ * to this early is held until the gap has passed or the charge is back, then rolled.
+ */
+const DODGE_GAP_TOLERANCE_S = 0.15;
+/** A dodge accepted but never stamped (a failed step) is resynced after this long (s, combat clock). */
+const DISPLACE_RESYNC_S = 2;
+/** A respawn whose save failed is not tried again sooner than this (ms). */
+const RESPAWN_RETRY_MS = 5000;
+/** How long an account's pending respawn admits it to the respawn zone however full (ms). */
+const RESPAWN_ADMIT_MS = 30 * 60_000;
+/** Intents have their own budget, so held keys never starve moves: a second, and the burst. */
+const INTENT_RATE = 20;
+const INTENT_BURST = 30;
+/** At most one `refused 'rate'` to a client this often (ms); further dropped intents are silent. */
+const RATE_REFUSAL_EVERY_MS = 250;
+const INTENTS: Record<string, IntentAction> = { target: 'target', ability: 'ability', swap: 'swap', dodge: 'dodge', loadout: 'loadout', respawn: 'respawn' };
+/** A fresh carry: what a join without a kept one starts with. */
+const FRESH_CARRY: Carry = { cooldowns: {}, gcd: 0, dodgeCharges: DODGE_CHARGES, dodgeRefillIn: 0, momentum: 0 };
 /**
  * How long a leaver's combat state (cooldowns, dodge charges, Momentum) is kept for its next join, in
  * ms: the longest cooldown anything has, plus a margin. After that everything would be ready anyway.
@@ -98,17 +122,32 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 const round2 = (v: number) => Math.round(v * 100) / 100;
 const byte = (v: number) => Math.min(255, Math.max(0, Math.round(v)));
 
-/** A carry `seconds` older: cooldowns and the GCD run down, dodge charges refill, Momentum decays. */
-function ageCarry(c: Carry, seconds: number): Carry {
+/**
+ * A carry `seconds` older: cooldowns, the GCD, the swap cooldown, the shield and sprint run down,
+ * dodge charges refill, Momentum decays, and every "since" grows. Absent optional fields stay absent.
+ */
+export function ageCarry(c: Carry, seconds: number): Carry {
   const s = Math.max(0, seconds);
   const cooldowns: Carry['cooldowns'] = {};
   for (const [id, left] of Object.entries(c.cooldowns) as [keyof Carry['cooldowns'], number][]) if (left - s > 0) cooldowns[id] = left - s;
   let charges = c.dodgeCharges, refill = c.dodgeRefillIn, rest = s;
   while (charges < DODGE_CHARGES && rest >= refill) { rest -= refill; charges++; refill = DODGE_REFILL_S; }
-  return {
+  const aged: Carry = {
     cooldowns, gcd: Math.max(0, c.gcd - s), dodgeCharges: charges, dodgeRefillIn: charges < DODGE_CHARGES ? refill - rest : 0,
     momentum: Math.max(0, c.momentum - MOMENTUM_DECAY_PER_S * s),
   };
+  const since = (v: number | undefined) => (v === undefined ? undefined : v + s);
+  const left = (v: number | undefined) => (v === undefined ? undefined : Math.max(0, v - s));
+  const extras: Record<string, number | undefined> = {
+    sinceCombat: since(c.sinceCombat), sinceHurt: since(c.sinceHurt), sinceDealt: since(c.sinceDealt),
+    swapCd: left(c.swapCd), sprintLeft: left(c.sprintLeft), shieldLeft: left(c.shieldLeft), shield: c.shield,
+  };
+  if (extras.shieldLeft === 0) extras.shield = 0;
+  for (const [k, v] of Object.entries(extras)) if (v !== undefined) (aged as unknown as Record<string, number>)[k] = v;
+  if (aged.sinceCombat !== undefined) aged.sinceCombat = Math.min(aged.sinceCombat, 1e6); // the engine's cap
+  if (aged.sinceHurt !== undefined) aged.sinceHurt = Math.min(aged.sinceHurt, 1e6);
+  if (aged.sinceDealt !== undefined) aged.sinceDealt = Math.min(aged.sinceDealt, 1e6);
+  return aged;
 }
 
 /** The point an fx event is heard from: its target, else its source. */
@@ -153,6 +192,22 @@ interface Session {
   respawnSaved: boolean;
   /** The last `self` sent, as JSON ('' = none yet). */
   lastSelf: string;
+  /** What the latest displacement was: a dodge of its own lets the next dodge carry the ack before it. */
+  lastDisplaceKind: 'dodge' | 'knock' | 'resync' | 'respawn' | null;
+  /** When awaitingDisplace was set (combat clock), so a lost stamp is resynced. */
+  awaitingSince: number;
+  /** A dodge that arrived just inside the minimum gap, held until `due` (combat clock). */
+  pendingDodge?: { dx: number; dz: number; due: number };
+  /** When the room last had a dodge accepted for it (combat clock). */
+  lastDodgeAt: number;
+  /** The engine's hp as of the last mirror (saved as floor: relogs never gain the fraction). */
+  hpExact: number;
+  /** A failed respawn is not tried again before this (wall ms). */
+  respawnRetryAt: number;
+  /** Intent budget: tokens left, when last refilled (wall ms), and the last `refused 'rate'` (wall ms). */
+  intentTokens: number;
+  intentTokensAt: number;
+  rateRefusedAt: number;
   /** Message token bucket: tokens left, and when it was last refilled (ms). */
   tokens: number;
   tokensAt: number;
@@ -214,7 +269,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private steps = 0;
   /** Step times (ms) over the last TICK_WINDOW_MS, oldest first. */
   private tickTimes: { at: number; ms: number }[] = [];
-  private lastTickErrorAt = -Infinity;
+  /** When each kind of failure was last logged (wall ms). */
+  private loggedAt = new Map<string, number>();
+  /** Failures caught in steps and handlers since the room started (stats). */
+  stepErrors = 0;
+  private wallMs!: () => number;
   /** The combat clock at the engine's last tick. */
   private lastTickAt = 0;
   /** Enemy and telegraph state keys, by engine id. */
@@ -245,6 +304,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.rooms = options.rooms;
     this.isExitOpen = options.isExitOpen;
     this.autoRespawnSeconds = options.autoRespawnSeconds;
+    this.wallMs = options.wallClock ?? Date.now;
     const createdAt = performance.now();
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
@@ -261,6 +321,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.onMessage('dodge', this.guard('dodge', (client, message) => this.onDodge(client, message)));
     this.onMessage('loadout', this.guard('loadout', (client, message) => this.onLoadout(client, message)));
     this.onMessage('respawn', this.guard('respawn', (client) => this.onRespawn(client)));
+    // (intents spend the intent budget, every other message the message budget: see guard)
     this.clock.setInterval(() => {
       this.forgetIdleAllowances();
       void this.saveAll();
@@ -316,18 +377,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     movement.zone = this.zone.id;
     const y = movement.air.y + 0; // + 0: never -0 (terrain height can be), which state and messages encode differently
     const hp = clampHp(adventurer.hp);
-    // Combat state a relog keeps (cooldowns, dodge charges, Momentum), from its last session anywhere.
-    const carry = this.takeCarry(accountId);
+    if (this.zone.id === RESPAWN_ZONE) this.accounts.respawns.delete(accountId);
+    // Combat state a relog keeps (cooldowns, timers, combat, shield, sprint, Momentum), from its last
+    // session anywhere, or a fresh one; a hurt adventurer waits out the regen delay again (relogging
+    // never heals sooner).
+    const carry: Carry = { ...(this.takeCarry(accountId) ?? FRESH_CARRY), ...(hp < MAX_HP ? { sinceHurt: 0 } : {}) };
     const now = this.nowS();
-    // A hurt adventurer waits out the regen delay again after joining: relogging never heals sooner.
-    // The engine starts that delay only on damage, so it joins one point up and loses it at once.
-    const hurt = hp < MAX_HP;
-    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp: hurt ? hp + 1 : hp, loadout: adventurer.loadout, carry }, now);
-    if (hurt) this.combat.damage(eid, 1, now, 'fall');
+    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp, loadout: adventurer.loadout, carry }, now);
     const loadout = this.combat.loadout(eid)!;
     const player = new PlayerState({
       name, x: start.x, z: start.z, y, facing: start.facing, moving: false, hp, maxHp: MAX_HP,
-      eid, weapon: loadout.weapon, momentum: 0, target: -1, dead: false, act: '', shield: 0,
+      eid, weapon: loadout.weapon, target: -1, dead: false, act: '', shield: 0,
     });
     const session: Session = {
       client,
@@ -344,8 +404,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       deadAt: -Infinity,
       respawnSaved: false,
       lastSelf: '',
+      lastDisplaceKind: null,
+      awaitingSince: -Infinity,
+      lastDodgeAt: -Infinity,
+      hpExact: hp,
+      respawnRetryAt: -Infinity,
+      intentTokens: INTENT_BURST,
+      intentTokensAt: this.wallMs(),
+      rateRefusedAt: -Infinity,
       tokens: MESSAGE_BURST,
-      tokensAt: Date.now(),
+      tokensAt: this.wallMs(),
       lastChatAt: -Infinity,
     };
     this.sessions.set(sessionId, session);
@@ -393,6 +461,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       else if (!this.sessionByAccount.has(id)) held++;
     }
     if (this.sessionByAccount.has(accountId) || this.arrivals.has(accountId)) return true;
+    // Someone who died (saved as respawned here) always gets up at the statue, however full it is.
+    if (this.zone.id === RESPAWN_ZONE && (this.accounts.respawns.get(accountId) ?? -Infinity) > this.wallMs()) return true;
     return this.sessionByAccount.size + held < this.maxPlayers;
   }
 
@@ -427,7 +497,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const pose = parsePose(message);
     if (!session || !pose || session.travelling || session.dead || session.awaitingDisplace) return;
     if (pose.ack !== session.displaceSeq) return; // sent before a displacement it has not applied yet (or forged): silent
-    this.acceptPose(session, pose, Date.now());
+    this.acceptPose(session, pose, this.wallMs());
   }
 
   /**
@@ -484,7 +554,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     return refusal === null;
   }
 
-  private refuse(session: Session, action: IntentAction, reason: Refusal | 'stale') {
+  private refuse(session: Session, action: IntentAction, reason: Refusal | 'stale' | 'rate') {
     this.sendTo(session.client, 'refused', { action, reason });
   }
 
@@ -521,9 +591,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   /**
-   * A dodge: its starting pose is checked like any move first (and must carry the latest ack); a
-   * refused pose is corrected and the dodge refused as 'stale'. The engine then rolls from it; the
-   * room stamps the result on the next step.
+   * A dodge: its starting pose is checked like any move first; a refused pose is corrected and the
+   * dodge refused as 'stale'. It must carry the latest ack, or the one before when the latest
+   * displacement was this client's own dodge (a client that predicts its rolls sends the second
+   * before the first's `displaced` reaches it; its pose is then checked from the first roll's end).
+   * One arriving just inside the minimum gap (network jitter) is held until the gap has passed. The
+   * engine then rolls from the accepted pose and the room stamps the result on the next step; if
+   * the engine refuses it, the refusal is followed by a `correct` to that pose.
    */
   private onDodge(client: Client, message: unknown) {
     const session = this.actor(client);
@@ -531,18 +605,44 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const { dx, dz } = (typeof message === 'object' && message !== null ? message : {}) as { dx?: unknown; dz?: unknown };
     if (!session || !pose || !finite(dx) || !finite(dz) || Math.abs(dx) > 1e6 || Math.abs(dz) > 1e6) return;
     if (session.dead) return this.refuse(session, 'dodge', 'dead');
-    if (session.awaitingDisplace || pose.ack !== session.displaceSeq) return this.refuse(session, 'dodge', 'stale');
-    if (!this.acceptPose(session, pose, Date.now())) return this.refuse(session, 'dodge', 'stale');
+    const ownRollBefore = pose.ack === session.displaceSeq - 1 && session.lastDisplaceKind === 'dodge';
+    if (session.awaitingDisplace || (pose.ack !== session.displaceSeq && !ownRollBefore)) return this.refuse(session, 'dodge', 'stale');
+    if (!this.acceptPose(session, pose, this.wallMs())) return this.refuse(session, 'dodge', 'stale');
     if (session.travelling) return;
-    const from = { ...session.lastGood };
-    if (this.intent(session, 'dodge', { t: 'dodge', dx, dz, from, grounded: session.movement.air.grounded })) session.awaitingDisplace = true;
+    const now = this.nowS();
+    const view = this.combat.self(session.eid);
+    const gapWait = session.lastDodgeAt + DODGE_MIN_GAP_S - now;
+    const chargeWait = view && view.dodgeCharges <= 0 ? view.dodgeNextIn : 0;
+    const wait = Math.max(gapWait, chargeWait);
+    if (wait > 1e-6 && wait <= DODGE_GAP_TOLERANCE_S) {
+      session.pendingDodge = { dx, dz, due: now + wait + 1e-6 };
+      session.awaitingDisplace = true; // its moves wait for the roll, like any accepted dodge's
+      session.awaitingSince = now;
+      return;
+    }
+    this.startDodge(session, dx, dz, now);
+  }
+
+  /** Rolls from the last accepted pose; a refusal goes back with a `correct` to that pose (the client may have predicted the roll). */
+  private startDodge(session: Session, dx: number, dz: number, now: number) {
+    session.pendingDodge = undefined;
+    session.awaitingDisplace = false;
+    const refusal = this.combat.intent(session.eid, { t: 'dodge', dx, dz, from: { ...session.lastGood }, grounded: session.movement.air.grounded }, now);
+    if (refusal) {
+      this.refuse(session, 'dodge', refusal);
+      this.correct(session, this.wallMs());
+      return;
+    }
+    session.awaitingDisplace = true;
+    session.awaitingSince = now;
+    session.lastDodgeAt = now;
   }
 
   private onRespawn(client: Client) {
     const session = this.actor(client);
     if (!session) return;
     if (!session.dead) return this.refuse(session, 'respawn', 'invalid');
-    if (this.nowS() - session.deadAt < DEATH_MIN_S - 1e-6) return this.refuse(session, 'respawn', 'cooldown');
+    if (this.nowS() - session.deadAt < DEATH_MIN_S - 1e-6 || this.wallMs() < session.respawnRetryAt) return this.refuse(session, 'respawn', 'cooldown');
     this.respawn(session);
   }
 
@@ -564,7 +664,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const travelling = (async () => {
       // A respawn elsewhere: the death may have been saved as respawned already (that is this travel's save).
       if (respawn) await session.deathSave;
-      const saved = (respawn && session.respawnSaved) || (await this.save(session, { zone: exit.to, x, z, facing })) === 'saved';
+      const result = respawn && session.respawnSaved ? 'saved' : await this.save(session, { zone: exit.to, x, z, facing });
+      const saved = result === 'saved';
       if (this.sessions.get(sessionId) !== session) {
         // Kicked or gone while saving: that ended the session already, without saving over the travel.
         // If the travel was not saved either, save it here as it is (kick waits for this).
@@ -577,15 +678,23 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (!saved) {
         destination.releaseArrival(session.accountId);
         session.travelling = undefined;
+        if (respawn && result === 'refused') {
+          // Not saved here any more: it already is in the respawn zone (an earlier save went through).
+          await this.sendOn(session);
+          return;
+        }
+        if (respawn) session.respawnRetryAt = this.wallMs() + RESPAWN_RETRY_MS; // the store is down: not every step
         if (!respawn) {
           session.lastGood = before;
           Object.assign(session.player, before, { moving: false });
           this.combat.setPose(session.eid, before.x, before.z, before.y, session.player.facing);
-          this.correct(session, Date.now());
+          this.correct(session, this.wallMs());
         }
-        this.notice(session, REASON_TRAVEL_FAILED, Date.now());
+        this.notice(session, REASON_TRAVEL_FAILED, this.wallMs());
         return;
       }
+      // Died while the travel was being saved (alive, in the next zone): saved again, as respawned.
+      if (session.dead && !respawn) await this.save(session, undefined, exit.to);
       // Its height here means nothing there: it arrives standing (the next room's join places it).
       session.movement.zone = exit.to;
       await this.removeSession(sessionId, { save: false });
@@ -634,7 +743,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * told the health it sees lost (hp shows as Math.ceil of the engine's).
    */
   private fall(session: Session, damage: number) {
-    const shown = () => Math.ceil(this.combat.get(session.eid)?.hp ?? 0);
+    const shown = () => Math.ceil(this.combat.get(session.eid)?.hp ?? 0); // the hp the client sees
     const before = shown();
     this.combat.damage(session.eid, damage, this.nowS(), 'fall');
     const amount = before - shown();
@@ -705,7 +814,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private leaveFight(session: Session) {
     if (!this.sessionByEid.delete(session.eid)) return;
     const carry = session.dead ? undefined : this.combat.carryOf(session.eid);
-    if (carry) this.accounts.carries.set(session.accountId, { carry, at: Date.now() });
+    if (carry) this.accounts.carries.set(session.accountId, { carry, at: this.wallMs() });
     this.combat.removeAdventurer(session.eid);
   }
 
@@ -714,7 +823,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const kept = this.accounts.carries.get(accountId);
     if (!kept) return undefined;
     this.accounts.carries.delete(accountId);
-    const ago = Date.now() - kept.at;
+    const ago = this.wallMs() - kept.at;
     return ago < CARRY_KEEP_MS ? ageCarry(kept.carry, ago / 1000) : undefined;
   }
 
@@ -754,16 +863,45 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * it is still saved in this zone: 'saved' if written, 'refused' if the store says it is not (saved
    * elsewhere, or unknown), 'failed' if the store threw (logged).
    */
-  private async save(session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>): Promise<'saved' | 'refused' | 'failed'> {
-    const { x, z, facing, hp } = session.player;
+  private async save(
+    session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>, expectZone: ZoneId = this.zone.id,
+  ): Promise<'saved' | 'refused' | 'failed'> {
+    const { x, z, facing } = session.player;
+    // Health as a whole number rounded down (at least 1): a relog never gains the fraction.
+    const hp = Math.max(1, Math.floor(session.hpExact));
     // The dead are always saved as respawned: at the statue, with full health.
-    const as = session.dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: MAX_HP } : to;
+    const dead = session.dead;
+    const as = dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: MAX_HP } : to;
     const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, loadout: session.loadout, ...as };
+    let result: 'saved' | 'refused' | 'failed';
     try {
-      return (await this.store.saveAdventurer(values, { zone: this.zone.id })) ? 'saved' : 'refused';
+      result = (await this.store.saveAdventurer(values, { zone: expectZone })) ? 'saved' : 'refused';
     } catch (err) {
-      console.error('Saving an adventurer failed:', err);
+      this.logFailure('save', 'Saving an adventurer failed', err);
       return 'failed';
+    }
+    if (result === 'saved' && dead) {
+      this.accounts.respawns.set(session.accountId, this.wallMs() + RESPAWN_ADMIT_MS);
+      if (session.dead) session.respawnSaved = true;
+    }
+    return result;
+  }
+
+  /** Logs a failure, at most once a minute per kind (so an outage or a bad tick cannot flood the log); every one is counted. */
+  private logFailure(kind: string, what: string, err: unknown) {
+    this.stepErrors++;
+    const now = Date.now();
+    if (now - (this.loggedAt.get(kind) ?? -Infinity) < LOG_EVERY_MS) return;
+    this.loggedAt.set(kind, now);
+    console.error(`${what} (${this.zone.id}; logged at most once a minute):`, err);
+  }
+
+  /** Runs one piece of a step; a throw is counted and logged (throttled) and the step goes on. */
+  private safely(kind: string, fn: () => void) {
+    try {
+      fn();
+    } catch (err) {
+      this.logFailure(`step:${kind}`, `The ${kind} part of a room step failed`, err);
     }
   }
 
@@ -785,12 +923,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.deadAt = this.nowS();
     session.awaitingDisplace = false;
     session.anim = undefined;
+    session.pendingDodge = undefined;
     session.player.moving = false;
-    if (session.travelling) return; // the travel's save saves it respawned
-    const sessionId = session.client.sessionId;
-    session.deathSave = this.save(session).then((result) => {
-      if (result === 'saved' && this.sessions.get(sessionId) === session && session.dead) session.respawnSaved = true;
-    });
+    if (session.travelling) return; // the travel saves it again as respawned once it has landed
+    session.deathSave = this.save(session).then(() => {}); // save() marks it respawnSaved
   }
 
   /** Up again at the statue: revived here in RESPAWN_ZONE; from anywhere else, a travel there (one save). */
@@ -805,7 +941,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const y = (this.zone.surface(x, z) ?? 0) + 0; // + 0: never -0
     this.combat.revive(session.eid, { x, z, y }, this.nowS());
     this.combat.setPose(session.eid, x, z, y, facing);
-    Object.assign(session, { dead: false, deadAt: -Infinity, respawnSaved: false, deathSave: undefined, anim: undefined, awaitingDisplace: false });
+    Object.assign(session, {
+      dead: false, deadAt: -Infinity, respawnSaved: false, deathSave: undefined, anim: undefined, awaitingDisplace: false,
+      pendingDodge: undefined, respawnRetryAt: -Infinity, lastDisplaceKind: 'respawn',
+    });
+    this.accounts.respawns.delete(session.accountId);
     session.lastGood = { x, z, y };
     session.movement.air = makeAirTrack(y);
     session.movement.zone = this.zone.id;
@@ -838,18 +978,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (old > 0) this.tickTimes.splice(0, old);
   }
 
-  /** One room step, timed; a throw is logged (at most once a minute) and the room carries on. */
+  /** One room step, timed: every part of it runs, whatever another part throws (see safely). */
   private step() {
     const started = performance.now();
-    try {
-      this.advance();
-    } catch (err) {
-      const now = Date.now();
-      if (now - this.lastTickErrorAt >= TICK_ERROR_LOG_MS) {
-        this.lastTickErrorAt = now;
-        console.error(`The ${this.zone.id} room's step failed (logged at most once a minute):`, err);
-      }
-    }
+    this.advance();
     const now = Date.now();
     this.tickTimes.push({ at: now, ms: performance.now() - started });
     this.forgetTicks(now);
@@ -857,46 +989,77 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /**
    * Runs the engine up to the combat clock (one tick per 1/TICK_HZ, at most MAX_TICKS_PER_STEP),
-   * handling each tick's displacements, deaths and kills; then moves displaced bodies along their
-   * paths, respawns the long dead, mirrors the state, and sends fx and `self`.
+   * handling each tick's displacements, deaths and kills one by one; then, per session, moves
+   * displaced bodies along their paths, rolls held dodges, resyncs lost displacements, reconciles
+   * deaths the step missed and respawns the long dead; then mirrors the state and sends fx and `self`.
    */
   private advance() {
     const w0 = this.lastTickAt;
     const target = Math.max(this.nowS(), w0);
     const n = Math.min(MAX_TICKS_PER_STEP, Math.max(1, Math.round((target - w0) * TICK_HZ)));
     const fx: FxEvent[] = [];
+    this.safely('held dodges', () => {
+      for (const session of this.sessions.values()) {
+        const held = session.pendingDodge;
+        if (held && held.due <= target && !session.dead && !session.travelling) this.startDodge(session, held.dx, held.dz, Math.max(target, held.due));
+      }
+    });
     for (let k = 1; k <= n; k++) {
-      const out = this.combat.tick(w0 + ((target - w0) * k) / n);
+      let out: TickOut | undefined;
+      this.safely('tick', () => { out = this.combat.tick(w0 + ((target - w0) * k) / n); });
+      if (!out) break;
       this.handle(out);
       for (const e of out.fx) fx.push(e);
     }
     this.lastTickAt = target;
     this.steps++;
+    const wall = this.wallMs();
     for (const session of this.sessions.values()) {
-      if (session.anim) this.animate(session);
-      if (session.dead && !session.travelling && target - session.deadAt >= this.autoRespawnSeconds) this.respawn(session);
+      this.safely('session', () => {
+        if (session.anim) this.animate(session);
+        if (session.awaitingDisplace && !session.pendingDodge && target - session.awaitingSince > DISPLACE_RESYNC_S) this.resync(session);
+        if (!session.dead && this.combat.get(session.eid)?.alive === false) this.died(session); // a death the step lost
+        if (session.dead && !session.travelling && target - session.deadAt >= this.autoRespawnSeconds && wall >= session.respawnRetryAt) this.respawn(session);
+      });
     }
-    this.mirrorZone();
-    for (const session of this.sessions.values()) this.mirrorPlayer(session);
-    if (fx.length > 0) this.sendFx(fx);
-    if (this.steps % SELF_EVERY_STEPS === 0) for (const session of this.sessions.values()) this.sendSelf(session);
+    this.safely('mirror', () => this.mirrorAll());
+    if (fx.length > 0) this.safely('fx', () => this.sendFx(fx));
+    if (this.steps % SELF_EVERY_STEPS === 0) {
+      for (const session of this.sessions.values()) this.safely('self', () => this.sendSelf(session));
+    }
   }
 
+  /** A tick's displacements, deaths and kills, each on its own (one that throws does not stop the rest). */
   private handle(out: TickOut) {
     for (const d of out.displaced) {
       const session = this.sessionByEid.get(d.id);
-      if (session) this.displace(session, d);
+      if (session) this.safely('displace', () => this.displace(session, d));
     }
     for (const id of out.died) {
       const session = this.sessionByEid.get(id);
-      if (session && !session.dead) this.died(session);
+      if (session && !session.dead) this.safely('death', () => this.died(session));
     }
     for (const kill of out.kills) {
       for (const id of kill.credit) {
         const session = this.sessionByEid.get(id);
-        if (session) this.sendTo(session.client, 'credit', { kind: kill.kind });
+        if (session) this.safely('credit', () => this.sendTo(session.client, 'credit', { kind: kill.kind }));
       }
     }
+  }
+
+  /**
+   * A dodge accepted but never stamped (its step failed): the client is put where the engine has it,
+   * with a new seq (`displaced` kind 'resync', from = to), and its moves count again.
+   */
+  private resync(session: Session) {
+    const v = this.combat.get(session.eid);
+    if (!v) return;
+    const at = { x: v.x, z: v.z, y: v.y + 0 };
+    const path = [{ t: 0, ...at }];
+    this.displace(session, {
+      id: session.eid, kind: 'resync' as 'dodge', from: at, d: { vx: 0, vz: 0, vy: 0, seconds: 0 },
+      result: { ...at, drop: 0, drops: [], fallHp: 0, seconds: 0, grounded: true, path },
+    });
   }
 
   /**
@@ -906,19 +1069,27 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    */
   private displace(session: Session, d: DisplaceOut) {
     if (!d.result.grounded) return; // no displacement (the engine sends none like this)
+    const kind = d.kind as 'dodge' | 'knock' | 'resync';
     const end = { x: d.result.x, z: d.result.z, y: d.result.y + 0 };
     const seq = ++session.displaceSeq;
     session.awaitingDisplace = false;
+    session.pendingDodge = undefined;
+    session.lastDisplaceKind = kind;
     session.lastGood = end;
     const movement = session.movement;
-    const now = Date.now();
+    const now = this.wallMs();
+    // Knocked in mid-air: the fall it was already in is charged too, from its highest point to where the push began.
+    const air = movement.air;
+    const before = air.grounded ? 0 : fallDamage(Math.max(air.peakY, air.airStartY) - d.from.y);
     movement.air = makeAirTrack(end.y);
-    movement.metres = Math.min(refillAllowance(movement.metres, (now - movement.at) / 1000), MAX_MOVE_ALLOWANCE) + DISPLACE_FUZZ_M;
+    const scale = this.combat.speedScale(session.eid, this.nowS());
+    movement.metres = Math.min(refillAllowance(movement.metres, (now - movement.at) / 1000, scale), MAX_MOVE_ALLOWANCE * Math.max(1, scale)) + DISPLACE_FUZZ_M;
     movement.at = now;
-    if (d.result.fallHp > 0) this.fall(session, d.result.fallHp);
-    session.anim = { path: d.result.path, i: 1 };
+    if (before + d.result.fallHp > 0) this.fall(session, before + d.result.fallHp);
+    session.anim = kind === 'resync' ? undefined : { path: d.result.path, i: 1 };
+    if (kind === 'resync') Object.assign(session.player, end);
     session.player.moving = false;
-    const message: S2C['displaced'] = { seq, kind: d.kind, from: { ...d.from }, d: { ...d.d }, to: end };
+    const message: S2C['displaced'] = { seq, kind, from: { ...d.from }, d: { ...d.d }, to: end };
     session.lastSeqMessage = { type: 'displaced', message };
     if (!session.reconnection) this.sendTo(session.client, 'displaced', message);
   }
@@ -965,11 +1136,27 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.sendTo(session.client, 'self', self);
   }
 
-  /** The engine's view of an adventurer onto its PlayerState (only fields that changed are set). */
+  /** The engine's view of one adventurer onto its PlayerState (after an intent or a fall; steps use mirrorAll). */
   private mirrorPlayer(session: Session) {
     const v = this.combat.get(session.eid);
-    if (!v) return;
+    if (v) this.mirrorPlayerView(session, v);
+  }
+
+  /** One pass over the engine's combatants: each enemy and each adventurer's state (only fields that changed are set). */
+  private mirrorAll() {
+    for (const v of this.combat.all()) {
+      if (v.team === 'enemy') this.mirrorEnemy(v);
+      else {
+        const session = this.sessionByEid.get(v.id);
+        if (session) this.mirrorPlayerView(session, v);
+      }
+    }
+    this.mirrorTelegraphs();
+  }
+
+  private mirrorPlayerView(session: Session, v: CombatantView) {
     const p = session.player;
+    session.hpExact = v.hp;
     const hp = v.alive ? Math.max(1, Math.ceil(v.hp)) : 0;
     if (p.hp !== hp) p.hp = hp;
     const dead = !v.alive;
@@ -979,21 +1166,24 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (p.target !== target) p.target = target;
     const shield = byte(v.shield);
     if (p.shield !== shield) p.shield = shield;
-    const momentum = byte(this.combat.self(session.eid)?.momentum ?? 0);
-    if (p.momentum !== momentum) p.momentum = momentum;
     if (p.weapon !== session.loadout.weapon) p.weapon = session.loadout.weapon;
   }
 
-  /** Enemies and telegraphs onto the state: fields set only when changed; telegraphs added once and deleted when gone. */
+  /** Enemies and telegraphs onto the state (the room's start; steps use mirrorAll). */
   private mirrorZone() {
-    for (const v of this.combat.all()) {
-      if (v.team !== 'enemy') continue;
+    for (const v of this.combat.all()) if (v.team === 'enemy') this.mirrorEnemy(v);
+    this.mirrorTelegraphs();
+  }
+
+  /** An enemy onto the state: fields set only when changed. */
+  private mirrorEnemy(v: CombatantView) {
+    {
       const key = this.keyOf(v.id);
       let e = this.state.enemies.get(key);
       if (!e) {
         e = new EnemySchema({
           eid: v.id, kind: v.kind, x: v.x, z: v.z, y: v.y, facing: v.facing, hp: Math.ceil(v.hp), maxHp: v.maxHp, stagger: 0,
-          maxStagger: byte(v.maxStagger), marks: 0, mode: 'idle', target: -1, windup: '', windupTotal: 0,
+          maxStagger: byte(v.maxStagger), marks: 0, mode: 'idle', target: -1, windup: '', windupTotal: 0, surging: false, staggerImmune: 0,
         });
         this.state.enemies.set(key, e);
       }
@@ -1010,7 +1200,15 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (e.target !== target) e.target = target;
       if (e.windup !== windup) e.windup = windup;
       if (e.windupTotal !== windupTotal) e.windupTotal = windupTotal;
+      if (e.maxHp !== v.maxHp) e.maxHp = v.maxHp;
+      const surging = v.surging === true, staggerImmune = round2(v.staggerImmune ?? 0);
+      if (e.surging !== surging) e.surging = surging;
+      if (e.staggerImmune !== staggerImmune) e.staggerImmune = staggerImmune;
     }
+  }
+
+  /** Telegraphs onto the state: added once, deleted when gone. */
+  private mirrorTelegraphs() {
     const live = new Set<string>();
     for (const t of this.combat.telegraphs()) {
       const key = this.keyOf(t.id);
@@ -1039,7 +1237,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private allowanceFor(accountId: string): Allowance {
     let allowance = this.accounts.allowances.get(accountId);
     if (!allowance) {
-      allowance = { metres: STEP_SLACK, at: Date.now(), air: makeAirTrack(0), zone: this.zone.id };
+      allowance = { metres: STEP_SLACK, at: this.wallMs(), air: makeAirTrack(0), zone: this.zone.id };
       this.accounts.allowances.set(accountId, allowance);
     }
     return allowance;
@@ -1047,18 +1245,37 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /** Drops allowances of accounts that are online nowhere and have been still long enough to be full anyway. */
   private forgetIdleAllowances() {
-    const now = Date.now();
+    const now = this.wallMs();
     for (const [accountId, allowance] of this.accounts.allowances) {
       if (!this.accounts.get(accountId) && now - allowance.at > ALLOWANCE_FORGET_MS) this.accounts.allowances.delete(accountId);
     }
     for (const [accountId, kept] of this.accounts.carries) if (now - kept.at >= CARRY_KEEP_MS) this.accounts.carries.delete(accountId);
+    for (const [accountId, until] of this.accounts.respawns) if (until <= now) this.accounts.respawns.delete(accountId);
   }
 
-  /** Takes one token from the client's message bucket; false (drop the message) when it is empty. */
-  private takeToken(client: Client): boolean {
+  /**
+   * Takes one token from the client's message bucket, or for an intent from its intent bucket; false
+   * (drop the message) when it is empty. A dropped intent is answered `refused 'rate'` (at most one
+   * every RATE_REFUSAL_EVERY_MS); other dropped messages are silent.
+   */
+  private takeToken(client: Client, type: string): boolean {
     const session = this.sessions.get(client.sessionId);
     if (!session) return true; // handlers ignore messages without a session anyway
-    const now = Date.now();
+    const now = this.wallMs();
+    const action = INTENTS[type];
+    if (action) {
+      session.intentTokens = Math.min(INTENT_BURST, session.intentTokens + ((now - session.intentTokensAt) / 1000) * INTENT_RATE);
+      session.intentTokensAt = now;
+      if (session.intentTokens >= 1) {
+        session.intentTokens -= 1;
+        return true;
+      }
+      if (now - session.rateRefusedAt >= RATE_REFUSAL_EVERY_MS) {
+        session.rateRefusedAt = now;
+        this.refuse(session, action, 'rate');
+      }
+      return false;
+    }
     session.tokens = Math.min(MESSAGE_BURST, session.tokens + ((now - session.tokensAt) / 1000) * MESSAGE_RATE);
     session.tokensAt = now;
     if (session.tokens < 1) return false;
@@ -1066,14 +1283,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     return true;
   }
 
-  /** Wraps a message handler: rate-limited per client, and a throw is logged while the room carries on. */
+  /** Wraps a message handler: rate-limited per client, and a throw is logged (throttled) while the room carries on. */
   private guard(type: string, handler: (client: Client, message: unknown) => void) {
     return (client: Client, message: unknown) => {
-      if (!this.takeToken(client)) return;
+      if (!this.takeToken(client, type)) return;
       try {
         handler(client, message);
       } catch (err) {
-        console.error(`The ${type} handler failed:`, err);
+        this.logFailure(`handler:${type}`, `The ${type} handler failed`, err);
       }
     };
   }

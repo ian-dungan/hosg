@@ -30,6 +30,12 @@ export class Presence {
    * resets nothing. Forgotten once taken, or once everything would have been ready anyway.
    */
   readonly carries = new Map<string, { carry: Carry; at: number }>();
+  /**
+   * Accounts saved as respawned (a death) that have not joined the respawn zone since, and until when
+   * (ms): their join there is always admitted, however full it is (deaths may push the respawn zone
+   * past maxPlayers by design).
+   */
+  readonly respawns = new Map<string, number>();
 
   /** The session that holds the account now, if any (a copy). */
   get(accountId: string): Claim | undefined {

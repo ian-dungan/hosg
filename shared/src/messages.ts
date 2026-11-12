@@ -64,9 +64,18 @@ export type S2C = {
    * The server moved this adventurer (a dodge it asked for, or a knockback): it is at `to` now. From
    * now on every pose the client sends carries `ack: seq`; poses with an older ack are ignored.
    */
-  displaced: { seq: number; kind: 'dodge' | 'knock'; from: { x: number; z: number; y: number }; d: Displacement; to: { x: number; z: number; y: number } };
-  /** An intent the server refused; 'stale': a dodge whose pose was refused (a `correct` comes with it) or carried an old ack. */
-  refused: { action: IntentAction; reason: Refusal | 'stale' };
+  /**
+   * kind 'resync': no movement of its own; the server lost track of a displacement the client is
+   * waiting for and puts it at its own position (from = to) with a new seq.
+   */
+  displaced: { seq: number; kind: 'dodge' | 'knock' | 'resync'; from: { x: number; z: number; y: number }; d: Displacement; to: { x: number; z: number; y: number } };
+  /**
+   * An intent the server refused. 'stale': a dodge with an old ack, or whose pose was refused (a
+   * `correct` came first). 'rate': more intents than the intent budget (20 a second, bursts of 30).
+   * A dodge refused after its pose was accepted (cooldown, charges, ...) is always followed by a
+   * `correct` to the pose it started from: the one rollback path for a predicted roll.
+   */
+  refused: { action: IntentAction; reason: Refusal | 'stale' | 'rate' };
   /** The adventurer's own combat numbers, at most 5 times a second, only when they changed. */
   self: SelfView;
   /** This adventurer shares the kill of an enemy of this kind. */

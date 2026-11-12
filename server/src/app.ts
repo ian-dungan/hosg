@@ -31,6 +31,8 @@ export interface AppOptions {
   combatClock?: () => number;
   /** Test-only: seconds after a death before an adventurer gets up by itself (default AUTO_RESPAWN_S). */
   autoRespawnSeconds?: number;
+  /** Test-only: the wall clock (ms) the rooms' movement checks and budgets use (default Date.now). */
+  wallClock?: () => number;
 }
 
 export interface App {
@@ -39,9 +41,10 @@ export interface App {
   /**
    * Adventurers online, and state patches sent per second over the last 5 s: in all, and per zone.
    * The overall tickHz is the lowest among zones with adventurers (the grove's when none have any).
-   * Each zone's tickMs is the p95 of its room step's time over the last 5 s.
+   * Each zone's tickMs is the p95 of its room step's time over the last 5 s; stepErrors counts the
+   * failures its steps and handlers caught (and carried on from) since it started.
    */
-  stats(): { players: number; tickHz: number; zones: Record<ZoneId, { players: number; tickHz: number; tickMs: number }> };
+  stats(): { players: number; tickHz: number; zones: Record<ZoneId, { players: number; tickHz: number; tickMs: number; stepErrors: number }> };
   /** Whether the exits from `from` to `to` are open now. */
   isExitOpen(from: ZoneId, to: ZoneId): boolean;
   /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
@@ -70,9 +73,9 @@ export function createApp(opts: AppOptions): App {
     const perZone = Object.fromEntries(
       ZONE_IDS.map((id) => {
         const room = rooms.get(id);
-        return [id, { players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0), tickMs: Math.round((room?.tickMsP95 ?? 0) * 100) / 100 }];
+        return [id, { players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0), tickMs: Math.round((room?.tickMsP95 ?? 0) * 100) / 100, stepErrors: room?.stepErrors ?? 0 }];
       }),
-    ) as Record<ZoneId, { players: number; tickHz: number; tickMs: number }>;
+    ) as Record<ZoneId, { players: number; tickHz: number; tickMs: number; stepErrors: number }>;
     const busy = ZONE_IDS.filter((id) => perZone[id].players > 0).map((id) => perZone[id].tickHz);
     return {
       players: ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),
@@ -112,6 +115,7 @@ export function createApp(opts: AppOptions): App {
       combatSeed: opts.combatSeed ?? Math.floor(Math.random() * 2 ** 31),
       combatClock: opts.combatClock,
       autoRespawnSeconds: opts.autoRespawnSeconds ?? AUTO_RESPAWN_S,
+      wallClock: opts.wallClock,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }
