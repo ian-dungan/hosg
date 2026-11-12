@@ -250,19 +250,37 @@ function randomDisp(r: () => number): Disp {
  */
 function checkGuarantee(res: ReturnType<typeof simulateDisplacement>, surface: Surface, start: { x: number; z: number; y: number }) {
   const g0 = surface(start.x, start.z)!;
-  expect(replayPath(res, surface, start).filter((v) => v !== 'ok')).toEqual([]);
-  let ground = g0, prev = res.path[0];
+  // checkPose accepts every step, except a straight-down fall at the end (after a cut)
+  const results = replayPath(res, surface, start);
+  const firstRefused = results.findIndex((v) => v !== 'ok');
+  if (firstRefused >= 0) {
+    for (let i = firstRefused + 1; i < res.path.length; i++) {
+      expect(res.path[i].x).toBe(res.path[firstRefused].x);
+      expect(res.path[i].z).toBe(res.path[firstRefused].z);
+    }
+  }
+  // always ends standing on the real surface (no bottomless drops in these scenes)
+  expect(res.grounded).toBe(true);
+  expect(Math.abs(res.y - surface(res.x, res.z)!)).toBeLessThanOrEqual(1e-9);
+  let ground = g0, prev = res.path[0], walkedRise = 0, prevGrounded = true;
   for (const p of res.path) {
     const s = surface(p.x, p.z);
     expect(s).not.toBeNull();
+    const grounded = p.y <= s! + 0.05;
+    const step = Math.hypot(p.x - prev.x, p.z - prev.z);
+    // legal walking: a grounded-to-grounded stretch rising at most STEP_UP per 0.25 m
+    if (grounded && prevGrounded && p !== prev && p.y - prev.y <= 0.35 * Math.ceil(step / 0.25 - 1e-9) + 1e-9) walkedRise += Math.max(0, p.y - prev.y);
+    // the absolute bound: never more than 2 m above the ground under the start, except by legal walking
+    expect(p.y).toBeLessThanOrEqual(g0 + 2.0 + walkedRise + 1e-9);
     // between two samples the body may land and then walk up (at most STEP_UP per 0.25 m)
-    const walked = (0.35 * Math.hypot(p.x - prev.x, p.z - prev.z)) / 0.25;
+    const walked = (0.35 * step) / 0.25;
     expect(p.y).toBeLessThanOrEqual(ground + 2.0 + walked + 1e-9);
-    if (p.y <= s! + 0.05) {
-      expect(s!).toBeLessThanOrEqual(ground + JUMP_REACH + walked + 1e-9);
+    if (grounded) {
+      // a landing is at most 1.65 m (AIR_CAP − STEP_UP) above that ground, and a short walk adds STEP_UP
+      expect(s!).toBeLessThanOrEqual(ground + 2.0 + walked + 1e-9);
       ground = Math.max(ground, s!);
     }
-    prev = p;
+    prev = p; prevGrounded = grounded;
   }
 }
 
@@ -271,11 +289,13 @@ describe('simulateDisplacement guarantee (seeded fuzz)', () => {
     const r = rng(12345);
     for (let n = 0; n < 1500; n++) {
       const H = r() * 4, L = 0.5 + r() * 3, W = -3 - r() * 2, T = 0.25 + r() * 0.5, g = r() * 4;
-      const kind = Math.floor(r() * 3);
+      const kind = Math.floor(r() * 4);
+      const steep = [4, 6, 1.6, 2.56][Math.floor(r() * 4)];
       const surface: Surface = (x) => {
         if (x >= W - T && x <= W) return null; // a wall behind
         if (kind === 0) return x >= L ? H : 0; // a cliff ahead
         if (kind === 1) return x >= L ? Math.min(6, (x - L) * g) : 0; // a slope ahead
+        if (kind === 3) return x >= L ? Math.min(5, (x - L) * steep) : 0; // a steep ramp ahead (4:1, 6:1, ...)
         return x >= L && x <= L + T ? null : 0; // a thin wall ahead
       };
       const sx = W + 0.3 + r() * (L - W - 0.3), sz = r() * 4 - 2;
@@ -291,8 +311,13 @@ describe('simulateDisplacement guarantee (seeded fuzz)', () => {
         if (kind === 2) expect((a.x < L && b.x > L + T) || (a.x > L + T && b.x < L)).toBe(false);
       }
       if (kind === 0 && H > JUMP_REACH) expect(onTop(res, L, H)).toBe(false);
+      // a steep ramp: the flight stays within 2 m; any height above that is legal walking (sliding
+      // along the ramp in short level steps and stairs), which checkGuarantee accounts for
+      if (kind === 3) checkFlight(res, surface, start);
+      // pushed straight at the ramp there is no sliding, so nothing climbs past 2 m at all
+      if (kind === 3 && d.vz === 0) for (const p of res.path) expect(p.y).toBeLessThanOrEqual(2.0 + 1e-9);
       if (kind === 1 && (g * Math.abs(d.vx)) / Math.hypot(d.vx, d.vz) >= 1.45 && !airborne && d.vy === 0) { // too steep along the push
-        for (const p of res.path) if (p.x >= L) expect(p.y).toBeLessThanOrEqual(0.35 + 1e-9);
+        for (const p of res.path) if (p.x >= L) expect(p.y).toBeLessThanOrEqual(0.35 + 0.01); // the slope window interpolates between 0.1 m steps across the foot
       }
     }
   });
@@ -307,5 +332,82 @@ describe('simulateDisplacement guarantee (seeded fuzz)', () => {
       const start = { x, z, y: r() < 0.5 ? g0 : g0 + r() * 2.5 };
       checkGuarantee(simulateDisplacement(start, randomDisp(r), groveTownSurface), groveTownSurface, start);
     }
+  });
+});
+
+// ───────── fix round 2: launches riding up steep ramps; falls the movement checks would refuse ─────────
+
+/** Up to its first grounded sample, a displacement is never more than 2 m above the start's ground. */
+function checkFlight(res: ReturnType<typeof simulateDisplacement>, surface: Surface, start: { x: number; z: number; y: number }) {
+  const g0 = surface(start.x, start.z)!;
+  for (const p of res.path.slice(1)) {
+    expect(p.y).toBeLessThanOrEqual(g0 + 2.0 + 1e-9);
+    if (p.y <= surface(p.x, p.z)! + 0.05) break;
+  }
+}
+
+describe('simulateDisplacement on steep ramps (rotated, every start before the foot)', () => {
+  const knocks = [ENEMY_ATTACKS.gore_charge.knock!, ENEMY_ATTACKS.ground_slam.knock!, { speed: 15, seconds: 0.5, vy: 6 }];
+  it('standing at the foot of a 4:1 ramp, a Ground Slam does not carry the body more than 2 m up', () => {
+    const ramp: Surface = (x) => Math.max(0, Math.min(5, x * 4));
+    for (const sx of [-2, -1.5, -1, -0.8, -0.5, -0.3, -0.1, 0]) {
+      const r = simulateDisplacement({ x: sx, z: 0, y: 0 }, knockDisplacement({ x: sx - 1, z: 0 }, { x: sx, z: 0 }, slam), ramp);
+      for (const p of r.path) expect(p.y).toBeLessThanOrEqual(2.0 + 1e-9);
+      expect(r.grounded).toBe(true);
+    }
+  });
+  it('sweep: 1.6:1 to 6:1 ramps at 24 rotations, knocks toward them from 0–6 m away (the review’s grid)', () => {
+    let runs = 0;
+    for (const slope of [1.6, 2, 2.56, 3, 4, 6]) {
+      for (let ri = 0; ri < 24; ri++) {
+        const rot = (ri * Math.PI) / 12 + 0.07, c = Math.cos(rot), s = Math.sin(rot);
+        const surf: Surface = (X, Z) => { const x = X * c + Z * s; return Math.abs(x) > 14 ? null : Math.max(0, Math.min(5, x * slope)); };
+        for (let i = -60; i <= 0; i++) {
+          const sx = i * 0.1, x = sx * c, z = sx * s;
+          for (const k of knocks) {
+            const start = { x, z, y: 0 };
+            const r = simulateDisplacement(start, knockDisplacement({ x: x - c, z: z - s }, { x, z }, k), surf);
+            // a rotated ramp can be walked up sideways (sliding along it is shallow enough): that
+            // climb is legal walking, checked by checkGuarantee; the flight itself stays within 2 m
+            checkGuarantee(r, surf, start);
+            checkFlight(r, surf, start);
+            runs++;
+          }
+        }
+      }
+    }
+    expect(runs).toBe(6 * 24 * 61 * 3);
+  });
+});
+
+describe('simulateDisplacement always ends on the real surface', () => {
+  it('a hover start off the Old Lookout falls all the way down, charged for the fall', () => {
+    const x = 35.13, z = -26.25, s0 = groveTownSurface(x, z)!;
+    const knocks = [ENEMY_ATTACKS.gore_charge.knock!, slam, { speed: 15, seconds: 0.5, vy: 6 }];
+    for (let a = 0; a < 16; a++) {
+      const c = Math.cos((a * Math.PI) / 8), s = Math.sin((a * Math.PI) / 8);
+      for (const d of [dodgeDisplacement(c, s), ...knocks.map((k) => knockDisplacement({ x: x - c, z: z - s }, { x, z }, k))]) {
+        for (const dy of [0, 1.45, 2.0, 2.6]) {
+          const start = { x, z, y: s0 + dy };
+          const r = simulateDisplacement(start, d, groveTownSurface);
+          expect(r.grounded).toBe(true);
+          expect(r.y).toBe(groveTownSurface(r.x, r.z));
+          expect(r.fallHp).toBe(r.drops.reduce((sum, v) => sum + fallDamage(v), 0));
+          checkGuarantee(r, groveTownSurface, start);
+        }
+      }
+    }
+  });
+  it('a cut fall lands below the cut point and its drop is charged', () => {
+    // a 2 m hover over a 4.5 m ledge's top: falling off the edge outlasts the start arc's ceiling
+    const ledge: Surface = (x) => (x < 1 ? 4.5 : 0);
+    const r = simulateDisplacement({ x: 0, z: 0, y: 6.5 }, dodgeDisplacement(1, 0), ledge);
+    expect(r.grounded).toBe(true);
+    expect(r.y).toBe(ledge(r.x, r.z));
+    expect(r.drops.length).toBe(1);
+    expect(r.drop).toBeGreaterThan(4.5);
+    expect(r.fallHp).toBe(fallDamage(r.drop));
+    const last = r.path[r.path.length - 1];
+    expect(last).toEqual({ t: r.seconds, x: r.x, z: r.z, y: r.y });
   });
 });
