@@ -1,9 +1,8 @@
 // buildWorld: Shady Grove (town, grove, statue) in its valley, with the final stylised look:
 // painted materials, cascaded shadows, graded post, shader sky + river, grass, wind and life.
 import {
-  Vector3, Color3, Color4, StandardMaterial, DirectionalLight, HemisphericLight, GlowLayer, CascadedShadowGenerator,
-  Scene, MeshBuilder, DynamicTexture, type Mesh, type AbstractMesh,
-  DefaultRenderingPipeline, SSAO2RenderingPipeline, ImageProcessingConfiguration, type ArcRotateCamera, type TransformNode,
+  Vector3, Color3, Color4, StandardMaterial, DirectionalLight, HemisphericLight,
+  Scene, MeshBuilder, DynamicTexture, type Mesh, type AbstractMesh, type ArcRotateCamera, type TransformNode,
 } from '@babylonjs/core';
 import type { BuildWorld, WorldApi, AnchorName, Anchor, Quality } from '../core/contracts';
 import { ARENA_RADIUS } from '../core/contracts';
@@ -19,6 +18,7 @@ import { createRiver } from './water';
 import { buildGrass } from './grass';
 import { createLife, createCloudBank, dotTex } from './life';
 import { createReveal } from './reveal';
+import { createLook } from './look';
 import {
   createGroveWalk, groundHeight, BEACON_DIR, BEACON_C, BEACON_U, BEACON_PERP, ARENA_C, ARENA_Y, BEACON_TOP, B_DOCK_U, B_DOCK_Y, SKY_ISLAND,
   DOCK_START, DOCK_LEN, DOCK_Y, PLAZA_R, ROAD_X0, roadZ, bandR,
@@ -181,70 +181,22 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   const spawns: Vector3[] = [];
   for (const [u, s] of [[28, -5], [27, 6], [22, -9], [21, 2], [16, 8], [15, -6], [11, -10], [10, 10]]) { const p = bu(u, s); spawns.push(new Vector3(p.x, BEACON_TOP, p.z)); }
 
-  // ───── quality: shadows, glow, post ─────
+  // ───── quality: shadows, glow, post (world/look.ts) ─────
   let quality: Quality = 'med';
-  let shadow: CascadedShadowGenerator | null = null;
-  let glow: GlowLayer | null = null;
   let cam: ArcRotateCamera | null = null;
-  let pipe: DefaultRenderingPipeline | null = null;
-  let ssao: SSAO2RenderingPipeline | null = null;
   const casters: AbstractMesh[] = [mTown, mStatue, mBronzeM, mProps, mBand];
   const receivers: Mesh[] = [mTerrain, mTown, mStatue, mBronzeM, mProps, mBand, mGrassA, mGrassB];
+  const look = createLook(scene, {
+    prefix: 'world', sun, casters, receivers,
+    shadow: { high: { maxZ: 170, cascades: 3, size: 2048 }, med: { maxZ: 110, cascades: 2, size: 1024 } },
+    glowMeshes: () => [mTownGlow, mFarGlowM, beaconGlow, ...reveal.beamMeshes],
+    glowColor: (mesh, result) => { if (reveal.beamMeshes.includes(mesh as Mesh)) result.set(1, 0.8, 0.4, 1); else result.set(1, 0.72, 0.36, 1); },
+  });
   // blob shadows for characters on 'low' (no shadow maps there)
   const blobTex = new DynamicTexture('world_blob', { width: 64, height: 64 }, scene, false);
   { const g = blobTex.getContext() as unknown as CanvasRenderingContext2D; const r = g.createRadialGradient(32, 32, 2, 32, 32, 31); r.addColorStop(0, 'rgba(40,30,60,0.55)'); r.addColorStop(1, 'rgba(40,30,60,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); blobTex.hasAlpha = true; blobTex.update(); }
   const blobMat = new StandardMaterial('world_blobmat', scene); blobMat.diffuseTexture = blobTex; blobMat.useAlphaFromDiffuseTexture = true; blobMat.disableLighting = true; blobMat.emissiveColor = new Color3(1, 1, 1); blobMat.zOffset = -2;
   const blobs: { root: TransformNode; disc: Mesh }[] = [];
-
-  const ip = scene.imageProcessingConfiguration;
-  const grade = (c: ImageProcessingConfiguration) => {
-    c.toneMappingEnabled = true; c.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
-    c.exposure = 1.08; c.contrast = 1.12;
-    c.colorCurvesEnabled = true;
-    const cc = c.colorCurves!; cc.globalSaturation = 4; cc.shadowsHue = 235; cc.shadowsDensity = 22; cc.shadowsSaturation = 20; cc.highlightsHue = 40; cc.highlightsDensity = 18; cc.highlightsSaturation = 15;
-    c.vignetteEnabled = true; c.vignetteWeight = 1.25; c.vignetteStretch = 0.5; c.vignetteColor = new Color4(0.16, 0.1, 0.22, 0);
-  };
-  let shadowFor: Quality | null = null;
-  const applyShadows = (q: Quality) => {
-    if (!scene.activeCamera && !cam) { shadowFor = null; return; } // created once a camera exists
-    shadowFor = q;
-    shadow?.dispose(); shadow = null;
-    for (const m of receivers) m.receiveShadows = q !== 'low';
-    if (q === 'low') return;
-    const csm = new CascadedShadowGenerator(q === 'high' ? 2048 : 1024, sun);
-    if (cam) csm.camera = cam;
-    csm.numCascades = q === 'high' ? 3 : 2;
-    csm.lambda = 0.82; csm.shadowMaxZ = q === 'high' ? 170 : 110; csm.stabilizeCascades = true; csm.cascadeBlendPercentage = 0.12;
-    csm.usePercentageCloserFiltering = true; csm.filteringQuality = q === 'high' ? CascadedShadowGenerator.QUALITY_HIGH : CascadedShadowGenerator.QUALITY_MEDIUM;
-    csm.bias = 0.004; csm.normalBias = 0.025; csm.darkness = 0.38;
-    csm.depthClamp = true; csm.autoCalcDepthBounds = false;
-    for (const c of casters) csm.addShadowCaster(c, false);
-    shadow = csm;
-  };
-  const applyPost = () => {
-    pipe?.dispose(); pipe = null; ssao?.dispose(); ssao = null;
-    glow?.dispose(); glow = null;
-    if (quality !== 'low') {
-      glow = new GlowLayer('world_glowlayer', scene, { mainTextureRatio: quality === 'high' ? 0.5 : 0.25, blurKernelSize: quality === 'high' ? 32 : 16 });
-      glow.intensity = 0.5;
-      for (const m of [mTownGlow, mFarGlowM, beaconGlow, ...reveal.beamMeshes]) glow.addIncludedOnlyMesh(m);
-      glow.customEmissiveColorSelector = (mesh, _s, _m, result) => { if (reveal.beamMeshes.includes(mesh as Mesh)) result.set(1, 0.8, 0.4, 1); else result.set(1, 0.72, 0.36, 1); };
-    }
-    // in-material grading (used on 'low' and before a camera is attached)
-    grade(ip); ip.isEnabled = true;
-    if (!cam || quality === 'low') return;
-    pipe = new DefaultRenderingPipeline('world_post', quality === 'high', scene, [cam]);
-    pipe.imageProcessingEnabled = true;
-    if (quality === 'high') {
-      pipe.samples = 4; pipe.fxaaEnabled = false;
-      pipe.bloomEnabled = true; pipe.bloomThreshold = 0.86; pipe.bloomWeight = 0.22; pipe.bloomKernel = 48; pipe.bloomScale = 0.5;
-      pipe.sharpenEnabled = true; pipe.sharpen.edgeAmount = 0.12; pipe.sharpen.colorAmount = 1;
-      try {
-        ssao = new SSAO2RenderingPipeline('world_ssao', scene, { ssaoRatio: 0.5, blurRatio: 0.5 }, [cam]);
-        ssao.radius = 1.2; ssao.totalStrength = 0.9; ssao.base = 0.2; ssao.samples = 12; ssao.maxZ = 140; ssao.minZAspect = 0.4; ssao.expensiveBlur = true;
-      } catch (e) { console.warn('SSAO unavailable', e); ssao = null; }
-    } else { pipe.fxaaEnabled = true; }
-  };
   const setQuality = (q: Quality) => {
     quality = q;
     mProps.setEnabled(q !== 'low');
@@ -254,8 +206,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     sky.setOctaves(q === 'low' ? 3 : q === 'med' ? 4 : 5);
     life.setLevel(q);
     for (const b of blobs) b.disc.setEnabled(q === 'low');
-    applyShadows(q);
-    applyPost();
+    look.setQuality(q);
   };
   setQuality('med');
 
@@ -273,7 +224,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
       for (const m of root.getChildMeshes(false)) {
         if (casters.includes(m)) continue;
         casters.push(m);
-        shadow?.addShadowCaster(m, false);
+        look.addCaster(m);
       }
       if (!blobs.some(b => b.root === root)) {
         const disc = MeshBuilder.CreateGround('world_blob_' + blobs.length, { width: 1.3, height: 1.3 }, scene);
@@ -281,7 +232,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
         blobs.push({ root, disc });
       }
     },
-    attachCamera: (c: ArcRotateCamera) => { cam = c; applyShadows(quality); applyPost(); },
+    attachCamera: (c: ArcRotateCamera) => { cam = c; look.attachCamera(c); },
     groundAt: (x, z) => walk.groundAt(x, z),
     surfaceAt: (x, z) => walk.surfaceAt(x, z),
     anchor: (name) => { const a = anchors[name]; return { pos: a.pos.clone(), facing: a.facing }; },
@@ -304,7 +255,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
     setQuality,
     update: (dt) => {
       time += dt;
-      if (shadowFor !== quality && (cam || scene.activeCamera)) applyShadows(quality);
+      look.update();
       WFX.time = time;
       WFX.wind = 0.8 + 0.2 * Math.sin(time * 0.31);
       const ac = cam ?? (scene.activeCamera as ArcRotateCamera | null);

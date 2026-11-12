@@ -190,9 +190,11 @@ export function bootGame(opts: GameOpts = {}): Game {
   rigRef = rig;
 
   const zoneLoaded: ((z: ZoneId) => void)[] = [];
-  function loadZone(z: ZoneId): void {
-    stopWalk();
-    rig.dispose();
+  /** True while a zone change is half done (its scene is being replaced): the render loop draws nothing. */
+  let swapping = false;
+  function swapTo(z: ZoneId): void {
+    swapping = true;
+    try { rig.dispose(); } catch { /* a half-built rig */ }
     rigRef = null;
     scene.dispose();
     scene = new Scene(engine);
@@ -204,6 +206,28 @@ export function bootGame(opts: GameOpts = {}): Game {
     marker = makeMarker();
     rig = makeRig();
     rigRef = rig;
+    swapping = false;
+  }
+  function loadZone(z: ZoneId): void {
+    stopWalk();
+    const from = zone;
+    try {
+      swapTo(z);
+    } catch (err) {
+      // Building the zone failed (a lost GL context, out of memory on a phone): put the previous zone back; if
+      // even that fails, the page cannot carry on, so it reloads.
+      console.error('loading zone', z, 'failed', err);
+      try {
+        swapTo(from);
+      } catch (err2) {
+        console.error('restoring zone', from, 'failed', err2);
+        hud.toast('Something went wrong, reloading…');
+        window.setTimeout(() => location.reload(), 1200);
+        throw err2;
+      }
+      hud.toast("Couldn't load the next area");
+      throw err;
+    }
     for (const cb of zoneLoaded) cb(z);
   }
 
@@ -229,6 +253,7 @@ export function bootGame(opts: GameOpts = {}): Game {
       let last = performance.now();
       let lastFrameMs = last;
       engine.runRenderLoop(() => {
+        if (swapping || scene.isDisposed) return; // a zone change that failed half way: nothing to draw
         const now = performance.now();
         // game time follows real time down to 10 fps (the server checks jumps against real time)
         const dt = Math.min(0.1, (now - last) / 1000);

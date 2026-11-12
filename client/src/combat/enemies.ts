@@ -21,7 +21,9 @@ export interface EnemyView {
   /** metadata { entityId } on every pickable mesh. */
   setEntityId(id: number): void;
   /** windup plays over `seconds` (default: the attack's wind-up). Setting the mode it already has does nothing. */
-  setMode(mode: EnemyMode, attack?: EnemyAttackId, seconds?: number): void;
+  setMode(mode: EnemyMode, attack?: EnemyAttackId, seconds?: number, elapsed?: number): void;
+  /** Back to a fresh idle enemy (a pooled view about to be used for another enemy of its kind). */
+  reset(): void;
   /** The attack lands: releases the wind-up in progress (or just ended), else a quick auto attack. */
   strike(): void;
   /** A flinch. */ hit(): void;
@@ -40,6 +42,8 @@ const P = {
   teal: hex(PALETTE.teal), tealDark: hex('#2b867f'), meadow: hex(PALETTE.meadow), grass2: PAL.grass2,
   wood: PAL.wood, woodDark: PAL.woodDark, woodLight: PAL.woodLight, lamp: PAL.lamp, cream: hex('#f6ead6'),
   hollow: hex('#1d1426'), straw: hex('#e9c46a'), straw2: hex('#c99a4a'),
+  // contrast against grass: the Thornling's bulb is dark plum with an ochre underside; the Archer's robe plum and cliff red
+  thornBulb: hex('#5a3a5e'), thornBulb2: hex('#b77a3a'), archRobe: hex('#9a6a3e'), archRobe2: hex('#5e3b2a'), archHood: hex('#c0605a'),
 };
 
 // ───────────────────────── model building: parts on rigid bones ─────────────────────────
@@ -119,12 +123,12 @@ const THORNLING: KindDef = {
     m.joint('legR', null, [0.15, 0.24, 0]);
     const C: V3 = [0, 0.5, 0];
     m.on('body', (b, g) => {
-      b.ball(C, 0.35, P.leaf1, 1.05, 0.95, 1.05, 1, 0.38, P.leafDeep);
+      b.ball(C, 0.35, P.thornBulb, 1.05, 0.95, 1.05, 1, 0.38, P.thornBulb2);
       // bramble wraps round the bulb
       for (let k = 0; k < 5; k++) { const a = k * 1.25; b.prism([Math.cos(a) * 0.36, 0.3 + k * 0.08, Math.sin(a) * 0.36], [Math.cos(a + 1.6) * 0.36, 0.42 + k * 0.08, Math.sin(a + 1.6) * 0.36], 0.035, 0.035, 4, P.bramble, { caps: false }); }
       // a dark mouth and two gold eyes
       b.box(0, 0.42, 0.33, 0.16, 0.05, 0.04, P.hollow);
-      for (const sx of [-1, 1]) { b.ball([sx * 0.12, 0.57, 0.3], 0.07, P.hollow, 1, 0.8, 0.6, 0); g.ball([sx * 0.12, 0.575, 0.335], 0.05, P.gold, 1, 0.85, 0.6, 0); }
+      for (const sx of [-1, 1]) { b.ball([sx * 0.12, 0.57, 0.3], 0.07, P.hollow, 1, 0.8, 0.6, 0); g.ball([sx * 0.12, 0.575, 0.335], 0.06, P.lamp, 1, 0.85, 0.6, 0); }
     });
     m.on('thorns', (b) => {
       for (let i = 0; i < 18; i++) {
@@ -266,22 +270,22 @@ const ARCHER: KindDef = {
     m.joint('arrow', 'bow', [-0.25, 0.94, 0.2]);
     m.joint('legL', null, [-0.09, 0.6, 0]); m.joint('legR', null, [0.09, 0.6, 0]);
     m.on('hips', (b) => {
-      b.prism([0, 1.0, 0], [0, 0.6, 0], 0.17, 0.3, 8, P.teal, { caps: false, col2: P.tealDark });
+      b.prism([0, 1.0, 0], [0, 0.6, 0], 0.17, 0.3, 8, P.archRobe, { caps: false, col2: P.archRobe2 });
       b.prism([0, 1.08, 0], [0, 0.96, 0], 0.16, 0.18, 7, P.woodDark, { caps: false });                 // a twisted belt
     });
     m.on('hem', (b) => {
-      b.prism([0, 0.61, 0], [0, 0.3, -0.03], 0.3, 0.37, 8, P.tealDark, { caps: false, col2: tint(P.tealDark, 0.8) });
+      b.prism([0, 0.61, 0], [0, 0.3, -0.03], 0.3, 0.37, 8, P.archRobe2, { caps: false, col2: P.cliff });
       for (let k = 0; k < 8; k++) { const a = k / 8 * 6.283; b.ball([Math.cos(a) * 0.36, 0.31, Math.sin(a) * 0.36 - 0.03], 0.075, k % 2 ? P.meadow : P.grass2, 1.2, 0.7, 1, 0, 0.3); }
     });
     m.on('torso', (b) => {
       b.prism([0, 0.98, 0], [0, 1.36, 0], 0.13, 0.16, 6, P.woodDark);
-      b.ball([0, 1.33, 0], 0.24, P.teal, 1.2, 0.5, 1, 1, 0.3, P.tealDark);            // mossy mantle
+      b.ball([0, 1.33, 0], 0.24, P.archRobe, 1.2, 0.5, 1, 1, 0.3, P.archRobe2);      // mantle
       for (let k = 0; k < 4; k++) b.ball([(k - 1.5) * 0.12, 1.43, -0.05 + (k % 2) * 0.06], 0.07, P.meadow, 1, 0.6, 1, 0, 0.3);
       b.prism([0.08, 1.0, -0.18], [0.15, 1.5, -0.2], 0.06, 0.07, 6, P.woodLight);      // quiver
       for (let k = 0; k < 3; k++) b.prism([0.12 + k * 0.02, 1.5, -0.2], [0.13 + k * 0.03, 1.65, -0.22], 0.03, 0.0, 3, P.roof);
     });
     m.on('head', (b, g) => {
-      b.prism([0, 1.37, 0.0], [0, 1.86, -0.08], 0.19, 0.0, 7, P.teal, { col2: P.tealDark }); // the moss hood
+      b.prism([0, 1.37, 0.0], [0, 1.86, -0.08], 0.19, 0.0, 7, P.archHood, { col2: P.archRobe2 }); // the hood
       b.ball([0, 1.53, 0.07], 0.12, P.hollow, 1, 1.1, 0.75, 0);                              // the hollow inside
       g.ball([0, 1.52, 0.115], 0.075, mix(P.lamp, P.orange, 0.5), 0.9, 1.2, 0.3, 0);           // its lamp glow
       for (const sx of [-1, 1]) g.ball([sx * 0.045, 1.56, 0.15], 0.026, P.lamp, 1, 0.8, 0.5, 0);
@@ -518,16 +522,73 @@ let counter = 0;
 /** Triangles of the last enemy built (for the dev viewer). */
 export const enemyStats = { lastTriangles: 0 };
 const BASE_EMISSIVE = new Color3(0.07, 0.055, 0.06);
+/** Rim light per kind (emissive fresnel): kinds that sit on grass get a stronger warm rim so they read against it. */
+const RIM: Partial<Record<EnemyKindId, Color3>> = { thornling: new Color3(0.62, 0.36, 0.18), archer: new Color3(0.5, 0.42, 0.24) };
 const WINDUP_TINT = Color3.FromHexString(PALETTE.roof);
 const BLEND_S = 0.1;
+/** Drawn size per kind (the Thornling is drawn 1.3× so it fills its 0.5 m hit circle and reads at a distance). */
+const DRAW_SCALE: Partial<Record<EnemyKindId, number>> = { thornling: 1.3 };
 const STRIKE_LINGER_S = 0.4;
+
+/** Each kind's model (geometry in model space, rest pose, and its joints), built once and shared by every scene. */
+const MODELS = new Map<EnemyKindId, Model>();
+function modelOf(kind: EnemyKindId): Model {
+  let m = MODELS.get(kind);
+  if (!m) { m = new Model(1000 + Object.keys(KINDS).indexOf(kind) * 17); KINDS[kind].build(m); MODELS.set(kind, m); }
+  return m;
+}
+/** Per scene and kind: the body and glow meshes every enemy of that kind clones (they share the GPU geometry). */
+const TEMPLATES = new WeakMap<Scene, Map<EnemyKindId, { body: Mesh; glow: Mesh | null }>>();
+function templateOf(scene: Scene, kind: EnemyKindId): { body: Mesh; glow: Mesh | null } {
+  let byKind = TEMPLATES.get(scene);
+  if (!byKind) { byKind = new Map(); TEMPLATES.set(scene, byKind); }
+  let t = byKind.get(kind);
+  if (!t) {
+    const m = modelOf(kind);
+    const skin = (b: Builder, idx: number[], name: string): Mesh => {
+      const mesh = b.build(scene, name, null as unknown as StandardMaterial);
+      mesh.material = null;
+      const n = b.pos.length / 3;
+      const mi = new Float32Array(n * 4), mw = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) { mi[i * 4] = idx[i]; mw[i * 4] = 1; }
+      mesh.setVerticesData(VertexBuffer.MatricesIndicesKind, mi, false, 4);
+      mesh.setVerticesData(VertexBuffer.MatricesWeightsKind, mw, false, 4);
+      mesh.isPickable = false;
+      mesh.setEnabled(false);
+      return mesh;
+    };
+    t = { body: skin(m.b, m.bIdx, `enemyTpl_${kind}`), glow: m.g.tris > 0 ? skin(m.g, m.gIdx, `enemyTplGlow_${kind}`) : null };
+    byKind.set(kind, t);
+  }
+  return t;
+}
+
+/**
+ * Applies a mode change to an enemy's animation state (pure; makeEnemy's setMode). A wind-up starts `elapsed`
+ * seconds in (an enemy first seen part way through one) and lasts `seconds` (default: the attack's wind-up).
+ * Returns false when nothing changed (the same mode, or the same wind-up, again).
+ */
+export function applyMode(a: Pick<Anim, 'mode' | 'attack' | 'wT' | 'wDur'>, mode: EnemyMode, attack?: EnemyAttackId, seconds?: number, elapsed = 0): boolean {
+  if (mode === 'windup') {
+    const atk = attack ?? a.attack ?? null;
+    if (a.mode === 'windup' && atk === a.attack) return false;
+    a.attack = atk;
+    a.wDur = seconds ?? (atk ? ENEMY_ATTACKS[atk].windup : 1);
+    a.wT = Math.max(0, Math.min(a.wDur, Number.isFinite(elapsed) ? elapsed : 0));
+  } else {
+    if (mode === a.mode) return false;
+    a.attack = null;
+  }
+  a.mode = mode;
+  return true;
+}
 
 export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
   const def = KINDS[kind];
   const id = ++counter;
   const sh = shared(scene);
-  const m = new Model(1000 + Object.keys(KINDS).indexOf(kind) * 17);
-  def.build(m);
+  const m = modelOf(kind);
+  const tpl = templateOf(scene, kind);
   enemyStats.lastTriangles = m.b.tris + m.g.tris;
 
   const root = new TransformNode(`enemy_${kind}_${id}`, scene);
@@ -551,28 +612,26 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
   mat.diffuseColor = Color3.White(); mat.specularColor = Color3.Black();
   mat.emissiveColor = BASE_EMISSIVE.clone(); mat.ambientColor = new Color3(0.25, 0.23, 0.26);
   const fr = new FresnelParameters();
-  fr.leftColor = new Color3(0.36, 0.27, 0.2); fr.rightColor = new Color3(0, 0, 0); fr.bias = 0.12; fr.power = 2.6;
+  fr.leftColor = RIM[kind] ?? new Color3(0.36, 0.27, 0.2); fr.rightColor = new Color3(0, 0, 0); fr.bias = 0.12; fr.power = 2.6;
   mat.emissiveFresnelParameters = fr;
   const gmat = new StandardMaterial(`enemyGlow_${id}`, scene);
   gmat.disableLighting = true; gmat.emissiveColor = Color3.White();
 
-  const H = def.height, R = ENEMY_KINDS[kind].radius;
+  const DS = DRAW_SCALE[kind] ?? 1;
+  const H = def.height * DS, R = ENEMY_KINDS[kind].radius;
   const bounds = () => new BoundingInfo(new Vector3(-H, -0.3, -H), new Vector3(H, H * 1.35, H));
-  const skin = (b: Builder, idx: number[], name: string, material: StandardMaterial): Mesh => {
-    const mesh = b.build(scene, name, material);
-    const n = b.pos.length / 3;
-    const mi = new Float32Array(n * 4), mw = new Float32Array(n * 4);
-    for (let i = 0; i < n; i++) { mi[i * 4] = idx[i]; mw[i * 4] = 1; }
-    mesh.setVerticesData(VertexBuffer.MatricesIndicesKind, mi, false, 4);
-    mesh.setVerticesData(VertexBuffer.MatricesWeightsKind, mw, false, 4);
+  const skin = (t: Mesh, name: string, material: StandardMaterial): Mesh => {
+    const mesh = t.clone(name, rigRoot, true) as Mesh; // shares the template's geometry
+    mesh.setEnabled(true);
+    mesh.material = material;
     mesh.skeleton = skeleton; mesh.numBoneInfluencers = 1;
-    mesh.parent = rigRoot; mesh.isPickable = true;
+    mesh.isPickable = true;
     mesh.setBoundingInfo(bounds());
     mesh.receiveShadows = true;
     return mesh;
   };
-  const body = skin(m.b, m.bIdx, `enemyBody_${id}`, mat);
-  const glow = m.g.tris > 0 ? skin(m.g, m.gIdx, `enemyGlowMesh_${id}`, gmat) : null;
+  const body = skin(tpl.body, `enemyBody_${id}`, mat);
+  const glow = tpl.glow ? skin(tpl.glow, `enemyGlowMesh_${id}`, gmat) : null;
   if (glow) glow.receiveShadows = false;
   const pickables = glow ? [body, glow] : [body];
 
@@ -596,20 +655,12 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       for (const p of pickables) p.metadata = { ...(p.metadata ?? {}), entityId: eid };
       root.metadata = { ...(root.metadata ?? {}), entityId: eid };
     },
-    setMode(mode, attack, seconds) {
-      if (mode === 'windup') {
-        const atk = attack ?? a.attack ?? null;
-        if (a.mode === 'windup' && atk === a.attack) return;
-        if (a.mode === 'windup' && a.attack) lastWindup = { attack: a.attack, endedAt: a.T };
-        a.attack = atk; a.wT = 0; a.wDur = seconds ?? (atk ? ENEMY_ATTACKS[atk].windup : 1);
-      } else {
-        if (mode === a.mode) return;
-        if (a.mode === 'windup' && a.attack) lastWindup = { attack: a.attack, endedAt: a.T };
-        a.attack = null;
-      }
-      if (a.mode === 'dead' && mode !== 'dead') { spawnT = 0; a.hT = -1; a.sT = -1; root.setEnabled(true); }
+    setMode(mode, attack, seconds, elapsed) {
+      const wasMode = a.mode, wasAttack = a.attack;
+      if (!applyMode(a, mode, attack, seconds, elapsed)) return;
+      if (wasMode === 'windup' && wasAttack) lastWindup = { attack: wasAttack, endedAt: a.T };
+      if (wasMode === 'dead' && mode !== 'dead') { spawnT = 0; a.hT = -1; a.sT = -1; root.setEnabled(true); }
       if (mode === 'dead') { a.deadT = 0; a.sT = -1; }
-      a.mode = mode;
       startBlend();
     },
     strike() {
@@ -620,6 +671,16 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       lastWindup = null;
       a.sAttack = atk; a.sT = 0;
       startBlend();
+    },
+    reset() {
+      a.mode = 'idle'; a.attack = null; a.wT = 0; a.sT = -1; a.sAttack = null; a.hT = -1; a.deadT = 0; a.stunT = 0; a.speed = 0;
+      flashT = -1; lastWindup = null; spawnT = 1; blend = 1;
+      poser.reset(); out.set(poser.v); from.set(out);
+      prev.set(NaN, 0, 0);
+      rigRoot.scaling.setAll(DS); rigRoot.position.y = 0;
+      root.setEnabled(true);
+      view.setTargeted(false);
+      view.update(0);
     },
     hit() { if (a.mode !== 'dead') a.hT = 0; },
     flash() { flashT = 0; },
@@ -663,7 +724,7 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
         n.scaling.set(out[o + 6], out[o + 7], out[o + 8]);
       }
       // respawn pop, and a corpse sinks away after a while
-      if (spawnT < 1) { spawnT = Math.min(1, spawnT + dt / 0.45); const s = 0.2 + 0.8 * ease(spawnT); rigRoot.scaling.setAll(s); } else rigRoot.scaling.setAll(1);
+      if (spawnT < 1) { spawnT = Math.min(1, spawnT + dt / 0.45); const s = 0.2 + 0.8 * ease(spawnT); rigRoot.scaling.setAll(s * DS); } else rigRoot.scaling.setAll(DS);
       rigRoot.position.y = a.mode === 'dead' ? -0.9 * ease((a.deadT - 3) / 1.5) : 0;
       if (a.mode === 'dead' && a.deadT > 4.6) root.setEnabled(false);
       blob.setEnabled(!(a.mode === 'dead' && a.deadT > 2.5));

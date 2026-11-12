@@ -43,11 +43,15 @@ const CONNECTION_LOST = 'Connection lost';
 const CONNECTING = 'Connecting…';
 const RECONNECTING = 'Reconnecting…';
 /** Join refusals that say nothing against the account: its saved token is kept, so "Continue as" stays on offer. */
-const KEEP_TOKEN_ON = new Set([UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway')]);
+/** The page could not build the zone the adventurer is in (the previous one was put back, or the page reloads). */
+const LOAD_FAILED = "Couldn't load that area, try again";
+const KEEP_TOKEN_ON = new Set([LOAD_FAILED, UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway')]);
 /** How long the screen takes to fade out and back in around a zone change, in s. */
 const TRAVEL_FADE_S = 0.6;
 /** Longest wait after joining for the room to show this adventurer. */
 const ENTER_TIMEOUT_MS = 15_000;
+/** Longest wait after `travel` for the server to end the session before the page leaves the room itself. */
+const TRAVEL_LEAVE_MS = 5_000;
 
 const CSS = /* css */ `
 .sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 50px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
@@ -125,7 +129,7 @@ function boot(): void {
     remotes?.update(dt);
     enemies?.update(dt);
     let text = connecting ? CONNECTING : '';
-    if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.players?.size ?? 0}`;
+    if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.online ?? room.state.players?.size ?? 0}`;
     if (text !== statusText) {
       statusText = text;
       status.textContent = text;
@@ -153,6 +157,13 @@ function boot(): void {
 
   /** Set from a `travel` message until the next room is entered: the zone, the fade and when it began. */
   let travelling: { zone: ZoneId; fade: Promise<void>; since: number } | null = null;
+  /** Ends a travel that will not reach its room (a kick, a timeout, a failed join): the label goes and the screen fades back in. */
+  const endTravel = () => {
+    if (!travelling) return;
+    travelling = null;
+    travelLabel.classList.remove('on');
+    void hud.fade(false, '#16122a', TRAVEL_FADE_S);
+  };
 
   /** Plays one connection (to zone `zone`'s room) until it ends; resolves with what ended it. */
   function play(r: ZoneRoom, zone: ZoneId): Promise<Ended> {
@@ -162,6 +173,7 @@ function boot(): void {
       let travelTo: ZoneId | null = null;
       let lostTimer = 0;
       let sendTimer = 0;
+      let travelTimer = 0;
       let entered = false;
       const sent: SentPose = { x: NaN, z: NaN, y: NaN, facing: NaN, moving: false };
 
@@ -175,7 +187,7 @@ function boot(): void {
       r.onReconnect(() => {
         clearTimeout(lostTimer);
         lostTimer = 0;
-        rig.setMoveScale(1);
+        if (!travelTo) rig.setMoveScale(1);
         sent.x = NaN; // the server may have missed the last pose: send it again
       });
       r.onMessage('kicked', (m: S2C['kicked']) => { kickedFor = m.reason; });
@@ -197,6 +209,8 @@ function boot(): void {
         travelLabel.textContent = `${zoneDef(m.zone).name}…`;
         travelLabel.classList.add('on');
         travelling = { zone: m.zone, fade: hud.fade(true, '#16122a', TRAVEL_FADE_S), since: performance.now() };
+        // the server ends the session right after `travel`; if it never does, leave it ourselves
+        travelTimer = window.setTimeout(() => void r.leave(), TRAVEL_LEAVE_MS);
       });
 
       const onState = () => {
@@ -251,6 +265,7 @@ function boot(): void {
         connecting = false;
         clearTimeout(enterTimer);
         clearTimeout(lostTimer);
+        clearTimeout(travelTimer);
         clearInterval(sendTimer);
         remotes?.dispose();
         remotes = null;
@@ -265,6 +280,7 @@ function boot(): void {
         netUi.className = 'sg-net-off';
         (document.activeElement as HTMLElement | null)?.blur?.();
         if (travelTo && !kickedFor) { resolve({ travel: travelTo }); return; }
+        endTravel(); // a kick during a travel (or a travel join that never entered) ends the travel here
         if (kickedFor) forgetToken(); // a reload must not sign in again and kick the other place
         resolve({ reason: kickedFor || CONNECTION_LOST });
       });
@@ -297,7 +313,7 @@ function boot(): void {
       net.zone = zone;
       if (game.zone === zone) return;
       const t0 = performance.now();
-      game.loadZone(zone);
+      try { game.loadZone(zone); } catch { net.zone = game.zone as ZoneId; throw new Error(LOAD_FAILED); }
       net.lastLoadMs = performance.now() - t0;
     };
     /**
@@ -334,7 +350,7 @@ function boot(): void {
         joined = await join(token, arriving?.zone ?? null);
       } catch (err) {
         connecting = false;
-        if (arriving) { travelling = null; travelLabel.classList.remove('on'); void hud.fade(false, '#16122a', TRAVEL_FADE_S); }
+        endTravel();
         const message = err instanceof Error ? err.message : CONNECTION_LOST;
         if (message === REASON_NAME_FIRST) {
           // A reload while choosing a name: carry on choosing it, then join.

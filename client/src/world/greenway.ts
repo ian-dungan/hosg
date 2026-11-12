@@ -9,18 +9,29 @@
 // adventurer on) within 2 cm: an adaptive grid refines where the terrain curves (greenway.test.ts checks it).
 // Heights are computed once while building, cached in arrays; nothing here calls the recipe per frame.
 import {
-  Vector3, Color3, Color4, StandardMaterial, DirectionalLight, HemisphericLight, GlowLayer, CascadedShadowGenerator,
+  Vector3, Color3, Color4, StandardMaterial, DirectionalLight, HemisphericLight,
   Scene, MeshBuilder, DynamicTexture, Mesh, VertexData, type AbstractMesh,
-  DefaultRenderingPipeline, SSAO2RenderingPipeline, ImageProcessingConfiguration, type ArcRotateCamera, type TransformNode,
+  type ArcRotateCamera, type TransformNode,
 } from '@babylonjs/core';
 import { ENEMY_KINDS, greenwayLayout, prng, type ZoneLayout } from '@sg2/shared';
 import type { WorldApi, AnchorName, Anchor, Quality } from '../core/contracts';
-import { Builder, hex, mix, tint, vnoise, hash, type RGB, type V3 } from './mesh';
+import { Builder, hex, mix, tint, vnoise, type RGB, type V3 } from './mesh';
 import { Kit, PAL, tree, lantern } from './parts';
 import { createShaderSky, SUN_DIR, HAZE } from './sky';
 import { WorldFxPlugin, WFX, type WfxOpts } from './shading';
 import { buildGrass } from './grass';
 import { createLife } from './life';
+import { createLook } from './look';
+
+/**
+ * A hash of (x, y) in [0, 1) from integer arithmetic only (x and y are taken to 1/1024): the same in every
+ * browser, unlike mesh.ts's sine hash, so every player sees the same tree kinds, rock shapes and ferns.
+ */
+export function hash(x: number, y: number): number {
+  let h = Math.imul(Math.round(x * 1024) | 0, 0x27d4eb2d) ^ Math.imul(Math.round(y * 1024) | 0, 0x165667b1);
+  h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
 
 // ───────────────────────── placements (pure) ─────────────────────────
 
@@ -50,6 +61,10 @@ export interface GreenwayPlacements {
 export const PROP_ROAD_CLEAR = 1.2;
 /** Props keep this far (beyond both radii) from every spawn point, in m. */
 export const PROP_SPAWN_CLEAR = 0.4;
+/** Props keep this far (beyond their own radius) from every tree trunk, in m (the canopy may overhang). */
+export const PROP_TREE_CLEAR = 0.8;
+/** Props keep clear of rocks by this many times the rock's collision radius (its drawn foot, loose stones round it). */
+export const PROP_ROCK_K = 1.6;
 /** Footprint radius of each prop kind, in m (scaled by the prop's size). */
 const PROP_R: Record<PropKind, number> = { firepit: 1.15, nest: 0.85, sticks: 0.75, leanto: 1.25, totem: 0.4, milestone: 0.35, fence: 1.4, logs: 1.0 };
 
@@ -103,6 +118,8 @@ export function greenwayPlacements(layout: ZoneLayout): GreenwayPlacements {
         if (roadDistance(layout, x, z, halfRoad + PROP_ROAD_CLEAR + r + 1) <= halfRoad + PROP_ROAD_CLEAR + r) continue;
         if (spawns.some(sp => Math.hypot(sp.x - x, sp.z - z) <= r + ENEMY_KINDS[sp.kind].radius + PROP_SPAWN_CLEAR)) continue;
         if (props.some(p => Math.hypot(p.x - x, p.z - z) <= p.r + r + 0.3)) continue;
+        if (layout.trees.some(t => Math.hypot(t.x - x, t.z - z) <= r + PROP_TREE_CLEAR)) continue;
+        if (layout.rocks.some(o => Math.hypot(o.x - x, o.z - z) <= r + o.r * PROP_ROCK_K)) continue;
         props.push({ kind: w.kind, x, z, y: H(x, z), r, yaw: rng() * Math.PI * 2, s });
         break;
       }
@@ -168,8 +185,8 @@ export function greenwayPlacements(layout: ZoneLayout): GreenwayPlacements {
       const r = PROP_R[kind];
       if (layout.walk.groundAt(px, pz) === null) continue;
       if (layout.camps.some(c => Math.hypot(c.x - px, c.z - pz) < c.r + 4)) continue;
-      if (layout.rocks.some(o => Math.hypot(o.x - px, o.z - pz) < o.r + r + 0.8)) continue;
-      if (layout.trees.some(t => Math.hypot(t.x - px, t.z - pz) < 0.8 + r)) continue;
+      if (layout.rocks.some(o => Math.hypot(o.x - px, o.z - pz) <= o.r * PROP_ROCK_K + r)) continue;
+      if (layout.trees.some(t => Math.hypot(t.x - px, t.z - pz) <= r + PROP_TREE_CLEAR)) continue;
       if (roadDistance(layout, px, pz, halfRoad + 3 + r) <= halfRoad + 1 + r) continue;
       roadside.push({ kind, x: px, z: pz, y: H(px, pz), r, yaw: roadYaw(layout, x) + (kind === 'logs' ? 0.3 * (rng() - 0.5) : 0), s: 1 });
     }
@@ -244,6 +261,10 @@ const PER_BASE = BASE / Q;
 /** Largest height error a cell may leave (checked at its edge midpoints and centre), in m. */
 const TOL = 0.012;
 
+/** A coarser terrain for the low tier and for far tiles: at most `maxLevel` refinements, `farTol` beyond `nearRoad` m of the road. */
+export interface TerrainOpts { maxLevel: number; farTol: number; nearRoad: number }
+export const LOW_TERRAIN: TerrainOpts = { maxLevel: 2, farTol: 0.06, nearRoad: 30 };
+
 export interface TerrainMesh {
   positions: Float32Array; colors: Float32Array; indices: Uint32Array;
   /** Triangles in the mesh (all of them are ground). */
@@ -253,8 +274,9 @@ export interface TerrainMesh {
 }
 
 /** The terrain as an indexed mesh: an adaptive grid, finer where the ground curves, so it matches layout.height. */
-export function greenwayTerrain(layout: ZoneLayout, plan: GreenwayPlacements): TerrainMesh {
+export function greenwayTerrain(layout: ZoneLayout, plan: GreenwayPlacements, opts?: TerrainOpts): TerrainMesh {
   const H = layout.height;
+  const maxLevel = opts ? Math.min(MAX_LEVEL, opts.maxLevel) : MAX_LEVEL;
   const nI = (NEAR.x1 - NEAR.x0) / BASE, nJ = (NEAR.z1 - NEAR.z0) / BASE;
   // heights on the Q lattice, computed once each (an array cache; NaN = not computed)
   const cache = new Map<number, number>();
@@ -289,15 +311,26 @@ export function greenwayTerrain(layout: ZoneLayout, plan: GreenwayPlacements): T
   for (let ci = 0; ci < nI; ci++) for (let cj = 0; cj < nJ; cj++) {
     let L = 0;
     if (refinable(ci, cj)) {
-      for (; L < MAX_LEVEL; L++) {
+      const cx = NEAR.x0 + (ci + 0.5) * BASE, cz = NEAR.z0 + (cj + 0.5) * BASE;
+      const tol = opts && Math.abs(cz - layout.roadZ(Math.min(layout.recipe.width, Math.max(0, cx)))) > opts.nearRoad ? opts.farTol : TOL;
+      for (; L < maxLevel; L++) {
         const n = 1 << L, s = PER_BASE / n;
         let worst = 0;
-        for (let a = 0; a < n && worst <= TOL; a++) for (let c = 0; c < n && worst <= TOL; c++) worst = Math.max(worst, quadErr(ci * PER_BASE + a * s, cj * PER_BASE + c * s, s));
-        if (worst <= TOL) break;
+        for (let a = 0; a < n && worst <= tol; a++) for (let c = 0; c < n && worst <= tol; c++) worst = Math.max(worst, quadErr(ci * PER_BASE + a * s, cj * PER_BASE + c * s, s));
+        if (worst <= tol) break;
       }
     }
     level[ci * nJ + cj] = L;
     levels[L]++;
+  }
+  // coarse terrain: 2 × 2 base cells wholly outside the walkable area merge into one 4 m cell
+  // (1 = a merged cell's corner cell, drawn 4 m wide; 2 = covered by it)
+  const merged = new Uint8Array(nI * nJ);
+  if (opts) {
+    for (let ci = 0; ci + 1 < nI; ci += 2) for (let cj = 0; cj + 1 < nJ; cj += 2) {
+      if (refinable(ci, cj) || refinable(ci + 1, cj) || refinable(ci, cj + 1) || refinable(ci + 1, cj + 1)) continue;
+      merged[ci * nJ + cj] = 1; merged[(ci + 1) * nJ + cj] = 2; merged[ci * nJ + cj + 1] = 2; merged[(ci + 1) * nJ + cj + 1] = 2;
+    }
   }
 
   // colours
@@ -354,7 +387,30 @@ export function greenwayTerrain(layout: ZoneLayout, plan: GreenwayPlacements): T
     const step = Math.min(s, PER_BASE >> Ln);
     for (let k = 0; k < s; k += step) loop.push(vert(i0 + di * k, j0 + dj * k));
   };
+  // the step along one side of a merged 4 m cell: as fine as the finest of the two cells beyond it
+  const stepBeyond = (ci: number, cj: number) => (ci < 0 || cj < 0 || ci >= nI || cj >= nJ || merged[ci * nJ + cj] ? 2 * PER_BASE : PER_BASE >> level[ci * nJ + cj]);
+  const sideStep = (i0: number, j0: number, di: number, dj: number, s: number, step: number) => {
+    for (let k = 0; k < s; k += step) loop.push(vert(i0 + di * k, j0 + dj * k));
+  };
   for (let ci = 0; ci < nI; ci++) for (let cj = 0; cj < nJ; cj++) {
+    const mg = merged[ci * nJ + cj];
+    if (mg === 2) continue;
+    if (mg === 1) {
+      const s = 2 * PER_BASE, i = ci * PER_BASE, j = cj * PER_BASE;
+      const sb = Math.min(stepBeyond(ci, cj - 1), stepBeyond(ci + 1, cj - 1)), sr = Math.min(stepBeyond(ci + 2, cj), stepBeyond(ci + 2, cj + 1));
+      const st = Math.min(stepBeyond(ci, cj + 2), stepBeyond(ci + 1, cj + 2)), sl = Math.min(stepBeyond(ci - 1, cj), stepBeyond(ci - 1, cj + 1));
+      if (Math.min(sb, sr, st, sl) < s) {
+        loop.length = 0;
+        sideStep(i, j, 1, 0, s, sb); sideStep(i + s, j, 0, 1, s, sr); sideStep(i + s, j + s, -1, 0, s, st); sideStep(i, j + s, 0, -1, s, sl);
+        const ctr = vert(i + s / 2, j + s / 2);
+        for (let k = 0; k < loop.length; k++) triUp(ctr, loop[k], loop[(k + 1) % loop.length]);
+      } else {
+        const v00 = vert(i, j), v10 = vert(i + s, j), v01 = vert(i, j + s), v11 = vert(i + s, j + s);
+        const [main] = diagErr(i, j, s);
+        if (main) { triUp(v00, v10, v11); triUp(v00, v11, v01); } else { triUp(v00, v10, v01); triUp(v10, v11, v01); }
+      }
+      continue;
+    }
     const L = level[ci * nJ + cj], n = 1 << L, s = PER_BASE / n;
     const lB = levelAt(ci, cj - 1, L), lR = levelAt(ci + 1, cj, L), lT = levelAt(ci, cj + 1, L), lL = levelAt(ci - 1, cj, L);
     for (let a = 0; a < n; a++) for (let c = 0; c < n; c++) {
@@ -532,10 +588,12 @@ function drawRock(b: Builder, r: RockP, H: (x: number, z: number) => number) {
     const rim = capY - 0.1, belly = gmin + (rim - gmin) * 0.5;
     const warm = mix(PAL.rock2, PAL.rock1, 0.5), deep = tint(PAL.rock2, 0.72), pale = mix(PAL.stone2, PAL.rock1, 0.25);
     const oldCj = b.cj; b.cj = 0.08;
-    ringRock(b, [ring(gmin - 0.45, 1.1, 0.12), ring(belly, 1.22, 0.14), ring(rim, 1.07, 0.05), ring(capY, 1, 0)], [deep, warm, mix(warm, pale, 0.5), pale], { cap: pale });
+    // stone-like: craggy, uneven courses (strata) and a chipped rim, the pale flat top kept as the "climb me" cue
+    const strata = tint(PAL.rock2, 0.86);
+    ringRock(b, [ring(gmin - 0.45, 1.1, 0.16), ring(gmin + (belly - gmin) * 0.55, 1.2, 0.2), ring(belly, 1.24, 0.18), ring((belly + rim) / 2, 1.16, 0.16), ring(rim, 1.07, 0.1), ring(capY, 1, 0)],
+      [deep, strata, warm, mix(warm, deep, 0.35), mix(warm, pale, 0.5), pale], { cap: pale });
     b.cj = oldCj;
-    // moss patches lying on the top, and loose stones round the foot
-    for (let k = 0; k < 2; k++) { const a = r.yaw + k * 2.6, d = r.r * (0.35 + 0.3 * hash(k, r.z)); b.ball([r.x + Math.cos(a) * d, capY + 0.005, r.z + Math.sin(a) * d], 0.3 * Math.min(1.4, r.r), k ? PAL.grass : PAL.grass2, 1.5, 0.12, 1.1, 1, 0.35); }
+    // loose stones round the foot
     for (let k = 0; k < 6; k++) { const a = k * 1.1 + r.yaw, d = r.r * 1.5 + 0.25 * hash(k, r.z); const x = r.x + Math.cos(a) * d, z = r.z + Math.sin(a) * d; b.ball([x, H(x, z) + 0.04, z], 0.12 + 0.12 * hash(k, r.x), k % 2 ? warm : deep, 1.1, 0.65, 1, 0, 0.45); }
   } else {
     // a crag: a tall main spire and one or two lower ones beside it, plum-purple stone with cliff-red strata
@@ -545,16 +603,17 @@ function drawRock(b: Builder, r: RockP, H: (x: number, z: number) => number) {
     const spire = (cx: number, cz: number, rr: number, hh: number, sd: number) => {
       const tx = (hash(cx, 3 + sd) - 0.5) * rr * 0.6, tz = (hash(3 + sd, cz) - 0.5) * rr * 0.6;
       ringRock(b, [
-        crag(cx, cz, gmin - 0.5, rr * 1.08, n, rot, 0.25, sd),
-        crag(cx + tx * 0.15, cz + tz * 0.15, r.y + hh * 0.22, rr, n, rot + 0.15, 0.3, sd + 1),
-        crag(cx + tx * 0.25, cz + tz * 0.25, r.y + hh * 0.3, rr * 0.92, n, rot + 0.2, 0.3, sd + 2),
+        // drawn within ~1.05·r of the collision circle, so what blocks is what you see
+        crag(cx, cz, gmin - 0.5, rr * 0.92, n, rot, 0.2, sd),
+        crag(cx + tx * 0.15, cz + tz * 0.15, r.y + hh * 0.22, rr * 0.9, n, rot + 0.15, 0.3, sd + 1),
+        crag(cx + tx * 0.25, cz + tz * 0.25, r.y + hh * 0.3, rr * 0.84, n, rot + 0.2, 0.3, sd + 2),
         crag(cx + tx * 0.55, cz + tz * 0.55, r.y + hh * 0.62, rr * 0.6, n, rot + 0.45, 0.35, sd + 3),
         crag(cx + tx * 0.85, cz + tz * 0.85, r.y + hh * 0.86, rr * 0.3, n, rot + 0.7, 0.4, sd + 4),
       ], [c1, band, c2, c3, c3], { tip: [cx + tx, r.y + hh, cz + tz] });
     };
     spire(r.x, r.z, r.r, r.h * 1.25 + r.r * 0.9, seed);
     for (let k = 0; k < (r.r > 1.2 ? 2 : 1); k++) {
-      const a = r.yaw + 2.2 + k * 2.4, sx = r.x + Math.cos(a) * r.r * 0.62, sz = r.z + Math.sin(a) * r.r * 0.62;
+      const a = r.yaw + 2.2 + k * 2.4, sx = r.x + Math.cos(a) * r.r * 0.45, sz = r.z + Math.sin(a) * r.r * 0.45;
       spire(sx, sz, r.r * 0.5, (r.h * 1.25 + r.r * 0.9) * (0.45 + 0.2 * hash(r.x, 9 + k)), seed + 10 + k * 7);
     }
     b.cj = oldCj;
@@ -609,8 +668,9 @@ function drawProp(b: Builder, p: PropP) {
       break;
     }
     case 'fence': { // a few old posts, one rail still up, one fallen
-      for (let k = 0; k < 3; k++) b.prism([0, -0.2, -1.2 + k * 1.2], [0.04 * (k - 1), 0.85 - 0.12 * (k % 2), -1.2 + k * 1.2], 0.08, 0.07, 5, PAL.woodDark);
-      b.prism([0, 0.6, -1.25], [0, 0.55, 0.05], 0.045, 0.045, 4, PAL.woodLight);
+      // low (knee-high): cosmetic and walked through, so it must not read as a wall
+      for (let k = 0; k < 3; k++) b.prism([0, -0.2, -1.2 + k * 1.2], [0.04 * (k - 1), 0.55 - 0.1 * (k % 2), -1.2 + k * 1.2], 0.08, 0.07, 5, PAL.woodDark);
+      b.prism([0, 0.4, -1.25], [0, 0.36, 0.05], 0.045, 0.045, 4, PAL.woodLight);
       b.prism([0.35, 0.05, 0.15], [0.55, 0.06, 1.35], 0.045, 0.045, 4, PAL.wood);
       b.ball([0.1, 0.06, 1.2], 0.25, PAL.leafDeep, 1.3, 0.6, 1.2, 0, 0.35);
       break;
@@ -703,10 +763,12 @@ function drawFar(far: Builder, mount: Builder, layout: ZoneLayout) {
   const cx = (NEAR.x0 + NEAR.x1) / 2, cz = (NEAR.z0 + NEAR.z1) / 2;
   const rng = prng(layout.recipe.seed + 404);
   const per: [number, number][] = [];
-  for (let x = NEAR.x0; x < NEAR.x1; x += BASE) per.push([x, NEAR.z0]);
-  for (let z = NEAR.z0; z < NEAR.z1; z += BASE) per.push([NEAR.x1, z]);
-  for (let x = NEAR.x1; x > NEAR.x0; x -= BASE) per.push([x, NEAR.z1]);
-  for (let z = NEAR.z1; z > NEAR.z0; z -= BASE) per.push([NEAR.x0, z]);
+  // 4 m along the edge (the near terrain's coarse cells there; its tiles' skirts cover any seam)
+  const ES = 2 * BASE;
+  for (let x = NEAR.x0; x < NEAR.x1; x += ES) per.push([x, NEAR.z0]);
+  for (let z = NEAR.z0; z < NEAR.z1; z += ES) per.push([NEAR.x1, z]);
+  for (let x = NEAR.x1; x > NEAR.x0; x -= ES) per.push([x, NEAR.z1]);
+  for (let z = NEAR.z1; z > NEAR.z0; z -= ES) per.push([NEAR.x0, z]);
   const F = [1, 1.1, 1.25, 1.5, 1.95, 2.7, 4, 6.2, 9.5];
   const farY = (x: number, z: number) => 4 + 16 * vnoise(x * 0.005 + 3, z * 0.005 + 1) - 2;
   const ring = F.map((f, k) => per.map(([px, pz]): V3 => {
@@ -728,7 +790,7 @@ function drawFar(far: Builder, mount: Builder, layout: ZoneLayout) {
     const x = cx + Math.cos(a) * (NEAR.x1 - cx) * f, z = cz + Math.sin(a) * (NEAR.z1 - cz) * f;
     const hs = 22 + rng() * 40, y = farY(x, z);
     const c = mix(hex('#4f9a55'), hex('#8fae8e'), Math.min(1, (f - 1.2) / 2.2));
-    far.ball([x, y - hs * 0.22, z], hs, c, 1.4, 0.3 + rng() * 0.15, 1.2, 1, 0.3, tint(c, 0.8));
+    far.ball([x, y - hs * 0.22, z], hs, c, 1.4, 0.3 + rng() * 0.15, 1.2, 0, 0.3, tint(c, 0.8));
     for (let k = 0; k < 4; k++) farTree(far, x + (rng() - 0.5) * hs, y + hs * 0.04, z + (rng() - 0.5) * hs, 3 + rng() * 2, k % 3);
   }
   // distant blue mountains (like the town's)
@@ -748,8 +810,76 @@ function drawFar(far: Builder, mount: Builder, layout: ZoneLayout) {
 // ───────────────────────── the world ─────────────────────────
 
 const C3 = (h: string) => { const c = hex(h); return new Color3(c[0], c[1], c[2]); };
-/** Static geometry is cut into strips this wide along the road, so off-screen strips are culled. */
-const CHUNK_W = 66;
+/** Static geometry and the terrain are cut into tiles this wide (m), so off-screen tiles are culled and far ones drawn cheaper. */
+const TILE = 96;
+/** Skirt depth under each terrain tile's edge (m): hides the cracks where a fine tile meets a coarse one. */
+const SKIRT = 0.3;
+
+/**
+ * What a tile draws at distance `d` (m, from the adventurer to the tile's nearest point) on tier `q`: the fine
+ * or the coarse terrain, the detailed or the cheap trees, undergrowth and the two grass tiers.
+ */
+export function tileDetail(d: number, q: Quality): { fine: boolean; detail: boolean; under: boolean; grassA: boolean; grassB: boolean } {
+  if (q === 'low') return { fine: false, detail: false, under: false, grassA: false, grassB: false };
+  const high = q === 'high';
+  return { fine: d < (high ? 90 : 40), detail: d < (high ? 70 : 30), under: d < (high ? 40 : 14), grassA: d < (high ? 50 : 26), grassB: high && d < 26 };
+}
+
+/** One terrain tile: its own vertices (normals from the whole mesh, so tiles shade alike at their seams) and a skirt. */
+interface TerrainTile { positions: Float32Array; colors: Float32Array; normals: Float32Array; indices: Uint32Array }
+/** Cuts a terrain mesh into tiles (by triangle centroid), each with a skirt hanging SKIRT m under its edge. */
+export function splitTerrain(t: TerrainMesh, tileOf: (x: number, z: number) => number, n: number): (TerrainTile | null)[] {
+  const P = t.positions, C = t.colors, I = t.indices;
+  const N = new Float32Array(P.length);
+  VertexData.ComputeNormals(P, I, N);
+  const tris: number[][] = Array.from({ length: n }, () => []);
+  for (let k = 0; k < I.length; k += 3) {
+    const a = I[k] * 3, b = I[k + 1] * 3, c = I[k + 2] * 3;
+    tris[tileOf((P[a] + P[b] + P[c]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3)].push(k);
+  }
+  return tris.map((list) => {
+    if (list.length === 0) return null;
+    const map = new Map<number, number>();
+    const pos: number[] = [], col: number[] = [], nor: number[] = [], idx: number[] = [];
+    const v = (g: number, dy = 0): number => {
+      const key = dy ? -1 - g : g;
+      let i = map.get(key);
+      if (i === undefined) {
+        i = pos.length / 3; map.set(key, i);
+        pos.push(P[g * 3], P[g * 3 + 1] - dy, P[g * 3 + 2]); nor.push(N[g * 3], N[g * 3 + 1], N[g * 3 + 2]);
+        col.push(C[g * 4], C[g * 4 + 1], C[g * 4 + 2], 1);
+      }
+      return i;
+    };
+    const edges = new Map<number, [number, number] | null>();
+    const ek = (a: number, b: number) => (a < b ? a * 4194304 + b : b * 4194304 + a);
+    for (const k of list) {
+      const g = [I[k], I[k + 1], I[k + 2]];
+      idx.push(v(g[0]), v(g[1]), v(g[2]));
+      for (let e = 0; e < 3; e++) {
+        const a = g[e], b = g[(e + 1) % 3], key = ek(a, b);
+        edges.set(key, edges.has(key) ? null : [a, b]);
+      }
+    }
+    // the skirt: every edge used by one triangle of the tile, drawn down both ways
+    for (const e of edges.values()) {
+      if (!e) continue;
+      const [a, b] = e, a0 = v(a), b0 = v(b), a1 = v(a, SKIRT), b1 = v(b, SKIRT);
+      idx.push(a0, b0, b1, a0, b1, a1, a0, b1, b0, a0, a1, b1);
+    }
+    return { positions: new Float32Array(pos), colors: new Float32Array(col), normals: new Float32Array(nor), indices: new Uint32Array(idx) };
+  });
+}
+
+/** A cheap stand-in for a tree (far tiles, the low tier): a trunk and a blob, or a cone for pines, in its colours. */
+function liteTree(b: Builder, t: TreeP): void {
+  const s = t.s, x = t.x, y = t.y, z = t.z;
+  b.prism([x, y - 0.3, z], [x, y + 1.6 * s, z], 0.17 * s, 0.11 * s, 4, t.kind === 'birch' ? hex('#efe6d6') : PAL.woodDark, { caps: false });
+  if (t.kind === 'pine') { b.prism([x, y + 0.8 * s, z], [x, y + 4.8 * s, z], 1.2 * s * 0.95, 0, 6, hex('#4a9d66'), { col2: hex('#3f8f5f') }); return; }
+  const leaf = t.kind === 'amber' ? hex('#f0b04a') : t.kind === 'birch' ? hex('#a5d36a') : t.kind === 'teal' ? hex('#5cbf86') : t.kind === 'blossom' ? PAL.blossom : t.kind === 'oak' ? hex('#6cbf55') : PAL.leaf1;
+  const big = t.kind === 'oak' ? 1.45 : t.kind === 'birch' ? 1.0 : 1.2;
+  b.ball([x, y + (t.kind === 'birch' ? 2.9 : 2.3) * s, z], big * s, leaf, 1.1, t.kind === 'birch' ? 1.4 : 0.85, 1.1, 0, 0.3, tint(leaf, 0.75));
+}
 
 /** Paints `text` on one face of the west gate's sign (a canvas texture: built in code, no asset). */
 function signPlane(scene: Scene, at: V3, yaw: number, text: string): Mesh {
@@ -806,80 +936,106 @@ export function buildGreenway(scene: Scene): WorldApi {
   const mMountMat = litMat('gw_mount', { noise: 0.12 }); mMountMat.fogEnabled = false; mMountMat.diffuseColor = new Color3(0.42, 0.42, 0.46); mMountMat.emissiveColor = C3('#8d8aa0');
 
   // ───── terrain + road (indexed meshes, smooth normals) ─────
-  const indexed = (name: string, d: { positions: Float32Array; colors: Float32Array; indices: Uint32Array }, mat: StandardMaterial) => {
+  const indexed = (name: string, d: { positions: Float32Array; colors: Float32Array; indices: Uint32Array; normals?: Float32Array }, mat: StandardMaterial) => {
     const m = new Mesh(name, scene);
     const vd = new VertexData();
     vd.positions = d.positions; vd.colors = d.colors; vd.indices = d.indices;
-    const normals = new Float32Array(d.positions.length);
-    VertexData.ComputeNormals(d.positions, d.indices, normals);
+    let normals = d.normals;
+    if (!normals) { normals = new Float32Array(d.positions.length); VertexData.ComputeNormals(d.positions, d.indices, normals); }
     vd.normals = normals;
     vd.applyToMesh(m, false);
     m.material = mat; m.hasVertexAlpha = false;
     return m;
   };
-  const terrain = greenwayTerrain(layout, plan);
-  const mTerrain = indexed('gw_terrain', terrain, mTerrainMat);
+  // The terrain is cut into TILE × TILE m tiles (frustum culling), each in a fine and a coarse version: near
+  // tiles draw the fine one (it matches the walk within 2.5 cm), far tiles and the low tier the coarse one.
+  const nTx = Math.ceil((NEAR.x1 - NEAR.x0) / TILE), nTz = Math.ceil((NEAR.z1 - NEAR.z0) / TILE);
+  const tileOf = (x: number, z: number) => {
+    const i = Math.max(0, Math.min(nTx - 1, Math.floor((x - NEAR.x0) / TILE))), j = Math.max(0, Math.min(nTz - 1, Math.floor((z - NEAR.z0) / TILE)));
+    return i * nTz + j;
+  };
+  const fine = splitTerrain(greenwayTerrain(layout, plan), tileOf, nTx * nTz);
+  const coarse = splitTerrain(greenwayTerrain(layout, plan, LOW_TERRAIN), tileOf, nTx * nTz);
   const mRoad = indexed('gw_road', greenwayRoad(layout), mRoadMat);
 
-  // ───── trees, rocks, camps, gates: merged per strip along the road ─────
-  const W = layout.recipe.width;
-  const nChunks = Math.ceil((W + 40) / CHUNK_W);
-  const chunkOf = (x: number) => Math.max(0, Math.min(nChunks - 1, Math.floor((x + 20) / CHUNK_W)));
-  const chunks: Builder[] = Array.from({ length: nChunks }, (_, i) => new Builder(400 + i));
-  for (const t of plan.trees) drawTree(chunks[chunkOf(t.x)], t);
-  for (const r of plan.rocks) drawRock(chunks[chunkOf(r.x)], r, H);
-  for (const c of plan.camps) for (const p of c.props) drawProp(chunks[chunkOf(p.x)], p);
-  for (const u of plan.undergrowth) (u.kind === 'fern' ? fern : bush)(chunks[chunkOf(u.x)], u.x, u.y, u.z, u.s);
-  for (const p of plan.roadside) drawProp(chunks[chunkOf(p.x)], p);
-  const glowB = new Builder(450);
-  const gateKit = new Kit(chunks[0], glowB);
+  // ───── trees, rocks, camps, gates: merged per tile ─────
+  // detail: the full trees, rocks and props; lite: cheap trees (a trunk and a blob or a cone) with the same rocks
+  // and props, for far tiles and the low tier; under: undergrowth, near tiles on med and high only.
+  const nT = nTx * nTz;
+  const per = (seed: number) => Array.from({ length: nT }, (_, i) => new Builder(seed + i));
+  const detailB = per(400), liteB = per(500), underB = per(600);
+  for (const t of plan.trees) { const k = tileOf(t.x, t.z); drawTree(detailB[k], t); liteTree(liteB[k], t); }
+  for (const r of plan.rocks) { const k = tileOf(r.x, r.z); drawRock(detailB[k], r, H); drawRock(liteB[k], r, H); }
+  // far away (and on low) only the tall props that mark a camp from afar are drawn
+  for (const p of [...plan.camps.flatMap(c => c.props), ...plan.roadside]) { const k = tileOf(p.x, p.z); drawProp(detailB[k], p); if (p.kind === 'leanto' || p.kind === 'totem') drawProp(liteB[k], p); }
+  for (const u of plan.undergrowth) (u.kind === 'fern' ? fern : bush)(underB[tileOf(u.x, u.z)], u.x, u.y, u.z, u.s);
+  // the gate, the west hedge and the barricade: always drawn
+  const fixedB = new Builder(450), glowB = new Builder(451);
+  const gateKit = new Kit(fixedB, glowB);
   const gateOut = drawGate(gateKit, plan.gate, H);
-  drawBarricade(chunks[chunkOf(plan.barricade.x)], plan.barricade);
-  // the west boundary hedge (as the town's hedge ring), open where the road passes the gate
+  drawBarricade(fixedB, plan.barricade);
   {
     const gz = layout.westGate.z, hd = layout.recipe.depth / 2;
-    hedge(chunks[0], H, -0.6, gz - 3.4, -0.6, -hd + 2);
-    hedge(chunks[0], H, -0.6, gz + 3.4, -0.6, hd - 2);
+    hedge(fixedB, H, -0.6, gz - 3.4, -0.6, -hd + 2);
+    hedge(fixedB, H, -0.6, gz + 3.4, -0.6, hd - 2);
   }
   const beltB = new Builder(460);
   for (const t of plan.belt) farTree(beltB, t.x, t.y, t.z, t.s, t.kind);
   const farB = new Builder(470), mountB = new Builder(471);
   drawFar(farB, mountB, layout);
 
-  // grass: tier A (med+high) and tier B (high only), off the road, rocks, trees and camps' trampled middles
+  // grass: tier A (med+high) and tier B (high only), per tile, off the road, rocks, trees and camps' trampled middles
   const gOk = (x: number, z: number) => {
     if (walk.groundAt(x, z) === null) return false;
     if (Math.abs(z - layout.roadZ(x)) < 3.2) return false;
     return !plan.camps.some(c => Math.hypot(c.x - x, c.z - z) < c.r * 0.7);
   };
   const bnd = walk.bounds;
-  const sampleIn = (b: Builder) => (): [number, number] => {
+  const gSrc = new Builder(80);
+  const sample = (): [number, number] => {
     // most tufts within reach of the road (where adventurers walk), the rest anywhere
-    const x = b.rng.r(bnd.x0, bnd.x1);
-    const z = b.rng.next() < 0.6 ? layout.roadZ(x) + b.rng.r(-26, 26) : b.rng.r(bnd.z0, bnd.z1);
+    const x = gSrc.rng.r(bnd.x0, bnd.x1);
+    const z = gSrc.rng.next() < 0.6 ? layout.roadZ(x) + gSrc.rng.r(-26, 26) : gSrc.rng.r(bnd.z0, bnd.z1);
     return [x, z];
   };
-  const grassA = new Builder(81), grassB = new Builder(82);
-  buildGrass(grassA, 6000, H, gOk, sampleIn(grassA));
-  buildGrass(grassB, 9000, H, gOk, sampleIn(grassB));
+  const grassA = per(700), grassB = per(800);
+  for (const [list, count] of [[grassA, 6000], [grassB, 9000]] as const) {
+    const pts: [number, number][] = [];
+    for (let t = 0; t < count * 4 && pts.length < count; t++) { const q = sample(); if (gOk(q[0], q[1])) pts.push(q); }
+    const byTile: [number, number][][] = Array.from({ length: nT }, () => []);
+    for (const q of pts) byTile[tileOf(q[0], q[1])].push(q);
+    byTile.forEach((tp, k) => { let n = 0; if (tp.length) buildGrass(list[k], tp.length, H, () => true, () => tp[n++ % tp.length]); });
+  }
 
   const mk = (b: Builder, name: string, mat: StandardMaterial) => b.build(scene, name, mat);
-  const mChunks = chunks.map((b, i) => mk(b, `gw_chunk_${i}`, mLit));
+  interface Tile { cx: number; cz: number; fine: Mesh | null; coarse: Mesh | null; detail: Mesh | null; lite: Mesh | null; under: Mesh | null; grassA: Mesh | null; grassB: Mesh | null }
+  const tiles: Tile[] = [];
+  for (let k = 0; k < nT; k++) {
+    const i = Math.floor(k / nTz), j = k % nTz;
+    const opt = (b: Builder, name: string, mat: StandardMaterial) => (b.tris > 0 ? mk(b, `${name}_${k}`, mat) : null);
+    tiles.push({
+      cx: NEAR.x0 + (i + 0.5) * TILE, cz: NEAR.z0 + (j + 0.5) * TILE,
+      fine: fine[k] ? indexed(`gw_terrain_${k}`, fine[k]!, mTerrainMat) : null,
+      coarse: coarse[k] ? indexed(`gw_terrain_lo_${k}`, coarse[k]!, mTerrainMat) : null,
+      detail: opt(detailB[k], 'gw_detail', mLit), lite: opt(liteB[k], 'gw_lite', mLit), under: opt(underB[k], 'gw_under', mLit),
+      grassA: opt(grassA[k], 'gw_grass_a', mGrass), grassB: opt(grassB[k], 'gw_grass_b', mGrass),
+    });
+  }
+  const tileMeshes = (t: Tile) => [t.fine, t.coarse, t.detail, t.lite, t.under, t.grassA, t.grassB].filter((m): m is Mesh => m !== null);
+  const mFixed = mk(fixedB, 'gw_fixed', mLit);
   const mGlowM = mk(glowB, 'gw_glowm', mGlow);
   const mBelt = mk(beltB, 'gw_belt', mFarMat);
   const mFar = mk(farB, 'gw_far', mFarMat);
   const mMount = mk(mountB, 'gw_mountains', mMountMat);
-  const mGrassA = mk(grassA, 'gw_grass_a', mGrass);
-  const mGrassB = mk(grassB, 'gw_grass_b', mGrass);
   // the plane's front faces −Z; turned to face east, along the road, toward an adventurer walking back west
   // "Shady Grove" on the face toward the zone (read walking back west), "The Greenway" on the face toward the grove
   const sign = signPlane(scene, gateOut.sign, plan.gate.yaw - Math.PI, 'Shady Grove');
   const signBack = signPlane(scene, gateOut.signBack, plan.gate.yaw, 'The Greenway');
-  const statics: Mesh[] = [mTerrain, mRoad, ...mChunks, mGlowM, mBelt, mFar, mMount, mGrassA, mGrassB, sign, signBack];
-  for (const m of statics) { m.freezeWorldMatrix(); m.doNotSyncBoundingInfo = true; }
-  // the ground is pickable (tap-to-walk); the far scenery is not
-  for (const m of [mMount, mFar, mBelt, mGrassA, mGrassB, mGlowM, sign, signBack]) m.isPickable = false;
-  mTerrain.isPickable = true; mRoad.isPickable = true;
+  const statics: Mesh[] = [mRoad, mFixed, mGlowM, mBelt, mFar, mMount, sign, signBack, ...tiles.flatMap(tileMeshes)];
+  for (const m of statics) { m.freezeWorldMatrix(); m.doNotSyncBoundingInfo = true; m.isPickable = false; }
+  // the ground is pickable (tap-to-walk); the scenery is not
+  for (const t of tiles) for (const m of [t.fine, t.coarse]) if (m) m.isPickable = true;
+  mRoad.isPickable = true;
 
   const sky = createShaderSky(scene, new Vector3(-0.4, 0.5, 0.75)); // the cloud bank stays where the Beacon would be: off to the north-west
   const life = createLife(scene, []);
@@ -890,79 +1046,44 @@ export function buildGreenway(scene: Scene): WorldApi {
   const spawns = layout.camps.flatMap(c => c.spawns).map(s => new Vector3(s.x, H(s.x, s.z), s.z));
   const lens = new Vector3(gateOut.lantern[0], gateOut.lantern[1], gateOut.lantern[2]);
 
-  // ───── quality: shadows, glow, post (as the town's) ─────
+  // ───── quality: shadows, glow, post (world/look.ts), and what each tile draws ─────
   let quality: Quality = 'med';
-  let shadow: CascadedShadowGenerator | null = null;
-  let glow: GlowLayer | null = null;
   let cam: ArcRotateCamera | null = null;
-  let pipe: DefaultRenderingPipeline | null = null;
-  let ssao: SSAO2RenderingPipeline | null = null;
-  const casters: AbstractMesh[] = [...mChunks];
-  const receivers: Mesh[] = [mTerrain, mRoad, ...mChunks, mGrassA, mGrassB];
+  const casters: AbstractMesh[] = [mFixed, ...tiles.flatMap(t => [t.detail, t.lite]).filter((m): m is Mesh => m !== null)];
+  const receivers: Mesh[] = [mRoad, mFixed, ...tiles.flatMap(tileMeshes)];
+  const look = createLook(scene, {
+    prefix: 'gw', sun, casters, receivers,
+    // med: one cascade over the near field (phones); high: three over 150 m
+    shadow: { high: { maxZ: 150, cascades: 3, size: 2048 }, med: { maxZ: 60, cascades: 1, size: 1024 } },
+    glowMeshes: () => [mGlowM],
+  });
   const blobTex = new DynamicTexture('gw_blob', { width: 64, height: 64 }, scene, false);
   { const g = blobTex.getContext() as unknown as CanvasRenderingContext2D; const r = g.createRadialGradient(32, 32, 2, 32, 32, 31); r.addColorStop(0, 'rgba(40,30,60,0.55)'); r.addColorStop(1, 'rgba(40,30,60,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); blobTex.hasAlpha = true; blobTex.update(); }
   const blobMat = new StandardMaterial('gw_blobmat', scene); blobMat.diffuseTexture = blobTex; blobMat.useAlphaFromDiffuseTexture = true; blobMat.disableLighting = true; blobMat.emissiveColor = new Color3(1, 1, 1); blobMat.zOffset = -2;
   const blobs: { root: TransformNode; disc: Mesh }[] = [];
-  const ip = scene.imageProcessingConfiguration;
-  const grade = (c: ImageProcessingConfiguration) => {
-    c.toneMappingEnabled = true; c.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL;
-    c.exposure = 1.08; c.contrast = 1.12;
-    c.colorCurvesEnabled = true;
-    const cc = c.colorCurves!; cc.globalSaturation = 4; cc.shadowsHue = 235; cc.shadowsDensity = 22; cc.shadowsSaturation = 20; cc.highlightsHue = 40; cc.highlightsDensity = 18; cc.highlightsSaturation = 15;
-    c.vignetteEnabled = true; c.vignetteWeight = 1.25; c.vignetteStretch = 0.5; c.vignetteColor = new Color4(0.16, 0.1, 0.22, 0);
-  };
-  let shadowFor: Quality | null = null;
-  const applyShadows = (q: Quality) => {
-    if (!scene.activeCamera && !cam) { shadowFor = null; return; }
-    shadowFor = q;
-    shadow?.dispose(); shadow = null;
-    for (const m of receivers) m.receiveShadows = q !== 'low';
-    if (q === 'low') return;
-    const csm = new CascadedShadowGenerator(q === 'high' ? 2048 : 1024, sun);
-    if (cam) csm.camera = cam;
-    csm.numCascades = q === 'high' ? 3 : 2;
-    csm.lambda = 0.82; csm.shadowMaxZ = q === 'high' ? 150 : 95; csm.stabilizeCascades = true; csm.cascadeBlendPercentage = 0.12;
-    csm.usePercentageCloserFiltering = true; csm.filteringQuality = q === 'high' ? CascadedShadowGenerator.QUALITY_HIGH : CascadedShadowGenerator.QUALITY_MEDIUM;
-    csm.bias = 0.004; csm.normalBias = 0.025; csm.darkness = 0.38;
-    csm.depthClamp = true; csm.autoCalcDepthBounds = false;
-    for (const c of casters) if (!c.isDisposed()) csm.addShadowCaster(c, false);
-    shadow = csm;
-  };
-  const applyPost = () => {
-    pipe?.dispose(); pipe = null; ssao?.dispose(); ssao = null;
-    glow?.dispose(); glow = null;
-    if (quality !== 'low') {
-      glow = new GlowLayer('gw_glowlayer', scene, { mainTextureRatio: quality === 'high' ? 0.5 : 0.25, blurKernelSize: quality === 'high' ? 32 : 16 });
-      glow.intensity = 0.5;
-      glow.addIncludedOnlyMesh(mGlowM);
-      glow.customEmissiveColorSelector = (_mesh, _s, _m, result) => { result.set(1, 0.72, 0.36, 1); };
+  // per tile: what to draw at its distance from the adventurer (tileDetail), re-checked a few times a second
+  let tileX = NaN, tileZ = NaN, tileQ: Quality | null = null;
+  const applyTiles = (x: number, z: number) => {
+    tileX = x; tileZ = z; tileQ = quality;
+    for (const t of tiles) {
+      const d = Math.max(0, Math.hypot(Math.max(0, Math.abs(x - t.cx) - TILE / 2), Math.max(0, Math.abs(z - t.cz) - TILE / 2)));
+      const v = tileDetail(d, quality);
+      t.fine?.setEnabled(v.fine || !t.coarse); t.coarse?.setEnabled(!v.fine || !t.fine);
+      t.detail?.setEnabled(v.detail || !t.lite); t.lite?.setEnabled(!v.detail || !t.detail);
+      t.under?.setEnabled(v.under); t.grassA?.setEnabled(v.grassA); t.grassB?.setEnabled(v.grassB);
     }
-    grade(ip); ip.isEnabled = true;
-    if (!cam || quality === 'low') return;
-    pipe = new DefaultRenderingPipeline('gw_post', quality === 'high', scene, [cam]);
-    pipe.imageProcessingEnabled = true;
-    if (quality === 'high') {
-      pipe.samples = 4; pipe.fxaaEnabled = false;
-      pipe.bloomEnabled = true; pipe.bloomThreshold = 0.86; pipe.bloomWeight = 0.22; pipe.bloomKernel = 48; pipe.bloomScale = 0.5;
-      pipe.sharpenEnabled = true; pipe.sharpen.edgeAmount = 0.12; pipe.sharpen.colorAmount = 1;
-      try {
-        ssao = new SSAO2RenderingPipeline('gw_ssao', scene, { ssaoRatio: 0.5, blurRatio: 0.5 }, [cam]);
-        ssao.radius = 1.2; ssao.totalStrength = 0.9; ssao.base = 0.2; ssao.samples = 12; ssao.maxZ = 140; ssao.minZAspect = 0.4; ssao.expensiveBlur = true;
-      } catch (e) { console.warn('SSAO unavailable', e); ssao = null; }
-    } else { pipe.fxaaEnabled = true; }
   };
   const setQuality = (q: Quality) => {
     quality = q;
-    mGrassA.setEnabled(q !== 'low');
-    mGrassB.setEnabled(q === 'high');
     mBelt.setEnabled(true);
     sky.setOctaves(q === 'low' ? 3 : q === 'med' ? 4 : 5);
     life.setLevel(q);
     for (const b of blobs) b.disc.setEnabled(q === 'low');
-    applyShadows(q);
-    applyPost();
+    applyTiles(Number.isNaN(tileX) ? entry.x : tileX, Number.isNaN(tileZ) ? entry.z : tileZ);
+    look.setQuality(q);
   };
-  setQuality('med');
+
+  applyTiles(entry.x, entry.z); // the tier itself is applied by the first setQuality / attachCamera
 
   let time = 0;
   const tmpTarget = new Vector3();
@@ -972,7 +1093,7 @@ export function buildGreenway(scene: Scene): WorldApi {
         if (casters.includes(m)) continue;
         if ((m.material as StandardMaterial | null)?.disableLighting) continue; // glowing bits cast no shadow
         casters.push(m);
-        shadow?.addShadowCaster(m, false);
+        look.addCaster(m);
       }
       if (!blobs.some(b => b.root === root)) {
         const disc = MeshBuilder.CreateGround('gw_blob_' + blobs.length, { width: 1.3, height: 1.3 }, scene);
@@ -980,7 +1101,7 @@ export function buildGreenway(scene: Scene): WorldApi {
         blobs.push({ root, disc });
       }
     },
-    attachCamera: (c: ArcRotateCamera) => { cam = c; applyShadows(quality); applyPost(); },
+    attachCamera: (c: ArcRotateCamera) => { cam = c; look.attachCamera(c); },
     groundAt: (x, z) => walk.groundAt(x, z),
     surfaceAt: (x, z) => walk.surfaceAt(x, z),
     // grove-only anchors (the statue, the docks, the arena) have no place here: they all answer the entry
@@ -993,11 +1114,13 @@ export function buildGreenway(scene: Scene): WorldApi {
     setQuality,
     update: (dt) => {
       time += dt;
-      if (shadowFor !== quality && (cam || scene.activeCamera)) applyShadows(quality);
+      look.update();
       WFX.time = time;
       WFX.wind = 0.8 + 0.2 * Math.sin(time * 0.31);
       const ac = cam ?? (scene.activeCamera as ArcRotateCamera | null);
       if (ac && ac.target) { tmpTarget.copyFrom(ac.target); WFX.target.copyFrom(tmpTarget); WFX.fadeRadius = 3.2; }
+      // tiles re-pick their detail once the adventurer has moved a few metres (or the tier changed)
+      if (tileQ !== quality || Math.hypot(tmpTarget.x - tileX, tmpTarget.z - tileZ) > 4) applyTiles(tmpTarget.x, tmpTarget.z);
       sky.update(time);
       life.update(dt, time, WFX.target);
       for (let i = blobs.length - 1; i >= 0; i--) {
@@ -1006,7 +1129,6 @@ export function buildGreenway(scene: Scene): WorldApi {
         const p = b.root.position;
         b.disc.position.set(p.x, (walk.surfaceAt(p.x, p.z) ?? p.y) + 0.04, p.z);
       }
-      for (let i = casters.length - 1; i >= 0; i--) if (casters[i].isDisposed()) casters.splice(i, 1);
     },
   };
 }

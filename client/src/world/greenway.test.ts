@@ -3,7 +3,10 @@
 // character controller stand the adventurer on), so feet never float above or sink into the drawn ground.
 import { describe, expect, it } from 'vitest';
 import { ENEMY_KINDS, greenwayLayout } from '@sg2/shared';
-import { greenwayPlacements, greenwayRoad, greenwayTerrain, roadDistance, rockShape, PROP_ROAD_CLEAR, PROP_SPAWN_CLEAR } from './greenway';
+import {
+  greenwayPlacements, greenwayRoad, greenwayTerrain, roadDistance, rockShape, splitTerrain, tileDetail, hash,
+  LOW_TERRAIN, PROP_ROAD_CLEAR, PROP_SPAWN_CLEAR, PROP_TREE_CLEAR, PROP_ROCK_K,
+} from './greenway';
 
 const layout = greenwayLayout();
 const plan = greenwayPlacements(layout);
@@ -55,6 +58,23 @@ describe('greenwayPlacements', () => {
       expect(roadDistance(layout, p.x, p.z)).toBeGreaterThan(halfRoad + 1 + p.r);
       for (const c of layout.camps) expect(Math.hypot(p.x - c.x, p.z - c.z)).toBeGreaterThan(c.r + 4);
     }
+  });
+
+  it('props never stand in a tree trunk or a rock', () => {
+    const props = [...plan.camps.flatMap(c => c.props), ...plan.roadside];
+    for (const p of props) {
+      for (const t of layout.trees) expect(Math.hypot(p.x - t.x, p.z - t.z)).toBeGreaterThan(p.r + PROP_TREE_CLEAR);
+      for (const r of layout.rocks) expect(Math.hypot(p.x - r.x, p.z - r.z)).toBeGreaterThan(p.r + r.r * PROP_ROCK_K);
+    }
+  });
+
+  it('variety comes from an integer hash: the same values in every browser', () => {
+    expect(hash(0, 0)).toBe(0);
+    expect(hash(1.5, -2.25)).toBeCloseTo(hash(1.5, -2.25), 15);
+    const vals = Array.from({ length: 2000 }, (_, i) => hash(i * 0.37, i * 1.13));
+    for (const v of vals) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThan(1); }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    expect(Math.abs(mean - 0.5)).toBeLessThan(0.03);
   });
 
   it('rocks you can climb have a flat top exactly at the platform height that covers the whole platform', () => {
@@ -146,5 +166,53 @@ describe('the drawn ground matches the shared ZoneWalk', () => {
       n++;
     }
     expect(n).toBeGreaterThan(10_000);
+  });
+});
+
+describe('terrain tiles and tiers', () => {
+  const b = layout.walk.bounds;
+  it('the coarse terrain (far tiles, low tier) covers the walkable area without holes, within 7 cm of groundAt', () => {
+    const t = greenwayTerrain(layout, plan, LOW_TERRAIN);
+    const ground = sampler(t.positions, t.indices, t.topTriangles);
+    let worst = 0;
+    for (let x = b.x0 - 6; x <= b.x1 + 6; x += 0.9) for (let z = b.z0 - 6; z <= b.z1 + 6; z += 0.97) {
+      const m = ground(x, z);
+      expect(m).not.toBeNull();
+      const g = layout.walk.groundAt(x, z);
+      if (g !== null) worst = Math.max(worst, Math.abs(m! - g));
+    }
+    expect(worst).toBeLessThanOrEqual(0.07);
+    expect(t.topTriangles).toBeLessThan(greenwayTerrain(layout, plan).topTriangles * 0.5);
+  });
+
+  it('splitTerrain keeps every triangle once, in the tile of its centroid, plus skirts under the tile edges', () => {
+    const t = greenwayTerrain(layout, plan, LOW_TERRAIN);
+    const tileOf = (x: number, z: number) => (x < 100 ? 0 : 1) + (z < 0 ? 0 : 2);
+    const tiles = splitTerrain(t, tileOf, 4);
+    let top = 0;
+    for (const tile of tiles) {
+      expect(tile).not.toBeNull();
+      const P = tile!.positions, I = tile!.indices;
+      for (let k = 0; k < I.length; k += 3) {
+        const ys = [P[I[k] * 3 + 1], P[I[k + 1] * 3 + 1], P[I[k + 2] * 3 + 1]];
+        const xs = [P[I[k] * 3], P[I[k + 1] * 3], P[I[k + 2] * 3]];
+        // top triangles (no lowered skirt vertex): count them
+        const skirt = I[k] >= 0 && ys.some((y, q) => { const g = layout.height(xs[q], P[[I[k], I[k + 1], I[k + 2]][q] * 3 + 2]); return y < g - 0.2; });
+        if (!skirt) top++;
+      }
+      expect(tile!.normals.length).toBe(P.length);
+    }
+    expect(top).toBe(t.topTriangles);
+  });
+
+  it('tileDetail: near tiles draw the fine ground and full trees; far tiles and the low tier the cheap ones', () => {
+    expect(tileDetail(0, 'high')).toEqual({ fine: true, detail: true, under: true, grassA: true, grassB: true });
+    expect(tileDetail(0, 'med')).toMatchObject({ fine: true, detail: true, under: true, grassA: true, grassB: false });
+    expect(tileDetail(200, 'high')).toEqual({ fine: false, detail: false, under: false, grassA: false, grassB: false });
+    expect(tileDetail(0, 'low')).toEqual({ fine: false, detail: false, under: false, grassA: false, grassB: false });
+    for (const d of [0, 10, 30, 60, 100]) {
+      const m = tileDetail(d, 'med'), h = tileDetail(d, 'high');
+      for (const k of ['fine', 'detail', 'under', 'grassA', 'grassB'] as const) if (m[k]) expect(h[k]).toBe(true); // high draws at least what med does
+    }
   });
 });

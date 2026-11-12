@@ -82,14 +82,17 @@ export interface CountryOut { obstacles: Obstacle[] }
 export function buildCountryside(terrain: Builder, band: Kit, far: Kit, water: Builder, mount: Builder): CountryOut {
   const obs: Obstacle[] = [];
   // ───── terrain: polar mesh to the horizon ─────
-  const radii: number[] = []; for (let j = 0; j <= 30; j++) radii.push(j * 3.2);
+  // 3.2 m rings out to r ≈ 141 m: the east road leaves the walkable band at r ≈ 100, where coarser rings rose
+  // above the road (the arrival point from the Greenway)
+  const FINE_RINGS = 44;
+  const radii: number[] = []; for (let j = 0; j <= FINE_RINGS; j++) radii.push(j * 3.2);
   while (radii[radii.length - 1] < 2000) radii.push(radii[radii.length - 1] * 1.085);
   const NA = 128;
   const ring = radii.map((r, j) => {
     const out: V3[] = [];
     for (let i = 0; i < NA; i++) {
       const a = i / NA * Math.PI * 2;
-      const rr = j === 0 ? 0 : r * (1 + (h2(i, j) - 0.5) * (j > 30 ? 0.08 : 0.03));
+      const rr = j === 0 ? 0 : r * (1 + (h2(i, j) - 0.5) * (j > FINE_RINGS ? 0.08 : 0.03));
       const x = Math.cos(a) * rr, z = Math.sin(a) * rr; out.push([x, H(x, z), z]);
     }
     return out;

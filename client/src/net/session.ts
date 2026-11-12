@@ -52,6 +52,8 @@ export interface StateMap<T> {
 export interface ZoneState {
   readonly players?: StateMap<PlayerView>;
   readonly enemies?: StateMap<EnemyStateView>;
+  /** The zone's true head count (players holds only those within this client's interest radius). */
+  readonly online?: number;
 }
 
 export type ZoneRoom = Room<ZoneState>;
