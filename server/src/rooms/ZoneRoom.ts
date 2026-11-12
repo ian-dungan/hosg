@@ -664,6 +664,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const session = this.actor(client);
     const { slot, phase } = (typeof message === 'object' && message !== null ? message : {}) as { slot?: unknown; phase?: unknown };
     if (!session || !Number.isSafeInteger(slot) || (phase !== 'press' && phase !== 'release')) return;
+    // A release with no charge in progress (the shot already loosed, auto-released or cancelled, or no
+    // press at all) is dropped silently: the client sends one on every key-up of the slot.
+    if (phase === 'release' && (this.combat.self(session.eid)?.charge ?? null) === null) return;
     this.intent(session, 'ability', { t: 'ability', slot: slot as number, phase });
   }
 

@@ -120,7 +120,7 @@ A fight run passes only if all of these hold:
 - the mean patch rate is at least 14 Hz;
 - 0 corrections, and no dodge rollback for a reason other than `busy`;
 - no bot stuck (no move it could make) for 15 ticks in a row;
-- credited kills ≥ 50, dodges ≥ 25 and knockbacks ≥ 1;
+- credited kills ≥ 50, dodges ≥ 20 (ruling P3-j) and knockbacks ≥ 1;
 - at least one predicted second roll sent before the first's `displaced`, and every such roll rolled;
 - at least one move sent at Sprint speed;
 - every bot that died is back in the Greenway or on its way;
@@ -133,8 +133,11 @@ A fight run passes only if all of these hold:
 Why not the plan's "dodges ≥ 100, deaths ≥ 1" in 60 s (coordinator ruling P3-i): the Greenway has 21
 enemies on a 25 s respawn, and its camps are 37–218 m from the entry, so a 60 s run sees about 30
 enemy deaths. A fight puts a bot inside about 2 telegraphs, and careful bots dodge about 90% of them.
-Six tuned runs gave 28–54 dodges, and deaths of 0 or 1. The 60 s run is therefore gated at 25 dodges,
-and deaths are gated on the 120 s `--cycle` run.
+Six tuned runs gave 28–54 dodges, and deaths of 0 or 1. The 60 s run was therefore gated at 25 dodges,
+and deaths are gated on the 120 s `--cycle` run. The stricter bots of the final review (sprinters and
+predictors, which reach and kill enemies sooner) rolled 23–42 in 60 s over 8 runs, so ruling P3-j set
+the gate at 20. The three careless hunters fight their Mossback strictly alone: no other bot engages
+an elite a hunter is on, so the hunters die and `--cycle`'s deaths gate holds.
 
 It prints, beside the usual numbers:
 - kills credited (by kind) and the enemy deaths seen;
@@ -201,6 +204,13 @@ gate depends on the three careless hunters losing to a Mossback; in the failing 
 died 6 times instead (other bots joined in), so the gate is not deterministic. The clustered case
 with the state `clock` (ruling P3-g accepted ≤ ~11 KiB/s): 10.5 KiB/s, as before the clock. A 10-bot
 `--stand` run saw 15.00 Hz.
+
+After ruling P3-j (dodges ≥ 20) and strictly solo hunters, every run passed:
+
+| run | result | bot Hz | KiB/s per bot (mean / p95) | step p95 | peak RSS | kills | deaths / back | dodges | knockbacks | early rolls (sent / rolled) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `--cycle` 120 s, 3 runs | PASS ×3 | 15.15 | 4.4–4.6 / 5.1–5.3 | 5.8–7.8 ms | 149–160 MB | 480–518 | 3/3, 3/3, 1/1 | 48–69 | 13–19 | 4–10 / all |
+| `--fight` 60 s, 2 runs | PASS ×2 | 15.18–15.19 | 5.4–5.5 / 6.5–6.6 | 8.8–9.5 ms | 150–151 MB | 162–177 | 1 / 0 (on its way) | 31–48 | 11–13 | 3–6 / all |
 
 ### 2026-11-12: fighting bots, the smoke test (Plan 3 Task 9)
 

@@ -14,7 +14,7 @@ const DUMMY: CampSpawn = { kind: 'dummy', x: 3, z: -11, facing: 0 };
 const me = (room: Room<any, any>) => room.state.players.get(room.sessionId);
 
 describe('a stray Charged Shot release', () => {
-  it('after the shot was loosed, or with no press, is ignored: no second shot, no charge, nothing but a silent refusal', async () => {
+  it('after the shot was loosed, or with no press, is ignored: no second shot, no charge, no refusal at all', async () => {
     server = await startServer({ combatSeed: 7, zones: { grove: { surface: flat, ground: flat, sight: () => true, camps: [DUMMY] } } });
     const { url, store } = server;
     const account = await accountFor(store, 'Alice');
@@ -38,8 +38,6 @@ describe('a stray Charged Shot release', () => {
     expect(shots()).toBe(1);
     expect(selves.at(-1)?.charge).toBeNull();
     expect(me(room).act).not.toBe('charge');
-    expect(refused.filter((r) => r.action === 'ability')).toEqual([
-      { action: 'ability', reason: 'invalid' }, { action: 'ability', reason: 'invalid' }, { action: 'ability', reason: 'invalid' },
-    ]);
+    expect(refused).toEqual([]); // dropped silently: the client sends a release on every key-up
   });
 });

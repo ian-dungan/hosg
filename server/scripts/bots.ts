@@ -37,7 +37,7 @@
 // back. It passes only if every bot stayed connected, the mean patch rate is at least 14 Hz, no move
 // was corrected (the `correct` that follows a dodge the engine refused is the protocol's rollback,
 // counted apart by the refusal's reason, and only RACY_ROLLBACKS may cause one), no bot was stuck for
-// TICK_HZ ticks in a row, credited kills >= 50, dodges >= 25, knockbacks >= 1, predicted second rolls
+// TICK_HZ ticks in a row, credited kills >= 50, dodges >= 20, knockbacks >= 1, predicted second rolls
 // sent early >= 1 and every one of them rolled, every bot that died is back in the Greenway or on its
 // way, the zone step p95 <= 15 ms, peak RSS <= 400 MB, and no bot saw more than MAX_ENEMIES_PER_ZONE
 // enemies.
@@ -113,11 +113,12 @@ const BODY_STEP_MAX_S = 0.25;
 // --fight
 /** The fight run's pass marks. */
 // (Ruling P3-i: the brief asked for dodges >= 100 and deaths >= 1 in 60 s, which 21 enemies on a 25 s
-// respawn cannot give; deaths and the whole way back are gated by --cycle, on a 120 s run.)
-const FIGHT_MIN = { kills: 50, dodges: 25, knocks: 1, earlyRolls: 1 };
+// respawn cannot give; deaths and the whole way back are gated by --cycle, on a 120 s run. Ruling P3-j:
+// dodges >= 20, as the stricter bots rolled 23-42 in 60 s.)
+const FIGHT_MIN = { kills: 50, dodges: 20, knocks: 1, earlyRolls: 1 };
 /** With --cycle: at least this many deaths, and this many bots back in the Greenway after one. */
 const CYCLE_MIN = { deaths: 1, returned: 1 };
-/** Careless bots (by index) sent solo at a Mossback from the start, so that deaths happen. */
+/** Careless bots (by index) sent solo at a Mossback from the start, so that deaths happen: no other bot engages an elite a hunter is on. */
 const ELITE_HUNTERS = [3, 7, 11];
 const MAX_STEP_P95_MS = 15;
 const MAX_PEAK_RSS_MB = 400;
@@ -255,6 +256,9 @@ function passableIn(zone: ZoneId) {
   }
   return p;
 }
+
+/** The hunters' adventurers (`zone:eid`), so other bots leave the elite a hunter is on alone. */
+const hunterEids = new Set<string>();
 
 /** Every enemy any bot has seen (engine id → kind), and enemy deaths seen in fx (deduplicated across bots). */
 const enemyKinds = new Map<number, string>();
@@ -575,6 +579,7 @@ class Bot {
     this.body = makeBody(me.x, me.z, this.surface);
     this.air = makeAirTrack(this.body.y);
     this.home = { x: me.x, z: me.z };
+    if (this.hunter) hunterEids.add(`${zone}:${me.eid}`);
     this.selfView = null;
     this.sentTarget = null;
     this.dodgeSentAt = null;
@@ -812,17 +817,23 @@ class Bot {
     const mine = this.room.state.players?.get(this.room.sessionId)?.eid;
     let n = 0;
     const claimed = new Map<number, number>();
+    /** Enemies a hunter (another bot) is on: nobody else engages them, so its fight stays solo. */
+    const hunted = new Set<number>();
     this.room.state.players?.forEach((p: any, id: string) => {
-      if (id !== this.room.sessionId && !p.dead && p.target >= 0) claimed.set(p.target, (claimed.get(p.target) ?? 0) + 1);
+      if (id === this.room.sessionId || p.dead || p.target < 0) return;
+      claimed.set(p.target, (claimed.get(p.target) ?? 0) + 1);
+      if (hunterEids.has(`${this.zone}:${p.eid}`)) hunted.add(p.target);
     });
     this.room.state.enemies?.forEach((e: any) => {
       n++;
       if (!enemyKinds.has(e.eid)) enemyKinds.set(e.eid, e.kind);
       if (e.mode === 'dead' || e.mode === 'return') return;
+      const elite = ENEMY_KINDS[e.kind as EnemyKindId]?.elite === true;
+      // an elite a hunter is on is left to it: not kept, not fought back, not picked (it stays solo)
+      if (!this.hunter && elite && hunted.has(e.eid)) return;
       const d = dist(e, this.body);
       if (e.eid === this.sentTarget && d <= TARGET_RANGE + 5) current = e;
       if (e.target === mine && d <= TARGET_RANGE) attacker = e;
-      const elite = ENEMY_KINDS[e.kind as EnemyKindId]?.elite === true;
       // a hunter takes only an elite (whoever else is on it); the others leave elites to one adventurer
       if (this.hunter ? !elite : (claimed.get(e.eid) ?? 0) >= (elite ? FIGHTERS_PER_ELITE : FIGHTERS_PER_ENEMY)) return;
       if (d <= bestD) { best = e; bestD = d; }
