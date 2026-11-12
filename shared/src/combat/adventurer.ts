@@ -12,7 +12,7 @@ import {
   RHYTHM_AUTO_MOMENTUM, STEAM_HEAL, STEAM_R, BURNING_COEF_PER_S, CAST_MOVE_SCALE, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S,
   COMBO_COEF, COMBO_STAGGER, DODGE_IFRAME_S, ELITE_ROOT_MULT, MARK_S, ROOT_IMMUNE_S, MOMENTUM_MAX, DODGE_MIN_GAP_S, DODGE_REFILL_S, GCD_S, INTERRUPT_STAGGER,
   KNOCK_RECOVER_S, RESPAWN_CLEAR_RADIUS, SPEED_GRACE_S, SWAP_COOLDOWN_S, TARGET_DROP_RANGE, TARGET_RANGE, THREAT_PER_DAMAGE,
-  THREAT_PER_HEAL,
+  THREAT_PER_HEAL, TOLL_STAGGER_MULT,
 } from './constants';
 import { breakCast, castView, startCast, tickCast } from './casting';
 import {
@@ -340,6 +340,8 @@ export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
  * now, as an interrupt's does), stunned until the bar recovers.
  */
 export function applyStagger(w: CombatWorld, e: EnemyState, amount: number, nowS: number): boolean {
+  // ruling P4-k: a boss winding up Keeper's Toll takes TOLL_STAGGER_MULT × stagger (save it for the Toll and Break it)
+  if (e.windup?.attack === 'keepers_toll') amount *= TOLL_STAGGER_MULT;
   if (!e.alive || enemyInvulnerable(e) || !addStagger(e.stagger, amount, nowS)) return false;
   // a boss's own Break length (else BREAK_STUN_S)
   const breakS = e.data.boss?.breakS;

@@ -76,9 +76,9 @@ export const BOSSES: Readonly<Record<BossKindId, BossData>> = deepFreeze({
    */
   fallen_warden: {
     phases: [
-      { index: 0, name: 'The Keeper Wakes', untilFrac: 0.7, rotation: ['lamp_sweep', 'brass_fall', 'lamp_sweep', 'keepers_toll'], gap: 3.0 },
+      { index: 0, name: 'The Keeper Wakes', untilFrac: 0.7, rotation: ['lamp_sweep', 'brass_fall', 'lamp_sweep', 'keepers_toll'], gap: 2.3 },
       {
-        index: 1, name: 'The Lamp Kindles', untilFrac: 0.35, rotation: ['beacon_lance', 'lamp_sweep', 'keepers_toll', 'brass_fall'], gap: 2.6,
+        index: 1, name: 'The Lamp Kindles', untilFrac: 0.35, rotation: ['beacon_lance', 'lamp_sweep', 'keepers_toll', 'brass_fall'], gap: 2.0,
         onEnter: {
           fields: [{ id: 'lampfire', shape: { kind: 'ring', x: 0, z: 0, dir: 0, inner: 15, r: 40 }, raw: 8 }],
           adds: [{ kind: 'lens_shard', dx: -10, dz: 0 }, { kind: 'lens_shard', dx: 10, dz: 0 }],
@@ -87,11 +87,11 @@ export const BOSSES: Readonly<Record<BossKindId, BossData>> = deepFreeze({
       },
       {
         index: 2, name: 'The Lens Falls', untilFrac: 0,
-        rotation: ['turning_light', 'brass_fall', 'lamp_sweep', 'keepers_toll', 'beacon_lance'], gap: 2.4, autoEvery: 2.4, anchor: true,
+        rotation: ['turning_light', 'brass_fall', 'lamp_sweep', 'keepers_toll', 'beacon_lance'], gap: 1.8, autoEvery: 2.4, anchor: true,
         onEnter: { clearFields: true, fields: [{ id: 'lampfire_deep', shape: { kind: 'ring', x: 0, z: 0, dir: 0, inner: 12, r: 40 }, raw: 10 }] },
       },
     ],
-    scale: [1, 1, 1.1, 1.9],
+    scale: [1, 1, 1.1, 2.6],
     transitionS: 4,
     breakS: 5,
     enrage: { s: 330, attack: 'last_light', every: 4 },

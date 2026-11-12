@@ -46,6 +46,8 @@ export const SURGE_AFTER_S = 3;
  * than starting a telegraph. So plain running never kites it; Sprint and dodges break away briefly.
  */
 export const SURGE_SCALE = 1.3;
+/** An arena boss surges after this long with nobody in its melee reach (ruling P4-l), in s. */
+export const BOSS_SURGE_AFTER_S = 6;
 /** An ordinary enemy cannot be parry-stunned again for this long after a parry stun ends. */
 export const PARRY_STUN_IMMUNE_S = 3;
 /** Expanded path-search nodes shared by every enemy of a zone per tick. */
@@ -95,6 +97,8 @@ export interface EnemyAi {
   progTarget: number | null; progBest: number; progAt: number;
   /** The chase surge: last time it was in range of any attack (or started one). */
   chanceAt: number;
+  /** An arena boss: last time an engaged adventurer stood in its melee reach (ruling P4-l). */
+  reachAt: number;
   /** Elite scaling: the most adventurers engaged so far this fight. */
   scaleN: number;
   /** An ordinary enemy's parry-stun immunity ends then. */
@@ -109,7 +113,7 @@ function aiOf(e: EnemyState, nowS: number): EnemyAi {
       engaged: false, noTargetSince: null, nextAutoAt: -Infinity,
       direct: true, path: null, pathIdx: 0, pathGoalX: 0, pathGoalZ: 0, planAt: -Infinity, checkAt: -Infinity, searchAt: -Infinity,
       dirty: false, noWay: false, wantSince: null, wantX: 0, wantZ: 0, searchedAt: -Infinity, longestWaitS: 0,
-      progTarget: null, progBest: Infinity, progAt: nowS, chanceAt: nowS, scaleN: 1, parryImmuneUntil: -Infinity, returnSince: -Infinity,
+      progTarget: null, progBest: Infinity, progAt: nowS, chanceAt: nowS, reachAt: nowS, scaleN: 1, parryImmuneUntil: -Infinity, returnSince: -Infinity,
     };
     AI.set(e, ai);
   }
@@ -322,6 +326,7 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
     ai.noTargetSince = null;
     ai.progTarget = null;
     ai.chanceAt = now;
+    ai.reachAt = now;
     if (boss) wakeBoss(w, e, now);
   }
   if (d.elite) scaleElite(w, e, ai);
@@ -344,7 +349,16 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   // leash is the arena itself (Task 4 review: a lunge near the wall must not reset the fight)
   if (d.speed > 0 && (e.camp.arena ? !inArena(e, e) : hyp(e.x - e.camp.x, e.z - e.camp.z) > d.leash)) { startReturn(w, e, ai, now); return; }
   // a boss's rotation starts its telegraphs (rooted while they are in flight)
-  if (boss && stepBoss(w, e, now) === 'handled') { ai.chanceAt = now; holdProgress(ai, now); return; }
+  // ruling P4-l: an arena boss nobody has stood in melee reach of for BOSS_SURGE_AFTER_S surges; while it
+  // surges it starts no telegraph, and the surge ends when an auto lands on its target (no kiting it for good)
+  if (boss && e.camp.arena && d.auto && !bossAnchored(e)) {
+    for (const id of e.threat.ids()) {
+      const a = w.adventurers.get(id);
+      if (a && a.alive && inArena(e, a) && hyp(a.x - e.x, a.z - e.z) - d.radius <= d.auto.reach) { ai.reachAt = now; break; }
+    }
+    if (!e.surging && now - ai.reachAt >= BOSS_SURGE_AFTER_S - TIME_EPS) e.surging = true;
+  }
+  if (boss && !e.surging && stepBoss(w, e, now) === 'handled') { ai.chanceAt = now; holdProgress(ai, now); return; }
   if (boss && bossAnchored(e)) { anchoredStep(w, e, ai, t, now, dt); return; }
 
   const dist = hyp(t.x - e.x, t.z - e.z);

@@ -3,8 +3,10 @@
 // Soft Rain stops inside an awake arena.
 import { describe, expect, it } from 'vitest';
 import type { Loadout } from './abilities';
-import { damageEnemy, strikeFull } from './adventurer';
-import { STEADFAST_TAKEN } from './constants';
+import { applyStagger, damageEnemy, strikeFull } from './adventurer';
+import { bossAiStateOf } from './bossAi';
+import { BOSS_SURGE_AFTER_S } from './enemyAi';
+import { STEADFAST_TAKEN, TOLL_STAGGER_MULT } from './constants';
 import { applyAffliction, searingMult } from './effects';
 import { resolveHit } from './enemyAi';
 import type { CampSpawn, EnemyState } from './engine';
@@ -66,5 +68,43 @@ describe('Task 5 review round 1', () => {
     r.at(r.now + 2.1);
     expect(r.fx('heal').filter((h) => h.dst === a.id).length).toBe(0);
     expect(a.buffs.rain === undefined || a.buffs.rain.until <= r.now).toBe(true);
+  });
+
+  it('P4-k: a Warden winding up Keeper\'s Toll takes TOLL_STAGGER_MULT × stagger', () => {
+    const { r, add } = rig([camp('fallen_warden', 0, 0)]);
+    const e = r.w.enemies.get(r.enemy('fallen_warden'))!;
+    const a = add(0, -3);
+    damageEnemy(r.w, a.id, e, 1, 'auto', r.now);
+    r.tick();
+    const s0 = e.stagger.value;
+    applyStagger(r.w, e, 10, r.now);
+    expect(e.stagger.value - s0).toBeCloseTo(10, 9);
+    e.windup = { attack: 'keepers_toll', startedAt: r.now, endsAt: r.now + 4, interruptible: true, telegraphId: null };
+    const s1 = e.stagger.value;
+    applyStagger(r.w, e, 10, r.now);
+    expect(e.stagger.value - s1).toBeCloseTo(10 * TOLL_STAGGER_MULT, 9);
+  });
+
+  it('P4-l: an arena boss nobody stands in melee reach of surges after BOSS_SURGE_AFTER_S and starts no telegraph meanwhile', () => {
+    const arena = (x: number, z: number) => Math.hypot(x, z) <= 22;
+    const { r, add } = rig([{ ...camp('fallen_warden', 0, 0), arena }]);
+    const e = r.w.enemies.get(r.enemy('fallen_warden'))!;
+    const a = add(0, -9);
+    damageEnemy(r.w, a.id, e, 1, 'auto', r.now);
+    let surgedAt: number | null = null, telegraphsWhileSurging = 0;
+    for (let k = 0; k < 15 * 12; k++) {
+      // always 9 m away (never in its reach), running around the arena
+      const ang = k / 30, x = e.x + Math.sin(ang) * 9, z = e.z + Math.cos(ang) * 9;
+      const d = Math.hypot(x, z), f = d > 20 ? 20 / d : 1;
+      r.c.setPose(a.id, x * f, z * f, 0, 0);
+      const n = r.w.telegraphs.size;
+      r.tick();
+      if (surgedAt !== null && r.w.telegraphs.size > n) telegraphsWhileSurging++;
+      if (surgedAt === null && e.surging) surgedAt = r.now;
+    }
+    expect(bossAiStateOf(e)!.wokeAt).not.toBeNull();
+    expect(surgedAt).not.toBeNull();
+    expect(surgedAt!).toBeGreaterThanOrEqual(BOSS_SURGE_AFTER_S - 0.2);
+    expect(telegraphsWhileSurging).toBe(0);
   });
 });

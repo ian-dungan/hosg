@@ -202,7 +202,7 @@ New combat constants live in `shared/src/combat/constants.ts` in a section heade
 | boss | n = 1 | 2 | 3 | 4 |
 |---|---|---|---|---|
 | `wickhound` | 1 | 1 | 1.5 | 2.0 |
-| `fallen_warden` | 1 | 1 | 1.1 (Task 5: was 1.45; ruling P4-h allows 1.1) | 1.9 |
+| `fallen_warden` | 1 | 1 | 1.1 (Task 5: was 1.45; ruling P4-h allows 1.1) | 2.6 (Task 5: was 1.9; ruling P4-m E) |
 
   The tables never go below 1: a boss is never weaker for fewer adventurers (spec §8). Adds a boss spawns take the boss's current factor.
 
@@ -211,7 +211,7 @@ New combat constants live in `shared/src/combat/constants.ts` in a section heade
 | kind | name | tier | hp | def | radius | speed | aggro (wake) | leash | auto (reach, every, raw) | attacks | weak / resist | stagger | respawn |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `wickhound` | the Wickhound | boss | 3380 (Task 5: was 2600) | 15 | 1.4 | 4.5 | 10 | 14 (room r − 2; in its arena: the arena) | melee 3.0 m, 2.2 s (1.8 s in phase 2), 7 (Task 5: was 10) | wick_lunge, ember_breath, cinder_ring | water / fire | 220 | never |
-| `fallen_warden` | the Fallen Warden | mega | 7800 (Task 5: was 6000) | 18 | 1.8 | 3.5 | 10 | 20 (room r − 2) | melee 3.2 m, 2.8 s (2.4 s in phase 3), 7 (Task 5: was 9), adds Searing | lamp_sweep, brass_fall, keepers_toll, beacon_lance, turning_light, last_light | water / fire | 300 | never |
+| `fallen_warden` | the Fallen Warden | mega | 6500 (Task 5: was 6000) | 18 | 1.8 | 3.5 | 10 | 20 (room r − 2) | melee 3.2 m, 2.8 s (2.4 s in phase 3), 8 (Task 5: was 9), adds Searing | lamp_sweep, brass_fall, keepers_toll, beacon_lance, turning_light, last_light | water / fire | 300 | never |
 | `lens_shard` | Lens Shard | ordinary (add) | 420 | 5 | 0.8 | 0 | 40 | — | none | focus_beam | lightning / — | 0 | never |
 
 "never" is `respawn: Infinity`. A Lens Shard never moves; it is spawned engaged with every adventurer on the Warden's threat table.
@@ -223,11 +223,11 @@ New combat constants live in `shared/src/combat/constants.ts` in a section heade
 | `wick_lunge` | Wick Lunge | line 10 × 2.2 toward the target | 1.3 | 36 (Task 5: was 28) | knock 10 m/s 0.35 s vy 4; dashes to the line's end; useRange 9 |
 | `ember_breath` | Ember Breath | cone 60°, r 9, toward the target | 1.8 | 39 (Task 5: was 30) | **interruptible**; useRange 8 |
 | `cinder_ring` | Cinder Ring | ring-self, inner 3.5, r 9 | 1.6 | 33 (Task 5: was 26) | phase 2 only (stand close) |
-| `lamp_sweep` | Lamp Sweep | cone 100°, r 12, toward the target | 1.6 | 28 | useRange 12 |
-| `brass_fall` | Brass Fall | circle r 3 on **each** engaged adventurer | 2.0 | 24 | `targets: 'each'`: stacked adventurers take every circle they stand in |
-| `keepers_toll` | Keeper's Toll | circle-self r 40 (the whole arena) | 3.0 | 34 | **interruptible**; a Break cancels it too; **unavoidable** (ruling P4-f: dodge i-frames do not avoid it, no perfect-dodge reward) |
-| `beacon_lance` | Beacon Lance | line 30 × 3 toward the farthest engaged adventurer | 1.8 | 36 | knock 12 m/s 0.4 s vy 5 (into the fire ring) |
-| `turning_light` | Turning Light | line 28 × 3.5 from the Warden | 1.4 each | 30 | `repeat: { count: 8, every: 0.6, rotate: π/4 }` |
+| `lamp_sweep` | Lamp Sweep | cone 100°, r 12, toward the target | 1.6 | 45 (Task 5: was 28) | useRange 12 |
+| `brass_fall` | Brass Fall | circle r 3 on **each** engaged adventurer | 2.0 | 40 (Task 5: was 24) | `targets: 'each'`: stacked adventurers take every circle they stand in |
+| `keepers_toll` | Keeper's Toll | circle-self r 40 (the whole arena) | 4.0 (Task 5: was 3.0) | 40 (Task 5: was 34) | **interruptible**; a Break cancels it too, and while it winds up the Warden takes `TOLL_STAGGER_MULT` = 8 × stagger (ruling P4-k); with four engaged its raw (and Last Light's) is × (1 + `TOLL_PARTY_RAW_PER` 1.2 × (n − 3)) (P4-m E); **unavoidable** (ruling P4-f: dodge i-frames do not avoid it, no perfect-dodge reward) |
+| `beacon_lance` | Beacon Lance | line 30 × 3 toward the farthest engaged adventurer | 1.8 | 55 (Task 5: was 36) | knock 12 m/s 0.4 s vy 5 (into the fire ring) |
+| `turning_light` | Turning Light | line 28 × 3.5 from the Warden | 1.4 each | 45 (Task 5: was 30) | `repeat: { count: 8, every: 0.6, rotate: π/4 }` |
 | `last_light` | Last Light | circle-self r 40 | 1.0 | 19 (Task 5: was 15) | enrage only, every 4 s, `ramp: 5` (19, 24, 29, ...); **unavoidable** (ruling P4-f) |
 | `focus_beam` | Focus Beam | line 20 × 1.6 toward the farthest engaged adventurer | 1.5 | 18 | **interruptible**; cooldown 7, first at 3 |
 
@@ -260,6 +260,7 @@ export interface BossData {
 - **Ward:** while any add spawned by `onEnter.adds` with a `wardMult` lives, the boss takes × `wardMult` damage (`CombatantView.warded`).
 - **Enrage:** `enrage.s` seconds after the boss woke, the rotation is replaced by `enrage.attack` every `enrage.every` s, its raw rising by `ramp` each use. `CombatantView.enrageIn` counts down (null without enrage). A phase transition that comes during the enrage pauses Last Light while it lasts (at most twice, `transitionS` each); a boss arena's enemy leashes to its arena (it goes home only when outside it), and its dashes stop at the arena's edge.
 - **Reset:** when the boss goes home (no live target, leash, or a wipe), it resets to phase 1, its adds are despawned (no credit), its fields are removed, the enrage clock stops and its scale returns to base.
+- **No kiting (ruling P4-l):** an arena boss that has had nobody of its threat table in its melee reach for `BOSS_SURGE_AFTER_S` = 6 s surges (Plan 3's surge speed); while it surges it starts no telegraph, and the surge ends when an auto lands on its target. Stepping out briefly to shed Searing stays fine.
 - **Wake:** a boss notices adventurers within its `aggro` (in sight), or anyone who damages it (Plan 3 rules).
 
 **The Wickhound** (the Warden's lamp-hound: a brass hound whose wick-mane still burns):
@@ -275,9 +276,9 @@ export interface BossData {
 
 | phase | name (banner) | until | rotation | gap s | on enter |
 |---|---|---|---|---|---|
-| 1 | The Keeper Wakes | 70% | lamp_sweep, brass_fall, lamp_sweep, keepers_toll | 3.0 | — |
-| 2 | The Lamp Kindles | 35% | beacon_lance, lamp_sweep, keepers_toll, brass_fall | 2.6 | field `lampfire`: ring inner 15, r 40, raw 8; adds: `lens_shard` at (−10, 0) and (10, 0), `wardMult: 0.4` |
-| 3 | The Lens Falls | 0 | turning_light, brass_fall, lamp_sweep, keepers_toll, beacon_lance | 2.4 | `clearFields`; field `lampfire_deep`: ring inner 12, r 40, raw 10; `anchor: true`; autos every 2.4 s |
+| 1 | The Keeper Wakes | 70% | lamp_sweep, brass_fall, lamp_sweep, keepers_toll | 2.3 (Task 5: was 3.0) | — |
+| 2 | The Lamp Kindles | 35% | beacon_lance, lamp_sweep, keepers_toll, brass_fall | 2.0 (Task 5: was 2.6) | field `lampfire`: ring inner 15, r 40, raw 8; adds: `lens_shard` at (−10, 0) and (10, 0), `wardMult: 0.4` |
+| 3 | The Lens Falls | 0 | turning_light, brass_fall, lamp_sweep, keepers_toll, beacon_lance | 1.8 (Task 5: was 2.4) | `clearFields`; field `lampfire_deep`: ring inner 12, r 40, raw 10; `anchor: true`; autos every 2.4 s |
 
 `transitionS: 4`, `breakS: 5`, `enrage: { s: 330, attack: 'last_light', every: 4 }`. The arena (the Lens Pit) is a flat circle of r 22, so phase 1 has the whole floor, phase 2 shrinks the safe floor to r 15 (and adds the shards inside it), and phase 3 to r 12 with the light turning from the anchored Warden: each phase changes the arena (spec §8). Victory line: "The Warden's lamp steadies, and for a moment its beam points the same way as Ellie's arm."
 
@@ -323,7 +324,7 @@ Reference: Plan 3b's careful duos kill a 1275 hp Mossback (def 15, mitigation 0.
 - **Four** face ×1.9 hp (11400) with 2× the damage: about 10% faster than a duo, with the same mechanics and Brass Fall on four adventurers: not trivial for careless play.
 - **Solo** at Plan 3b power faces the full 6000 hp at about 16 per second: about 590 s, far past the 330 s enrage. A solo kill needs Plan 5's top tier ("soloable only in the top tier", spec §9). The G1 band proves the room is there: a top-tier stand-in (power 20, defence 24, max hp 180) makes it possible.
 
-**Tuned by Task 5** (review round 1 included; the reasoning above is the plan's starting point). Every change, old → new: the Warden's hp 6000 → 7800, its auto raw 9 → 7, `scale[2]` 1.45 → 1.1 (ruling P4-h allows 1.1: no-healer trios die to attrition); Last Light 15 → 19; Keeper's Toll and Last Light are **unavoidable** (ruling P4-f: a dodge's i-frames do not avoid them and give no perfect-dodge reward; a Break or an interrupt cancels the Toll, shields, heals, Aegis, Shelter and the revive answer both; the views carry `unavoidable` so clients draw them as "cannot be dodged"); the Wickhound's hp 2600 → 3380, auto raw 10 → 7, Wick Lunge 28 → 36, Ember Breath 30 → 39, Cinder Ring 26 → 33, gaps 3.5 → 2.6 and 3.0 → 2.2 (every pair of the seven but two Ninjas beats it careful; careless duos lose). Outside the numbers (ruling P4-g): the Paladin's duo picks are Dawn Ward + Kindle and the Ninja's Weak Point + Ashcloud (Mist Form failed Plan 3b's D5 gate); a Shelter share takes the Paladin's own Searing only. A boss still never surges (its rotation's useRange counts as in range), so a ranged adventurer could kite the Warden for good: open, pending a ruling. Unchanged: every other number here (round 0's raises of Lamp Sweep, Brass Fall, Keeper's Toll, Beacon Lance and Turning Light, Searing 0.12 and the 300 s enrage were taken back). The measured bands are in the Task 5 reports.
+**Tuned by Task 5** (rounds 0–2; the reasoning above is the plan's starting point). Every change, old → new: the Warden's hp 6000 → 6500, auto raw 9 → 8, `scale[2]` 1.45 → 1.1, `scale[3]` 1.9 → 2.6; Lamp Sweep 28 → 45, Brass Fall 24 → 40, Beacon Lance 36 → 55, Turning Light 30 → 45 (what sloppy play eats; careful play avoids them); Keeper's Toll wind-up 3.0 → 4.0 s and raw 34 → 40; Last Light 15 → 19; the phase gaps 3.0/2.6/2.4 → 2.3/2.0/1.8. New rules (rulings P4-f, P4-k, P4-l, P4-m E): Keeper's Toll and Last Light are unavoidable (dodge i-frames neither avoid them nor reward; views carry `unavoidable`); while the Toll winds up the Warden takes `TOLL_STAGGER_MULT` = 8 × stagger, so a party without a healer Breaks it; the unavoidable attacks' raw grows by `TOLL_PARTY_RAW_PER` = 1.2 per engaged adventurer beyond three; an arena boss nobody stands in melee reach of for 6 s surges and starts no telegraph meanwhile. The Wickhound: hp 2600 → 3380, auto raw 10 → 7, Wick Lunge 28 → 36, Ember Breath 30 → 39, Cinder Ring 26 → 33, gaps 3.5/3.0 → 2.6/2.2. Pick data (ruling P4-g): the Paladin's duo picks are Dawn Ward + Kindle, the Ninja's Weak Point + Ashcloud; a Shelter share takes the Paladin's own Searing only. Unchanged: Searing's table, the fields, `wardMult`, the shards and every other number here. The measured bands and what is deferred to live tuning are in the Task 5 reports.
 
 **Tuning rule (Task 5 only):** if a band fails, change only these, each within the range given, and record every change (before → after) in the task report and in Task 11's Outcome:
 - the new kinds' `hp` (±30%) and auto `raw` (±30%);

@@ -19,6 +19,7 @@ import { ROTATION_SKIP_S, scaleFactor, type BossData, type BossPhase } from './b
 import type { AdventurerState, CombatWorld, EnemyState } from './engine';
 import { cancelWindup, despawnEnemy, spawnEnemy, TIME_EPS } from './adventurer';
 import { addField, removeFieldsOf } from './fields';
+import { TOLL_PARTY_RAW_PER } from './constants';
 import { enemyScaleN, farthestEngaged, inArena, resolveTelegraph, shapeFor } from './enemyAi';
 import { lineOfSight } from './sight';
 
@@ -304,7 +305,9 @@ export function stepBoss(w: CombatWorld, e: EnemyState, nowS: number): 'handled'
     return 'chase';
   }
   s.waitSince = null;
-  const raw = atk.raw + (enraged && atk.ramp ? atk.ramp * s.enrageUses : 0);
+  // an unavoidable attack grows with the party beyond three (TOLL_PARTY_RAW_PER a member: ruling P4-m E)
+  const party = atk.unavoidable ? 1 + TOLL_PARTY_RAW_PER * Math.max(0, enemyScaleN(e) - 3) : 1;
+  const raw = (atk.raw + (enraged && atk.ramp ? atk.ramp * s.enrageUses : 0)) * party;
   if (enraged) s.enrageUses++;
   const face = atk.targets === 'each' ? t : aims[0];
   if (face.x !== e.x || face.z !== e.z) e.facing = Math.atan2(face.x - e.x, face.z - e.z);

@@ -108,6 +108,8 @@ export const KITE_SEARING = 3;
 export const KITE_SEARING_MELEE = 4;
 /** A kiting adventurer keeps this far beyond the boss's reach (and goes to twice this), in m. */
 const KITE_SLACK = 2.5;
+/** A finisher's likely combo stagger when it detonates a mark (for choosing what to Break the Toll with). */
+const COMBO_STAGGER_GUESS = 25;
 /** Bracing for an unavoidable hit, a heal goes to an adventurer below this hp fraction. */
 const BRACE_HEAL_FRAC = 0.8;
 /** A safe spot is this far beyond the edge of what it escapes, in m. */
@@ -400,6 +402,8 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
   const caster = b.careful
     ? b.enemies.find((e) => e.alive && e.id !== live.id && e.windup !== null && e.windup.interruptible && !PLAN3_ATTACKS.has(e.windup.attack)) ?? null
     : null;
+  /** A boss winding up Keeper's Toll (ruling P4-k), else null. */
+  const tolling = b.enemies.find((e) => e.alive && e.windup !== null && e.windup.attack === 'keepers_toll') ?? null;
   /** Careful, with an unavoidable telegraph live where self or an ally stands. */
   const bracing = b.careful && b.telegraphs.some((t) => t.unavoidable && (inShape(t.shape, self.x, self.z) || liveAllies.some((a) => inShape(t.shape, a.x, a.z))));
   const brace = (): BrainAction | null =>
@@ -449,6 +453,21 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
     // 1b. an unavoidable hit coming (Keeper's Toll, Last Light; careful): shields first, then heals to brace
     //     (the Toll's interrupt and Break come from the interrupt and finisher steps as usual)
     () => (bracing ? brace() : null),
+    // 1c. ruling P4-k: the Warden winds up Keeper's Toll (it takes TOLL_STAGGER_MULT stagger meanwhile): the
+    //     ready ability with the most stagger goes into it, to Break it (a finisher counts its combo)
+    () => {
+      if (!b.careful || !tolling) return null;
+      let best = -1, bestStagger = 0;
+      for (let s = 0; s < self.slots.length; s++) {
+        const ab = ABILITIES[self.slots[s]];
+        if (!ready(s) || !castOk(ab) || ab.aim !== 'enemy' || (ab.cost !== undefined && self.momentum < ab.cost)) continue;
+        if (reachOf(tolling) > ab.range) continue;
+        const st = (ab.stagger ?? 0) + (s === FINISHER ? COMBO_STAGGER_GUESS : 0);
+        if (st > bestStagger) { best = s; bestStagger = st; }
+      }
+      if (best < 0) return null;
+      return tolling.id === live.id ? action(best) : retarget(tolling, best);
+    },
     // 2. allyBigHeal: the lowest (self included) below 50%
     () => first('allyBigHeal', (ab, s) => { const l = lowestWithin(ab.range); return frac(l) < 0.5 ? action(s, allyArg(l)) : null; }),
     // 3. selfHeal

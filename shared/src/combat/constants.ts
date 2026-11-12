@@ -192,3 +192,7 @@ export const BOSS_SCALE_CAP = 4;
 export const FIELD_TICK_S = 1;
 /** After a stall, at most this many of a field's (or a Soft Rain's) due ticks land in one engine tick; the rest are skipped. */
 export const CATCH_UP_TICKS = 2;
+/** Stagger a boss takes while it winds up Keeper's Toll, × (ruling P4-k: a party without a healer Breaks it instead). */
+export const TOLL_STAGGER_MULT = 8;
+/** The unavoidable attacks' raw rises by this share per engaged adventurer beyond three (ruling P4-m E: a full party pays). */
+export const TOLL_PARTY_RAW_PER = 1.2;

@@ -237,7 +237,7 @@ describe('the boss script', () => {
       // the rotation moves on: the next entry (Lamp Sweep) starts a gap later
       const next = r.attacks(e.id).filter((t) => t.startedAt > at);
       expect(next[0].attack).toBe('lamp_sweep');
-      expect(near(next[0].startedAt, at + 3.0, 2 * DT)).toBe(true);
+      expect(near(next[0].startedAt, at + BOSSES.fallen_warden.phases[0].gap, 2 * DT)).toBe(true);
     }
     {
       const r = new BRig([camp('fallen_warden', 0, 0)]);
@@ -261,7 +261,7 @@ describe('the boss script', () => {
       r.at(0.5);
       for (const id of ids) hit(r, id, e, 1);
       force(r, e, 3);
-      r.at(r.now + 3.2);
+      r.at(r.now + ENEMY_ATTACKS.keepers_toll.windup + 0.2);
       expect(tolls(r, e).map((h) => h.dst).sort()).toEqual([...ids].sort());
     }
   });
@@ -499,7 +499,7 @@ describe('the boss script', () => {
     expect(r.hits().filter((h) => h.dst === e.id).length).toBe(n);
     expect(e.threat.has(out)).toBe(false);
     force(r, e, 3);
-    r.at(r.now + 3.2);
+    r.at(r.now + ENEMY_ATTACKS.keepers_toll.windup + 0.2);
     expect(r.hits(e.id).filter((h) => h.by === 'keepers_toll').map((h) => h.dst).sort()).toEqual([a, b].sort());
     toPhase(r, e, a, 1);
     for (const s of [...r.w.enemies.values()].filter((o) => o.kind === 'lens_shard')) expect(s.camp.arena).toBe(arena);

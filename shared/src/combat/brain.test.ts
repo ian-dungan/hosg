@@ -190,4 +190,14 @@ describe('the dungeon brain (Plan 4)', () => {
     const far = think(dIn({ self: bm({ z: -16 }), target: warden({ targetId: 3 }), allies: [pal] }));
     expect(Math.hypot(far.moveTo!.x - pal.x, far.moveTo!.z - pal.z)).toBeLessThanOrEqual(10);
   });
+
+  it('P4-k: a Dark Knight (no interrupt) turns from a shard to put its finisher into a tolling Warden, to Break it', () => {
+    const dk = self('dark_knight', JOBS.dark_knight.picks.duo, { x: 0, z: -3.5, momentum: 60, cd: [9, 0, 9, 9, 9], targetId: 11 });
+    const boss = warden({ warded: true, phase: 1, windup: { attack: 'keepers_toll', total: 4, left: 3, interruptible: true, unavoidable: true } });
+    const s = shard(11, -2);
+    const act = think(dIn({ self: dk, target: boss, enemies: [boss, s] }));
+    const k = act.intents.findIndex((i) => i.t === 'ability');
+    expect(act.intents[k]).toEqual({ t: 'ability', slot: 1, phase: 'press' });
+    expect(act.intents.slice(0, k).at(-1)).toEqual({ t: 'target', id: 1 });
+  });
 });

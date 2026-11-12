@@ -1,16 +1,18 @@
-// Plan 4 bands, the Fallen Warden (Task 5, ruling P4-h): W3, sloppy duos (30% of telegraphs missed).
+// Plan 4 bands, the Fallen Warden (Task 5, ruling P4-m B and G): sloppy duos (30% of telegraphs missed).
 import { describe, expect, it } from 'vitest';
-import { S20, STRONG_PAIRS, costly, runs, wins } from './bandRig';
+import { S20, STRONG_PAIRS, runs, seeds, wins } from './bandRig';
 
-const all = () => STRONG_PAIRS.flatMap(([a, b]) => runs('warden', [a, b], 'sloppy', S20));
+const rate = (skill: 'sloppy', ss: number[], stats?: { power: number; defence: number; maxHp: number }) =>
+  STRONG_PAIRS.reduce((s, [a, b]) => s + wins(runs('warden', [a, b], skill, ss, stats)), 0) / (STRONG_PAIRS.length * ss.length);
 
 describe('the Fallen Warden, sloppy duos', { timeout: 180_000 }, () => {
-  it('W3: a sloppy duo still wins sometimes (at least 15% of runs; measured 84 of 120)', () => {
-    expect(wins(all())).toBeGreaterThanOrEqual(0.15 * 120);
+  it('B: an average duo usually loses or barely wins: 25–55% of runs won', () => {
+    const w = rate('sloppy', S20);
+    expect(w).toBeGreaterThanOrEqual(0.25);
+    expect(w).toBeLessThanOrEqual(0.55);
   });
-  // W3's cost gate: losses + enrage wins + wins with a death ≥ 55% of runs. NOT MET: measured 38 of 120
-  // (32%): White Mage and Paladin duos win cleanly even at 30% missed (see the report).
-  it.skip('W3: sloppy duos pay: at least 55% of runs lost, enraged or with a death (pending a ruling)', () => {
-    expect(all().filter(costly).length).toBeGreaterThanOrEqual(0.55 * 120);
+  it('G: +20% gear lifts sloppy duos by at least 15 points', () => {
+    const ss = seeds(1, 10);
+    expect(rate('sloppy', ss, { power: 12, defence: 12, maxHp: 120 }) - rate('sloppy', ss)).toBeGreaterThanOrEqual(0.15);
   });
 });
