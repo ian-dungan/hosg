@@ -63,12 +63,13 @@ The player starts on solid ground. The first game was a small corner of a much l
    - **Armour sets**: each set has its own style and colours. The first slice has one set per armour type per gear tier (nine sets).
    - **Weapons**: each weapon has its own look wherever possible (shape, colour, glow or trail), so a named or rare weapon is recognisable in another adventurer's hands. Boss drops and quest rewards always get a unique model; only common starter weapons may share one. Named weapons carry a unique effect, not only bigger numbers. The first slice has about six blades, six bows and six staves.
    - **Costumes**: purely cosmetic outfits worn over your gear in a separate costume slot, so they never change stats. Adventurers buy them from a costume shop for in-game gold (never real money) or win them at GM-run events.
+   - **Character creation** (owner direction 2026-11-12: personalising must be in-depth): four playable peoples that differ in looks only, sliders for body and face, hair and facial hair, free colour pickers, stance, walk and emotes, dye slots on armour, and a barber to change it later for gold.
    - **GM tools**: game masters can start an event, announce it to the server and award a costume or item to the winners.
 10. **Online**: accounts (username and password, or play as guest), saved characters with a name the player chooses (no bad words, no impersonating staff or the heroes), chat, other players visible everywhere outside boss arenas. Death returns you to the statue with no item loss.
 
 ## Out of scope (later rounds, each with its own design)
 
-Normandy (the capital), the wider continent, and the later-game sky region (floating islands, ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets), player-versus-player, further zones.
+Player homes and neighbourhoods (owner direction 2026-11-12; see the roadmap), Normandy (the capital), the wider continent, and the later-game sky region (floating islands, ships and crews, drifting islands, wind roads and gliding, player-drawn maps, trading, Wayglass echoes and duets), player-versus-player, further zones.
 
 ## Architecture
 
