@@ -321,9 +321,8 @@ describe('the hashed blocklist', () => {
     const since = fs.statSync(here + 'badwords.ts').mtimeMs;
     const files = (d: string): string[] =>
       fs.readdirSync(d).flatMap((f) => (fs.statSync(d + '/' + f).isDirectory() ? files(d + '/' + f) : /\.(m?js|html)$/.test(f) ? [d + '/' + f] : []));
-    // Entries (and, by chance, ROT13 forms) can sit inside innocent words or minified names, so only a quoted
-    // string counts: a shipped list, plain or the fixture, would be a run of quoted entries.
-    const quoted = (t: string, w: string) => [`'${w}'`, `"${w}"`, `\`${w}\``].some((q) => t.includes(q));
+    const plain = new Set([...BAD_WORDS, ...SHORT_BAD_WORDS]);
+    const fixture = new Set([...LONG_FIXTURE, ...SHORT_FIXTURE]);
     const problems: string[] = [];
     for (const dir of ['../../client/dist', '../../client/dist-online', '../../server/dist']) {
       const list = fs.existsSync(here + dir) ? files(here + dir) : [];
@@ -333,10 +332,25 @@ describe('the hashed blocklist', () => {
         continue;
       }
       const text = list.map((f) => fs.readFileSync(f, 'utf8')).join('\n').toLowerCase();
-      expect([...BAD_WORDS, ...SHORT_BAD_WORDS].flatMap((w, i) => (quoted(text, w) ? [i] : [])), dir).toEqual([]);
-      expect([...LONG_FIXTURE, ...SHORT_FIXTURE].flatMap((w, i) => (quoted(text, w) ? [i] : [])), dir).toEqual([]);
+      expect(shippedLists(text, plain), dir).toEqual([]);
+      expect(shippedLists(text, fixture), dir).toEqual([]);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('the bundle scan finds a shipped list (plain or the fixture, as an array or a joined string) and ignores a lone runtime string', () => {
+    const plain = new Set([...BAD_WORDS, ...SHORT_BAD_WORDS]);
+    const fixture = new Set([...LONG_FIXTURE, ...SHORT_FIXTURE]);
+    const some = BAD_WORDS.filter((w) => w.length >= 4).slice(0, 6);
+    const asArray = (ws: string[]) => `var a=1;const L=[${ws.map((w, i) => (i % 2 ? `"${w}"` : `'${w}'`)).join(', ')}];f(L)`;
+    expect(shippedLists(asArray(some), plain).length).toBeGreaterThan(0);
+    expect(shippedLists(`new Set(${asArray(some.map(rot13))})`, fixture).length).toBeGreaterThan(0);
+    expect(shippedLists(`x="${some.join(' ')}".split(" ")`, plain).length).toBeGreaterThan(0);
+    expect(shippedLists(`x=\`${some.join('|')}\``, plain).length).toBeGreaterThan(0);
+    // A runtime's own lone string that happens to equal an entry (Vite's preload helper reads an attribute
+    // whose name is one) is not a list; nor is an entry beside ordinary strings, or inside a sentence.
+    const lone = `e.getAttribute("${some[0]}");m("a","${some[1]}","b");throw Error("the ${some[2]} and ${some[3]} failed")`;
+    expect(shippedLists(lone, plain)).toEqual([]);
   });
 
   it('the hashes are exactly the fixture, both ways: long hashes, lengths and short entries', () => {
@@ -423,6 +437,39 @@ describe('the hashed blocklist', () => {
     expect(ordinary.filter((n) => validateAdventurerName(n) !== null)).toEqual([]);
   });
 });
+
+/**
+ * Where (character offsets, never the words) `text` (lower-cased bundle code) ships a list of entries: two
+ * or more quoted string literals in a row, separated only by commas (an array or Set literal), each made of
+ * entries only; or one quoted literal of two or more entries joined by spaces, commas or bars (a string
+ * that is split or used as a pattern). Entries (and, by chance, ROT13 forms) sit inside innocent words,
+ * minified names and runtime code (Vite's preload helper has a lone quoted attribute name equal to an
+ * entry), so a lone quoted entry, an entry among ordinary strings and an entry in prose never count.
+ */
+function shippedLists(text: string, entries: ReadonlySet<string>): number[] {
+  const LITERAL = /'([^'\\\n]{1,20000})'|"([^"\\\n]{1,20000})"|`([^`\\]{1,20000})`/g;
+  /** How many entries a literal is made of (0 unless every token is one). */
+  const entriesIn = (body: string): number => {
+    const tokens = body.split(/[\s,|]+/).filter((t) => t !== '');
+    return tokens.length > 0 && tokens.every((t) => entries.has(t)) ? tokens.length : 0;
+  };
+  const found: number[] = [];
+  let run = 0, runAt = -1, lastEnd = -1;
+  for (const m of text.matchAll(LITERAL)) {
+    const at = m.index!;
+    const n = entriesIn(m[1] ?? m[2] ?? m[3] ?? '');
+    const joined = lastEnd >= 0 && /^\s*,\s*$/.test(text.slice(lastEnd, at));
+    if (n > 0 && joined && run > 0) run += n;
+    else {
+      if (run >= 2) found.push(runAt);
+      run = n;
+      runAt = at;
+    }
+    lastEnd = at + m[0].length;
+  }
+  if (run >= 2) found.push(runAt);
+  return found;
+}
 
 /** A test-local copy of the plain-list filter that names.ts used before the hashes (its behaviour is the contract). */
 function plainIsOffensive(BAD: readonly string[], SHORT: readonly string[]): (s: string) => boolean {

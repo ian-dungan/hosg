@@ -212,14 +212,17 @@ describe('travel through an open exit', () => {
 
   it('a second sign-in while the travel is being saved waits for it, then is sent to the right zone', async () => {
     const memory = createMemoryStore();
-    let travelSaving!: () => void;
+    let travelSaving!: () => void, releaseSave!: () => void;
     const saving = new Promise<void>((resolve) => (travelSaving = resolve));
+    // the travel's save is held until the second sign-in has kicked the travelling session (not for a fixed time,
+    // which a busy machine can outrun): the overlap the test is about is made by the store
+    const released = new Promise<void>((resolve) => (releaseSave = resolve));
     const slow: Store = {
       ...memory,
       saveAdventurer: async (a, only) => {
         if (a.zone === 'greenway') {
           travelSaving();
-          await sleep(300);
+          await released;
         }
         return memory.saveAdventurer(a, only);
       },
@@ -233,7 +236,11 @@ describe('travel through an open exit', () => {
     const kicked = collect(a.room, 'kicked');
     void walk(a.room, SPAWN, INTO_EXIT);
     await saving;
-    await expect(new Client(url).joinOrCreate('grove', { token: alice.token })).rejects.toThrow(REASON_ELSEWHERE);
+    const second = new Client(url).joinOrCreate('grove', { token: alice.token });
+    second.catch(() => {}); // awaited below
+    await waitFor(() => kicked.length > 0, 10_000);
+    releaseSave();
+    await expect(second).rejects.toThrow(REASON_ELSEWHERE);
     expect(kicked).toEqual([{ reason: 'Signed in somewhere else' }]);
     expect(travels).toEqual([]);
     expect(await slow.getOrCreateAdventurer(alice.accountId)).toMatchObject({ zone: 'greenway', x: ENTRY.x, z: ENTRY.z });

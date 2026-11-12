@@ -127,8 +127,10 @@ describe('a fight', () => {
     expect(selves.length).toBe(1); // nothing changed
     a.room.send('ability', { slot: 3, phase: 'press' }); // Mend
     await waitFor(() => selves.some((s) => s.cd[3] > 19));
+    const from = performance.now();
     await sleep(500);
-    expect(selves.length).toBeLessThanOrEqual(1 + 5); // at most 5 a second
+    // at most 5 a second, over the time that really passed (a busy machine sleeps longer than asked)
+    expect(selves.length).toBeLessThanOrEqual(1 + 5 * Math.max(1, Math.ceil((performance.now() - from) / 1000)));
   });
 });
 
@@ -142,7 +144,10 @@ describe('intent spam and nonsense', () => {
     const dummy = await waitFor(() => enemyOf(a.room, 'dummy'));
     a.room.send('target', { id: dummy.eid });
     await waitFor(() => me(a.room).target === dummy.eid);
-    for (let i = 0; i < 50; i++) {
+    // 50 presses in about 1 s; Slash's 4 s cooldown must outlast them, so a machine too busy to send them in 3.5 s
+    // would test nothing: the presses stop there (the count of refusals below still needs over 40)
+    const from = performance.now();
+    for (let i = 0; i < 50 && performance.now() - from < 3500; i++) {
       a.room.send('ability', { slot: 0, phase: 'press' });
       await sleep(20);
     }

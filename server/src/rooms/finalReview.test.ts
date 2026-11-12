@@ -79,7 +79,12 @@ describe('room maps stay bounded (I2)', () => {
       const room = zr;
       await a.room.leave();
       await waitFor(() => room.state.players.size === 0);
-      await sleep(150); // a few steps with nobody there
+      // a few steps with nobody there (counted, not slept: a busy machine may step late)
+      let steps = 0;
+      const step = room.step;
+      room.step = (...args: unknown[]) => { steps++; return step.apply(room, args); };
+      await waitFor(() => steps >= 3, 5000);
+      room.step = step;
       const live = room.state.enemies.size + room.state.telegraphs.size;
       expect(room.keys?.size ?? 0).toBeLessThanOrEqual(live);
       expect(room.targeting.size).toBe(0);

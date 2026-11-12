@@ -252,10 +252,19 @@ describe('sessions', () => {
 
   it('lets the newer of two overlapping joins of one account win', async () => {
     const memory = createMemoryStore();
+    // onAuth and onJoin both load the adventurer. The older join's second load (in its onJoin, after it claimed the
+    // account) is held until the newer join's own onJoin load starts, i.e. until the newer one has claimed it: the
+    // overlap is made by the store, not by wall-clock sleeps (which a busy machine can reorder).
+    let calls = 0;
+    let olderLoading!: () => void, newerClaimed!: () => void;
+    const olderInJoin = new Promise<void>((resolve) => (olderLoading = resolve));
+    const release = new Promise<void>((resolve) => (newerClaimed = resolve));
     const slow: Store = {
       ...memory,
       getOrCreateAdventurer: async (accountId) => {
-        await sleep(400); // onAuth and onJoin both load the adventurer: room for the newer join to overtake
+        const call = ++calls;
+        if (call === 2) { olderLoading(); await release; }
+        if (call === 4) newerClaimed();
         return memory.getOrCreateAdventurer(accountId);
       },
     };
@@ -265,7 +274,7 @@ describe('sessions', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const older = new Client(url).joinOrCreate('grove', { token });
-    await sleep(50);
+    await olderInJoin;
     const newer = joinGrove(url, token);
     await expect(older).rejects.toThrow('Signed in somewhere else');
     const { room } = await newer;

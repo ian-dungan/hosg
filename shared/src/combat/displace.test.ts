@@ -208,25 +208,27 @@ describe('simulateDisplacement results', () => {
     expect(simulateDisplacement({ x: 0, z: 0, y: 0 }, dodgeDisplacement(1, 0), flat).grounded).toBe(true);
   });
   it('refuses nonsense without looping: non-finite or absurd speeds, durations and starts', () => {
-    const t0 = Date.now();
+    // "without looping" is counted in ground probes (deterministic), not in wall-clock time (a busy machine is slow)
+    let probes = 0;
+    const flatCounted: Surface = (x, z) => { probes++; return flat(x, z); };
     const cases = [
       { vx: NaN, vz: 0, vy: 0, seconds: 0.3 }, { vx: Infinity, vz: 0, vy: 0, seconds: 0.3 }, { vx: 1e12, vz: 0, vy: 0, seconds: 3 },
       { vx: 1, vz: 0, vy: NaN, seconds: 0.3 }, { vx: 1, vz: 0, vy: 1e9, seconds: 0.3 }, { vx: 1, vz: 0, vy: 0, seconds: Infinity },
       { vx: 1, vz: 0, vy: 0, seconds: NaN }, { vx: 1, vz: 0, vy: 0, seconds: -5 },
     ];
     for (const d of cases) {
-      const r = simulateDisplacement({ x: 0, z: 0, y: 0 }, d, flat);
+      const r = simulateDisplacement({ x: 0, z: 0, y: 0 }, d, flatCounted);
       for (const v of [r.x, r.y, r.z, r.seconds, r.drop, r.fallHp]) expect(Number.isFinite(v)).toBe(true);
       expect(r.seconds).toBeLessThanOrEqual(3);
       expect(Math.max(...r.path.map((p) => p.y))).toBeLessThanOrEqual(KNOCK_MAX_VY ** 2 / 44 + 1e-9);
     }
-    expect(simulateDisplacement({ x: 0, z: 0, y: 0 }, { vx: 1e12, vz: 0, vy: 0, seconds: 3 }, flat).x).toBe(0);
-    const bad = simulateDisplacement({ x: NaN, z: 0, y: 0 }, dodgeDisplacement(1, 0), flat);
+    expect(simulateDisplacement({ x: 0, z: 0, y: 0 }, { vx: 1e12, vz: 0, vy: 0, seconds: 3 }, flatCounted).x).toBe(0);
+    const bad = simulateDisplacement({ x: NaN, z: 0, y: 0 }, dodgeDisplacement(1, 0), flatCounted);
     expect(bad.grounded).toBe(false);
     expect(bad.seconds).toBe(0);
     const nowhere = simulateDisplacement({ x: 0, z: 0, y: 0 }, dodgeDisplacement(1, 0), () => null);
     expect(nowhere).toMatchObject({ x: 0, z: 0, y: 0, seconds: 0, grounded: false });
-    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(probes).toBeLessThan(5000); // 153 when written: every case ends after a few probes
   });
 });
 
