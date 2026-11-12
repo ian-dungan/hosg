@@ -217,7 +217,7 @@ describe('effects', () => {
     const heals = r.fx('heal');
     expect(heals.filter((h) => h.dst === a).map((h) => [h.at, h.src, h.amount])).toEqual([1, 2, 3, 4, 5, 6].map((t) => [t, a, 4]));
     expect(heals.filter((h) => h.dst === b).length).toBe(6);
-    expect(r.c.get(b)!.hp).toBe(74);
+    expect(r.c.get(b)!.hp).toBeCloseTo(50 + 6 * 4 * 1.2, 9); // Font: ×1.2 on others
     expect(r.c.get(a)!.buffs).toBe(0);
   });
 
@@ -232,8 +232,8 @@ describe('effects', () => {
     expect(r.hits().filter((h) => h.dst === a)).toEqual([]);
     r.i(a, { t: 'target', id: d });
     r.at(1);
-    expect(r.press(a, 0)).toBeNull(); // Grim Rend at 1 hp
-    expect(r.c.get(a)!.hp).toBe(1);
+    expect(r.press(a, 0)).toBeNull(); // Grim Rend at 1 hp: the cost takes nothing; Crimson Tithe heals 20% of 16
+    expect(r.c.get(a)!.hp).toBeCloseTo(1 + 0.2 * 16, 9);
     expect(r.hits(a).some((h) => h.by === 'grim_rend' && h.dst === d)).toBe(true);
     expect(r.c.get(a)!.alive).toBe(true);
   });
@@ -363,7 +363,7 @@ describe('Task 2 review round 1', () => {
     r.engage(b, d);
     expect(r.press(wm, 4)).toBeNull(); // Soft Rain
     r.at(1.1);
-    expect(r.w.enemies.get(d)!.threat.get(wm)).toBe(4 * 0.5); // heal threat while alive
+    expect(r.w.enemies.get(d)!.threat.get(wm)).toBeCloseTo(4 * 1.2 * 0.5 * 0.5, 9); // heal threat while alive (Font: ×1.2 heal, ×0.5 threat)
     kill(r, wm);
     expect(onTables(r, wm)).toBe(false);
     r.at(2.1);

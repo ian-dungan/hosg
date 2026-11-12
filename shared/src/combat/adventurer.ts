@@ -8,18 +8,23 @@ import {
   type Loadout, type Plan3Loadout,
 } from './abilities';
 import {
-  AUTO_MOMENTUM, BEDROCK_S, BEDROCK_SHIELD, BREAK_DAMAGE_MULT, BURNING_COEF_PER_S, CAST_MOVE_SCALE, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S,
+  AUTO_MOMENTUM, BEDROCK_R, BEDROCK_S, BEDROCK_SHIELD, BLAST_COEF, BLAST_SPLASH_FRAC, BLAST_SPLASH_R, BREAK_DAMAGE_MULT, CONDUCT_STAGGER, CONDUCT_STUN_S,
+  RHYTHM_AUTO_MOMENTUM, STEAM_HEAL, STEAM_R, BURNING_COEF_PER_S, CAST_MOVE_SCALE, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S,
   COMBO_COEF, COMBO_STAGGER, DODGE_IFRAME_S, MOMENTUM_MAX, DODGE_MIN_GAP_S, DODGE_REFILL_S, GCD_S, INTERRUPT_STAGGER,
   KNOCK_RECOVER_S, RESPAWN_CLEAR_RADIUS, SPEED_GRACE_S, SWAP_COOLDOWN_S, TARGET_DROP_RANGE, TARGET_RANGE, THREAT_PER_DAMAGE,
   THREAT_PER_HEAL,
 } from './constants';
 import { breakCast, castView, startCast, tickCast } from './casting';
-import { applyEffects, onDamageTaken, outgoingMult, resolveAim, targetFor, tickBuffs, tickDebuffs } from './effects';
+import {
+  applyEffects, applyShield, onDamageTaken, outgoingMult, resolveAim, strikesFromBehind, targetFor, threatMult, tickBuffs, tickDebuffs, traitOf,
+} from './effects';
+import { REACTIONS, reactionFor, type ElementId } from './elements';
+import { stunEnemy } from './enemyAi';
 import { JOBS, isJobId, type JobId } from './jobs';
 import { dodgeDisplacement, simulateDisplacement, type Displacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackId } from './enemies';
 import type { FxEvent } from './fx';
-import { applyFinisherMark, MARK_BITS, type MarkId } from './marks';
+import { applyFinisherMark, applyPrimerMark, liveMarks, MARK_BITS, type MarkId } from './marks';
 import { decayMomentum, gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
 import { addStagger, isBroken, tickStagger } from './stagger';
@@ -257,7 +262,7 @@ export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
   e.x = c.x; e.z = c.z; e.y = w.zone.ground(c.x, c.z) ?? 0; e.facing = c.facing;
   e.maxHp = e.data.hp; e.hp = e.maxHp; e.alive = true; e.act = ''; e.actUntil = -Infinity; e.targetId = null; e.surging = false;
   e.threat.clear(); e.stagger = { value: 0, max: e.data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity };
-  e.marks = {}; e.burning = null; e.windup = null; e.attackReadyAt = {}; e.debuffs = {};
+  e.marks = {}; e.markBy = {}; e.burning = null; e.windup = null; e.attackReadyAt = {}; e.debuffs = {};
   e.respawnAt = Infinity; e.lastDamagedAt = -Infinity;
 }
 
@@ -294,22 +299,27 @@ export function interruptWindup(w: CombatWorld, e: EnemyState, nowS: number): bo
 }
 
 /**
- * `amount` damage on an enemy from `src` (an adventurer id, or null): hp, threat, the combat timers,
- * a `hit` fx and, at 0 hp, the kill.
+ * `amount` damage on an enemy from `src` (an adventurer id, or null): hp, threat (× threatMult), the
+ * combat timers, a `hit` fx (with `element` and `behind` from `tag`) and, at 0 hp, the kill.
  */
 export function damageEnemy(
   w: CombatWorld, src: number, e: EnemyState, amount: number, by: HitBy, nowS: number, combo?: MarkId[], credit = true,
+  tag?: { element?: ElementId; behind?: boolean },
 ): void {
   if (!e.alive || enemyInvulnerable(e)) return;
   e.hp = Math.max(0, e.hp - amount);
   e.lastDamagedAt = nowS;
-  fx(w, combo && combo.length ? { t: 'hit', src, dst: e.id, amount, absorbed: 0, by, combo } : { t: 'hit', src, dst: e.id, amount, absorbed: 0, by });
+  const ev: Extract<FxEvent, { t: 'hit' }> = { t: 'hit', src, dst: e.id, amount, absorbed: 0, by };
+  if (combo && combo.length) ev.combo = combo;
+  if (tag?.element !== undefined) ev.element = tag.element;
+  if (tag?.behind) ev.behind = true;
+  fx(w, ev);
   // a dead source's damage over time still lands, but adds no threat, combat time or kill credit
   const a = w.adventurers.get(src);
   if (a && a.alive && credit) {
     a.lastDealtAt = nowS;
     a.lastCombatAt = nowS;
-    e.threat.add(a.id, amount * THREAT_PER_DAMAGE);
+    e.threat.add(a.id, amount * THREAT_PER_DAMAGE * threatMult(w, a.id));
   }
   if (e.hp <= 0) killEnemy(w, e, nowS);
 }
@@ -321,48 +331,112 @@ export function killEnemy(w: CombatWorld, e: EnemyState, nowS: number): void {
   cancelWindup(w, e);
   e.alive = false; e.hp = 0; e.act = 'dead'; e.actUntil = -Infinity; e.targetId = null;
   e.diedAt = nowS; e.respawnAt = nowS + e.data.respawn;
-  e.threat.clear(); e.marks = {}; e.burning = null; e.debuffs = {};
+  e.threat.clear(); e.marks = {}; e.markBy = {}; e.burning = null; e.debuffs = {};
   e.stagger = { value: 0, max: e.stagger.max, brokenUntil: -Infinity, lastGainAt: -Infinity };
   for (const a of w.adventurers.values()) if (a.targetId === e.id) a.targetId = null;
   fx(w, { t: 'death', dst: e.id });
   w.out.kills.push({ enemy: e.id, kind: e.kind, credit });
 }
 
-export interface Strike { coef: number; by: AbilityId | 'auto'; momentum?: number; mark?: MarkId; stagger?: number; interrupts?: boolean }
-
 /**
- * An adventurer's hit: hitDamage(coef) (×BREAK_DAMAGE_MULT on a broken target, × outgoingMult); a
- * finisher's mark detonates every other live mark (+hitDamage(COMBO_COEF) and COMBO_STAGGER each, one
- * `hit` with `combo`), then sets its own; then Momentum, stagger and the interrupt. Returns the
- * plain hit's amount (without detonations), 0 if nothing landed.
+ * An adventurer's hit. mark: the mark it leaves; primer: it only sets that mark (no detonation);
+ * finisher: it detonates (default: it has a mark and is no primer); element: a damage effect's element
+ * (never set for heals, shields or buffs); behind: it always counts as from behind (Ghost Edge).
  */
-export function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): number {
-  if (!e.alive || enemyInvulnerable(e)) return 0;
+export interface Strike {
+  coef: number; by: AbilityId | 'auto'; momentum?: number; mark?: MarkId; primer?: boolean; finisher?: boolean;
+  element?: ElementId; behind?: boolean; stagger?: number; interrupts?: boolean;
+}
+
+/** Drops a live mark (and who set it); Burning's DoT ends with its mark. */
+function consumeMark(w: CombatWorld, e: EnemyState, m: MarkId): void {
+  delete e.marks[m]; delete e.markBy[m];
+  if (m === 'burning') e.burning = null;
+  fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
+}
+
+/** Live adventurers within r of point p (no sight needed). */
+function adventurersAround(w: CombatWorld, p: { x: number; z: number }, r: number): AdventurerState[] {
+  const out: AdventurerState[] = [];
+  for (const b of w.adventurers.values()) if (b.alive && Math.hypot(b.x - p.x, b.z - p.z) <= r) out.push(b);
+  return out;
+}
+
+/** strike, returning the plain hit's amount (without detonations or reactions) and everything it dealt. */
+export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): { plain: number; total: number } {
+  if (!e.alive || enemyInvulnerable(e)) return { plain: 0, total: 0 };
   const power = a.stats.power, def = e.data.defence;
+  const behind = strikesFromBehind(a, e, s);
   const mult = (isBroken(e.stagger, nowS) ? BREAK_DAMAGE_MULT : 1) * outgoingMult(w, a, e, s, nowS);
   let amount = hitDamage(s.coef, power, def, mult);
   const plain = amount;
   let stagger = s.stagger ?? 0;
+  // 1. the reaction: an elemental hit on a live reacting mark (not its own) consumes it
+  const reaction = reactionFor(s.element, liveMarks(e.marks, nowS), s.mark);
+  let blast = 0;
+  if (reaction) {
+    fx(w, { t: 'react', src: a.id, dst: e.id, reaction });
+    consumeMark(w, e, REACTIONS[s.element!].mark);
+    const extra = hitDamage(reaction === 'blast' ? BLAST_COEF : COMBO_COEF, power, def, mult);
+    amount += extra;
+    if (reaction === 'blast') blast = extra;
+    stagger += COMBO_STAGGER + (reaction === 'conduct' && e.data.elite ? CONDUCT_STAGGER : 0);
+  }
+  // 2. a finisher's plain detonations, 3. its own mark (finisher or primer)
   let combo: MarkId[] | undefined;
   if (s.mark) {
     const hadBurning = e.burning !== null && (e.marks.burning ?? -Infinity) > nowS;
-    combo = applyFinisherMark(e.marks, s.mark, nowS);
-    for (const m of combo) {
-      amount += hitDamage(COMBO_COEF, power, def, mult);
-      stagger += COMBO_STAGGER;
-      fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
-    }
+    if (s.finisher ?? !s.primer) {
+      combo = applyFinisherMark(e.marks, s.mark, nowS);
+      for (const m of Object.keys(e.markBy) as MarkId[]) if (m !== s.mark) delete e.markBy[m];
+      for (const m of combo) {
+        amount += hitDamage(COMBO_COEF, power, def, mult);
+        stagger += COMBO_STAGGER;
+        fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
+      }
+    } else applyPrimerMark(e.marks, s.mark, nowS);
+    e.markBy[s.mark] = a.id;
     if (s.mark === 'burning') {
       e.burning = hadBurning && e.burning ? { src: a.id, power, nextAt: e.burning.nextAt } : { src: a.id, power, nextAt: nowS + 1 };
-    } else if (combo.includes('burning')) e.burning = null;
+    } else if (combo?.includes('burning')) e.burning = null;
   }
+  // 4. Momentum, the hit, stagger and the interrupt
   if (s.momentum) a.momentum = gainMomentum(a.momentum, s.momentum);
-  damageEnemy(w, a.id, e, amount, s.by, nowS, combo);
-  if (!e.alive) return plain;
+  damageEnemy(w, a.id, e, amount, s.by, nowS, combo, true, { element: s.element, behind });
+  let total = amount;
+  // the reaction's effects around the target land even when the hit killed it
+  if (reaction === 'blast') {
+    const part = Math.round(blast * BLAST_SPLASH_FRAC);
+    for (const o of w.enemies.values()) {
+      if (o === e || !o.alive || enemyInvulnerable(o) || Math.hypot(o.x - e.x, o.z - e.z) - o.data.radius > BLAST_SPLASH_R) continue;
+      damageEnemy(w, a.id, o, part, s.by, nowS, undefined, true, { element: s.element });
+      total += part;
+    }
+  } else if (reaction === 'steam') {
+    for (const b of adventurersAround(w, e, STEAM_R)) healAdventurer(w, b, STEAM_HEAL, a.id, nowS);
+  } else if (reaction === 'bedrock') {
+    for (const b of adventurersAround(w, e, BEDROCK_R)) applyShield(w, a, b, BEDROCK_SHIELD, BEDROCK_S, nowS);
+  }
+  if (!e.alive) return { plain, total };
+  if (reaction === 'conduct') {
+    if (e.data.elite) interruptWindup(w, e, nowS);
+    else stunEnemy(w, e, CONDUCT_STUN_S, nowS);
+  }
   if (s.mark) fx(w, { t: 'mark', dst: e.id, mark: s.mark, on: true });
   applyStagger(w, e, stagger, nowS);
   if (s.interrupts) interruptWindup(w, e, nowS);
-  return plain;
+  return { plain, total };
+}
+
+/**
+ * An adventurer's hit, in the order of Numbers → Elements: hitDamage(coef) × BREAK_DAMAGE_MULT on a
+ * broken target × outgoingMult; 1. a reaction (an elemental hit on its reacting mark consumes it:
+ * blast, conduct, steam or bedrock; `react` fx); 2. a finisher detonates every other live mark
+ * (+hitDamage(COMBO_COEF) and COMBO_STAGGER each, one `hit` with `combo`); 3. its own mark (finisher
+ * or primer); 4. Momentum, stagger and the interrupt. Returns the plain hit's amount, 0 if nothing landed.
+ */
+export function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): number {
+  return strikeFull(w, a, e, s, nowS).plain;
 }
 
 // ───────── hurting adventurers (the enemy AI calls these) ─────────
@@ -374,7 +448,7 @@ export function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Str
  * adventurer never shows 0.
  */
 export function hurtAdventurer(
-  w: CombatWorld, a: AdventurerState, amount: number, src: number, by: EnemyAttackId | 'auto', nowS: number,
+  w: CombatWorld, a: AdventurerState, amount: number, src: number, by: EnemyAttackId | 'auto', nowS: number, redirected = false,
 ): { taken: number; absorbed: number } {
   if (!a.alive || !finite(amount) || amount <= 0) return { taken: 0, absorbed: 0 };
   const shield = liveShield(a, nowS);
@@ -386,7 +460,7 @@ export function hurtAdventurer(
   a.lastCombatAt = nowS;
   fx(w, { t: 'hit', src, dst: a.id, amount: amount - absorbed, absorbed, by });
   if (a.hp <= 0) killAdventurer(w, a, nowS);
-  else onDamageTaken(w, a, taken, absorbed, src, nowS);
+  else onDamageTaken(w, a, taken, absorbed, src, nowS, redirected);
   return { taken, absorbed };
 }
 
@@ -424,7 +498,7 @@ export function knockAdventurer(w: CombatWorld, a: AdventurerState, d: Displacem
 }
 
 /**
- * Heals up to the maximum; `heal` fx (none when nothing is healed); THREAT_PER_HEAL × healed for `src`
+ * Heals up to the maximum; `heal` fx (none when nothing is healed); THREAT_PER_HEAL × healed × threatMult for `src`
  * on every table that holds the healed, only with `credit` and while `src` is a live adventurer here.
  */
 export function healAdventurer(w: CombatWorld, a: AdventurerState, amount: number, src: number, nowS: number, credit = true): number {
@@ -435,7 +509,8 @@ export function healAdventurer(w: CombatWorld, a: AdventurerState, amount: numbe
   fx(w, { t: 'heal', src, dst: a.id, amount: healed });
   // heal threat only for a healer who is here and alive (a dead healer's Soft Rain keeps healing, quietly)
   if (credit && w.adventurers.get(src)?.alive === true) {
-    for (const e of w.enemies.values()) if (e.alive && e.threat.has(a.id)) e.threat.add(src, healed * THREAT_PER_HEAL);
+    const t = healed * THREAT_PER_HEAL * threatMult(w, src, true);
+    for (const e of w.enemies.values()) if (e.alive && e.threat.has(a.id)) e.threat.add(src, t);
   }
   void nowS;
   return healed;
@@ -631,7 +706,7 @@ export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number,
   if (next <= nowS + TIME_EPS) next = nowS + weapon.autoEvery; // a long stall: never two swings at once
   a.nextAutoAt = next;
   a.autoWaiting = false;
-  strike(w, a, e, { coef: weapon.autoCoef, by: 'auto', momentum: AUTO_MOMENTUM }, nowS);
+  strike(w, a, e, { coef: weapon.autoCoef, by: 'auto', momentum: traitOf(a) === 'battle_rhythm' ? RHYTHM_AUTO_MOMENTUM : AUTO_MOMENTUM }, nowS);
 }
 
 /** Per enemy, after the enemy AI: Burning ticks, mark expiry, stagger decay, the end of a stun, respawns. */
@@ -657,7 +732,7 @@ export function tickEnemyStatus(w: CombatWorld, e: EnemyState, nowS: number, dt:
   for (const m of Object.keys(MARK_BITS) as MarkId[]) {
     const until = e.marks[m];
     if (until !== undefined && until <= nowS + TIME_EPS) {
-      delete e.marks[m];
+      delete e.marks[m]; delete e.markBy[m];
       if (m === 'burning') e.burning = null;
       fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
     }

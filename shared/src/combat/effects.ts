@@ -2,40 +2,109 @@
 // (applyEffects), and the shields, buffs, debuffs, heals, revives and hp costs behind them. Every
 // adventurer in the zone counts as an ally (no parties before Plan 4); aims never pick enemies.
 import { ABILITIES, type AbilityData, type AbilityId, type BuffId, type DebuffId, type Effect } from './abilities';
-import { ALLY_RANGE, RANGE_FUZZ, REVIVE_IFRAMES_S } from './constants';
+import {
+  AEGIS_ALLY_TAKEN, AEGIS_TAKEN, ALLY_RANGE, BEHIND_COS, BEHIND_MULT, BLOCK_MOMENTUM, BLOODBOND_R, BLOOD_LIFESTEAL, BLOOD_MOMENTUM_PER_HP,
+  FONT_HEAL_MULT, FONT_MOMENTUM_CAP, FONT_MOMENTUM_PER_HP, FONT_THREAT_MULT, OVERFLOW_MULT, PACT_LIFESTEAL_MULT, PACT_MULT, PINPOINT_MULT,
+  RANGE_FUZZ, REVIVE_IFRAMES_S, ROAR_MULT, STEADFAST_TAKEN, STEADFAST_THREAT, WEAKPOINT_MULT,
+} from './constants';
+import { elementMult, type ElementId } from './elements';
 import type { AdventurerState, CombatWorld, EnemyState, Refusal } from './engine';
-import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, strike, TIME_EPS, type Strike } from './adventurer';
+import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, strikeFull, TIME_EPS, type Strike } from './adventurer';
 import type { FxEvent } from './fx';
 import { gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
-import { JOBS } from './jobs';
+import { JOBS, type TraitId } from './jobs';
 
 const fx = (w: CombatWorld, ev: FxEvent) => { w.out.fx.push(ev); };
 const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
 
-// ───────── hooks (Task 3 fills these: traits, buffs and debuffs on damage and heals) ─────────
-/** Outgoing damage multiplier for an adventurer's hit (roar, pact, weakpoint, behind, pinpoint, element, overflow): 1 for now. */
+// ───────── traits, multipliers and the hooks on damage and heals ─────────
+/**
+ * The adventurer's job trait, or null for a Plan 3 loadout (deprecated, until Tasks 5–7: it runs
+ * Plan 3's rules unchanged, so no trait applies to it).
+ */
+export function traitOf(a: AdventurerState): TraitId | null {
+  return a.plan3 ? null : JOBS[a.job].trait.id;
+}
+/** "Behind": dot(facingDir(enemy), unit(attacker − enemy)) < BEHIND_COS. */
+export function isBehind(e: EnemyState, p: { x: number; z: number }): boolean {
+  const dx = p.x - e.x, dz = p.z - e.z, d = Math.hypot(dx, dz);
+  if (!(d > 0)) return false;
+  return (Math.sin(e.facing) * dx + Math.cos(e.facing) * dz) / d < BEHIND_COS;
+}
+/** Dusk Slip: a Ninja's hit from behind (or one that always counts as from behind, Ghost Edge). */
+export function strikesFromBehind(a: AdventurerState, e: EnemyState, s: Strike): boolean {
+  return traitOf(a) === 'dusk_slip' && (s.behind === true || isBehind(e, a));
+}
+/**
+ * Outgoing damage multiplier for an adventurer's hit (BREAK_DAMAGE_MULT is strike's): roar, pact,
+ * weakpoint on the target, Dusk Slip from behind, Pinpoint, the element's weakness or resistance, and
+ * Overflow on a Black Mage's elemental damage. `s.element` is set only on damage effects.
+ */
 export function outgoingMult(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): number {
-  void w; void a; void e; void s; void nowS;
-  return 1;
+  void w;
+  const trait = traitOf(a);
+  let m = 1;
+  if (hasBuff(a, 'roar', nowS)) m *= ROAR_MULT;
+  if (hasBuff(a, 'pact', nowS)) m *= PACT_MULT;
+  if (hasDebuff(e, 'weakpoint', nowS)) m *= WEAKPOINT_MULT;
+  if (strikesFromBehind(a, e, s)) m *= BEHIND_MULT;
+  // Pinpoint: the target is attacking someone else (an enemy with no target is attacking no one)
+  if (trait === 'pinpoint' && e.targetId !== null && e.targetId !== a.id) m *= PINPOINT_MULT;
+  if (s.element !== undefined) {
+    m *= elementMult(s.element, e.data);
+    if (trait === 'overflow') m *= OVERFLOW_MULT;
+  }
+  return m;
 }
-/** Damage-taken multiplier for an enemy hit on an adventurer (Steadfast, aegis): 1 for now. */
-export function takenMult(w: CombatWorld, a: AdventurerState, e: EnemyState, nowS: number): number {
-  void w; void a; void e; void nowS;
-  return 1;
+/** Damage-taken multiplier for an enemy hit on an adventurer: Steadfast × the lowest of aegis and aegis_ally (never both). */
+export function takenMult(w: CombatWorld, a: AdventurerState, e: EnemyState | null, nowS: number): number {
+  void w; void e;
+  let m = traitOf(a) === 'steadfast' ? STEADFAST_TAKEN : 1;
+  if (hasBuff(a, 'aegis', nowS)) m *= AEGIS_TAKEN;
+  else if (hasBuff(a, 'aegis_ally', nowS)) m *= AEGIS_ALLY_TAKEN;
+  return m;
 }
-/** Heal multiplier for `src` healing `dst` (Font on others): 1 for now. */
+/** Heal multiplier for `src` healing `dst`: Font on others. */
 export function healMult(src: AdventurerState, dst: AdventurerState): number {
-  void src; void dst;
-  return 1;
+  return src !== dst && traitOf(src) === 'font' ? FONT_HEAL_MULT : 1;
 }
-/** After `src` healed `dst` by `healed` (Font Momentum): nothing for now. */
+/** × on every threat `src` adds: Steadfast (STEADFAST_THREAT), and Font's quieter heals (`heal`). */
+export function threatMult(w: CombatWorld, src: number, heal = false): number {
+  const a = w.adventurers.get(src);
+  if (!a) return 1;
+  const trait = traitOf(a);
+  return (trait === 'steadfast' ? STEADFAST_THREAT : 1) * (heal && trait === 'font' ? FONT_THREAT_MULT : 1);
+}
+/** After `src` healed `dst` by `healed`: Font's Momentum (FONT_MOMENTUM_PER_HP, at most FONT_MOMENTUM_CAP per heal), for a live healer only. */
 export function onHealDone(w: CombatWorld, src: AdventurerState | undefined, dst: AdventurerState, healed: number, nowS: number): void {
-  void w; void src; void dst; void healed; void nowS;
+  void w; void dst; void nowS;
+  if (!src || !src.alive || !(healed > 0) || traitOf(src) !== 'font') return;
+  src.momentum = gainMomentum(src.momentum, Math.min(FONT_MOMENTUM_CAP, healed * FONT_MOMENTUM_PER_HP));
 }
-/** After an enemy hit landed on an adventurer (Block Momentum, Crimson Tithe Momentum, Shelter): nothing for now. */
-export function onDamageTaken(w: CombatWorld, a: AdventurerState, taken: number, absorbed: number, src: number, nowS: number): void {
-  void w; void a; void taken; void absorbed; void src; void nowS;
+/**
+ * After an enemy hit landed on an adventurer (hp or shield): Steadfast's BLOCK_MOMENTUM per hit and
+ * Crimson Tithe's floor(taken × BLOOD_MOMENTUM_PER_HP). A share redirected by Shelter is not a hit on
+ * the Paladin, and only enemy sources count.
+ */
+export function onDamageTaken(w: CombatWorld, a: AdventurerState, taken: number, absorbed: number, src: number, nowS: number, redirected = false): void {
+  void nowS;
+  if (redirected || !w.enemies.has(src) || !(taken + absorbed > 0)) return;
+  const trait = traitOf(a);
+  if (trait === 'steadfast') a.momentum = gainMomentum(a.momentum, BLOCK_MOMENTUM);
+  else if (trait === 'crimson_tithe') a.momentum = gainMomentum(a.momentum, Math.floor(taken * BLOOD_MOMENTUM_PER_HP + 1e-9));
+}
+/**
+ * Crimson Tithe: BLOOD_LIFESTEAL of an ability's damage dealt heals the Dark Knight (× PACT_LIFESTEAL_MULT
+ * with pact); with bloodbond the lowest-hp other adventurer within BLOODBOND_R (in sight) heals the same.
+ */
+export function lifesteal(w: CombatWorld, a: AdventurerState, dealt: number, nowS: number): void {
+  if (!a.alive || !(dealt > 0) || traitOf(a) !== 'crimson_tithe') return;
+  const amount = dealt * BLOOD_LIFESTEAL * (hasBuff(a, 'pact', nowS) ? PACT_LIFESTEAL_MULT : 1);
+  healAdventurer(w, a, amount, a.id, nowS);
+  if (!hasBuff(a, 'bloodbond', nowS)) return;
+  const b = pickAlly(w, a, undefined, BLOODBOND_R, false);
+  if (b) healAdventurer(w, b, amount, a.id, nowS);
 }
 
 // ───────── aims ─────────
@@ -200,9 +269,10 @@ function enemiesNear(w: CombatWorld, p: { x: number; z: number }, r: number, exc
 
 /**
  * Applies the ability's effects, in list order, for caster `a` on `subject`. The ability's Momentum,
- * mark, stagger and interrupt ride on its (first) damage effect, through strike. Primer marks are
- * Task 3's (a primer sets no mark yet). Splash hits other live enemies within r of the target for
- * frac × the target's amount, with no marks and no detonation.
+ * mark (finisher or primer), stagger and interrupt ride on its (first) damage effect, through strike;
+ * its element rides on every damage effect (never on heals, shields or buffs). Splash hits other live
+ * enemies within r of the target for frac × the target's plain amount, with no marks and no
+ * detonation. Then Crimson Tithe's lifesteal on everything the effect dealt.
  */
 export function applyEffects(w: CombatWorld, a: AdventurerState, id: AbilityId, subject: Subject, nowS: number): void {
   const ab = ABILITIES[id];
@@ -220,15 +290,19 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
     case 'damage': {
       const e = subject.enemy;
       if (!e) return;
-      const s: Strike = struck ? { coef: ef.coef, by: ab.id } : {
-        coef: ef.coef, by: ab.id, momentum: ab.momentum, mark: ab.primer ? undefined : ab.mark, stagger: ab.stagger, interrupts: ab.interrupts,
+      const tag = { element: ab.element, behind: ef.behind };
+      const s: Strike = struck ? { coef: ef.coef, by: ab.id, ...tag } : {
+        coef: ef.coef, by: ab.id, momentum: ab.momentum, mark: ab.mark, primer: ab.primer, finisher: ab.role === 'finisher',
+        stagger: ab.stagger, interrupts: ab.interrupts, ...tag,
       };
       const near = ef.splash ? enemiesNear(w, e, ef.splash.r, e) : [];
-      const amount = strike(w, a, e, s, nowS);
-      if (ef.splash && amount > 0) {
-        const part = Math.max(1, Math.round(amount * ef.splash.frac));
-        for (const o of near) splashHit(w, a, o, part, ab.id, nowS);
+      const { plain, total } = strikeFull(w, a, e, s, nowS);
+      let dealt = total;
+      if (ef.splash && plain > 0) {
+        const part = Math.max(1, Math.round(plain * ef.splash.frac));
+        for (const o of near) if (o.alive) { splashHit(w, a, o, part, ab.id, nowS, ab.element); dealt += part; }
       }
+      lifesteal(w, a, dealt, nowS);
       return;
     }
     case 'heal': {
@@ -284,6 +358,6 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
 }
 
 /** A splash: `amount` on another enemy, with no marks, Momentum, stagger or detonation. */
-function splashHit(w: CombatWorld, a: AdventurerState, e: EnemyState, amount: number, by: AbilityId, nowS: number): void {
-  damageEnemy(w, a.id, e, amount, by, nowS);
+function splashHit(w: CombatWorld, a: AdventurerState, e: EnemyState, amount: number, by: AbilityId, nowS: number, element?: ElementId): void {
+  damageEnemy(w, a.id, e, amount, by, nowS, undefined, true, { element });
 }

@@ -9,7 +9,7 @@ import type { CastState } from './casting';
 import type { EnemyAttackId, EnemyKindData, EnemyKindId } from './enemies';
 import { ENEMY_KINDS } from './enemies';
 import type { FxEvent } from './fx';
-import type { Marks } from './marks';
+import type { MarkId, Marks } from './marks';
 import { markBits } from './marks';
 import type { Shape } from './shapes';
 import { staggerImmuneLeft, type StaggerBar } from './stagger';
@@ -179,6 +179,8 @@ export interface EnemyState {
   act: Act; actUntil: number;
   targetId: number | null;
   threat: ThreatTable; stagger: StaggerBar; marks: Marks;
+  /** Who applied each live mark (an adventurer's engine id). */
+  markBy: Partial<Record<MarkId, number>>;
   /** Burning damage: from `src` with its power, next tick at nextAt (once a second while the mark lives). */
   /** orphan: its source died, revived or left since; it still burns but adds no threat, combat time or credit. */
   burning: { src: number; power: number; nextAt: number; orphan?: boolean } | null;
@@ -224,7 +226,7 @@ function newEnemy(w: CombatWorld, c: CampSpawn, nowS: number): EnemyState {
   const e: EnemyState = {
     id: w.nextId++, team: 'enemy', kind: c.kind, data, camp: { ...c },
     x: 0, z: 0, y: 0, facing: 0, hp: data.hp, maxHp: data.hp, alive: true, act: '', actUntil: -Infinity, targetId: null,
-    threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {},
+    threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {}, markBy: {},
     burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false, debuffs: {},
   };
   spawnEnemyState(w, e);

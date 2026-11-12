@@ -39,9 +39,9 @@ describe('casting', () => {
     r.at(t0 + 1.3);
     const hit = r.hits(a).find((h) => h.by === 'skyfall_arc')!;
     expect(hit.at).toBeCloseTo(t0 + 1.2, 3);
-    expect(hit.amount).toBe(35); // round(4.0 · 10 · 0.870)
+    expect(hit.amount).toBe(38); // round(4.0 · 10 · 0.870 · 1.1 Overflow)
     s = r.c.self(a)!;
-    expect(s.momentum).toBe(10);
+    expect(s.momentum).toBe(20); // 60 − 50, + Overflow's 10 for the finished cast
     expect(s.cd[1]).toBeGreaterThan(5.8);
     expect(s.cast).toBeNull();
     expect(r.c.get(a)!.act).toBe('');
@@ -106,7 +106,7 @@ describe('casting', () => {
       r.move(a, 0, -(18 + 1 + beyond + 0.5));
       r.at(1.5);
       expect(castEnds(r)).toEqual([['skyfall_arc', ok, ok ? undefined : 'fizzle']]);
-      expect(r.c.self(a)!.momentum).toBe(ok ? 10 : 60);
+      expect(r.c.self(a)!.momentum).toBe(ok ? 20 : 60); // + Overflow's 10 on completion
     }
   });
 

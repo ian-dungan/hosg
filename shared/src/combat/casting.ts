@@ -3,9 +3,9 @@
 // fizzle (the re-check failed: no cost, no cooldown), the caster's own dodge (no cooldown), an
 // interrupt (CAST_BREAK_LOCK_S of cooldown) or death. Autos pause for the whole cast.
 import { ABILITIES, type AbilityId } from './abilities';
-import { CAST_BREAK_LOCK_S, CAST_RANGE_SLACK } from './constants';
+import { CAST_BREAK_LOCK_S, CAST_RANGE_SLACK, OVERFLOW_CAST_MOMENTUM } from './constants';
 import type { AdventurerState, CombatWorld } from './engine';
-import { applyEffects, resolveAim, type Subject } from './effects';
+import { applyEffects, resolveAim, traitOf, type Subject } from './effects';
 import { TIME_EPS } from './adventurer';
 import { gainMomentum } from './momentum';
 
@@ -51,6 +51,8 @@ export function tickCast(w: CombatWorld, a: AdventurerState, nowS: number): bool
   const dst = subject.enemy?.id ?? (subject.ally !== a ? subject.ally?.id : undefined);
   w.out.fx.push(dst === undefined ? { t: 'use', src: a.id, ability: c.id } : { t: 'use', src: a.id, ability: c.id, dst });
   applyEffects(w, a, c.id, subject, nowS);
+  // Overflow: a Black Mage's finished cast builds OVERFLOW_CAST_MOMENTUM
+  if (a.alive && traitOf(a) === 'overflow') a.momentum = gainMomentum(a.momentum, OVERFLOW_CAST_MOMENTUM);
   w.out.fx.push({ t: 'castEnd', src: a.id, ability: c.id, ok: true });
   return true;
 }

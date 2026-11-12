@@ -15,13 +15,14 @@ import { RUN_SPEED } from '../constants';
 import { findPath, withClearance, type Vec2 } from '../path';
 import {
   AGGRO_THREAT, DISPLACE_SUBSTEP_M, ENEMY_PATH_NODES, ENEMY_REPLAN_S, PARRY_MOMENTUM, PARRY_STAGGER, PARRY_STUN_S, PATHS_PER_TICK,
-  PERFECT_DODGE_MOMENTUM, PERFECT_DODGE_STAGGER, PERFECT_DODGE_WINDOW_S, UNREACHABLE_S,
+  PERFECT_DODGE_MOMENTUM, PERFECT_DODGE_STAGGER, PERFECT_DODGE_WINDOW_S, UNREACHABLE_S, EVASION_PERFECT_MOMENTUM, ROOTED_SPEED_SCALE, SHELTER_SHARE,
 } from './constants';
 import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
 import type { AdventurerState, CombatWorld, CombatZone, EnemyState } from './engine';
 import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
-import { takenMult } from './effects';
+import { hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
+import { breakCast } from './casting';
 import { gainMomentum } from './momentum';
 import { inShape, type Shape } from './shapes';
 import { lineOfSight } from './sight';
@@ -305,7 +306,7 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   if (e.targetId === null && d.aggro > 0) {
     for (const a of w.adventurers.values()) {
       if (!a.alive || e.threat.has(a.id)) continue;
-      if (hyp(a.x - e.x, a.z - e.z) <= d.aggro && lineOfSight(w.zone.sight, e.x, e.z, a.x, a.z)) e.threat.add(a.id, AGGRO_THREAT);
+      if (hyp(a.x - e.x, a.z - e.z) <= d.aggro && lineOfSight(w.zone.sight, e.x, e.z, a.x, a.z)) e.threat.add(a.id, AGGRO_THREAT * threatMult(w, a.id));
     }
   }
   if (!ai.engaged) {
@@ -368,7 +369,8 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   // chase: melee closes to a little inside reach, a ranged enemy to keepRange (and into sight)
   const stopReach = auto === null ? 0 : auto.ranged ? Math.min(auto.reach, d.keepRange ?? auto.reach) : auto.reach - REACH_MARGIN;
   const stop = stopReach + d.radius;
-  const speed = e.surging ? SURGE_SCALE * RUN_SPEED : d.speed;
+  // Rooted slows the chase, surge included
+  const speed = (e.surging ? SURGE_SCALE * RUN_SPEED : d.speed) * ((e.marks.rooted ?? -Infinity) > now ? ROOTED_SPEED_SCALE : 1);
   let free = false;
   if (dist > stop || (auto?.ranged && !sees)) {
     const x0 = e.x, z0 = e.z;
@@ -618,10 +620,12 @@ function dash(w: CombatWorld, e: EnemyState, s: Extract<Shape, { kind: 'line' }>
 
 /**
  * One enemy hit on an adventurer, in order: i-frames → `miss` (perfect when inside the telegraph, or
- * dodged from inside it within PERFECT_DODGE_WINDOW_S: elite +15 stagger, adventurer +10 Momentum);
- * an open parry against a parryable hit → `parry` (nothing taken, +20 Momentum, the elite +35
- * stagger, an ordinary enemy stunned PARRY_STUN_S unless it is still parry-stun immune); else
- * enemyHit(raw, defence) through the shield, then the knock.
+ * dodged from inside it within PERFECT_DODGE_WINDOW_S: elite +15 stagger, adventurer +10 Momentum, a
+ * Ninja +25); an auto on an adventurer in Mist Form, or from a Blinded enemy → `miss` (why); an open
+ * parry against a parryable hit → `parry` (nothing taken, +20 Momentum, the elite +35 stagger, an
+ * ordinary enemy stunned PARRY_STUN_S unless it is still parry-stun immune); else enemyHit(raw,
+ * defence, takenMult) through the shield (Shelter moving its share to the Paladin), a landed telegraph
+ * breaking a cast, then the knock.
  */
 export function resolveHit(
   w: CombatWorld, e: EnemyState, a: AdventurerState, raw: number, by: EnemyAttackId | 'auto', parryable: boolean,
@@ -633,30 +637,53 @@ export function resolveHit(
     const perfect = shape !== undefined && (inShape(shape, a.x, a.z) || dodgedFrom(a, shape, now));
     fxOf(w).push({ t: 'miss', src: e.id, dst: a.id, perfect });
     if (perfect) {
-      a.momentum = gainMomentum(a.momentum, PERFECT_DODGE_MOMENTUM);
+      a.momentum = gainMomentum(a.momentum, traitOf(a) === 'dusk_slip' ? EVASION_PERFECT_MOMENTUM : PERFECT_DODGE_MOMENTUM);
       if (e.data.elite) applyStagger(w, e, PERFECT_DODGE_STAGGER, now);
     }
     return;
+  }
+  // autos only: Mist Form on the adventurer, or a Blinded enemy, misses (telegraphs still hit)
+  if (by === 'auto') {
+    const why = hasBuff(a, 'mist', now) ? 'mist' : hasDebuff(e, 'blinded', now) ? 'blind' : null;
+    if (why) { fxOf(w).push({ t: 'miss', src: e.id, dst: a.id, perfect: false, why }); return; }
   }
   if (parryable && now < a.parryUntil) {
     a.parryUntil = -Infinity;
     fxOf(w).push({ t: 'parry', src: a.id, dst: e.id });
     a.momentum = gainMomentum(a.momentum, PARRY_MOMENTUM);
     if (e.data.elite) applyStagger(w, e, PARRY_STAGGER, now);
-    else {
-      const ai = aiOf(e, now);
-      if (now >= ai.parryImmuneUntil - TIME_EPS) {
-        cancelWindup(w, e);
-        e.act = 'stun'; e.actUntil = now + PARRY_STUN_S;
-        ai.parryImmuneUntil = now + PARRY_STUN_S + PARRY_STUN_IMMUNE_S;
-      }
-    }
+    else stunEnemy(w, e, PARRY_STUN_S, now);
     return;
   }
-  const got = hurtAdventurer(w, a, enemyHit(raw, a.stats.defence, takenMult(w, a, e, now)), e.id, by, now);
+  const final = enemyHit(raw, a.stats.defence, takenMult(w, a, e, now));
+  // Shelter: a live Paladin src in this room takes floor(final × SHELTER_SHARE), × its own taken-mult,
+  // through its i-frames and without breaking its cast
+  const sh = a.buffs.sheltered;
+  const pal = sh && sh.until > now ? w.adventurers.get(sh.src) : undefined;
+  const sheltered = pal !== undefined && pal !== a && pal.alive && pal.job === 'paladin';
+  const moved = sheltered ? Math.floor(final * SHELTER_SHARE) : 0;
+  const got = hurtAdventurer(w, a, final - moved, e.id, by, now);
+  if (sheltered && moved > 0) hurtAdventurer(w, pal, Math.round(moved * takenMult(w, pal, e, now)), e.id, by, now, true);
+  const landed = got.taken + got.absorbed > 0;
   // the chase surge ends only when a hit lands on its target (taken or absorbed)
-  if (e.surging && a.id === e.targetId && got.taken + got.absorbed > 0) { e.surging = false; aiOf(e, now).chanceAt = now; }
+  if (e.surging && a.id === e.targetId && landed) { e.surging = false; aiOf(e, now).chanceAt = now; }
+  // a telegraph that lands (hp or shield) breaks a cast; autos never do
+  if (by !== 'auto' && landed && a.alive) breakCast(w, a, 'interrupt', now);
   if (knock && a.alive) knockAdventurer(w, a, knockDisplacement({ x: e.x, z: e.z }, a, knock, lineDir), now);
+}
+
+/**
+ * An ordinary enemy stunned for `s` (Plan 3's parry stun, also the conduct reaction's): its wind-up
+ * cancelled, act 'stun'; then immune to it for PARRY_STUN_IMMUNE_S after the stun ends. Returns false
+ * (nothing happens) while it is still immune.
+ */
+export function stunEnemy(w: CombatWorld, e: EnemyState, s: number, now: number): boolean {
+  const ai = aiOf(e, now);
+  if (now < ai.parryImmuneUntil - TIME_EPS) return false;
+  cancelWindup(w, e);
+  e.act = 'stun'; e.actUntil = now + s;
+  ai.parryImmuneUntil = now + s + PARRY_STUN_IMMUNE_S;
+  return true;
 }
 
 // ───────── keeping apart ─────────

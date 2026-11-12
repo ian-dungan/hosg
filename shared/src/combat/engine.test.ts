@@ -70,13 +70,13 @@ const dodge = (dx: number, dz: number, from = { x: 0, z: 0, y: 0 }, grounded = t
 
 // ───────── autos ─────────
 describe('autos', () => {
-  it('a Blade in reach of a Thornling hits 9 at 0, 1.2, 2.4 and 3.6 s and builds 40 Momentum', () => {
+  it('a Blade in reach of a Thornling hits 9 at 0, 1.2, 2.4 and 3.6 s and builds 60 Momentum (Battle Rhythm: 15 an auto)', () => {
     const r = new Rig([camp('thornling')]);
     const e = r.enemy('thornling'), a = r.add(0, -2.5);
     expect(r.i(a, { t: 'target', id: e })).toBeNull();
     r.at(4.5);
     expect(r.hits(a).map((h) => [h.at, h.amount, h.by])).toEqual([[0, 9, 'auto'], [1.2, 9, 'auto'], [2.4, 9, 'auto'], [3.6, 9, 'auto']]);
-    expect(r.c.self(a)!.momentum).toBe(40);
+    expect(r.c.self(a)!.momentum).toBe(60);
     expect(r.c.get(e)!.hp).toBe(210 - 36);
     expect(r.c.get(a)!.targetId).toBe(e);
   });
@@ -137,7 +137,7 @@ describe('abilities', () => {
     expect(r.press(a, 0)).toBeNull();
     r.tick(); // the auto at 0 as well
     expect(r.hits(a).map((h) => [h.by, h.amount])).toEqual([['slash', 16], ['auto', 9]]);
-    expect(r.c.self(a)!.momentum).toBe(30);
+    expect(r.c.self(a)!.momentum).toBe(35); // 20 + Battle Rhythm's 15
     expect(r.fx('use').map((u) => [u.ability, u.dst])).toEqual([['slash', e]]);
     r.at(3.8);
     expect(r.press(a, 0)).toBe('cooldown');
@@ -193,15 +193,16 @@ describe('abilities', () => {
     const r = new Rig([camp('thornling')]);
     const e = r.enemy('thornling'), a = r.add(0, -2.5);
     r.i(a, { t: 'target', id: e });
-    r.at(3.6 + 1 / 15); // four autos
-    expect(r.c.self(a)!.momentum).toBe(40);
+    r.at(2.4 + 1 / 15); // three autos (Battle Rhythm: 15 each)
+    expect(r.c.self(a)!.momentum).toBe(45);
     expect(r.press(a, 1)).toBe('momentum');
-    expect(r.press(a, 0)).toBeNull(); // Slash: 60
+    expect(r.press(a, 0)).toBeNull(); // Slash: 65
+    r.at(3.6 + 1 / 15); // the fourth auto: 80
     r.at(4.2);
     expect(r.press(a, 1)).toBeNull();
     const sunder = r.hits(a).at(-1);
     expect([sunder?.by, sunder?.amount, sunder?.combo]).toEqual(['sunder', 35, undefined]);
-    expect(r.c.self(a)!.momentum).toBe(10);
+    expect(r.c.self(a)!.momentum).toBe(30);
     r.tick();
     expect(r.fx('mark').map((m) => [m.dst, m.mark, m.on])).toEqual([[e, 'marked', true]]);
     expect(r.c.get(e)!.marks).toBe(4);
