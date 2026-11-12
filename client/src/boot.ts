@@ -74,6 +74,7 @@ export function bootGame(opts: GameOpts = {}): Game {
   let route: Vec2[] = [];                  // waypoints still to reach; the last is where the walk ends
   let walkGoal: Vector3 | null = null;     // the tapped point or person
   let walkThen: { within: number; then: () => void } | null = null;
+  let walkOnGround = false;                // the walk has had the adventurer on the ground (not up on something)
   let stuckTime = 0;
   const lastPos = new Vector3();
   const marker = MeshBuilder.CreateTorus('walkMarker', { diameter: 1.1, thickness: 0.09, tessellation: 24 }, scene);
@@ -84,7 +85,7 @@ export function bootGame(opts: GameOpts = {}): Game {
   marker.isPickable = false;
   marker.setEnabled(false);
   const stopWalk = () => {
-    route = []; walkGoal = null; walkThen = null; stuckTime = 0;
+    route = []; walkGoal = null; walkThen = null; stuckTime = 0; walkOnGround = false;
     marker.setEnabled(false);
   };
   function walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): boolean {
@@ -120,6 +121,13 @@ export function bootGame(opts: GameOpts = {}): Game {
     const r = rigRef;
     if (!r || !walkGoal || route.length === 0) return j;
     if (busy() || Math.hypot(j.x, j.y) > 0.15) { stopWalk(); return j; }
+    // routes keep to the ground: up on something after a jump (a bench, the Lookout), the walk ends before it
+    // could walk the adventurer off the edge
+    const b = r.body;
+    if (b.grounded) {
+      if (world.groundAt(b.x, b.z) !== null) walkOnGround = true;
+      else if (walkOnGround && world.surfaceAt(b.x, b.z) !== null) { stopWalk(); return j; }
+    }
     const px = r.position.x, pz = r.position.z;
     if (walkThen && Math.hypot(walkGoal.x - px, walkGoal.z - pz) <= walkThen.within) { arrived(); return j; }
     // on to the next waypoint once this one is close

@@ -99,7 +99,8 @@ export interface PlayerRigOpts {
   joystick: () => { x: number; y: number };
   /** A short tap/click on the 3D view (not a drag, not on HUD). */
   onTap: (tap: TapInfo) => void;
-  /** Called when the player lands, with how far they fell (metres from the highest point of the jump or fall). */
+  /** Called when the player lands, with how far they fell (metres from the highest point of the jump or fall).
+   *  Nothing passes it yet (online fall damage comes from the server); kept for later local landing effects. */
   onLand?: (drop: number) => void;
 }
 export interface PlayerRig {

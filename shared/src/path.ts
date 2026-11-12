@@ -9,6 +9,10 @@ export interface PathOpts { cell?: number; maxNodes?: number; snap?: number }
 /** Distance between line-of-sight samples when smoothing, in m. */
 const SIGHT_STEP = 0.25;
 const SQRT2 = Math.SQRT2;
+/** A goal whose reachable cells close out below this many is in a pocket (and is moved), in cells. */
+const POCKET_CELLS = 1000;
+/** How many pockets in a row the goal may be moved out of before giving up. */
+const POCKET_TRIES = 4;
 // cell (i, j) -> one number; i and j stay within ±2^20 for any sane cell size and map
 const OFF = 1 << 20, SPAN = 1 << 21;
 const keyOf = (i: number, j: number) => (i + OFF) * SPAN + (j + OFF);
@@ -94,11 +98,11 @@ export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) 
   };
   const at = (id: number): Vec2 => ({ x: ni[id] * cell, z: nj[id] * cell });
 
-  /** The passable cell nearest p within `snap` m (p's own cell first), or -1. */
-  const nearestPassable = (p: Vec2): number => {
+  /** The passable cell nearest p within `snap` m (p's own cell first), leaving out `skip`, or -1. */
+  const nearestPassable = (p: Vec2, skip?: Set<number>): number => {
     const ci = Math.round(p.x / cell), cj = Math.round(p.z / cell);
     const own = node(ci, cj);
-    if (ok[own]) return own;
+    if (ok[own] && !skip?.has(own)) return own;
     const R = Math.ceil(snap / cell);
     let best = -1, bestD = snap * snap;
     for (let dj = -R; dj <= R; dj++) for (let di = -R; di <= R; di++) {
@@ -106,16 +110,48 @@ export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) 
       const d2 = (x - p.x) ** 2 + (z - p.z) ** 2;
       if (d2 > bestD) continue;
       const id = node(ci + di, cj + dj);
-      if (ok[id] && (best < 0 || d2 < bestD)) { best = id; bestD = d2; }
+      if (ok[id] && !skip?.has(id) && (best < 0 || d2 < bestD)) { best = id; bestD = d2; }
     }
     return best;
   };
+  /** Calls f for each cell one step from id, as the search moves (8 neighbours, no cutting corners). */
+  const eachStep = (id: number, f: (nb: number, diag: boolean) => void) => {
+    const i = ni[id], j = nj[id];
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (di === 0 && dj === 0) continue;
+      const nb = node(i + di, j + dj);
+      if (!ok[nb]) continue;
+      const diag = di !== 0 && dj !== 0;
+      if (diag && (!ok[node(i + di, j)] || !ok[node(i, j + dj)])) continue;
+      f(nb, diag);
+    }
+  };
+  /** The cells reachable from `seed` if they are a small closed pocket without `start`, else null. */
+  const pocketOf = (seed: number): number[] | null => {
+    const seen = new Set<number>([seed]), queue = [seed];
+    for (let k = 0; k < queue.length; k++) {
+      if (queue[k] === start || queue.length > POCKET_CELLS) return null;
+      eachStep(queue[k], (nb) => { if (!seen.has(nb)) { seen.add(nb); queue.push(nb); } });
+    }
+    return queue;
+  };
 
-  const goal = nearestPassable(to);
-  if (goal < 0) return null;
   const start = nearestPassable(from);
   if (start < 0) return null;
-  const end: Vec2 = passable(to.x, to.z) ? { x: to.x, z: to.z } : at(goal);
+  // the goal: the passable cell nearest `to`, but not in a small walled-off pocket (a gap behind a cluster of
+  // barrels, say), which A* could only rule out by searching everything else first
+  const pockets = new Set<number>();
+  let goal = -1;
+  for (let tries = 0; ; tries++) {
+    goal = nearestPassable(to, pockets);
+    if (goal < 0) return null;
+    const pocket = pocketOf(goal);
+    if (!pocket) break;
+    if (tries === POCKET_TRIES) return null;
+    for (const id of pocket) pockets.add(id);
+  }
+  // end exactly at `to` when it can be stood on and seen from the goal cell
+  const end: Vec2 = passable(to.x, to.z) && clearLine(at(goal), to, passable) ? { x: to.x, z: to.z } : at(goal);
 
   // A* with 8 neighbours; a diagonal step needs both cells beside it passable (no cutting corners)
   const gi = ni[goal], gj = nj[goal];
@@ -133,16 +169,11 @@ export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) 
     if (cur === goal) { found = true; break; }
     closed[cur] = true;
     if (++expanded > maxNodes) return null;
-    const i = ni[cur], j = nj[cur];
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      if (di === 0 && dj === 0) continue;
-      const nb = node(i + di, j + dj);
-      if (!ok[nb] || closed[nb]) continue;
-      const diag = di !== 0 && dj !== 0;
-      if (diag && (!ok[node(i + di, j)] || !ok[node(i, j + dj)])) continue;
+    eachStep(cur, (nb, diag) => {
+      if (closed[nb]) return;
       const ng = g[cur] + (diag ? SQRT2 : 1);
       if (ng < g[nb]) { g[nb] = ng; parent[nb] = cur; open.push(nb, ng + h(nb)); }
-    }
+    });
   }
   if (!found) return null;
 

@@ -21,10 +21,14 @@ const CLOSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 export class Settings {
   readonly values: SettingsValues = load();
   private panel: HTMLElement;
+  private gear: HTMLButtonElement;
+  private input: HTMLInputElement;
   constructor(buttonParent: HTMLElement, panelParent: HTMLElement) {
-    const gear = h('button', 'sg-gear sg-ctl', buttonParent);
+    const gear = this.gear = h('button', 'sg-gear sg-ctl', buttonParent);
     gear.type = 'button';
     gear.setAttribute('aria-label', 'Settings');
+    gear.setAttribute('aria-expanded', 'false');
+    gear.setAttribute('aria-controls', 'sg-settings-card');
     gear.innerHTML = GEAR;
     gear.addEventListener('pointerdown', (e) => e.stopPropagation());
     gear.addEventListener('click', (e) => { e.stopPropagation(); this.toggle(); });
@@ -33,7 +37,9 @@ export class Settings {
     this.panel = h('div', 'sg-settings sg-ctl', panelParent);
     this.panel.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === this.panel) this.close(); });
     const card = h('div', 'sg-settings-card', this.panel);
+    card.id = 'sg-settings-card';
     card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
     card.setAttribute('aria-label', 'Settings');
     const head = h('div', 'sg-settings-head', card);
     h('div', 'sg-settings-title', head, 'Settings');
@@ -47,7 +53,7 @@ export class Settings {
     const txt = h('span', 'sg-switch-text', row);
     h('span', 'sg-switch-name', txt, 'Tap to walk');
     h('span', 'sg-switch-sub', txt, 'Tap the ground to walk there, or a person to walk over and talk.');
-    const input = h('input', 'sg-switch-input', row);
+    const input = this.input = h('input', 'sg-switch-input', row);
     input.type = 'checkbox';
     input.setAttribute('role', 'switch');
     input.checked = this.values.tapToWalk;
@@ -59,10 +65,17 @@ export class Settings {
     });
   }
   get open(): boolean { return this.panel.classList.contains('on'); }
-  toggle(): void { if (this.open) this.close(); else toggle(this.panel, 'on', true); }
+  toggle(): void { if (this.open) this.close(); else this.show(); }
+  private show(): void {
+    toggle(this.panel, 'on', true);
+    this.gear.setAttribute('aria-expanded', 'true');
+    this.input.focus({ preventScroll: true });
+  }
   close(): void {
-    // hand the keys back to the game (a focused switch would swallow WASD)
-    if (this.panel.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+    if (!this.open) return;
     toggle(this.panel, 'on', false);
+    this.gear.setAttribute('aria-expanded', 'false');
+    // focus back on the gear (never left on the switch, which would swallow WASD: the game ignores keys typed into inputs)
+    if (this.panel.contains(document.activeElement) || document.activeElement === document.body) this.gear.focus({ preventScroll: true });
   }
 }

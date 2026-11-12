@@ -26,6 +26,12 @@ function routeLength(from: Vec2, path: Vec2[]): number {
   return len;
 }
 
+/** passable, counting how often it is asked (findPath asks once per grid cell, plus line-of-sight samples). */
+function counted(p: Passable) {
+  let n = 0;
+  return { fn: ((x, z) => { n++; return p(x, z); }) as Passable, calls: () => n };
+}
+
 const open: Passable = (x, z) => Math.abs(x) < 50 && Math.abs(z) < 50;
 // A wall along x = 0 from z = -20 to z = 20, with a 2 m gap at z in (8, 10).
 const wallWithGap: Passable = (x, z) => open(x, z) && !(Math.abs(x) < 0.5 && Math.abs(z) < 20 && !(z > 8 && z < 10));
@@ -70,21 +76,53 @@ describe('findPath', () => {
     expect(findPath({ x: 0, z: 0 }, { x: 10, z: 0 }, big)).toBeNull();
   });
 
-  it('a walled-off goal returns null, stopping within maxNodes, quickly even on a big map', () => {
-    // 400 x 400 cells (200 m square at 0.5 m cells), goal inside a closed ring
+  it('a walled-off region bigger than the pocket check: null after expanding at most maxNodes cells', () => {
+    // 400 x 400 cells (200 m square at 0.5 m cells), goal inside a closed ring of radius 25 m (~7800 cells inside)
     const ring: Passable = (x, z) => {
       if (Math.abs(x) >= 100 || Math.abs(z) >= 100) return false;
       const r = Math.hypot(x - 60, z - 60);
-      return !(r > 5 && r < 6);
+      return !(r > 25 && r < 26);
     };
-    let calls = 0;
-    const counted: Passable = (x, z) => { calls++; return ring(x, z); };
-    const t0 = performance.now();
-    expect(findPath({ x: -60, z: -60 }, { x: 60, z: 60 }, counted, { maxNodes: 20000 })).toBeNull();
-    const ms = performance.now() - t0;
-    expect(ms).toBeLessThan(200);
-    // each expanded cell looks at no more than 8 new neighbours
-    expect(calls).toBeLessThan(20000 * 9 + 1000);
+    const c = counted(ring);
+    expect(findPath({ x: -60, z: -60 }, { x: 60, z: 60 }, c.fn, { maxNodes: 20000 })).toBeNull();
+    // passable is asked once per cell: the pocket check (< 2000 cells) plus at most 8 new neighbours per expanded cell
+    expect(c.calls()).toBeLessThan(2000 + 20000 * 8 + 1000);
+  });
+
+  it('a goal in a small walled-off pocket goes to the nearest reachable point instead, without a full search', () => {
+    // a 1 m pocket at (10, 0) enclosed by a wall 0.5 m thick; outside the wall is open
+    const pocket: Passable = (x, z) => {
+      if (!open(x, z)) return false;
+      const d = Math.max(Math.abs(x - 10), Math.abs(z));
+      return d < 0.6 || d > 1.1;
+    };
+    const c = counted(pocket);
+    const path = findPath({ x: 0, z: 0 }, { x: 10, z: 0.2 }, c.fn);
+    expect(path).not.toBeNull();
+    const end = path!.at(-1)!;
+    expect(Math.max(Math.abs(end.x - 10), Math.abs(end.z))).toBeGreaterThan(1.1);   // outside the pocket
+    expect(Math.hypot(end.x - 10, end.z - 0.2)).toBeLessThanOrEqual(2);
+    expect(routeClear({ x: 0, z: 0 }, path!, pocket)).toBe(true);
+    expect(c.calls()).toBeLessThan(5000);
+  });
+
+  it('a pocket the walk starts in is not left out: a goal inside it is reached', () => {
+    const pocket: Passable = (x, z) => {
+      if (!open(x, z)) return false;
+      const d = Math.max(Math.abs(x - 10), Math.abs(z));
+      return d < 1.6 || d > 2.1;
+    };
+    expect(findPath({ x: 9.5, z: -1 }, { x: 10.5, z: 1 }, pocket)).toEqual([{ x: 10.5, z: 1 }]);
+  });
+
+  it('the last leg to the tapped point is checked: a tapped point the goal cell cannot see is not used', () => {
+    // a thin wall at x in (10.1, 10.2): the tapped point (10.3, 0) is passable but behind it from the goal side;
+    // its own cell (10.5, 0) is inside a blocked strip, so the goal snaps to the near side of the wall
+    const thin: Passable = (x, z) => open(x, z) && !(x > 10.1 && x < 10.2) && !(x > 10.4 && x < 10.6 && Math.abs(z) < 3) && x < 10.7;
+    const path = findPath({ x: 0, z: 0 }, { x: 10.3, z: 0 }, thin);
+    expect(path).not.toBeNull();
+    expect(routeClear({ x: 0, z: 0 }, path!, thin)).toBe(true);
+    expect(path!.at(-1)!.x).toBeLessThan(10.1);
   });
 
   it('starting on a blocked cell (on top of something) steps off to the nearest passable point first', () => {
@@ -114,30 +152,39 @@ describe('findPath on the real grove', () => {
     const goal = { x: TAVERN.x + (dx / d) * 7, z: TAVERN.z + (dz / d) * 7 };
     expect(ground(goal.x, goal.z)).toBe(true);
     expect(segmentClear(spawn, goal, ground)).toBe(false); // the straight line is blocked
-    const t0 = performance.now();
-    const path = findPath(spawn, goal, ground);
-    const ms = performance.now() - t0;
+    const c = counted(ground);
+    const path = findPath(spawn, goal, c.fn);
     expect(path).not.toBeNull();
     expect(routeClear(spawn, path!, ground)).toBe(true);
     expect(path!.at(-1)).toEqual(goal);
     expect(routeLength(spawn, path!)).toBeLessThan(1.6 * Math.hypot(goal.x - spawn.x, goal.z - spawn.z));
-    expect(ms).toBeLessThan(200);
+    expect(c.calls()).toBeLessThan(10000);
   });
 
-  it('from SPAWN to a point across the river: null, within the time bound', () => {
+  it('a tap on the barrels by the tavern (a walled-off pocket behind them) walks up to the barrels', () => {
+    const tap = { x: -32.6, z: 11.6 };
+    const c = counted(ground);
+    const path = findPath(spawn, tap, c.fn);
+    expect(path).not.toBeNull();
+    const end = path!.at(-1)!;
+    expect(Math.hypot(end.x - tap.x, end.z - tap.z)).toBeLessThanOrEqual(2);
+    expect(routeClear(spawn, path!, ground)).toBe(true);
+    expect(c.calls()).toBeLessThan(10000);       // a normal across-town search, not the full 20000-node one
+  });
+
+  it('from SPAWN to a point across the river: null, after looking at only the cells round the goal', () => {
     const z = 0, goal = { x: riverX(z) - 10, z };
     expect(walk.surfaceAt(goal.x, goal.z)).toBeNull(); // the far bank is not walkable land at all here
-    const t0 = performance.now();
-    expect(findPath(spawn, goal, ground)).toBeNull();
-    expect(performance.now() - t0).toBeLessThan(400);
+    const c = counted(ground);
+    expect(findPath(spawn, goal, c.fn)).toBeNull();
+    expect(c.calls()).toBeLessThan(200);
   });
 
   it('worst case: a standable goal with no route (the out-of-play Beacon clearing) gives up after maxNodes', () => {
     const goal = { x: BEACON_C.x, z: BEACON_C.z + 10 };
     expect(ground(goal.x, goal.z)).toBe(true);
-    const t0 = performance.now();
-    expect(findPath(spawn, goal, ground)).toBeNull();
-    const ms = performance.now() - t0;
-    expect(ms).toBeLessThan(400);
+    const c = counted(ground);
+    expect(findPath(spawn, goal, c.fn)).toBeNull();
+    expect(c.calls()).toBeLessThan(2000 + 20000 * 8 + 1000);
   });
 });
