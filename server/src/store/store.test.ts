@@ -566,6 +566,22 @@ if (databaseUrl) {
     }
   });
 
+  describe('PgStore timeouts', () => {
+    it('every connection has a statement and a lock timeout (a hung call never holds a session forever)', async () => {
+      const pool = createPool(databaseUrl);
+      try {
+        const st = await pool.query('SHOW statement_timeout'), lt = await pool.query('SHOW lock_timeout');
+        expect(st.rows[0].statement_timeout).toBe('10s');
+        expect(lt.rows[0].lock_timeout).toBe('5s');
+        const short = createPool(databaseUrl, { statementTimeoutMs: 100 });
+        await expect(short.query('SELECT pg_sleep(1)')).rejects.toThrow(/timeout/);
+        await short.end();
+      } finally {
+        await pool.end();
+      }
+    });
+  });
+
   describe('PgStore migrations', () => {
     it('runs each migration once, even when stores open at the same time', async () => {
       const stores = await Promise.all([createPgStore(databaseUrl), createPgStore(databaseUrl)]);

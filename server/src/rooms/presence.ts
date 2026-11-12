@@ -98,7 +98,9 @@ export class Presence {
   private readonly invFlights = new Map<string, Promise<void>>();
   /** Holds the account's next join until `flight` settles. */
   inventoryInFlight(accountId: string, flight: Promise<void>): void {
-    const entry = flight.catch(() => {}).finally(() => { if (this.invFlights.get(accountId) === entry) this.invFlights.delete(accountId); });
+    // chained: a later flight never hides an earlier one still in the air
+    const prev = this.invFlights.get(accountId);
+    const entry = Promise.all([prev, flight.catch(() => {})]).then(() => {}).finally(() => { if (this.invFlights.get(accountId) === entry) this.invFlights.delete(accountId); });
     this.invFlights.set(accountId, entry);
   }
   /** Resolves once no ended session's inventory write for the account is in flight. */

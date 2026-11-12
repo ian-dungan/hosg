@@ -30,7 +30,7 @@ export const BANK_SLOTS = 60;
 /** Gold never exceeds this (extra is dropped, with a notice). */
 export const GOLD_MAX = 1_000_000;
 /** Kill keys remembered per adventurer for de-duplication. */
-export const RECENT_KILLS = 64;
+export const RECENT_KILLS = 256;
 /** Client operation ids remembered per adventurer (as `${op}:${id}`), so a resent operation applies once. */
 export const RECENT_OPS = 64;
 /** An operation id is a random string of this many characters or more (ruling P5-e). */

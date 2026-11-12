@@ -18,7 +18,11 @@ export const LOOK_NOT_FREE = 'Visit the Barber in Shady Grove to change your loo
 /** An inventory no one has touched: the 16 starter items only (uids 1–16). */
 const UNTOUCHED_NEXT_UID = 17;
 
-export function lookRouter(store: Store, secret: string, opts: { ratePerMinute?: number } = {}): express.Router {
+/**
+ * `onLookChanged`: the account's look or inventory changed behind its room (an online adventurer's room re-reads
+ * and shows the new look at once).
+ */
+export function lookRouter(store: Store, secret: string, opts: { ratePerMinute?: number; onLookChanged?: (accountId: string) => void } = {}): express.Router {
   const router = express.Router();
   router.use(rateLimit(opts.ratePerMinute ?? 10, 'Too many attempts, wait a minute'));
   router.use(express.json({ limit: '2kb', type: () => true }));
@@ -68,8 +72,10 @@ export function lookRouter(store: Store, secret: string, opts: { ratePerMinute?:
         const dye: [number, number] = [look.outfit.dye1, look.outfit.dye2];
         const inventory = { ...a.inventory, bag: a.inventory.bag.map((i) => ({ ...i, dye: [dye[0], dye[1]] as [number, number] })) };
         // compare-and-set: if anything changed it meanwhile (a join's first write), the dyes are left as they are
-        await store.writeInventory(a.id, a.invVersion, { inventory, jobs: a.jobs, dGold: 0, dSeals: 0 });
+        // (jobs left as stored: an online room is their authority)
+        await store.writeInventory(a.id, a.invVersion, { inventory, dGold: 0, dSeals: 0 });
       }
+      opts.onLookChanged?.(account.id);
       res.json(await answer(account));
     } catch (err) {
       next(err);

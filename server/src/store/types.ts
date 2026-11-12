@@ -67,7 +67,12 @@ export interface Adventurer {
  * One atomic inventory write (writeInventory): the inventory and jobs as they are after the operation,
  * gold and Seals as checked deltas (whole numbers), and the look (with lookFree false when the free visit is spent).
  */
-export interface InvWrite { inventory: InventorySave; jobs: JobsSave; dGold: number; dSeals: number; look?: Look; lookFree?: false }
+export interface InvWrite {
+  inventory: InventorySave;
+  /** Absent: the stored jobs (and level) are left as they are (writes made without a session: offline loot, GM grants, the creator's dyes). */
+  jobs?: JobsSave;
+  dGold: number; dSeals: number; look?: Look; lookFree?: false;
+}
 
 /** The new version and the gold and Seals after a write. */
 export interface InvWritten { version: number; gold: number; seals: number }
@@ -88,7 +93,7 @@ export function highestLevel(jobs: JobsSave): number {
 export function checkedInvWrite(w: InvWrite): InvWrite {
   const inv = parseInventory(w?.inventory);
   if (inv.repaired) throw new TypeError('writeInventory: not an inventory');
-  if (!isJobsSave(w.jobs)) throw new TypeError('writeInventory: not a jobs save');
+  if (w.jobs !== undefined && !isJobsSave(w.jobs)) throw new TypeError('writeInventory: not a jobs save');
   let look: Look | undefined;
   if (w.look !== undefined) {
     const parsed = parseLook(w.look);
@@ -99,7 +104,7 @@ export function checkedInvWrite(w: InvWrite): InvWrite {
     if (!Number.isSafeInteger(w[k])) throw new TypeError(`writeInventory: ${k} is not a whole number`);
   }
   if (w.lookFree !== undefined && w.lookFree !== false) throw new TypeError('writeInventory: lookFree can only be spent');
-  return { inventory: inv.inv, jobs: parseJobsSave(w.jobs), dGold: w.dGold, dSeals: w.dSeals, ...(look ? { look } : {}), ...(w.lookFree === false ? { lookFree: false as const } : {}) };
+  return { inventory: inv.inv, ...(w.jobs !== undefined ? { jobs: parseJobsSave(w.jobs) } : {}), dGold: w.dGold, dSeals: w.dSeals, ...(look ? { look } : {}), ...(w.lookFree === false ? { lookFree: false as const } : {}) };
 }
 
 /** Checks a GM audit entry (both stores): a command of 1..64 characters, a result of at most 500, a target of at most 64. */

@@ -122,8 +122,10 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       if (!adventurer || adventurer.invVersion !== expect) return null;
       if (adventurer.gold + v.dGold < 0 || adventurer.seals + v.dSeals < 0) return null;
       adventurer.inventory = json(v.inventory);
-      adventurer.jobs = v.jobs;
-      adventurer.level = highestLevel(v.jobs);
+      if (v.jobs) {
+        adventurer.jobs = v.jobs;
+        adventurer.level = highestLevel(v.jobs);
+      }
       adventurer.gold = goldAfter(adventurer.gold, v.dGold);
       adventurer.seals += v.dSeals;
       if (v.look) adventurer.look = json(v.look);

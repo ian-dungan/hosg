@@ -49,6 +49,8 @@ export interface InvTask<T> {
   recheck?: readonly string[];
   /** Runs synchronously as the task ends, before the next task starts (the room applies the result here). */
   settle?(r: TaskResult<T>): void;
+  /** Never refused for a full queue (loot: a stalled store must never drop an award). */
+  unbounded?: boolean;
 }
 
 /** Serialises a session's store writes (inventory writes and saves). */
@@ -91,6 +93,11 @@ export interface QueueDeps {
   lock: WriteLock;
   /** Every write that landed (for /healthz's invWritesPerS). */
   onWrite?(): void;
+  /**
+   * A write landed, with the jobs it wrote: called inside the write lock, before any save waiting on it runs
+   * (also for a session that ended meanwhile), so a save never stores jobs from before a landed write.
+   */
+  landed?(jobs: JobsSave): void;
   /** A task's settle threw (logged by the caller; the queue carries on with the next task). */
   onError?(err: unknown): void;
 }
@@ -127,7 +134,7 @@ export class InventoryQueue {
       task.settle?.(r);
       return Promise.resolve(r);
     }
-    if (this.pending.length >= QUEUE_MAX) {
+    if (this.pending.length >= QUEUE_MAX && !task.unbounded) {
       const r: TaskResult<T> = { status: 'refused', snapshot: this.snap, reason: 'rate' };
       task.settle?.(r);
       return Promise.resolve(r);
@@ -220,7 +227,17 @@ export class InventoryQueue {
       const expect = this.snap.version;
       let written: InvWritten | null;
       try {
-        written = await this.deps.lock.run(() => this.deps.write(expect, out.write));
+        written = await this.deps.lock.run(async () => {
+          const w = await this.deps.write(expect, out.write);
+          if (w) {
+            try {
+              this.deps.landed?.(out.next.jobs);
+            } catch (err) {
+              this.deps.onError?.(err);
+            }
+          }
+          return w;
+        });
       } catch (error) {
         this.dirty = true; // it may have landed: read the truth before the next task
         return { status: 'failed', snapshot: this.snap, error };

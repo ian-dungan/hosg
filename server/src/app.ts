@@ -224,7 +224,9 @@ export function createApp(opts: AppOptions): App {
     express: (app) => {
       if (opts.trustProxy !== undefined) app.set('trust proxy', opts.trustProxy); // before the login limit reads req.ip
       app.use('/api/leaderboard', leaderboardRouter(opts.store));
-      app.use('/api/look', lookRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute }));
+      app.use('/api/look', lookRouter(opts.store, opts.jwtSecret, {
+        ratePerMinute: opts.authRatePerMinute, onLookChanged: (accountId) => { presence.get(accountId)?.room.refreshInventory(accountId); },
+      }));
       app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute, instanceOf: (accountId) => instances.heldRoom(accountId) }));
       app.get('/healthz', (_req, res) => {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).

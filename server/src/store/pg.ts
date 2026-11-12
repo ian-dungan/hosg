@@ -120,8 +120,16 @@ function toAdventurer(r: AdventurerRow): Adventurer {
  * 'error' on the pool for those, and an unhandled 'error' event would crash the server. The broken
  * client is discarded and the next query opens a new connection.
  */
-export function createPool(databaseUrl: string): pg.Pool {
-  const pool = new pg.Pool({ connectionString: databaseUrl });
+/** Every statement gives up after this (ms), and waits at most LOCK_TIMEOUT_MS for a row lock: a hung store call never holds a session's write lock for ever. */
+export const STATEMENT_TIMEOUT_MS = 10_000;
+export const LOCK_TIMEOUT_MS = 5000;
+
+export function createPool(databaseUrl: string, opts: { statementTimeoutMs?: number; lockTimeoutMs?: number } = {}): pg.Pool {
+  const pool = new pg.Pool({
+    connectionString: databaseUrl,
+    statement_timeout: opts.statementTimeoutMs ?? STATEMENT_TIMEOUT_MS,
+    lock_timeout: opts.lockTimeoutMs ?? LOCK_TIMEOUT_MS,
+  });
   pool.on('error', (err) => {
     console.error('PostgreSQL idle connection error (continuing):', err.message);
   });
@@ -270,13 +278,13 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
       // One statement: the version and both balances are checked and changed together (a Seal awarded,
       // a GM grant or another write in between bumps inv_version, and this one writes nothing).
       const { rows } = await pool.query<{ inv_version: number; gold: number; seals: number }>(
-        `UPDATE adventurers SET inventory = $3::jsonb, jobs = $4::jsonb, level = $5, gold = LEAST($8::integer, gold + $6::integer), seals = seals + $7::integer,
+        `UPDATE adventurers SET inventory = $3::jsonb, jobs = COALESCE($4::jsonb, jobs), level = COALESCE($5::integer, level), gold = LEAST($8::integer, gold + $6::integer), seals = seals + $7::integer,
            look = COALESCE($9::jsonb, look), look_free = CASE WHEN $10::boolean THEN false ELSE look_free END,
            inv_version = inv_version + 1, updated_at = now()
          WHERE id = $1 AND inv_version = $2 AND gold + $6::integer >= 0 AND seals + $7::integer >= 0
          RETURNING inv_version, gold, seals`,
         [
-          adventurerId, expect, JSON.stringify(v.inventory), JSON.stringify(v.jobs), highestLevel(v.jobs), v.dGold, v.dSeals, GOLD_MAX,
+          adventurerId, expect, JSON.stringify(v.inventory), v.jobs ? JSON.stringify(v.jobs) : null, v.jobs ? highestLevel(v.jobs) : null, v.dGold, v.dSeals, GOLD_MAX,
           v.look ? JSON.stringify(v.look) : null, v.lookFree === false,
         ],
       );

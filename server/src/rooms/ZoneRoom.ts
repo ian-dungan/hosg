@@ -202,6 +202,8 @@ export interface ZoneRoomOptions {
   onInvWrite?: () => void;
 }
 
+/** Operations refused inside a sealed boss arena (ruling P5-h): gear and talents. */
+const SEALED_REFUSED: readonly InvOp['op'][] = ['equip', 'unequip', 'talent', 'respec'];
 /** Refusals an operation checks once more on a fresh read before giving them (balances and room). */
 const RECHECK: readonly string[] = ['gold', 'seals', 'bag-full', 'bank-full', 'purse-full'];
 /** Loot writes that fail (the store threw) are tried again this many times, this far apart (ms), then given up (logged). */
@@ -481,6 +483,10 @@ interface Session {
   // ───────── Plan 5 ─────────
   /** Its inventory queue (every op, Barber visit, loot award and grant), and the lock its saves share with it. */
   queue: InventoryQueue;
+  /** A landed inventory write changed its jobs (talents, outfits): `jobs` is sent when the task settles. */
+  invJobsChanged?: boolean;
+  /** A kit change waits for the fight (or cast) to end: tried again every step. */
+  kitPending?: boolean;
   lock: WriteLock;
   /** INV_OPS_PER_S for inventory and Barber requests. */
   invBucket: TokenBucket;
@@ -835,7 +841,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       looksSent: new Map(),
       looksOut: new Set(),
     };
-    session.queue = this.makeQueue(snapshot, lock, adventurer.id, accountId, () => session.jobs);
+    session.queue = this.makeQueue(snapshot, lock, adventurer.id, accountId, () => session.jobs, (j) => {
+      // (inside the write lock: a save waiting on it reads these jobs, even if the session ended meanwhile)
+      if (this.mergeJobs(session, j)) session.invJobsChanged = true;
+    });
     this.sessions.set(sessionId, session);
     this.sessionByEid.set(eid, session);
     if (prevDeadAt !== undefined) {
@@ -1057,13 +1066,22 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * only when what it is made from changed (a job change, equip, talent, level-up): loot or a dye never re-kits.
    * Callers re-kit only out of combat and not mid-cast (operations are refused then), except a level-up.
    */
-  private refreshKit(session: Session) {
+  private refreshKit(session: Session, now = false) {
     const inv = session.queue.snapshot.inv, job = session.jobs.current;
     const k = this.kitOf(session.jobs, inv, job);
     if (k.key !== session.kitKey) {
+      // An operation's context was checked when it ran; its write may land once a fight or a cast has begun:
+      // the kit then waits until the adventurer is out of combat and not casting or charging (a level-up and a
+      // job change pass `now`).
+      const self = this.combat.self(session.eid);
+      if (!now && self && (self.inCombat || self.cast !== null || self.charge !== null)) {
+        session.kitPending = true;
+        return;
+      }
+      session.kitPending = false;
       session.kitKey = k.key;
       if (this.kits) this.combat.setKit(session.eid, k.kit, k.level);
-    }
+    } else session.kitPending = false;
     const p = session.player, gear = this.gearCode(inv, session.jobs, job);
     if (session.gearCode !== gear) {
       session.gearCode = gear;
@@ -1103,10 +1121,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   /** The adventurer's inventory queue: reads and writes the store for it, its writes under the session's lock. */
-  private makeQueue(snapshot: InvSnapshot, lock: WriteLock, adventurerId: string, accountId: string, jobs: () => JobsSave): InventoryQueue {
+  private makeQueue(
+    snapshot: InvSnapshot, lock: WriteLock, adventurerId: string, accountId: string, jobs: () => JobsSave, landed?: (jobs: JobsSave) => void,
+  ): InventoryQueue {
     return new InventoryQueue(snapshot, {
       lock,
       jobs,
+      landed,
       write: (expect, w) => this.store.writeInventory(adventurerId, expect, w),
       load: async () => {
         const a = await this.store.getOrCreateAdventurer(accountId);
@@ -1131,6 +1152,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (session.reconnection) return;
     const text = reason === 'save' ? INV_SAVE_TEXT : INV_TEXT[reason];
     this.sendTo(session.client, 'invRefused', { op, reason, text });
+  }
+
+  /** Inside an instance's sealed boss arena now (ruling P5-h: no gear, talent or pick changes there). */
+  private inSealedArena(session: Session): boolean {
+    const sealed = this.inst?.sealed;
+    return !!sealed && this.inst!.arenas[sealed](session.lastGood.x, session.lastGood.z);
   }
 
   /** Where and how the adventurer stands for an operation, from the server's own view (never the client's). */
@@ -1168,7 +1195,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (this.sessions.get(session.client.sessionId) !== session) return; // ended meanwhile (its write, if any, landed)
     switch (r.status) {
       case 'applied':
-        if (this.mergeJobs(session, r.jobs)) this.sendJobs(session);
+        // (its jobs were merged as the write landed: see makeQueue's landed)
+        if (session.invJobsChanged) {
+          session.invJobsChanged = false;
+          this.sendJobs(session);
+        }
         this.refreshKit(session);
         this.sendInventory(session);
         return;
@@ -1203,6 +1234,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       retries: 1,
       recheck: RECHECK,
       run: (s, jobs) => {
+        // ruling P5-h: no gear or talent change inside a sealed boss arena (between pulls too)
+        if (SEALED_REFUSED.includes(op.op) && this.inSealedArena(session)) return { kind: 'refuse', reason: 'combat' };
         const r = applyInvOp({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, op, this.invCtx(session));
         if ('refusal' in r) return { kind: 'refuse', reason: r.refusal };
         if (r.dup) return { kind: 'none', info: null };
@@ -1288,10 +1321,32 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     });
   }
 
+  /**
+   * In-process: the store changed behind the account's queue here (a GM grant offline, offline loot, the creator):
+   * the queue re-reads, and the owner hears the truth (inventory, look). False when it has no session here.
+   */
+  public refreshInventory(accountId: string): boolean {
+    const session = this.sessionOf(accountId);
+    if (!session) return false;
+    session.queue.markStale();
+    const wasFree = session.queue.snapshot.lookFree;
+    void session.queue.push<null>({
+      retries: 0, unbounded: true,
+      run: () => ({ kind: 'none', info: null }),
+      settle: (r) => {
+        if (r.status === 'unchanged') this.lookChanged(session, wasFree && !r.snapshot.lookFree);
+        this.settleInv(session, null, r as TaskResult<unknown>);
+        if (r.status === 'unchanged') this.refreshKit(session);
+      },
+    });
+    return true;
+  }
+
   /** A loot task for `awards`: rolled from the queued state, at most once per kill key; then `loot`, its notices and the view. */
   private lootTask(session: Session, awards: LootAward[], tries: number): InvTask<ReturnType<typeof applyLoot>['given']> {
     return {
       retries: LOOT_STALE_RETRIES,
+      unbounded: true, // never refused for a full queue (a stalled store must not drop loot)
       run: (s, jobs) => {
         const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, awards, this.lootAlways);
         if (out.given.every((g) => g.dup)) return { kind: 'none', info: out.given };
@@ -1306,12 +1361,18 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           if (r.status === 'failed') this.logFailure('loot', 'A loot write failed', r.error);
           // tried again a little later (a kill key is rewarded once however often it is tried); then given up
           if (tries + 1 < LOOT_TRIES) {
-            setTimeout(() => { void session.queue.push(this.lootTask(session, awards, tries + 1)); }, LOOT_RETRY_MS);
+            // (held as in flight from now: a rejoin meanwhile waits for it, and reads the store after it lands)
+            const retry = new Promise<void>((resolve) => setTimeout(resolve, LOOT_RETRY_MS)).then(() => session.queue.push(this.lootTask(session, awards, tries + 1)));
+            this.accounts.inventoryInFlight(session.accountId, retry.then(() => {}));
           } else this.logFailure('loot', 'Loot was given up after its tries', new Error(`${awards.length} awards for ${session.accountId}`));
           return;
         }
         if (r.status === 'dropped') {
           this.offlineLoot(session, awards); // the session ended first: written for the adventurer all the same
+          return;
+        }
+        if (r.status === 'refused') {
+          this.logFailure('loot', 'Loot could not be applied', new Error(`${r.reason}: ${awards.length} awards for ${session.accountId}`));
           return;
         }
         if (r.status !== 'applied' || this.sessions.get(session.client.sessionId) !== session) return;
@@ -1343,9 +1404,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       run: (s, j) => {
         const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs: j }, awards, this.lootAlways);
         if (out.given.every((g) => g.dup)) return { kind: 'none', info: null };
-        return { kind: 'write', info: null, write: { inventory: out.state.inv, jobs: j, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree } };
+        // (jobs left as stored: this write has no session, and a newer one may hold newer jobs)
+        return { kind: 'write', info: null, write: { inventory: out.state.inv, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree } };
       },
-      settle: (r) => { if (r.status === 'failed') this.logFailure('loot', 'Loot for an adventurer who left could not be written', r.error); },
+      unbounded: true,
+      settle: (r) => {
+        if (r.status === 'failed' || r.status === 'stale' || r.status === 'refused') {
+          this.logFailure('loot', 'Loot for an adventurer who left could not be written', r.status === 'failed' ? r.error : new Error(r.status));
+        }
+        // back online already (it read the store before this landed): its session hears the truth
+        if (r.status === 'applied') this.accounts.get(session.accountId)?.room.refreshInventory(session.accountId);
+      },
     });
     this.accounts.inventoryInFlight(session.accountId, flight.then(() => {}));
   }
@@ -1393,6 +1462,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const session = this.actor(client);
     const picks = (message as { picks?: unknown } | null)?.picks;
     if (!session || !Array.isArray(picks) || picks.length !== 2 || !picks.every((p) => typeof p === 'string')) return;
+    if (this.inSealedArena(session)) return this.refuse(session, 'loadout', 'in-combat'); // ruling P5-h
     if (!this.intent(session, 'loadout', { t: 'loadout', picks: [picks[0], picks[1]] as [AbilityId, AbilityId] })) return;
     this.takeJob(session);
     this.sendJobs(session);
@@ -1413,7 +1483,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (!this.intent(session, 'job', { t: 'job', job, picks: recordFor(session.jobs, job).picks })) return;
     this.takeJob(session);
     // the engine keeps the old job's kit through a job change: the new job's kit (its gear and talents) at once
-    this.refreshKit(session);
+    this.refreshKit(session, true);
     this.sendJobs(session);
     if (JSON.stringify(before) !== JSON.stringify(session.jobs)) this.saveJobs(session);
   }
@@ -1472,7 +1542,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.sendTo(session.client, 'jobXp', { job, gained: xp - had, xp, level, levelUp });
     if (xp !== had) this.sendJobs(session);
     if (levelUp) {
-      this.refreshKit(session);
+      this.refreshKit(session, true);
       session.player.lvlAt = Math.max(1, this.clockSteps(this.nowS()));
       if (!session.reconnection) this.sendTo(session.client, 'levelUp', { job, level, talentRow: talentRowFor(level) });
       this.sendInventory(session); // its stats
@@ -2046,11 +2116,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const full = Math.max(1, Math.round(session.maxHp));
     const as = this.inst ? { zone: 'greenway' as const, ...LAMPFALL_MOUTH.arrive, ...(dead ? { hp: full } : {}), ...to }
       : dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: full } : to;
-    const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, jobs: session.jobs, ...as };
     let result: 'saved' | 'refused' | 'failed';
     try {
-      // (under the session's write lock: never interleaved with an inventory write's jobs)
-      result = (await session.lock.run(() => this.store.saveAdventurer(values, { zone: expect }))) ? 'saved' : 'refused';
+      // Under the session's write lock, with its jobs read only once the lock is held: an inventory write that
+      // landed first (a respec, a costume worn) has merged its jobs already, so a save never undoes it.
+      result = (await session.lock.run(() => {
+        const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, jobs: session.jobs, ...as };
+        return this.store.saveAdventurer(values, { zone: expect });
+      })) ? 'saved' : 'refused';
     } catch (err) {
       this.logFailure('save', 'Saving an adventurer failed', err);
       return 'failed';
@@ -2702,6 +2775,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           this.sendTo(session.client, 'lookFree', { free: session.queue.snapshot.lookFree });
         }
         this.flushLoot(session);
+        if (session.kitPending) this.refreshKit(session);
       });
     }
     if (this.inst) this.safely('instance', () => this.stepInstance(target));
