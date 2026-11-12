@@ -10,6 +10,12 @@ export class ThreatTable {
   add(id: number, amount: number): void {
     this.threat.set(id, (this.threat.get(id) ?? 0) + (Number.isFinite(amount) ? amount : 0));
   }
+  /** Sets id's threat to `v` (entering it in the table if absent). */
+  set(id: number, v: number): void {
+    this.threat.set(id, Number.isFinite(v) ? v : 0);
+  }
+  /** id's threat, or undefined when it is not in the table. */
+  get(id: number): number | undefined { return this.threat.get(id); }
   remove(id: number): void {
     this.threat.delete(id);
     if (this.forced === id) this.forced = null;

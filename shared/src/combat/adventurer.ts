@@ -1,20 +1,25 @@
-// Adventurers in a fight: intents (target, abilities, swap, dodge, loadout), autos, timers, and the
-// hit and hurt helpers the enemy AI reuses. All state lives in the engine's CombatWorld.
+// Adventurers in a fight: intents (target, abilities, dodge, loadout, job; and, deprecated, the Plan 3
+// swap), autos, timers, and the hit and hurt helpers the enemy AI reuses. All state lives in the
+// engine's CombatWorld. What abilities do is data (effects.ts); casts are casting.ts.
 import { HP_REGEN_DELAY_S, HP_REGEN_PER_S, TICK_HZ } from '../constants';
 import {
-  ABILITIES, BULWARK_ABSORB, BULWARK_S, CHARGE_MAX_S, CHARGE_MOVE_SCALE, MEND_HEAL, PARRY_WINDOW_S,
-  SPRINT_S, SPRINT_SCALE, WEAPONS, chargedShot, damageCoef, parsePlan3Loadout, plan3LoadoutOf, plan3Slots, type AbilityId,
+  ABILITIES, BUFF_BITS, CHARGE_MAX_S, CHARGE_MOVE_SCALE, DEBUFF_BITS, DEFAULT_LOADOUT, SPRINT_S, SPRINT_SCALE, WEAPONS, chargedShot,
+  legacyLoadout, parseLoadout, parsePlan3Loadout, plan3LoadoutOf, plan3Slots, slotsFor, type AbilityId, type BuffId, type DebuffId,
+  type Loadout, type Plan3Loadout,
 } from './abilities';
 import {
-  AUTO_MOMENTUM, BREAK_DAMAGE_MULT, BURNING_COEF_PER_S, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S, COMBO_COEF, COMBO_STAGGER,
-  DODGE_CHARGES, DODGE_IFRAME_S, MOMENTUM_MAX, DODGE_MIN_GAP_S, DODGE_REFILL_S, FINISHER_COST, GCD_S, INTERRUPT_STAGGER, KNOCK_RECOVER_S,
-  RANGE_FUZZ, RESPAWN_CLEAR_RADIUS, SPEED_GRACE_S, SWAP_COOLDOWN_S, TARGET_DROP_RANGE, TARGET_RANGE, THREAT_PER_DAMAGE,
+  AUTO_MOMENTUM, BEDROCK_S, BEDROCK_SHIELD, BREAK_DAMAGE_MULT, BURNING_COEF_PER_S, CAST_MOVE_SCALE, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S,
+  COMBO_COEF, COMBO_STAGGER, DODGE_IFRAME_S, MOMENTUM_MAX, DODGE_MIN_GAP_S, DODGE_REFILL_S, GCD_S, INTERRUPT_STAGGER,
+  KNOCK_RECOVER_S, RESPAWN_CLEAR_RADIUS, SPEED_GRACE_S, SWAP_COOLDOWN_S, TARGET_DROP_RANGE, TARGET_RANGE, THREAT_PER_DAMAGE,
   THREAT_PER_HEAL,
 } from './constants';
+import { breakCast, castView, startCast, tickCast } from './casting';
+import { applyEffects, onDamageTaken, outgoingMult, resolveAim, targetFor, tickBuffs, tickDebuffs } from './effects';
+import { JOBS, isJobId, type JobId } from './jobs';
 import { dodgeDisplacement, simulateDisplacement, type Displacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackId } from './enemies';
 import type { FxEvent } from './fx';
-import { applyFinisherMark, type MarkId } from './marks';
+import { applyFinisherMark, MARK_BITS, type MarkId } from './marks';
 import { decayMomentum, gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
 import { addStagger, isBroken, tickStagger } from './stagger';
@@ -55,7 +60,23 @@ export function isDisplaced(a: AdventurerState, nowS: number): boolean {
 export function currentAct(a: AdventurerState, nowS: number): Act {
   if (!a.alive) return 'dead';
   if (isDisplaced(a, nowS)) return a.act;
-  return a.charge ? 'charge' : '';
+  return a.cast ? 'cast' : a.charge ? 'charge' : '';
+}
+/** The adventurer's live buffs as BUFF_BITS flags. */
+export function buffBits(a: AdventurerState, nowS: number): number {
+  let bits = 0;
+  for (const [id, b] of Object.entries(a.buffs) as [BuffId, { until: number }][]) if (b.until > nowS) bits |= BUFF_BITS[id];
+  return bits;
+}
+/** The enemy's live debuffs as DEBUFF_BITS flags. */
+export function debuffBits(e: EnemyState, nowS: number): number {
+  let bits = 0;
+  for (const [id, d] of Object.entries(e.debuffs) as [DebuffId, { until: number }][]) if (d.until > nowS) bits |= DEBUFF_BITS[id];
+  return bits;
+}
+/** The job's dodge charges. */
+export function dodgeMax(a: AdventurerState): number {
+  return JOBS[a.job].dodgeCharges;
 }
 export function liveShield(a: AdventurerState, nowS: number): number {
   return a.shield > 0 && nowS < a.shieldUntil ? a.shield : 0;
@@ -73,18 +94,21 @@ export function speedScaleOf(a: AdventurerState, nowS: number): number {
   let s = 1;
   if (nowS < a.sprintUntil + SPEED_GRACE_S) s *= SPRINT_SCALE;
   if (a.charge && nowS - a.charge.startedAt >= CHARGE_SLOW_GRACE_S - TIME_EPS) s *= CHARGE_MOVE_SCALE;
+  // the slow starts CHARGE_SLOW_GRACE_S in (latency) and ends with the cast: never stricter than an honest client
+  if (a.cast && nowS - a.cast.startedAt >= CHARGE_SLOW_GRACE_S - TIME_EPS && nowS < a.cast.endsAt) s *= CAST_MOVE_SCALE;
   return s;
 }
 
 const left = (until: number, nowS: number) => Math.max(0, until - nowS);
 export function selfView(w: CombatWorld, a: AdventurerState, nowS: number): SelfView {
   return {
-    momentum: a.momentum, weapon: a.loadout.weapon, slots: [...a.slots],
+    momentum: a.momentum, weapon: a.plan3?.weapon ?? JOBS[a.job].weapon, slots: [...a.slots],
     cd: a.slots.map((id) => left(a.readyAt[id] ?? -Infinity, nowS)),
-    gcd: left(a.gcdUntil, nowS), swapCd: left(a.swapReadyAt, nowS), swapLock: 0,
+    gcd: left(a.gcdUntil, nowS), swapCd: a.plan3 ? left(a.swapReadyAt, nowS) : 0, swapLock: 0,
     dodgeCharges: a.dodgeCharges, dodgeNextIn: a.dodgeRefillAt === null ? 0 : left(a.dodgeRefillAt, nowS),
     charge: a.charge ? Math.max(0, nowS - a.charge.startedAt) : null,
     inCombat: adventurerInCombat(w, a, nowS),
+    job: a.job, dodgeMax: dodgeMax(a), cast: castView(a, nowS),
   };
 }
 
@@ -92,19 +116,33 @@ const fx = (w: CombatWorld, ev: FxEvent) => { w.out.fx.push(ev); };
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
 // ───────── lifecycle ─────────
+/** What the engine runs for a stored loadout: a job Loadout; a Plan 3 one (deprecated) as its job with its Plan 3 slots; else DEFAULT_LOADOUT. */
+function runLoadout(v: unknown): { loadout: Loadout; slots: AbilityId[]; plan3: Plan3Loadout | null } {
+  const l = parseLoadout(v);
+  if (l) return { loadout: l, slots: slotsFor(l), plan3: null };
+  const p3 = parsePlan3Loadout(v);
+  if (p3) return { loadout: legacyLoadout(p3)!, slots: plan3Slots(p3), plan3: p3 };
+  const d = parseLoadout(DEFAULT_LOADOUT)!;
+  return { loadout: d, slots: slotsFor(d), plan3: null };
+}
+
+/** @deprecated Until Task 6: the Plan 3 loadout the server saves (a Plan 3 one as it runs; else plan3LoadoutOf the job loadout). */
+export function plan3LoadoutState(a: AdventurerState): Plan3Loadout {
+  return a.plan3 ? { weapon: a.plan3.weapon, free: [a.plan3.free[0], a.plan3.free[1]] } : plan3LoadoutOf(a.loadout);
+}
+
 export function newAdventurer(id: number, s: { x: number; z: number; y: number; facing: number; hp: number; loadout: unknown }, nowS: number): AdventurerState {
-  // Until Task 2 the engine runs Plan 3 loadouts: a Plan 3 one as it is, a Warrior or Ranger one as its weapon.
-  const loadout = plan3LoadoutOf(s.loadout);
+  const { loadout, slots, plan3 } = runLoadout(s.loadout);
   const stats = { ...STARTER_STATS };
   const a: AdventurerState = {
     id, team: 'adventurer', x: finite(s.x) ? s.x : 0, z: finite(s.z) ? s.z : 0, y: finite(s.y) ? s.y : 0, facing: finite(s.facing) ? s.facing : 0,
     stats, hp: finite(s.hp) ? Math.min(stats.maxHp, Math.max(1, s.hp)) : stats.maxHp, alive: true, diedAt: -Infinity,
-    act: '', actUntil: -Infinity, loadout, slots: plan3Slots(loadout), momentum: 0,
+    act: '', actUntil: -Infinity, job: loadout.job, loadout, slots, plan3, momentum: 0,
     lastDealtAt: -Infinity, lastCombatAt: -Infinity, lastHurtAt: -Infinity,
     readyAt: {}, gcdUntil: -Infinity, swapReadyAt: -Infinity, targetId: null, nextAutoAt: -Infinity,
     shield: 0, shieldUntil: -Infinity, sprintUntil: -Infinity, parryUntil: -Infinity, iframeUntil: -Infinity,
-    dodgeCharges: DODGE_CHARGES, dodgeRefillAt: null, lastDodgeAt: -Infinity, lastDodgeFrom: null, charge: null,
-    autoWaiting: false,
+    dodgeCharges: JOBS[loadout.job].dodgeCharges, dodgeRefillAt: null, lastDodgeAt: -Infinity, lastDodgeFrom: null, charge: null,
+    cast: null, buffs: {}, afflictions: new Set(), autoWaiting: false,
   };
   void nowS;
   return a;
@@ -112,6 +150,16 @@ export function newAdventurer(id: number, s: { x: number; z: number; y: number; 
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) => (finite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
 const ALL_ABILITIES = Object.keys(ABILITIES) as AbilityId[];
+/** The largest shield any effect gives, and the longest. */
+let shieldMax: { amount: number; s: number } | null = null;
+function maxShield(): { amount: number; s: number } {
+  if (!shieldMax) {
+    let amount = BEDROCK_SHIELD, s = BEDROCK_S;
+    for (const ab of Object.values(ABILITIES)) for (const e of ab.effects) if (e.k === 'shield') { amount = Math.max(amount, e.amount); s = Math.max(s, e.s); }
+    shieldMax = { amount, s };
+  }
+  return shieldMax;
+}
 
 /** The relog snapshot: seconds remaining on each cooldown still running, the GCD, dodge charges, Momentum. */
 export function carryOfState(a: AdventurerState, nowS: number): Carry {
@@ -127,7 +175,7 @@ export function carryOfState(a: AdventurerState, nowS: number): Carry {
     cooldowns, gcd: Math.max(0, a.gcdUntil - nowS), dodgeCharges: a.dodgeCharges,
     dodgeRefillIn: a.dodgeRefillAt === null ? 0 : Math.max(0, a.dodgeRefillAt - nowS), momentum: a.momentum,
     sinceCombat: since(a.lastCombatAt), sinceHurt: since(a.lastHurtAt), sinceDealt: since(a.lastDealtAt),
-    swapCd: Math.max(0, a.swapReadyAt - nowS), shield, shieldLeft: shield > 0 ? a.shieldUntil - nowS : 0,
+    swapCd: a.plan3 ? Math.max(0, a.swapReadyAt - nowS) : 0, shield, shieldLeft: shield > 0 ? a.shieldUntil - nowS : 0,
     sprintLeft: Math.max(0, a.sprintUntil - nowS),
   };
 }
@@ -142,17 +190,19 @@ export function applyCarry(a: AdventurerState, c: Carry, nowS: number): void {
   }
   const gcd = clamp(c.gcd, 0, GCD_S, 0);
   if (gcd > 0) a.gcdUntil = nowS + gcd;
-  a.dodgeCharges = Math.floor(clamp(c.dodgeCharges, 0, DODGE_CHARGES, DODGE_CHARGES));
-  a.dodgeRefillAt = a.dodgeCharges < DODGE_CHARGES ? nowS + clamp(c.dodgeRefillIn, 0, DODGE_REFILL_S, DODGE_REFILL_S) : null;
+  const max = dodgeMax(a);
+  a.dodgeCharges = Math.floor(clamp(c.dodgeCharges, 0, max, max));
+  a.dodgeRefillAt = a.dodgeCharges < max ? nowS + clamp(c.dodgeRefillIn, 0, DODGE_REFILL_S, DODGE_REFILL_S) : null;
   a.momentum = clamp(c.momentum, 0, MOMENTUM_MAX, 0);
   // the optional extras: absent = fresh; present but nonsense = the most restrictive value
   const since = (v: unknown) => nowS - clamp(v, 0, SINCE_CAP, 0);
   if (c.sinceCombat !== undefined) a.lastCombatAt = since(c.sinceCombat);
   if (c.sinceHurt !== undefined) a.lastHurtAt = since(c.sinceHurt);
   if (c.sinceDealt !== undefined) a.lastDealtAt = since(c.sinceDealt);
-  if (c.swapCd !== undefined) a.swapReadyAt = nowS + clamp(c.swapCd, 0, SWAP_COOLDOWN_S, SWAP_COOLDOWN_S);
+  if (c.swapCd !== undefined && a.plan3) a.swapReadyAt = nowS + clamp(c.swapCd, 0, SWAP_COOLDOWN_S, SWAP_COOLDOWN_S);
   if (c.shield !== undefined && c.shieldLeft !== undefined) {
-    const amount = clamp(c.shield, 0, BULWARK_ABSORB, 0), left = clamp(c.shieldLeft, 0, BULWARK_S, 0);
+    const m = maxShield();
+    const amount = clamp(c.shield, 0, m.amount, 0), left = clamp(c.shieldLeft, 0, m.s, 0);
     if (amount > 0 && left > 0) { a.shield = amount; a.shieldUntil = nowS + left; }
   }
   if (c.sprintLeft !== undefined) {
@@ -166,7 +216,7 @@ const SINCE_CAP = 1e6;
 /** revive: full hp at `at`, Momentum 0, cooldowns, charges and timers reset, out of combat. */
 export function resetAdventurer(w: CombatWorld, a: AdventurerState, at: { x: number; z: number; y: number }, nowS: number): void {
   removeFromThreat(w, a.id);
-  Object.assign(a, newAdventurer(a.id, { ...at, facing: a.facing, hp: a.stats.maxHp, loadout: a.loadout }, nowS));
+  Object.assign(a, newAdventurer(a.id, { ...at, facing: a.facing, hp: a.stats.maxHp, loadout: a.plan3 ?? a.loadout }, nowS));
 }
 
 /** Drops id from every threat table and enemy target; its Burning keeps burning, but credits no one now. */
@@ -191,6 +241,11 @@ function cancelCharge(a: AdventurerState): void {
   a.charge = null;
 }
 
+/** A job or picks change: job, loadout and slots; it leaves a Plan 3 loadout for good. */
+function setLoadout(a: AdventurerState, l: Loadout): void {
+  a.job = l.job; a.loadout = l; a.slots = slotsFor(l); a.plan3 = null;
+}
+
 // ───────── enemies: spawning and hits ─────────
 /** The enemy fresh at its camp spot: full hp, no threat, marks, stagger, wind-up or cooldowns (no fx). */
 export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
@@ -198,7 +253,7 @@ export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
   e.x = c.x; e.z = c.z; e.y = w.zone.ground(c.x, c.z) ?? 0; e.facing = c.facing;
   e.maxHp = e.data.hp; e.hp = e.maxHp; e.alive = true; e.act = ''; e.actUntil = -Infinity; e.targetId = null; e.surging = false;
   e.threat.clear(); e.stagger = { value: 0, max: e.data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity };
-  e.marks = {}; e.burning = null; e.windup = null; e.attackReadyAt = {};
+  e.marks = {}; e.burning = null; e.windup = null; e.attackReadyAt = {}; e.debuffs = {};
   e.respawnAt = Infinity; e.lastDamagedAt = -Infinity;
 }
 
@@ -262,25 +317,27 @@ export function killEnemy(w: CombatWorld, e: EnemyState, nowS: number): void {
   cancelWindup(w, e);
   e.alive = false; e.hp = 0; e.act = 'dead'; e.actUntil = -Infinity; e.targetId = null;
   e.diedAt = nowS; e.respawnAt = nowS + e.data.respawn;
-  e.threat.clear(); e.marks = {}; e.burning = null;
+  e.threat.clear(); e.marks = {}; e.burning = null; e.debuffs = {};
   e.stagger = { value: 0, max: e.stagger.max, brokenUntil: -Infinity, lastGainAt: -Infinity };
   for (const a of w.adventurers.values()) if (a.targetId === e.id) a.targetId = null;
   fx(w, { t: 'death', dst: e.id });
   w.out.kills.push({ enemy: e.id, kind: e.kind, credit });
 }
 
-interface Strike { coef: number; by: AbilityId | 'auto'; momentum?: number; mark?: MarkId; stagger?: number; interrupts?: boolean }
+export interface Strike { coef: number; by: AbilityId | 'auto'; momentum?: number; mark?: MarkId; stagger?: number; interrupts?: boolean }
 
 /**
- * An adventurer's hit: hitDamage(coef) (×BREAK_DAMAGE_MULT on a broken target); a finisher's mark
- * detonates every other live mark (+hitDamage(COMBO_COEF) and COMBO_STAGGER each, one `hit` with
- * `combo`), then sets its own; then Momentum, stagger and the interrupt.
+ * An adventurer's hit: hitDamage(coef) (×BREAK_DAMAGE_MULT on a broken target, × outgoingMult); a
+ * finisher's mark detonates every other live mark (+hitDamage(COMBO_COEF) and COMBO_STAGGER each, one
+ * `hit` with `combo`), then sets its own; then Momentum, stagger and the interrupt. Returns the
+ * plain hit's amount (without detonations), 0 if nothing landed.
  */
-function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): void {
-  if (!e.alive || enemyInvulnerable(e)) return;
+export function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): number {
+  if (!e.alive || enemyInvulnerable(e)) return 0;
   const power = a.stats.power, def = e.data.defence;
-  const mult = isBroken(e.stagger, nowS) ? BREAK_DAMAGE_MULT : 1;
+  const mult = (isBroken(e.stagger, nowS) ? BREAK_DAMAGE_MULT : 1) * outgoingMult(w, a, e, s, nowS);
   let amount = hitDamage(s.coef, power, def, mult);
+  const plain = amount;
   let stagger = s.stagger ?? 0;
   let combo: MarkId[] | undefined;
   if (s.mark) {
@@ -297,10 +354,11 @@ function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, no
   }
   if (s.momentum) a.momentum = gainMomentum(a.momentum, s.momentum);
   damageEnemy(w, a.id, e, amount, s.by, nowS, combo);
-  if (!e.alive) return;
+  if (!e.alive) return plain;
   if (s.mark) fx(w, { t: 'mark', dst: e.id, mark: s.mark, on: true });
   applyStagger(w, e, stagger, nowS);
   if (s.interrupts) interruptWindup(w, e, nowS);
+  return plain;
 }
 
 // ───────── hurting adventurers (the enemy AI calls these) ─────────
@@ -324,12 +382,15 @@ export function hurtAdventurer(
   a.lastCombatAt = nowS;
   fx(w, { t: 'hit', src, dst: a.id, amount: amount - absorbed, absorbed, by });
   if (a.hp <= 0) killAdventurer(w, a, nowS);
+  else onDamageTaken(w, a, taken, absorbed, src, nowS);
   return { taken, absorbed };
 }
 
-/** Death from combat damage: `died`, `death` fx, act 'dead', dropped from every threat table. */
+/** Death from combat damage: a cast cancelled, `died`, `death` fx, act 'dead', buffs gone, dropped from every threat table. */
 export function killAdventurer(w: CombatWorld, a: AdventurerState, nowS: number): void {
   if (!a.alive) return;
+  breakCast(w, a, 'cancel', nowS);
+  a.buffs = {};
   a.alive = false; a.hp = 0; a.act = 'dead'; a.actUntil = -Infinity; a.diedAt = nowS;
   a.targetId = null; a.shield = 0; a.parryUntil = -Infinity; a.sprintUntil = -Infinity;
   cancelCharge(a);
@@ -349,6 +410,7 @@ export function knockAdventurer(w: CombatWorld, a: AdventurerState, d: Displacem
   // Still airborne at DISPLACE_MAX_S, or an invalid start: no displacement; ordinary falling goes on.
   if (!result.grounded) return null;
   cancelCharge(a);
+  breakCast(w, a, 'interrupt', nowS);
   a.x = result.x; a.z = result.z; a.y = result.y;
   a.act = 'knock';
   a.actUntil = nowS + result.seconds + KNOCK_RECOVER_S;
@@ -369,15 +431,6 @@ export function healAdventurer(w: CombatWorld, a: AdventurerState, amount: numbe
 }
 
 // ───────── intents ─────────
-/** The current target if it is a live, hittable enemy within range (+RANGE_FUZZ) and in sight. */
-function targetFor(w: CombatWorld, a: AdventurerState, range: number): EnemyState | Refusal {
-  const e = a.targetId === null ? undefined : w.enemies.get(a.targetId);
-  if (!e || !e.alive || enemyInvulnerable(e)) return 'no-target';
-  if (reach(a, e) > range + RANGE_FUZZ) return 'range';
-  if (!lineOfSight(w.zone.sight, a.x, a.z, e.x, e.z)) return 'sight';
-  return e;
-}
-
 export function targetIntent(w: CombatWorld, a: AdventurerState, id: unknown, nowS: number): Refusal | null {
   if (!a.alive) return 'dead';
   if (id === null) { a.targetId = null; return null; }
@@ -391,86 +444,114 @@ export function targetIntent(w: CombatWorld, a: AdventurerState, id: unknown, no
   return null;
 }
 
-export function abilityIntent(w: CombatWorld, a: AdventurerState, slot: unknown, phase: unknown, nowS: number): Refusal | null {
+/**
+ * An ability press or release on slot `slot` of the current five: dead, busy (displaced, casting, or
+ * charging on a press), invalid, cooldown (GCD or the ability's own), Momentum, then the aim
+ * (no-target, range, sight, no-ally). An instant ability lands at once; a cast starts (casting.ts);
+ * Charged Shot charges until released.
+ */
+export function abilityIntent(w: CombatWorld, a: AdventurerState, slot: unknown, phase: unknown, ally: unknown, nowS: number): Refusal | null {
   if (!a.alive) return 'dead';
-  if (isDisplaced(a, nowS) || (a.charge && phase === 'press')) return 'busy';
+  if (isDisplaced(a, nowS) || ((a.charge || a.cast) && phase === 'press')) return 'busy';
   if (!Number.isInteger(slot) || (slot as number) < 0 || (slot as number) >= a.slots.length || (phase !== 'press' && phase !== 'release')) return 'invalid';
   const id = a.slots[slot as number];
-  if (phase === 'release') return id === 'charged_shot' && a.charge ? releaseCharge(w, a, nowS) : 'invalid';
   const ab = ABILITIES[id];
+  const charges = ab.effects.some((e) => e.k === 'charge');
+  if (phase === 'release') return charges && a.charge ? releaseCharge(w, a, id, nowS) : 'invalid';
   if (nowS < a.gcdUntil - TIME_EPS || nowS < (a.readyAt[id] ?? -Infinity) - TIME_EPS) return 'cooldown';
   if (ab.cost !== undefined && a.momentum < ab.cost) return 'momentum';
-  let target: EnemyState | null = null;
-  if (ab.needsTarget) {
-    const t = targetFor(w, a, ab.range);
-    if (typeof t === 'string') return t;
-    target = t;
-  }
+  const subject = resolveAim(w, a, ab, a.targetId, ally);
+  if (typeof subject === 'string') return subject;
   a.gcdUntil = nowS + GCD_S;
-  if (id === 'charged_shot') { a.charge = { startedAt: nowS }; return null; }
+  if (charges) { a.charge = { startedAt: nowS }; return null; }
+  if (ab.cast) { startCast(w, a, slot as number, id, subject, nowS); return null; }
   a.readyAt[id] = nowS + ab.cooldown;
-  useAbility(w, a, id, target, nowS);
+  const dst = subject.enemy?.id ?? (subject.ally !== a ? subject.ally?.id : undefined);
+  fx(w, dst === undefined ? { t: 'use', src: a.id, ability: id } : { t: 'use', src: a.id, ability: id, dst });
+  if (ab.cost !== undefined) a.momentum = gainMomentum(a.momentum, -ab.cost);
+  applyEffects(w, a, id, subject, nowS);
   return null;
-}
-
-function useAbility(w: CombatWorld, a: AdventurerState, id: AbilityId, target: EnemyState | null, nowS: number): void {
-  const ab = ABILITIES[id];
-  fx(w, target ? { t: 'use', src: a.id, ability: id, dst: target.id } : { t: 'use', src: a.id, ability: id });
-  switch (id) {
-    case 'slash': case 'snap_shot': case 'sunder': case 'pitch_arrow':
-      if (ab.cost !== undefined) a.momentum = gainMomentum(a.momentum, -FINISHER_COST);
-      strike(w, a, target!, { coef: damageCoef(ab), by: id, momentum: ab.momentum, mark: ab.mark, stagger: ab.stagger, interrupts: ab.interrupts }, nowS);
-      return;
-    case 'parry': a.parryUntil = nowS + PARRY_WINDOW_S; return;
-    case 'mend': healAdventurer(w, a, MEND_HEAL, a.id, nowS); return;
-    case 'taunt': target!.threat.taunt(a.id, nowS); return;
-    case 'bulwark': a.shield = BULWARK_ABSORB; a.shieldUntil = nowS + BULWARK_S; return;
-    case 'sprint': a.sprintUntil = nowS + SPRINT_S; return;
-    case 'charged_shot': return; // pressed and released through releaseCharge
-  }
 }
 
 /** Fires a Charged Shot held since charge.startedAt; on a lost target the charge is dropped with no cooldown. */
-function releaseCharge(w: CombatWorld, a: AdventurerState, nowS: number): Refusal | null {
+function releaseCharge(w: CombatWorld, a: AdventurerState, id: AbilityId, nowS: number): Refusal | null {
   const held = nowS - a.charge!.startedAt;
   cancelCharge(a);
-  const t = targetFor(w, a, ABILITIES.charged_shot.range);
+  const ab = ABILITIES[id];
+  const t = targetFor(w, a, a.targetId, ab.range);
   if (typeof t === 'string') return t;
   const cs = chargedShot(held);
-  a.readyAt.charged_shot = nowS + ABILITIES.charged_shot.cooldown;
-  fx(w, { t: 'use', src: a.id, ability: 'charged_shot', dst: t.id, frac: cs.frac });
-  strike(w, a, t, { coef: cs.coef, by: 'charged_shot', momentum: cs.momentum, stagger: cs.stagger, interrupts: cs.interrupts }, nowS);
+  a.readyAt[id] = nowS + ab.cooldown;
+  fx(w, { t: 'use', src: a.id, ability: id, dst: t.id, frac: cs.frac });
+  strike(w, a, t, { coef: cs.coef, by: id, momentum: cs.momentum, stagger: cs.stagger, interrupts: cs.interrupts }, nowS);
   return null;
 }
 
-/** Blade ⇄ Bow, only out of combat (weapons belong to jobs). SWAP_COOLDOWN_S between swaps. */
+/**
+ * A job change: dead; busy (displaced, casting, charging); invalid (not a starting job, or picks not
+ * two distinct ids of its pool); in-combat; not-here (zone.jobSwitch false or absent). On accept: the
+ * new loadout and slots, Momentum 0, cooldowns kept per id, dodge charges min(charges, the job's)
+ * refilling toward its maximum, the target kept; no fx.
+ */
+export function jobIntent(w: CombatWorld, a: AdventurerState, job: unknown, picks: unknown, nowS: number): Refusal | null {
+  if (!a.alive) return 'dead';
+  if (isDisplaced(a, nowS) || a.cast || a.charge) return 'busy';
+  const l = isJobId(job) ? parseLoadout({ job, picks }) : null;
+  if (!l) return 'invalid';
+  if (adventurerInCombat(w, a, nowS)) return 'in-combat';
+  if (!w.zone.jobSwitch?.(a.x, a.z)) return 'not-here';
+  refillDodges(a, nowS);
+  setLoadout(a, l);
+  a.momentum = 0;
+  const max = dodgeMax(a);
+  a.dodgeCharges = Math.min(a.dodgeCharges, max);
+  if (a.dodgeCharges >= max) a.dodgeRefillAt = null;
+  else a.dodgeRefillAt ??= nowS + DODGE_REFILL_S;
+  return null;
+}
+
+/**
+ * New picks for the current job, anywhere out of combat: dead, busy, invalid (not two distinct ids of
+ * the job's pool), in-combat. Deprecated until Tasks 6 and 7: `{ free }` on a Plan 3 loadout runs
+ * Plan 3's rules (any two distinct Plan 3 free picks); on a job loadout it is invalid.
+ */
+export function loadoutIntent(w: CombatWorld, a: AdventurerState, i: Extract<Intent, { t: 'loadout' }>, nowS: number): Refusal | null {
+  if (!a.alive) return 'dead';
+  if (isDisplaced(a, nowS) || a.charge || a.cast) return 'busy';
+  if ('free' in i) {
+    const p3 = a.plan3 ? parsePlan3Loadout({ weapon: a.plan3.weapon, free: i.free }) : null;
+    if (!p3) return 'invalid';
+    if (adventurerInCombat(w, a, nowS)) return 'in-combat';
+    a.plan3 = p3; a.loadout = legacyLoadout(p3)!; a.slots = plan3Slots(p3);
+    return null;
+  }
+  const l = parseLoadout({ job: a.job, picks: (i as { picks?: unknown }).picks });
+  if (!l) return 'invalid';
+  if (adventurerInCombat(w, a, nowS)) return 'in-combat';
+  setLoadout(a, l);
+  return null;
+}
+
+/** @deprecated Plan 3 loadouts only (until Tasks 6 and 7): Blade ⇄ Bow, out of combat, SWAP_COOLDOWN_S apart; Momentum kept. */
 export function swapIntent(w: CombatWorld, a: AdventurerState, nowS: number): Refusal | null {
   if (!a.alive) return 'dead';
-  if (isDisplaced(a, nowS)) return 'busy';
+  if (!a.plan3) return 'invalid';
+  if (isDisplaced(a, nowS) || a.cast) return 'busy';
   if (adventurerInCombat(w, a, nowS)) return 'in-combat';
   if (nowS < a.swapReadyAt - TIME_EPS) return 'cooldown';
   cancelCharge(a);
-  a.loadout = { weapon: a.loadout.weapon === 'blade' ? 'bow' : 'blade', free: [a.loadout.free[0], a.loadout.free[1]] };
-  a.slots = plan3Slots(a.loadout);
+  const p3: Plan3Loadout = { weapon: a.plan3.weapon === 'blade' ? 'bow' : 'blade', free: [a.plan3.free[0], a.plan3.free[1]] };
+  a.plan3 = p3; a.loadout = legacyLoadout(p3)!; a.job = a.loadout.job; a.slots = plan3Slots(p3);
   a.swapReadyAt = nowS + SWAP_COOLDOWN_S;
   return null;
 }
 
-export function loadoutIntent(w: CombatWorld, a: AdventurerState, free: unknown, nowS: number): Refusal | null {
-  if (!a.alive) return 'dead';
-  if (isDisplaced(a, nowS) || a.charge) return 'busy';
-  const l = parsePlan3Loadout({ weapon: a.loadout.weapon, free });
-  if (!l) return 'invalid';
-  if (adventurerInCombat(w, a, nowS)) return 'in-combat';
-  a.loadout = l;
-  a.slots = plan3Slots(l);
-  return null;
-}
-
-function refillDodges(a: AdventurerState, nowS: number): void {
+/** Charges that came due refill, one at a time, up to the job's maximum. */
+export function refillDodges(a: AdventurerState, nowS: number): void {
+  const max = dodgeMax(a);
   while (a.dodgeRefillAt !== null && nowS >= a.dodgeRefillAt - TIME_EPS) {
-    a.dodgeCharges = Math.min(DODGE_CHARGES, a.dodgeCharges + 1);
-    a.dodgeRefillAt = a.dodgeCharges < DODGE_CHARGES ? a.dodgeRefillAt + DODGE_REFILL_S : null;
+    a.dodgeCharges = Math.min(max, a.dodgeCharges + 1);
+    a.dodgeRefillAt = a.dodgeCharges < max ? a.dodgeRefillAt + DODGE_REFILL_S : null;
   }
 }
 
@@ -491,6 +572,7 @@ export function dodgeIntent(w: CombatWorld, a: AdventurerState, i: Extract<Inten
   // Still airborne at DISPLACE_MAX_S (a bottomless drop) or no surface at the start: refused, nothing spent.
   if (!result.grounded) return 'invalid';
   cancelCharge(a);
+  breakCast(w, a, 'dodge', nowS);
   a.x = result.x; a.z = result.z; a.y = result.y;
   a.act = 'dodge';
   a.actUntil = nowS + result.seconds;
@@ -505,8 +587,10 @@ export function dodgeIntent(w: CombatWorld, a: AdventurerState, i: Extract<Inten
 }
 
 // ───────── the tick ─────────
-/** Timers, Momentum decay, regen, the Charged Shot's self-release, target drop, then the auto. */
+/** Timers, buffs, Momentum decay, regen, the Charged Shot's self-release, a cast's completion, target drop, then the auto. */
 export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number, dt: number): void {
+  if (!a.alive) return;
+  tickBuffs(w, a, nowS);
   if (!a.alive) return;
   if ((a.act === 'dodge' || a.act === 'knock') && nowS >= a.actUntil - TIME_EPS) a.act = '';
   refillDodges(a, nowS);
@@ -516,7 +600,9 @@ export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number,
     const s = Math.min(dt, nowS - a.lastHurtAt - HP_REGEN_DELAY_S);
     if (s > 0) a.hp = Math.min(a.stats.maxHp, a.hp + HP_REGEN_PER_S * s);
   }
-  if (a.charge && nowS - a.charge.startedAt >= CHARGE_MAX_S - TIME_EPS) releaseCharge(w, a, nowS);
+  if (a.charge && nowS - a.charge.startedAt >= CHARGE_MAX_S - TIME_EPS) releaseCharge(w, a, 'charged_shot', nowS);
+  tickCast(w, a, nowS);
+  if (!a.alive) return;
 
   // The swing schedule: on cadence (nextAutoAt + every, whatever the tick jitter) while swinging; a
   // tick that finds a swing due but cannot swing (no target, out of range or sight, busy) marks the
@@ -527,8 +613,8 @@ export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number,
   const e = w.enemies.get(a.targetId);
   if (!e || !e.alive || reach(a, e) > TARGET_DROP_RANGE) { a.targetId = null; wait(); return; }
   if (!due) return;
-  const weapon = WEAPONS[a.loadout.weapon];
-  if (a.charge || isDisplaced(a, nowS) || enemyInvulnerable(e) || reach(a, e) > weapon.autoRange || !lineOfSight(w.zone.sight, a.x, a.z, e.x, e.z)) { wait(); return; }
+  const weapon = WEAPONS[JOBS[a.job].weapon];
+  if (a.charge || a.cast || isDisplaced(a, nowS) || enemyInvulnerable(e) || reach(a, e) > weapon.autoRange || !lineOfSight(w.zone.sight, a.x, a.z, e.x, e.z)) { wait(); return; }
   let next = a.autoWaiting ? nowS + weapon.autoEvery : a.nextAutoAt + weapon.autoEvery;
   if (next <= nowS + TIME_EPS) next = nowS + weapon.autoEvery; // a long stall: never two swings at once
   a.nextAutoAt = next;
@@ -555,7 +641,8 @@ export function tickEnemyStatus(w: CombatWorld, e: EnemyState, nowS: number, dt:
     damageEnemy(w, b.src, e, hitDamage(BURNING_COEF_PER_S, b.power, e.data.defence, mult), 'burning', nowS, undefined, !b.orphan);
   }
   if (!e.alive) return;
-  for (const m of ['soaked', 'burning', 'marked'] as const) {
+  tickDebuffs(w, e, nowS);
+  for (const m of Object.keys(MARK_BITS) as MarkId[]) {
     const until = e.marks[m];
     if (until !== undefined && until <= nowS + TIME_EPS) {
       delete e.marks[m];

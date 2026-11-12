@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCombat, worldOf, type CampSpawn, type Combat, type CombatZone, type Intent, type TickOut } from './engine';
 import { hurtAdventurer, isInCombat, isInvulnerable, knockAdventurer } from './adventurer';
-// Until Task 2 the engine runs Plan 3 loadouts: these tests use the deprecated Plan 3 shapes.
-import { PLAN3_DEFAULT_LOADOUT as DEFAULT_LOADOUT, plan3Slots as slotsFor, type Plan3Loadout as Loadout } from './abilities';
+import { DEFAULT_LOADOUT, type Loadout } from './abilities';
 import { hitDamage } from './stats';
 import type { FxEvent } from './fx';
 import type { EnemyKindId } from './enemies';
@@ -16,7 +15,7 @@ function zone(camps: CampSpawn[], walls: Wall[] = []): CombatZone {
   return { surface, ground: surface, sight: (x, z) => !inWall(x, z), camps };
 }
 const camp = (kind: EnemyKindId, x = 0, z = 0): CampSpawn => ({ kind, x, z, facing: 0 });
-const BOW: Loadout = { weapon: 'bow', free: ['mend', 'bulwark'] };
+const BOW: Loadout = { job: 'ranger', picks: ['field_dressing', 'pinning_shot'] };
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
 class Rig {
@@ -187,7 +186,7 @@ describe('abilities', () => {
     expect(r.release(a, 0)).toBe('invalid'); // not a hold ability
     expect(r.i(a, { t: 'nonsense' } as unknown as Intent)).toBe('invalid');
     expect(r.press(a, 0)).toBe('no-target');
-    expect(r.c.intent(12345, { t: 'swap' }, 0)).toBe('invalid'); // unknown adventurer
+    expect(r.c.intent(12345, { t: 'job', job: 'ninja', picks: ['mist_form', 'ashcloud'] }, 0)).toBe('invalid'); // unknown adventurer
   });
 
   it('Sunder: refused below 50 Momentum; at 60 it deals 35, leaves 10 and marks', () => {
@@ -234,7 +233,7 @@ describe('abilities', () => {
 
   it('Sprint: speedScale 1.4 for SPRINT_S + SPEED_GRACE_S (4.5 s)', () => {
     const r = new Rig([]);
-    const a = r.add(0, 0, { weapon: 'blade', free: ['sprint', 'mend'] });
+    const a = r.add(0, 0, { job: 'ranger', picks: ['sprint', 'field_dressing'] });
     expect(r.c.speedScale(a, 0)).toBe(1);
     expect(r.press(a, 3)).toBeNull();
     expect(r.c.speedScale(a, 0)).toBe(1.4);
@@ -245,7 +244,7 @@ describe('abilities', () => {
   it('Taunt makes the taunter the forced target with top × 1.1 + 10 threat', () => {
     const r = new Rig([camp('thornling')]);
     const e = r.enemy('thornling');
-    const a = r.add(0, -2.5), b = r.add(0, -10, { weapon: 'blade', free: ['taunt', 'mend'] });
+    const a = r.add(0, -2.5), b = r.add(0, -10, { job: 'paladin', picks: ['taunt', 'kindle'] });
     r.i(a, { t: 'target', id: e });
     r.at(1); // one auto: threat 9
     r.i(b, { t: 'target', id: e });
@@ -376,59 +375,7 @@ describe('Charged Shot', () => {
   });
 });
 
-// ───────── weapon swap: out of combat only (owner ruling) ─────────
-describe('swap', () => {
-  it('is refused in combat', () => {
-    const r = new Rig([camp('thornling')]);
-    const e = r.enemy('thornling'), a = r.add(0, -2.5);
-    r.i(a, { t: 'target', id: e });
-    r.tick();
-    expect(r.c.self(a)!.inCombat).toBe(true);
-    expect(r.i(a, { t: 'swap' })).toBe('in-combat');
-    expect(r.c.self(a)!.weapon).toBe('blade');
-  });
-
-  it('out of combat: changes slots, keeps cooldowns per ability and Momentum; 2 s anti-spam cooldown', () => {
-    const r = new Rig([camp('dummy')]);
-    const d = r.enemy('dummy'), a = r.add(0, -2.5);
-    r.i(a, { t: 'target', id: d });
-    r.at(3.6 + 1 / 15); // four autos of 10 kill the dummy
-    expect(r.c.self(a)!.momentum).toBe(40);
-    expect(r.press(a, 2)).toBeNull(); // Parry (cd 8) at 3.667
-    r.at(8.6 - 1 / 15);
-    expect(r.i(a, { t: 'swap' })).toBe('in-combat');
-    r.at(8.6); // COMBAT_TIMEOUT_S after the last hit
-    expect(r.i(a, { t: 'swap' })).toBeNull();
-    expect(r.c.self(a)!.inCombat).toBe(false);
-    const s = r.c.self(a)!;
-    expect(s.weapon).toBe('bow');
-    expect(s.slots).toEqual(['snap_shot', 'pitch_arrow', 'charged_shot', 'mend', 'bulwark']);
-    expect(s.momentum).toBe(40);
-    expect(s.swapCd).toBe(2);
-    expect(s.swapLock).toBe(0);
-    expect(r.c.loadout(a)).toEqual(BOW);
-    r.at(10.6 - 1 / 15);
-    expect(r.i(a, { t: 'swap' })).toBe('cooldown');
-    r.at(10.6);
-    expect(r.i(a, { t: 'swap' })).toBeNull();
-    expect(r.c.self(a)!.slots).toEqual(slotsFor(DEFAULT_LOADOUT));
-    expect(r.c.self(a)!.cd[2]).toBeCloseTo(3.667 + 8 - r.now, 2); // Parry's cooldown was kept
-  });
-
-  it('cancels a charge (out of combat), with no cooldown; refused while dodging', () => {
-    const r = new Rig([camp('dummy')]);
-    const d = r.enemy('dummy'), a = r.add(0, -10, BOW);
-    r.i(a, { t: 'target', id: d });
-    expect(r.press(a, 2)).toBeNull();
-    expect(r.i(a, { t: 'swap' })).toBeNull();
-    expect(r.c.self(a)!.charge).toBeNull();
-    expect(r.c.get(a)!.act).toBe('');
-    r.at(3);
-    expect(r.hits(a)).toEqual([]); // a Blade at 9.5 m does not reach
-    expect(r.i(a, dodge(1, 0, { x: 0, z: -10, y: 0 }))).toBeNull();
-    expect(r.i(a, { t: 'swap' })).toBe('busy');
-  });
-});
+// (Plan 3's weapon swap is gone: jobs change in towns, jobsEngine.test.ts.)
 
 // ───────── dodge ─────────
 describe('dodge', () => {
@@ -542,8 +489,8 @@ describe('death', () => {
     expect([v.alive, v.act, v.hp, v.targetId]).toEqual([false, 'dead', 0, null]);
     expect(w.enemies.get(e)!.threat.has(a)).toBe(false);
     for (const i of [
-      { t: 'target', id: e }, { t: 'ability', slot: 0, phase: 'press' }, { t: 'swap' },
-      dodge(1, 0, { x: 0, z: -2.5, y: 0 }), { t: 'loadout', free: ['sprint', 'taunt'] },
+      { t: 'target', id: e }, { t: 'ability', slot: 0, phase: 'press' }, { t: 'job', job: 'ninja', picks: ['mist_form', 'ashcloud'] },
+      dodge(1, 0, { x: 0, z: -2.5, y: 0 }), { t: 'loadout', picks: ['rallying_roar', 'skullringer'] },
     ] as Intent[]) expect(r.i(a, i)).toBe('dead');
     const before = r.hits(a).length;
     r.at(5);
@@ -614,15 +561,15 @@ describe('in combat and regen', () => {
     const d = r.enemy('dummy'), a = r.add(0, -2.5);
     r.i(a, { t: 'target', id: d });
     r.tick();
-    expect(r.i(a, { t: 'loadout', free: ['sprint', 'taunt'] })).toBe('in-combat');
+    expect(r.i(a, { t: 'loadout', picks: ['skullringer', 'rallying_roar'] })).toBe('in-combat');
     r.at(8.6 - 1 / 15);
-    expect(r.i(a, { t: 'loadout', free: ['sprint', 'taunt'] })).toBe('in-combat');
-    expect(r.i(a, { t: 'loadout', free: ['sprint', 'sprint'] })).toBe('invalid');
-    expect(r.i(a, { t: 'loadout', free: ['slash', 'taunt'] } as unknown as Intent)).toBe('invalid');
+    expect(r.i(a, { t: 'loadout', picks: ['skullringer', 'rallying_roar'] })).toBe('in-combat');
+    expect(r.i(a, { t: 'loadout', picks: ['skullringer', 'skullringer'] })).toBe('invalid');
+    expect(r.i(a, { t: 'loadout', picks: ['slash', 'skullringer'] })).toBe('invalid');
     r.at(8.6);
-    expect(r.i(a, { t: 'loadout', free: ['sprint', 'taunt'] })).toBeNull();
-    expect(r.c.loadout(a)).toEqual({ weapon: 'blade', free: ['sprint', 'taunt'] });
-    expect(r.c.self(a)!.slots).toEqual(['slash', 'sunder', 'parry', 'sprint', 'taunt']);
+    expect(r.i(a, { t: 'loadout', picks: ['skullringer', 'rallying_roar'] })).toBeNull();
+    expect(r.c.jobLoadout(a)).toEqual({ job: 'warrior', picks: ['skullringer', 'rallying_roar'] });
+    expect(r.c.self(a)!.slots).toEqual(['slash', 'sunder', 'parry', 'skullringer', 'rallying_roar']);
   });
 });
 
@@ -669,7 +616,7 @@ describe('kills', () => {
     expect(worldOf(r.c).enemies.get(e)!.threat.has(a)).toBe(false);
     expect(r.c.get(a)).toBeUndefined();
     expect(r.c.self(a)).toBeUndefined();
-    expect(r.i(a, { t: 'swap' })).toBe('invalid');
+    expect(r.i(a, { t: 'job', job: 'ninja', picks: ['mist_form', 'ashcloud'] })).toBe('invalid');
     r.tick();
   });
 });

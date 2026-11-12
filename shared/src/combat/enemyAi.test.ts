@@ -849,7 +849,7 @@ describe('carry keeps combat state across a relog (M1)', () => {
     } }, 10);
     expect(c.self(b)!.inCombat).toBe(true);
     expect(c.self(b)!.swapCd).toBe(SWAP_COOLDOWN_S);
-    expect(c.get(b)!.shield).toBe(25);
+    expect(c.get(b)!.shield).toBe(30); // the largest shield any ability gives (Grave Ward, Bastion Stone)
   });
 });
 

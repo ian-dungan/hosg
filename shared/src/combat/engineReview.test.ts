@@ -3,14 +3,14 @@
 import { describe, expect, it } from 'vitest';
 import { createCombat, worldOf, type CampSpawn, type CombatZone } from './engine';
 import { applyStagger, hurtAdventurer, killEnemy } from './adventurer';
-import { PLAN3_DEFAULT_LOADOUT as DEFAULT_LOADOUT, type Plan3Loadout as Loadout } from './abilities'; // Plan 3 shapes until Task 2
+import { DEFAULT_LOADOUT, type Loadout } from './abilities';
 import { ENEMY_ATTACKS } from './enemies';
 
 const flat = (camps: CampSpawn[]): CombatZone => {
   const s = (x: number, z: number) => (Math.abs(x) <= 60 && Math.abs(z) <= 60 ? 0 : null);
   return { surface: s, ground: s, sight: () => true, camps };
 };
-const BOW: Loadout = { weapon: 'bow', free: ['mend', 'bulwark'] };
+const BOW: Loadout = { job: 'ranger', picks: ['field_dressing', 'pinning_shot'] };
 const enemyId = (c: ReturnType<typeof createCombat>) => [...c.all()].find((v) => v.team === 'enemy')!.id;
 
 describe('engine review round 1', () => {
@@ -35,7 +35,7 @@ describe('engine review round 1', () => {
     t = 12;
     c.tick(t);
     expect(c.self(a)!.inCombat).toBe(false);
-    expect(c.intent(a, { t: 'swap' }, t)).toBeNull();
+    expect(c.intent(a, { t: 'loadout', picks: ['sprint', 'barbed_rain'] }, t)).toBeNull(); // out of combat
   });
 
   it('a dead source gets no kill credit from its Burning', () => {

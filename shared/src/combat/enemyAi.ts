@@ -21,6 +21,7 @@ import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
 import type { AdventurerState, CombatWorld, CombatZone, EnemyState } from './engine';
 import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
+import { takenMult } from './effects';
 import { gainMomentum } from './momentum';
 import { inShape, type Shape } from './shapes';
 import { lineOfSight } from './sight';
@@ -652,7 +653,7 @@ export function resolveHit(
     }
     return;
   }
-  const got = hurtAdventurer(w, a, enemyHit(raw, a.stats.defence), e.id, by, now);
+  const got = hurtAdventurer(w, a, enemyHit(raw, a.stats.defence, takenMult(w, a, e, now)), e.id, by, now);
   // the chase surge ends only when a hit lands on its target (taken or absorbed)
   if (e.surging && a.id === e.targetId && got.taken + got.absorbed > 0) { e.surging = false; aiOf(e, now).chanceAt = now; }
   if (knock && a.alive) knockAdventurer(w, a, knockDisplacement({ x: e.x, z: e.z }, a, knock, lineDir), now);

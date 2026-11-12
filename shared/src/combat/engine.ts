@@ -2,7 +2,10 @@
 // advances the fight one tick at a time. Server-authoritative: the client only ever sends intents.
 // Pure and deterministic: the same seed, poses, intents and tick times give the same TickOut stream.
 import type { Surface } from '../body';
-import type { AbilityId, Loadout, Plan3Loadout, WeaponId } from './abilities';
+import type { AbilityId, BuffId, DebuffId, Loadout, Plan3Loadout, WeaponId } from './abilities';
+import type { JobId } from './jobs';
+import type { BuffState } from './effects';
+import type { CastState } from './casting';
 import type { EnemyAttackId, EnemyKindData, EnemyKindId } from './enemies';
 import { ENEMY_KINDS } from './enemies';
 import type { FxEvent } from './fx';
@@ -15,15 +18,24 @@ import { ThreatTable } from './threat';
 import { stepEnemies } from './enemyAi';
 import type { Displacement, DisplaceResult } from './displace';
 import {
-  abilityIntent, applyCarry, carryOfState, currentAct, dodgeIntent, fallDamageTaken, liveShield, loadoutIntent, newAdventurer, removeFromThreat,
-  resetAdventurer, selfView, spawnEnemyState, speedScaleOf, swapIntent, targetIntent, tickAdventurer, tickEnemyStatus,
+  abilityIntent, applyCarry, buffBits, carryOfState, currentAct, debuffBits, dodgeIntent, fallDamageTaken, jobIntent, liveShield, loadoutIntent,
+  newAdventurer, plan3LoadoutState, removeFromThreat, resetAdventurer, selfView, spawnEnemyState, speedScaleOf, swapIntent, targetIntent,
+  tickAdventurer, tickEnemyStatus,
 } from './adventurer';
+import { castView } from './casting';
 
 // ───────── public API ─────────
 export interface CampSpawn { kind: EnemyKindId; x: number; z: number; facing: number }
-/** surface: where adventurers stand; ground: where enemies walk; sight: true where a line of sight passes. */
-export interface CombatZone { surface: Surface; ground: Surface; sight: (x: number, z: number) => boolean; camps: readonly CampSpawn[] }
-export type Act = '' | 'charge' | 'dodge' | 'knock' | 'stun' | 'dead' | 'return';
+/**
+ * surface: where adventurers stand; ground: where enemies walk; sight: true where a line of sight
+ * passes; jobSwitch: true where a job may change (the grove, sanctuary circles). Absent = never.
+ */
+export interface CombatZone {
+  surface: Surface; ground: Surface; sight: (x: number, z: number) => boolean; camps: readonly CampSpawn[];
+  jobSwitch?: (x: number, z: number) => boolean;
+}
+export type Act = '' | 'charge' | 'cast' | 'dodge' | 'knock' | 'stun' | 'dead' | 'return';
+export type CastView = { ability: AbilityId; total: number; left: number } | null;
 export interface CombatantView {
   id: number; team: 'adventurer' | 'enemy'; kind: 'adventurer' | EnemyKindId;
   x: number; z: number; y: number; facing: number; hp: number; maxHp: number; alive: boolean; shield: number;
@@ -33,25 +45,47 @@ export interface CombatantView {
   surging?: boolean;
   /** Enemies with a stagger bar: seconds until it can gain stagger again (a break, then STAGGER_IMMUNE_S); 0 = it can. */
   staggerImmune?: number;
+  /**
+   * job: adventurers only. buffs: adventurers (BUFF_BITS); debuffs: enemies (DEBUFF_BITS); cast: the
+   * cast in progress. The engine always fills buffs, debuffs and cast (and job for adventurers); they
+   * are optional only until the server and client build views of their own on them (Tasks 6 and 7).
+   */
+  job?: JobId; buffs?: number; debuffs?: number; cast?: CastView;
 }
 /**
- * cd: seconds left per slot; gcd, swapCd, dodgeNextIn: seconds left (0 = ready / full);
- * swapLock: always 0 (weapons swap only out of combat, so there is no lockout); charge: seconds held, or null.
+ * cd: seconds left per slot; gcd, dodgeNextIn: seconds left (0 = ready / full); charge: seconds
+ * held, or null; dodgeMax: the job's dodge charges; cast: the cast in progress.
+ * Deprecated until Tasks 6 and 7: weapon (the job's, or a Plan 3 loadout's weapon), swapCd (a Plan 3
+ * loadout's swap cooldown, else 0) and swapLock (always 0). job, dodgeMax and cast are always filled;
+ * they are optional only until the server's and client's own SelfView literals carry them.
  */
 export interface SelfView {
   momentum: number; weapon: WeaponId; slots: AbilityId[]; cd: number[]; gcd: number; swapCd: number; swapLock: number;
   dodgeCharges: number; dodgeNextIn: number; charge: number | null; inCombat: boolean;
+  job?: JobId; dodgeMax?: number; cast?: CastView;
 }
 export interface TelegraphView { id: number; owner: number; attack: EnemyAttackId; shape: Shape; total: number; left: number }
 export interface DisplaceOut { id: number; kind: 'dodge' | 'knock'; from: { x: number; z: number; y: number }; d: Displacement; result: DisplaceResult }
-export interface TickOut { fx: FxEvent[]; displaced: DisplaceOut[]; died: number[]; kills: { enemy: number; kind: EnemyKindId; credit: number[] }[] }
+/** revived: always filled by the engine (optional only until the server's own TickOut literals carry it). */
+export interface TickOut {
+  fx: FxEvent[]; displaced: DisplaceOut[]; died: number[]; kills: { enemy: number; kind: EnemyKindId; credit: number[] }[];
+  revived?: { id: number; by: number; hp: number }[];
+}
+/**
+ * ally: the adventurer an ally-aimed ability should land on (else the aim rule picks one).
+ * Deprecated until Tasks 6 and 7, for adventurers added with a Plan 3 loadout only: `swap` (Blade ⇄
+ * Bow) and `loadout { free }` (Plan 3's free picks).
+ */
 export type Intent =
   | { t: 'target'; id: number | null }
-  | { t: 'ability'; slot: number; phase: 'press' | 'release' }
-  | { t: 'swap' }
+  | { t: 'ability'; slot: number; phase: 'press' | 'release'; ally?: number }
   | { t: 'dodge'; dx: number; dz: number; from: { x: number; z: number; y: number }; grounded: boolean }
+  | { t: 'loadout'; picks: [AbilityId, AbilityId] }
+  | { t: 'job'; job: JobId; picks: [AbilityId, AbilityId] }
+  | { t: 'swap' }
   | { t: 'loadout'; free: [AbilityId, AbilityId] };
-export type Refusal = 'dead' | 'busy' | 'invalid' | 'cooldown' | 'momentum' | 'no-target' | 'range' | 'sight' | 'charges' | 'air' | 'in-combat';
+export type Refusal = 'dead' | 'busy' | 'invalid' | 'cooldown' | 'momentum' | 'no-target' | 'range' | 'sight' | 'charges' | 'air' | 'in-combat'
+  | 'not-here' | 'no-ally';
 /**
  * What a relog keeps (seconds remaining, so it does not depend on either clock): per-ability
  * cooldowns, the GCD, dodge charges and the time to the next refill, and Momentum. The server takes it
@@ -62,7 +96,8 @@ export interface Carry {
   /**
    * Optional (absent = fresh), seconds: since combat damage dealt or taken (in combat), since any damage
    * taken (regen delay), since damage dealt (Momentum decay), swap cooldown left, shield amount and time
-   * left, sprint left. carryOf always fills them; "since" values are capped at 1e6.
+   * left, sprint left. carryOf always fills them; "since" values are capped at 1e6. A cast is never carried.
+   * swapCd: deprecated, read only for a Plan 3 loadout (ignored otherwise).
    */
   sinceCombat?: number; sinceHurt?: number; sinceDealt?: number; swapCd?: number; shield?: number; shieldLeft?: number; sprintLeft?: number;
 }
@@ -73,7 +108,11 @@ export interface Carry {
  * time, so a stale or rewound stamp can neither bypass a cooldown nor rewind a timer.
  */
 export interface Combat {
-  /** carry: what a relog keeps (see Carry); clamped to the real numbers. Without it everything starts fresh. */
+  /**
+   * carry: what a relog keeps (see Carry); clamped to the real numbers. Without it everything starts fresh.
+   * loadout: a job Loadout; anything else reads as DEFAULT_LOADOUT, except (deprecated, until Tasks
+   * 5–7) a Plan 3 loadout, which runs as its job (Blade → Warrior, Bow → Ranger) with its Plan 3 slots.
+   */
   addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Plan3Loadout | Loadout; carry?: Carry }, nowS: number): number;
   /** The relog snapshot of a present adventurer (take it before removeAdventurer), else undefined. */
   carryOf(id: number): Carry | undefined;
@@ -89,9 +128,17 @@ export interface Combat {
   tick(nowS: number): TickOut;
   get(id: number): CombatantView | undefined; self(id: number): SelfView | undefined;
   all(): Iterable<CombatantView>; telegraphs(): Iterable<TelegraphView>;
-  /** 1.4 while sprinting (+SPEED_GRACE_S), 0.4 from CHARGE_SLOW_GRACE_S into a charge, else 1 (both: the product). */
+  /**
+   * 1.4 while sprinting (+SPEED_GRACE_S), 0.4 from CHARGE_SLOW_GRACE_S into a charge, 0.5 from
+   * CHARGE_SLOW_GRACE_S into a cast until it ends, else 1 (several: the product).
+   */
   speedScale(id: number, nowS: number): number;
-  /** Until Task 2: the Plan 3 loadout the engine runs. */
+  /** The job and picks it runs (a copy). */
+  jobLoadout(id: number): Loadout | undefined;
+  /**
+   * @deprecated Until Task 6 (the server saves it): a Plan 3 loadout as it was added or changed by swap
+   * and `loadout { free }`; for an adventurer on a job loadout, plan3LoadoutOf of it.
+   */
   loadout(id: number): Plan3Loadout | undefined;
 }
 
@@ -100,18 +147,26 @@ export interface AdventurerState {
   id: number; team: 'adventurer';
   x: number; z: number; y: number; facing: number;
   stats: Stats; hp: number; alive: boolean; diedAt: number;
-  /** '' | 'dodge' | 'knock' | 'dead' ('charge' is derived from `charge`); dodge and knock last until actUntil. */
+  /** '' | 'dodge' | 'knock' | 'dead' ('charge' and 'cast' are derived from `charge` and `cast`); dodge and knock last until actUntil. */
   act: Act; actUntil: number;
-  /** Until Task 2 the engine runs Plan 3 loadouts (plan3LoadoutOf). */
-  loadout: Plan3Loadout; slots: AbilityId[];
+  /**
+   * job and loadout.job are the same. slots: the job's bar and picks, except for a Plan 3 loadout
+   * (deprecated, `plan3` set until Tasks 5–7): its Plan 3 bar and free picks.
+   */
+  job: JobId; loadout: Loadout; slots: AbilityId[]; plan3: Plan3Loadout | null;
   momentum: number;
   /** Last combat damage dealt (Momentum decay), dealt or taken (in combat), and any damage taken (regen delay). */
   lastDealtAt: number; lastCombatAt: number; lastHurtAt: number;
+  /** swapReadyAt: deprecated, Plan 3 loadouts only. */
   readyAt: Partial<Record<AbilityId, number>>; gcdUntil: number; swapReadyAt: number;
   targetId: number | null; nextAutoAt: number;
   shield: number; shieldUntil: number; sprintUntil: number; parryUntil: number; iframeUntil: number;
   dodgeCharges: number; dodgeRefillAt: number | null; lastDodgeAt: number; lastDodgeFrom: { x: number; z: number } | null;
   charge: { startedAt: number } | null;
+  cast: CastState | null;
+  buffs: Partial<Record<BuffId, BuffState>>;
+  /** Player debuffs from enemies: always empty in 3b (Wellspring's cleanse clears it). */
+  afflictions: Set<string>;
   /** A swing came due on a tick that could not swing: the next one counts from when it lands. */
   autoWaiting: boolean;
 }
@@ -133,6 +188,7 @@ export interface EnemyState {
   diedAt: number; respawnAt: number; lastDamagedAt: number;
   /** The chase surge (enemyAi): faster until it next starts an attack. */
   surging: boolean;
+  debuffs: Partial<Record<DebuffId, BuffState>>;
 }
 export interface TelegraphState { id: number; owner: number; attack: EnemyAttackId; shape: Shape; startedAt: number; endsAt: number }
 export interface CombatWorld {
@@ -161,7 +217,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [] });
+const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [], revived: [] });
 
 function newEnemy(w: CombatWorld, c: CampSpawn, nowS: number): EnemyState {
   const data = ENEMY_KINDS[c.kind];
@@ -169,7 +225,7 @@ function newEnemy(w: CombatWorld, c: CampSpawn, nowS: number): EnemyState {
     id: w.nextId++, team: 'enemy', kind: c.kind, data, camp: { ...c },
     x: 0, z: 0, y: 0, facing: 0, hp: data.hp, maxHp: data.hp, alive: true, act: '', actUntil: -Infinity, targetId: null,
     threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {},
-    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false,
+    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false, debuffs: {},
   };
   spawnEnemyState(w, e);
   void nowS;
@@ -203,11 +259,13 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     stagger: e.stagger.value, maxStagger: e.stagger.max, targetId: e.targetId, act: e.act,
     windup: e.windup ? { attack: e.windup.attack, total: e.windup.endsAt - e.windup.startedAt, left: Math.max(0, e.windup.endsAt - w.now), interruptible: e.windup.interruptible } : null,
     surging: e.surging, staggerImmune: e.stagger.max > 0 ? staggerImmuneLeft(e.stagger, w.now) : 0,
+    buffs: 0, debuffs: debuffBits(e, w.now), cast: null,
   });
   const advView = (a: AdventurerState): CombatantView => ({
     id: a.id, team: 'adventurer', kind: 'adventurer', x: a.x, z: a.z, y: a.y, facing: a.facing,
     hp: a.hp, maxHp: a.stats.maxHp, alive: a.alive, shield: liveShield(a, w.now), marks: 0, stagger: 0, maxStagger: 0,
     targetId: a.targetId, act: currentAct(a, w.now), windup: null,
+    job: a.job, buffs: buffBits(a, w.now), debuffs: 0, cast: castView(a, w.now),
   });
 
   const combat: Combat = {
@@ -238,11 +296,12 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       const t = at(nowS);
       switch (i.t) {
         case 'target': return targetIntent(w, a, i.id, t);
-        case 'ability': return abilityIntent(w, a, i.slot, i.phase, t);
-        case 'swap': return swapIntent(w, a, t);
+        case 'ability': return abilityIntent(w, a, i.slot, i.phase, i.ally, t);
         // the dodge trusts i.from: the server runs checkPose on it (as on any pose) before passing it on
         case 'dodge': return dodgeIntent(w, a, i, t);
-        case 'loadout': return loadoutIntent(w, a, i.free, t);
+        case 'loadout': return loadoutIntent(w, a, i, t);
+        case 'job': return jobIntent(w, a, i.job, i.picks, t);
+        case 'swap': return swapIntent(w, a, t);
         default: return a.alive ? 'invalid' : 'dead';
       }
     },
@@ -289,9 +348,13 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       const a = w.adventurers.get(id);
       return a ? speedScaleOf(a, finite(nowS) ? nowS : w.now) : 1;
     },
+    jobLoadout(id) {
+      const a = w.adventurers.get(id);
+      return a ? { job: a.loadout.job, picks: [a.loadout.picks[0], a.loadout.picks[1]] } : undefined;
+    },
     loadout(id) {
       const a = w.adventurers.get(id);
-      return a ? { weapon: a.loadout.weapon, free: [a.loadout.free[0], a.loadout.free[1]] } : undefined;
+      return a ? plan3LoadoutState(a) : undefined;
     },
   };
   worlds.set(combat, w);
