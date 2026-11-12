@@ -6,6 +6,7 @@ import {
   groundHeight as H, riverX, roadZ, bandR, ROAD_X0, WATER_Y, GROVE_TREES, FARMS, BEACON_C, BEACON_DIR, vnoise, smooth, type Obstacle,
 } from './layout';
 import { onPath } from './town';
+import { GROVE_EAST_GATE } from '@sg2/shared/world/zones';
 
 const circ = (x: number, z: number, r: number): Obstacle => ({ kind: 'c', x, z, r });
 function h2(x: number, y: number) { const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); }
@@ -159,7 +160,7 @@ export function buildCountryside(terrain: Builder, band: Kit, far: Kit, water: B
   }
 
   // ───── walkable-band boundary: hedge ring + tree belt, road gate ─────
-  let gateX = 80; while (Math.hypot(gateX, roadZ(gateX)) < bandR(Math.atan2(roadZ(gateX), gateX)) - 1.5) gateX += 0.5;
+  const gateX = GROVE_EAST_GATE.x; // the zone registry's east gate (where the walkable band ends on the road)
   {
     const N = 240; let prev: [number, number] | null = null;
     for (let i = 0; i <= N; i++) {

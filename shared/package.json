@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./world/layout": "./src/world/layout.ts",
-    "./world/obstacles": "./src/world/obstacles.ts"
+    "./world/obstacles": "./src/world/obstacles.ts",
+    "./world/recipe": "./src/world/recipe.ts",
+    "./world/zones": "./src/world/zones.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
