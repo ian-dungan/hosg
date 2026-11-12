@@ -151,9 +151,10 @@ const OUTFIT_KEYS = ['back', 'body', 'head', 'hideHead'];
 
 /** A clean outfit from `v` (exactly its four keys), or null. */
 function parseOutfit(v: unknown): JobOutfit | null {
-  if (!plainObject(v) || !sameKeys(v, OUTFIT_KEYS)) return null;
-  if (!costumeRef(v.body) || !costumeRef(v.head) || !costumeRef(v.back) || typeof v.hideHead !== 'boolean') return null;
-  return { body: v.body, head: v.head, back: v.back, hideHead: v.hideHead };
+  if (!plainObject(v) || !sameKeys(v, OUTFIT_KEYS) || typeof v.hideHead !== 'boolean') return null;
+  // an unknown costume (one removed since, or junk) empties only its own slot
+  const slot = (c: unknown) => (costumeRef(c) ? c : null);
+  return { body: slot(v.body), head: slot(v.head), back: slot(v.back), hideHead: v.hideHead };
 }
 
 /**

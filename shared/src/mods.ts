@@ -5,7 +5,11 @@ import type { Stats } from './combat/stats';
 // abilities.ts is read only inside parseMods, never at the top level.
 
 export type ModSlot = 'quick' | 'finisher' | 'signature';
-export type MomentumEvent = 'parry' | 'perfectDodge' | 'interrupt' | 'hitTaken' | 'detonate' | 'react' | 'castDone';
+/**
+ * When a momentumOn mod pays. cleanse: an ability's cleanse effect lands; revive: a revive lands; behind:
+ * a hit of this adventurer counts as from behind (Dusk Slip). The last three are ruling P5-b's.
+ */
+export type MomentumEvent = 'parry' | 'perfectDodge' | 'interrupt' | 'hitTaken' | 'detonate' | 'react' | 'castDone' | 'cleanse' | 'revive' | 'behind';
 
 /**
  * One effect of a set bonus, named weapon or talent. Stacking: `mult`s of the same kind and ability
@@ -24,6 +28,8 @@ export type Mod =
   | { readonly k: 'cast'; readonly ability: AbilityId | 'all'; readonly mult: number }
   /** Its buff, debuff, shield (and sprint) durations. */
   | { readonly k: 'buffS'; readonly ability: AbilityId; readonly add: number }
+  /** × on every ability heal and shield amount this adventurer gives (ruling P5-b: "heals and shields you give"). */
+  | { readonly k: 'given'; readonly mult: number }
   /** Its hp-cost (0 allowed). */
   | { readonly k: 'hpCost'; readonly ability: AbilityId; readonly mult: number }
   | { readonly k: 'stagger'; readonly ability: AbilityId; readonly add: number }
@@ -51,7 +57,7 @@ export type ModKind = Mod['k'];
 /** What the engine takes for an adventurer: its stats (level plus gear) and every active mod. */
 export interface Kit { readonly stats: Stats; readonly mods: readonly Mod[] }
 
-export const MOMENTUM_EVENTS: readonly MomentumEvent[] = Object.freeze(['parry', 'perfectDodge', 'interrupt', 'hitTaken', 'detonate', 'react', 'castDone']);
+export const MOMENTUM_EVENTS: readonly MomentumEvent[] = Object.freeze(['parry', 'perfectDodge', 'interrupt', 'hitTaken', 'detonate', 'react', 'castDone', 'cleanse', 'revive', 'behind']);
 
 type Field = 'ability' | 'abilityOrAll' | 'num' | 'event' | 'perfectDodge' | 'quick' | 'taunt' | 'true';
 /** Each kind's required and optional fields. */
@@ -61,6 +67,7 @@ const SHAPES: Readonly<Record<ModKind, { readonly req: Readonly<Record<string, F
   cd: { req: { ability: 'ability', add: 'num' } },
   cast: { req: { ability: 'abilityOrAll', mult: 'num' } },
   buffS: { req: { ability: 'ability', add: 'num' } },
+  given: { req: { mult: 'num' } },
   hpCost: { req: { ability: 'ability', mult: 'num' } },
   stagger: { req: { ability: 'ability', add: 'num' } },
   finisherCost: { req: { add: 'num' } },
@@ -85,14 +92,14 @@ export const MAX_MODS = 64;
  * cooldown or cost absurd. `dodge.charges` must also be an integer.
  */
 const RANGES: Readonly<Record<string, readonly [number, number]>> = Object.freeze({
-  'coef.mult': [0.1, 3], 'amount.mult': [0.1, 3], 'cd.add': [-30, 30], 'cast.mult': [0.1, 2], 'buffS.add': [-30, 30],
+  'coef.mult': [0.1, 3], 'amount.mult': [0.1, 3], 'cd.add': [-30, 30], 'cast.mult': [0.1, 2], 'buffS.add': [-30, 30], 'given.mult': [0.1, 3],
   'hpCost.mult': [0, 3], 'stagger.add': [-50, 100], 'finisherCost.add': [-30, 30],
-  'momentumOn.amount': [0, 100], 'momentumOn.everyS': [0, 600],
+  'momentumOn.amount': [0, 100], 'momentumOn.everyS': [1e-3, 600],
   'dodge.charges': [0, 1], 'dodge.refillMult': [0.1, 2],
   'healShield.frac': [0, 1], 'healShield.cap': [0, 1000], 'cdOnCast.s': [0, 10],
   'afterDodge.mult': [0.1, 3], 'afterDodge.s': [0, 10], 'staggerMult.mult': [0.1, 3],
   'lowHpShield.frac': [0, 1], 'lowHpShield.below': [0, 1], 'lowHpShield.everyS': [1, 3600],
-  'auraTaken.mult': [0.1, 2], 'auraTaken.r': [0, 50], 'lastStand.everyS': [1, 3600], 'lastStand.iframesS': [0, 10],
+  'auraTaken.mult': [0.1, 2], 'auraTaken.r': [0, 50], 'lastStand.everyS': [30, 3600], 'lastStand.iframesS': [0, 10],
   'shieldOn.amount': [0, 1000], 'shieldOn.s': [0, 60],
 });
 const inRange = (kind: string, key: string, v: number) => {

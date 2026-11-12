@@ -73,6 +73,11 @@ describe('loot', () => {
         if (r.item) items++;
       }
       expect(items / 2000).toBeLessThan(kind === 'wickhound' ? 0.3 : 0.14);
+      // a malformed day is never a new day: no guaranteed drop (else every kill would drop)
+      for (const day of ['', 'today', '2026-13-01', '2026-11-12T00:00', 7 as unknown as string, undefined as unknown as string]) {
+        const r = rollLoot({ kind, zone: 'lampfall' }, ctx('paladin', [], { day, lootDays: { wickhound: null, fallen_warden: null } }), seeds(1));
+        expect(r.daily, String(day)).toBe(false);
+      }
     }
   });
 

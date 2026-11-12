@@ -2,10 +2,14 @@
 // makes gold. Numbers are reported (W/task-2-report.md), not tuned: they are the Numbers' economy rows.
 import { describe, expect, it } from 'vitest';
 import { GEAR_SLOTS, ITEMS, ITEM_IDS, OFFHAND_FOR, kitItems, type ItemId } from './items';
-import { addLoot, applyInvOp, newInventory, ownedItems, type InvCtx, type InvState } from './inventory';
+import { OPS_NEEDING_ID, addLoot, applyInvOp as applyInvOpRaw, newInventory, ownedItems, type InvCtx, type InvOp, type InvState } from './inventory';
 import { rollLoot, lootTable } from './loot';
 import { JOBS, JOB_IDS, newJobsSave, type JobId } from './combat/jobs';
 
+/** Ruling P5-e: purchases and Vault moves need an operation id; these tests give each one a fresh id. */
+let opSeq = 0;
+const applyInvOp = (s: InvState, op: InvOp, ctx: InvCtx) =>
+  applyInvOpRaw(s, op.id === undefined && OPS_NEEDING_ID.includes(op.op) ? { ...op, id: `test-op-${String(++opSeq).padStart(6, '0')}` } : op, ctx);
 const CTX: InvCtx = { stall: null, jobSwitch: true, townBoard: false, inCombat: false, dead: false, busy: false };
 const fresh = (job: JobId, gold = 0, seals = 0): InvState => ({ inv: newInventory([0, 0]), gold, seals, jobs: newJobsSave(job) });
 const dayOf = (d: number) => new Date(Date.UTC(2026, 10, 1) + d * 86_400_000).toISOString().slice(0, 10);

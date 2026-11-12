@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BAG_SLOTS, BANK_SLOTS, DYE_PRICE, GOLD_MAX, INV_TEXT, RECENT_KILLS, RESPEC_PRICE, addLoot, applyInvOp, bagUsed, gearItems, gearLookOf, inventoryView,
+  BAG_SLOTS, BANK_SLOTS, DYE_PRICE, GOLD_MAX, INV_TEXT, RECENT_KILLS, RESPEC_PRICE, OPS_NEEDING_ID, addLoot, applyInvOp as applyInvOpRaw, bagUsed, gearItems, gearLookOf, inventoryView,
   newInventory, ownedItems, parseInvOp, parseInventory, wornBy, type InvCtx, type InvOp, type InvRefusal, type InvState, type InventorySave,
 } from './inventory';
 import { COSTUMES, COSTUME_IDS, GEAR_SLOTS, type CostumeId, ITEMS, ITEM_IDS, fits, kitItems, starterFor, starterItems, type GearSlot, type ItemId } from './items';
@@ -12,6 +12,10 @@ import { decodeGearLook, encodeGearLook } from './look';
 import { deepFreeze } from './combat/freeze';
 import { prng } from './world/recipe';
 
+/** Ruling P5-e: purchases and Vault moves need an operation id; these tests give each one a fresh id. */
+let opSeq = 0;
+const applyInvOp = (s: InvState, op: InvOp, ctx: InvCtx) =>
+  applyInvOpRaw(s, op.id === undefined && OPS_NEEDING_ID.includes(op.op) ? { ...op, id: `test-op-${String(++opSeq).padStart(6, '0')}` } : op, ctx);
 const CTX: InvCtx = { stall: null, jobSwitch: false, townBoard: false, inCombat: false, dead: false, busy: false };
 const at = (stall: InvCtx['stall'], more: Partial<InvCtx> = {}): InvCtx => ({ ...CTX, stall, ...more });
 const jobsAt = (job: JobId, level = 10, talents: string[] = []): JobsSave => {
@@ -103,11 +107,18 @@ describe('inventory', () => {
       ['a costume bought twice', ok(applyInvOp(base, { op: 'buyCostume', costume: 'orchard_smock' }, at('tailor'))).state, { op: 'buyCostume', costume: 'orchard_smock' }, at('tailor'), 'owned'],
       ['a talent above the level', { ...base, jobs: jobsAt('warrior', 6) }, { op: 'talent', row: 1, choice: 0 }, at(null, { jobSwitch: true }), 'level'],
       ['a row already chosen', { ...base, jobs: jobsAt('warrior', 10, ['warrior_1a']) }, { op: 'talent', row: 0, choice: 1 }, at(null, { jobSwitch: true }), 'taken'],
+      // ruling P5-e: purchases and Vault moves carry an operation id
+      ['buy without an operation id', base, { op: 'buy', stall: 'smithy', item: 'hedgecutter' }, at('smithy'), 'no-id'],
+      // a sale whose gold would pass GOLD_MAX would destroy the item for nothing
+      ['sell with a full purse', { ...hedge, gold: GOLD_MAX - 5 }, { op: 'sell', uid: hedgeUid }, at('smithy'), 'purse-full'],
+      // no uid left to mint: refused, never a lost item
+      ['buy with no uid left', { ...base, inv: { ...base.inv, nextUid: 2 ** 31 } }, { op: 'buy', stall: 'smithy', item: 'hedgecutter' }, at('smithy'), 'uids'],
     ];
     const seen = new Set<InvRefusal>();
     for (const [name, s, op, ctx, want] of cases) {
       deepFreeze(s);
-      expect(refusal(applyInvOp(s, op, ctx)), name).toBe(want);
+      const apply = want === 'no-id' ? applyInvOpRaw : applyInvOp;
+      expect(refusal(apply(s, op, ctx)), name).toBe(want);
       seen.add(want);
     }
     // 'rate' is the server's token bucket (INV_OPS_PER_S): never a rule outcome
@@ -156,10 +167,13 @@ describe('inventory', () => {
     const eq = ok(applyInvOp(s, { op: 'equip', uid: 17, slot: 'weapon' }, CTX)).state;
     expect(refusal(applyInvOp(eq, { op: 'sell', uid: 17 }, at('smithy')))).toBe('worn');
     expect(refusal(applyInvOp(eq, { op: 'bank', uid: 17 }, at('vault')))).toBe('worn');
-    // the old starter blade is still worn by nobody else: it can be banked now
+    // the old starter blade is worn by nobody now, but starter gear is never banked (an unequip would mint
+    // another one each time and fill the Vault)
     const blade = uidOf(eq.inv, 'grove_blade');
     expect(wornBy(eq.inv, blade)).toEqual([]);
-    expect(ok(applyInvOp(eq, { op: 'bank', uid: blade }, at('vault'))).state.inv.bank.map(i => i.item)).toEqual(['grove_blade']);
+    expect(refusal(applyInvOp(eq, { op: 'bank', uid: blade }, at('vault')))).toBe('starter');
+    const banked = ok(applyInvOp(withItem(eq, 'rowan_staff'), { op: 'bank', uid: 18 }, at('vault'))).state;
+    expect(banked.inv.bank.map(i => i.item)).toEqual(['rowan_staff']);
     const c = ok(applyInvOp(s, { op: 'buyCostume', costume: 'straw_sunhat' }, at('tailor'))).state;
     expect(refusal(applyInvOp(c, { op: 'buyCostume', costume: 'straw_sunhat' }, at('tailor')))).toBe('owned');
     for (const ev of COSTUME_IDS.filter(id => COSTUMES[id].price === null)) expect(refusal(applyInvOp(s, { op: 'buyCostume', costume: ev }, at('tailor')))).toBe('unknown');
@@ -250,19 +264,27 @@ describe('inventory', () => {
 
   it('an op with a client operation id applies once: a resend is a no-op (dup), whatever the context', () => {
     const s = state();
-    const op = { op: 'buy', stall: 'smithy', item: 'hedgecutter', id: 'tab1-0042' } as const;
+    const op = { op: 'buy', stall: 'smithy', item: 'hedgecutter', id: 'tab1-00000042' } as const;
     const first = ok(applyInvOp(s, op, at('smithy')));
     expect(first.dGold).toBe(-120);
     const again = ok(applyInvOp(first.state, op, at('smithy')));
     expect(again).toEqual({ state: first.state, dGold: 0, dSeals: 0, dup: true });
     expect(again.state).toBe(first.state);
     // a different id buys again
-    expect(ok(applyInvOp(first.state, { ...op, id: 'tab1-0043' }, at('smithy'))).dGold).toBe(-120);
+    expect(ok(applyInvOp(first.state, { ...op, id: 'tab1-00000043' }, at('smithy'))).dGold).toBe(-120);
     // a refused op does not burn its id
     const poor = applyInvOp({ ...s, gold: 0 }, op, at('smithy'));
     expect(refusal(poor)).toBe('gold');
     // the ids survive a save and reload
-    expect(parseInventory(JSON.parse(JSON.stringify(first.state.inv))).inv.recentOps).toEqual(['tab1-0042']);
+    // stored as `${op}:${id}` (ruling P5-e), and they survive a save and reload
+    expect(first.state.inv.recentOps).toEqual(['buy:tab1-00000042']);
+    expect(parseInventory(JSON.parse(JSON.stringify(first.state.inv))).inv.recentOps).toEqual(['buy:tab1-00000042']);
+    // the same id on another op is another operation
+    const sell = ok(applyInvOp(first.state, { op: 'sell', uid: 17, id: 'tab1-00000042' }, at('smithy')));
+    expect(sell.dGold).toBe(24);
+    // a short id is refused (ids are random strings of at least 12 characters); junk keys are dropped on load
+    expect(refusal(applyInvOp(s, { ...op, id: 'short-id-11' }, at('smithy')))).toBe('unknown');
+    expect(parseInventory({ ...first.state.inv, recentOps: ['buy:tab1-00000042', 'tab1-00000042', 'nope:tab1-00000099', 'buy:short'] }).inv.recentOps).toEqual(['buy:tab1-00000042']);
   });
 
   it('addLoot is idempotent by kill key; a full bag sells the item and reports the gold', () => {
@@ -279,6 +301,11 @@ describe('inventory', () => {
     for (let i = 0; i < BAG_SLOTS; i++) f = addLoot(f, 'rootbound_back', 0, `f${i}`).state;
     const sold = addLoot(f, 'furnace_edge', 3, 'room:9:1');
     expect(sold).toMatchObject({ dGold: 63, soldFor: 60, uid: null, dup: false });
+    // no uid left to mint: the drop is sold too (never lost), and an unequip that would mint is refused
+    const noUid: InvState = { ...s, inv: { ...s.inv, nextUid: 2 ** 31 } };
+    expect(addLoot(noUid, 'furnace_edge', 0, 'room:9:2')).toMatchObject({ soldFor: 60, uid: null, dGold: 60 });
+    const bare: InvState = { ...noUid, inv: { ...noUid.inv, bag: noUid.inv.bag.filter(i => i.item !== 'plain_head') } };
+    expect(refusal(applyInvOp(bare, { op: 'unequip', slot: 'head' }, CTX))).toBe('uids');
     expect(sold.state.inv.bag).toHaveLength(f.inv.bag.length);
     // the gold cap clamps
     const rich = addLoot(state({ gold: GOLD_MAX - 5 }), null, 60, 'k');
@@ -344,7 +371,7 @@ describe('inventory', () => {
       { op: 'equip', uid: 17, slot: 'head' }, { op: 'unequip', slot: 'back' }, { op: 'bank', uid: 3 }, { op: 'unbank', uid: 3 }, { op: 'sell', uid: 9 },
       { op: 'buy', stall: 'smithy', item: 'hedgecutter' }, { op: 'buyCostume', costume: 'orchard_smock' }, { op: 'wear', slot: 'body', costume: null },
       { op: 'wear', slot: 'head', costume: 'straw_sunhat' }, { op: 'hideHead', hide: true }, { op: 'dye', uid: 1, ch: 1, dye: 31 },
-      { op: 'dyeCostume', costume: 'orchard_smock', ch: 0, dye: 0 }, { op: 'talent', row: 2, choice: 0 }, { op: 'respec' }, { op: 'respec', id: 'a-1_B' },
+      { op: 'dyeCostume', costume: 'orchard_smock', ch: 0, dye: 0 }, { op: 'talent', row: 2, choice: 0 }, { op: 'respec' }, { op: 'respec', id: 'a-1_B-xyz-0001' },
     ];
     for (const g of good) expect(parseInvOp(g), JSON.stringify(g)).toEqual(g);
     const bad: unknown[] = [
@@ -354,7 +381,7 @@ describe('inventory', () => {
       { op: 'equip', uid: 17, slot: 'head', extra: 1 }, { op: 'buy', stall: 'castle', item: 'hedgecutter' }, { op: 'buy', stall: 'smithy', item: 'x'.repeat(41) },
       { op: 'buy', stall: 'smithy', item: 7 }, { op: 'buyCostume', costume: 'y'.repeat(41) }, { op: 'wear', slot: 'feet', costume: null }, { op: 'wear', slot: 'body' },
       { op: 'hideHead', hide: 'yes' }, { op: 'dye', uid: 1, ch: 2, dye: 3 }, { op: 'dye', uid: 1, ch: 0, dye: 32 }, { op: 'dye', uid: 1, ch: 0, dye: -1 },
-      { op: 'talent', row: 3, choice: 0 }, { op: 'talent', row: 0, choice: Infinity }, { op: 'respec', id: '' }, { op: 'respec', id: 'z'.repeat(41) }, { op: 'respec', id: 'has space' },
+      { op: 'talent', row: 3, choice: 0 }, { op: 'talent', row: 0, choice: Infinity }, { op: 'respec', id: '' }, { op: 'respec', id: 'z'.repeat(41) }, { op: 'respec', id: 'has space here' }, { op: 'respec', id: 'elevenchars' },
       { op: 'respec', id: 5 },
     ];
     for (const b of bad) expect(parseInvOp(b), JSON.stringify(b)).toBeNull();

@@ -78,8 +78,8 @@ export function baseStats(level: number): Stats {
   };
 }
 
-/** The starting jobs (JOB_IDS, restated: jobs.ts imports this module, so it cannot be read here at the top level). */
-const JOB_IDS_LOCAL: readonly JobId[] = Object.freeze(['warrior', 'ranger', 'paladin', 'dark_knight', 'ninja', 'white_mage', 'black_mage']);
+/** The starting jobs (JOB_IDS, restated, and a test holds them equal: jobs.ts imports this module, so it cannot be read here at the top level). */
+export const JOB_IDS_LOCAL: readonly JobId[] = Object.freeze(['warrior', 'ranger', 'paladin', 'dark_knight', 'ninja', 'white_mage', 'black_mage']);
 
 /** CATCH_UP_MULT when `job`'s level is below the highest level of any starting job in the save (future-job records are ignored), else 1. Levels come from xp. */
 export function catchUp(s: JobsSave, job: JobId): number {

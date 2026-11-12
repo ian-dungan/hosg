@@ -403,7 +403,7 @@ describe('jobs save', () => {
     expect(parseJobsSave(undefined, { weapon: 'bow', free: ['taunt', 'sprint'] }).curve).toBe(2);
     expect(parseJobsSave('garbage').curve).toBe(2);
   });
-  it('talents of another job, two in one row, or above the level are dropped; outfit garbage → null', () => {
+  it('talents of another job, two in one row, or above the level are dropped; outfit garbage → null, an unknown costume → its slot empty', () => {
     const rec = (xp: number, talents: unknown, outfit: unknown = null) => ({ level: 1, xp, picks: ['mend', 'bulwark'], talents, outfit });
     const read = (r: unknown) => parseJobsSave({ current: 'warrior', curve: 2, jobs: { warrior: r } }).jobs.warrior!;
     const l7 = totalTo(7), l10 = totalTo(10);
@@ -419,7 +419,10 @@ describe('jobs save', () => {
     const outfit = { body: 'lamplighter_coat', head: null, back: 'patchwork_cape', hideHead: true };
     expect(read(rec(0, [], outfit)).outfit).toEqual(outfit);
     expect(read(rec(0, [], { body: null, head: null, back: null, hideHead: false })).outfit).toEqual({ body: null, head: null, back: null, hideHead: false });
-    for (const bad of ['hat', 3, [], {}, { ...outfit, extra: 1 }, { ...outfit, hideHead: 'yes' }, { ...outfit, body: 5 }, { ...outfit, head: '' }, { ...outfit, back: 'x'.repeat(65) }, { body: null, head: null, back: null }]) {
+    // Task 2 review: an unknown costume id (junk, or one removed since) empties only its own slot
+    expect(read(rec(0, [], { ...outfit, body: 5 })).outfit).toEqual({ ...outfit, body: null });
+    expect(read(rec(0, [], { ...outfit, head: '', back: 'x'.repeat(65) })).outfit).toEqual({ ...outfit, head: null, back: null });
+    for (const bad of ['hat', 3, [], {}, { ...outfit, extra: 1 }, { ...outfit, hideHead: 'yes' }, { body: null, head: null, back: null }]) {
       expect(read(rec(0, [], bad)).outfit, JSON.stringify(bad)).toBeNull();
     }
     const kept = parseJobsSave({ current: 'warrior', curve: 2, jobs: { warrior: rec(l10, ['warrior_3a', 'warrior_1c'], outfit) } });

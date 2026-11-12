@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ABILITIES, CATCH_UP_MULT, CLEAR_XP, JOB_LEVEL_CAP, MIN_CREDIT_FRAC, STARTER_STATS, TALENT_LEVELS, XP_CURVE_VERSION, XP_PER_LEVEL, XP_TO_NEXT,
+  ABILITIES, CATCH_UP_MULT, JOB_IDS, JOB_IDS_LOCAL, CLEAR_XP, JOB_LEVEL_CAP, MIN_CREDIT_FRAC, STARTER_STATS, TALENT_LEVELS, XP_CURVE_VERSION, XP_PER_LEVEL, XP_TO_NEXT,
   baseStats, catchUp, levelForXp, migrateStubXp, newJobsSave, parseMods, MAX_MODS, totalTo, xpToNext, type JobsSave,
 } from './index';
 
@@ -81,6 +81,8 @@ describe('the level curve', () => {
     const withMonk = { ...s, jobs: { ...s.jobs, monk: rec(totalTo(9)) } } as unknown as JobsSave;
     expect(catchUp(withMonk, 'warrior')).toBe(1);
     expect(catchUp(withMonk, 'ranger')).toBe(1.5);
+    // the restated starting jobs are JOB_IDS
+    expect(JOB_IDS_LOCAL).toEqual(JOB_IDS);
   });
 });
 
@@ -151,10 +153,15 @@ describe('mods', () => {
       { k: 'auraTaken', mult: 0, r: 8 }, { k: 'auraTaken', mult: 0.95, r: 1e6 },
       { k: 'lastStand', everyS: 0, iframesS: 2 }, { k: 'lastStand', everyS: 90, iframesS: 60 },
       { k: 'shieldOn', on: 'taunt', amount: 1e7, s: 6 }, { k: 'afterDodge', mult: 1e3, s: 2 }, { k: 'cdOnCast', s: 1e3 },
+      // Task 2 review: a last stand at most every 30 s; a momentumOn everyS, when given, is above 0
+      { k: 'lastStand', everyS: 29, iframesS: 2 }, { k: 'momentumOn', on: 'hitTaken', amount: 2, everyS: 0 },
+      { k: 'given', mult: 0 }, { k: 'given', mult: 5 }, { k: 'momentumOn', on: 'nap', amount: 5 },
     ];
     for (const b of outOfRange) expect(parseMods([b]), JSON.stringify(b)).toEqual([]);
     // the edges of the good table still pass
-    for (const g of [{ k: 'hpCost', ability: 'crimson_pact', mult: 0 }, { k: 'dodge', charges: 1 }, { k: 'finisherCost', add: -20 }, { k: 'cd', ability: 'skullringer', add: -5 }])
+    for (const g of [{ k: 'hpCost', ability: 'crimson_pact', mult: 0 }, { k: 'dodge', charges: 1 }, { k: 'finisherCost', add: -20 }, { k: 'cd', ability: 'skullringer', add: -5 },
+      { k: 'lastStand', everyS: 30, iframesS: 2 }, { k: 'given', mult: 1.1 }, { k: 'momentumOn', on: 'cleanse', amount: 20 }, { k: 'momentumOn', on: 'revive', amount: 20 },
+      { k: 'momentumOn', on: 'behind', amount: 5, everyS: 0.5 }])
       expect(parseMods([g])).toEqual([g]);
     const many = Array.from({ length: MAX_MODS + 10 }, () => ({ k: 'staggerMult', mult: 1.1 }));
     expect(parseMods(many)).toHaveLength(MAX_MODS);

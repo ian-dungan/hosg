@@ -31,8 +31,12 @@ export const BANK_SLOTS = 60;
 export const GOLD_MAX = 1_000_000;
 /** Kill keys remembered per adventurer for de-duplication. */
 export const RECENT_KILLS = 64;
-/** Client operation ids remembered per adventurer, so a resent operation applies once. */
-export const RECENT_OPS = 32;
+/** Client operation ids remembered per adventurer (as `${op}:${id}`), so a resent operation applies once. */
+export const RECENT_OPS = 64;
+/** An operation id is a random string of this many characters or more (ruling P5-e). */
+export const OP_ID_MIN = 12;
+/** Operations refused without an operation id (ruling P5-e): purchases (gold or Seals) and Vault moves. */
+export const OPS_NEEDING_ID: readonly InvOpName[] = Object.freeze(['buy', 'buyCostume', 'bank', 'unbank']);
 /** Gold per dye change (a channel set to the dye it already has is free and changes nothing). */
 export const DYE_PRICE = 5;
 /** Gold per chosen row for a retraining after the first (free) one per job. */
@@ -52,13 +56,16 @@ export interface InventorySave {
   /** The UTC day of each daily guaranteed drop. */
   lootDays: { wickhound: string | null; fallen_warden: string | null };
   recentKills: string[];
-  /** Client operation ids already applied, oldest first (at most RECENT_OPS). */
+  /** Client operations already applied, as `${op}:${id}`, oldest first (at most RECENT_OPS). */
   recentOps: string[];
   freeRespecUsed: JobId[];
 }
 
 type WithId<T> = T & { id?: string };
-/** One operation: what a client may ask for (ids only; the server owns every price and amount). `id`: an optional client operation id (1–40 of A–Z a–z 0–9 _ -). */
+/**
+ * One operation: what a client may ask for (ids only; the server owns every price and amount). `id`: a client
+ * operation id (12–40 of A–Z a–z 0–9 _ -), required for OPS_NEEDING_ID and optional otherwise.
+ */
 export type InvOp = WithId<
   | { op: 'equip'; uid: number; slot: GearSlot }
   | { op: 'unequip'; slot: GearSlot }
@@ -76,7 +83,8 @@ export type InvOp = WithId<
 >;
 export type InvOpName = InvOp['op'];
 
-export type InvRefusal = 'where' | 'combat' | 'busy' | 'dead' | 'unknown' | 'fit' | 'worn' | 'starter' | 'bag-full' | 'bank-full' | 'gold' | 'seals' | 'owned' | 'level' | 'taken' | 'rate';
+export type InvRefusal = 'where' | 'combat' | 'busy' | 'dead' | 'unknown' | 'fit' | 'worn' | 'starter' | 'bag-full' | 'bank-full' | 'gold' | 'seals' | 'owned' | 'level' | 'taken' | 'rate'
+  | 'no-id' | 'purse-full' | 'uids';
 export const INV_TEXT: Readonly<Record<InvRefusal, string>> = Object.freeze({
   where: 'You need to be somewhere else for that',
   combat: 'Not while fighting',
@@ -85,7 +93,7 @@ export const INV_TEXT: Readonly<Record<InvRefusal, string>> = Object.freeze({
   unknown: "That isn't something you can do",
   fit: "That doesn't fit there",
   worn: 'Take it off first',
-  starter: 'Starter gear cannot be sold',
+  starter: 'Starter gear cannot be sold or banked',
   'bag-full': 'Your bag is full',
   'bank-full': 'The Vault is full',
   gold: 'Not enough gold',
@@ -94,6 +102,9 @@ export const INV_TEXT: Readonly<Record<InvRefusal, string>> = Object.freeze({
   level: 'Your job level is too low for that',
   taken: 'You have already chosen a talent in that row',
   rate: 'Slow down a little',
+  'no-id': 'Something went wrong; please try again',
+  'purse-full': 'Your purse is full',
+  uids: 'Your inventory cannot take any more new items',
 });
 
 /** What an operation works on: the inventory and the jobs (talents and outfits), gold and Seals. */
@@ -112,8 +123,16 @@ const own = (o: object, k: unknown): k is string => typeof k === 'string' && Obj
 const UID_MAX = 2 ** 31 - 1;
 const isUid = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= UID_MAX;
 const shortStr = (v: unknown): v is string => typeof v === 'string' && v.length >= 1 && v.length <= INV_STRING_MAX;
-const OP_ID = /^[A-Za-z0-9_-]{1,40}$/;
+const OP_ID = /^[A-Za-z0-9_-]{12,40}$/;
 const isOpId = (v: unknown): v is string => typeof v === 'string' && OP_ID.test(v);
+/** A remembered operation: `${op}:${id}`. */
+const isOpKey = (v: unknown): v is string => {
+  if (typeof v !== 'string') return false;
+  const k = v.indexOf(':');
+  return k > 0 && own(FIELDS, v.slice(0, k)) && isOpId(v.slice(k + 1));
+};
+/** A uid may still be minted. */
+const canMint = (inv: InventorySave) => isUid(inv.nextUid);
 const STALLS: readonly StallId[] = ['smithy', 'tailor', 'barber', 'lampwright', 'vault'];
 const COSTUME_SLOTS: readonly CostumeSlot[] = ['body', 'head', 'back'];
 const ch = (v: unknown): v is 0 | 1 => v === 0 || v === 1;
@@ -136,7 +155,11 @@ const FIELDS: Readonly<Record<InvOpName, Readonly<Record<string, Check>>>> = {
   respec: {},
 };
 
-/** Strict: exactly an operation's fields with the right types and ranges (strings at most 40 characters), plus an optional op id; else null. Ids are checked against the tables by applyInvOp. */
+/**
+ * Strict: exactly an operation's fields with the right types and ranges (strings at most 40 characters), plus
+ * an op id (12–40 characters) when given; else null. Ids are checked against the tables by applyInvOp, which
+ * also refuses OPS_NEEDING_ID without one.
+ */
 export function parseInvOp(v: unknown): InvOp | null {
   if (!plain(v) || !own(FIELDS, v.op)) return null;
   const f = FIELDS[v.op as InvOpName];
@@ -252,6 +275,7 @@ export function parseInventory(v: unknown, dyes: [DyeId, DyeId] = [0, 0]): { inv
       const inst = isUid(u) ? bag.find(i => i.uid === u) : undefined;
       if (inst && fits(inst.item, s, job)) { g[s] = inst.uid; continue; }
       let starter = bag.find(i => i.item === fallback);
+      if (!starter && nextUid > UID_MAX) continue; // no uid left: kitFor wears the starter piece anyway
       if (!starter) { starter = { uid: nextUid++, item: fallback, dye: [0, 0] }; bag.push(starter); }
       g[s] = starter.uid;
     }
@@ -287,7 +311,7 @@ export function parseInventory(v: unknown, dyes: [DyeId, DyeId] = [0, 0]): { inv
     v: 1, nextUid, bag, bank, gear, wardrobe, costumeDyes,
     lootDays: { wickhound: day(ld.wickhound), fallen_warden: day(ld.fallen_warden) },
     recentKills: strs(v.recentKills, s => typeof s === 'string' && s.length >= 1 && s.length <= KEY_MAX, RECENT_KILLS),
-    recentOps: strs(v.recentOps, isOpId, RECENT_OPS),
+    recentOps: strs(v.recentOps, isOpKey, RECENT_OPS),
     freeRespecUsed,
   };
   return { inv, repaired: canonical(inv) !== canonical(v) };
@@ -335,7 +359,9 @@ function withOutfit(o: JobOutfit | null, f: (o: JobOutfit) => void): JobOutfit |
 export function applyInvOp(s: InvState, op: InvOp, ctx: InvCtx): InvResult {
   const p = parseInvOp(op);
   if (!p) return { refusal: 'unknown' };
-  if (p.id !== undefined && (s.inv.recentOps ?? []).includes(p.id)) return { state: s, dGold: 0, dSeals: 0, dup: true };
+  const key = p.id !== undefined ? `${p.op}:${p.id}` : undefined;
+  if (key !== undefined && (s.inv.recentOps ?? []).includes(key)) return { state: s, dGold: 0, dSeals: 0, dup: true };
+  if (key === undefined && OPS_NEEDING_ID.includes(p.op)) return { refusal: 'no-id' };
   if (ctx.dead) return { refusal: 'dead' };
   if (ctx.inCombat) return { refusal: 'combat' };
   if (ctx.busy) return { refusal: 'busy' };
@@ -351,7 +377,7 @@ export function applyInvOp(s: InvState, op: InvOp, ctx: InvCtx): InvResult {
   const r = applyRules(p, inv, jobs, job, () => gold, () => seals, d => { gold = clampGold(gold + d); }, d => { seals += d; });
   if (r) return { refusal: r };
   if (bagUsed(inv) > BAG_SLOTS) return { refusal: 'bag-full' };
-  if (p.id !== undefined) { inv.recentOps.push(p.id); if (inv.recentOps.length > RECENT_OPS) inv.recentOps.splice(0, inv.recentOps.length - RECENT_OPS); }
+  if (key !== undefined) { inv.recentOps.push(key); if (inv.recentOps.length > RECENT_OPS) inv.recentOps.splice(0, inv.recentOps.length - RECENT_OPS); }
   return { state: { inv, gold, seals, jobs }, dGold: gold - s.gold, dSeals: seals - s.seals };
 }
 
@@ -374,6 +400,7 @@ function applyRules(
       if (!isArmourSlot(p.slot)) return 'fit';
       const id = starterFor(job, p.slot)!;
       let starter = inv.bag.find(i => i.item === id);
+      if (!starter && !canMint(inv)) return 'uids';
       if (!starter) { starter = { uid: inv.nextUid++, item: id, dye: [0, 0] }; inv.bag.push(starter); }
       (inv.gear[job] ??= {})[p.slot] = starter.uid;
       return null;
@@ -382,6 +409,7 @@ function applyRules(
       const k = bagAt(p.uid);
       if (k < 0) return 'unknown';
       if (wornBy(inv, p.uid).length) return 'worn';
+      if (ITEMS[inv.bag[k]!.item]!.tier === 0) return 'starter'; // a banked starter piece would be minted again on unequip
       if (inv.bank.length >= BANK_SLOTS) return 'bank-full';
       inv.bank.push(inv.bag.splice(k, 1)[0]!);
       return null;
@@ -398,12 +426,14 @@ function applyRules(
       if (wornBy(inv, p.uid).length) return 'worn';
       const it = ITEMS[inv.bag[k]!.item]!;
       if (it.sell <= 0) return 'starter';
+      if (gold() + it.sell > GOLD_MAX) return 'purse-full'; // never sell for gold that would be dropped
       inv.bag.splice(k, 1);
       addGold(it.sell);
       return null;
     }
     case 'buy': {
       if (!isItemId(p.item)) return 'unknown';
+      if (!canMint(inv)) return 'uids';
       const it = ITEMS[p.item]!;
       if (p.stall === 'smithy' && it.tier === 1 && it.price !== undefined) {
         if (gold() < it.price) return 'gold';
@@ -502,7 +532,8 @@ export function addLoot(
   let g = clampGold(s.gold + (Number.isFinite(gold) && gold > 0 ? Math.floor(gold) : 0));
   let soldFor: number | null = null, uid: number | null = null;
   if (item !== null && isItemId(item)) {
-    if (bagUsed(inv) < BAG_SLOTS) { uid = inv.nextUid++; inv.bag.push({ uid, item, dye: [0, 0] }); }
+    // no bag slot, or no uid left to mint: sold at once (never lost)
+    if (bagUsed(inv) < BAG_SLOTS && canMint(inv)) { uid = inv.nextUid++; inv.bag.push({ uid, item, dye: [0, 0] }); }
     else { soldFor = ITEMS[item]!.sell; g = clampGold(g + soldFor); }
   }
   return { state: { ...s, inv, gold: g }, dGold: g - s.gold, soldFor, dup: false, uid };

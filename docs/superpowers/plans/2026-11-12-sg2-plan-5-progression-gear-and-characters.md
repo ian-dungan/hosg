@@ -270,14 +270,14 @@ At level 10, a full kit gives these totals:
 | set id | name | tier | type | 3 pieces | 5 pieces |
 |---|---|---|---|---|---|
 | `plain` | Grove-Spun | starter | plain | — | — |
-| `mossweave` | Mossweave | T1 | cloth | heals you give also shield 15% of the amount healed (cap 15, 6 s) | your casts take 10% less time |
+| `mossweave` | Mossweave | T1 | cloth | heals and shields you give × 1.1 (`given`; ruling P5-b, was: heals you give also shield 15% of the amount healed, cap 15, 6 s) | your casts take 10% less time |
 | `thornrunner` | Thornrunner | T1 | light | a perfect dodge gives +10 Momentum | dodge charges refill 20% faster |
 | `rootbound` | Rootbound | T1 | heavy | +3 Momentum when an enemy hit lands on you (at most once a second) | falling below 35% hp shields you for 15% of max hp (6 s; once every 30 s) |
-| `wickthread` | Wickthread | T2 | cloth | a completed cast takes 0.5 s off your other cooldowns | interrupting a wind-up gives +20 Momentum |
+| `wickthread` | Wickthread | T2 | cloth | a completed cast takes 0.5 s off your other cooldowns | interrupting a wind-up, a cleanse or a revive gives +20 Momentum (ruling P5-b, was: interrupting only) |
 | `cinderstep` | Cinderstep | T2 | light | a finisher that detonates a mark refunds 10 Momentum | for 2 s after a dodge, your next ability deals ×1.2 |
 | `brassbound` | Brassbound | T2 | heavy | your taunts also shield you for 15 (6 s) | the stagger you deal × 1.2 |
-| `lenslight` | Lenslight | T3 | cloth | overhealing you give becomes a shield (30% of the overheal, cap 20, 6 s) | your finishers cost 10 less Momentum |
-| `tollwind` | Tollwind | T3 | light | +1 dodge charge | a perfect dodge resets your quick ability's cooldown |
+| `lenslight` | Lenslight | T3 | cloth | heals and shields you give × 1.15 (`given`; ruling P5-b, was: overhealing you give becomes a shield, 30% of the overheal, cap 20, 6 s) | your finishers cost 10 less Momentum |
+| `tollwind` | Tollwind | T3 | light | dodge charges refill 25% faster (ruling P5-b, was: +1 dodge charge, which Fourth Roll could not add to) | a perfect dodge resets your quick ability's cooldown |
 | `beaconstone` | Beaconstone | T3 | heavy | party members within 8 m take × 0.95 enemy damage | once every 90 s, a blow that would kill leaves you at 1 hp with 2 s of i-frames |
 
 Bonus magnitudes are tunable ±30%. The piece nouns:
@@ -298,8 +298,8 @@ Bonus magnitudes are tunable ±30%. The piece nouns:
 | blade | `grove_blade` Grove Blade | `hedgecutter` Hedgecutter | `wickfang_sabre` Wickfang Sabre | `last_bell` **Last Bell**: a parry gives +25 Momentum; Sunder's cooldown −1 s |
 | bow | `grove_bow` Grove Bow | `ashwood_longbow` Ashwood Longbow | `cinderstring` Cinderstring | `longwatch` **Longwatch**: Charged Shot × 1.2; interrupting gives +15 Momentum |
 | sword | `grove_sword` Grove Sword | `millward_sword` Millward Sword | `cogtooth_blade` Cogtooth Blade | `lampwardens_oath` **Lampwarden's Oath**: your taunts shield you for 25 (6 s); Dawn Ward × 1.2 |
-| greatsword | `grove_greatsword` Grove Greatsword | `woodsmans_cleaver` Woodsman's Cleaver | `furnace_edge` Furnace Edge | `grief_of_brass` **Grief of Brass**: Crimson Pact costs no hp; Nightfall × 1.1 |
-| daggers | `grove_knives` Grove Knives | `thornpick_pair` Thornpick Pair | `twin_sparks` Twin Sparks | `twin_wicks` **Twin Wicks**: a perfect dodge resets your quick ability; for 2 s after a dodge your next ability × 1.15 |
+| greatsword | `grove_greatsword` Grove Greatsword | `woodsmans_cleaver` Woodsman's Cleaver | `furnace_edge` Furnace Edge | `grief_of_brass` **Grief of Brass**: Crimson Pact's hp cost × 0.5 (ruling P5-b, was: costs no hp, which left Pact of Ash nothing to do); Nightfall × 1.1 |
+| daggers | `grove_knives` Grove Knives | `thornpick_pair` Thornpick Pair | `twin_sparks` Twin Sparks | `twin_wicks` **Twin Wicks**: each hit from behind +5 Momentum; Ghost Edge × 1.15 (ruling P5-b, was: a perfect dodge resets your quick ability, which Tollwind's 5 pieces already do, and for 2 s after a dodge your next ability × 1.15, which Cinderstep's ×1.2 hid) |
 | staff | `grove_staff` Grove Staff | `rowan_staff` Rowan Staff | `lampglass_rod` Lampglass Rod | `dawnlantern` **Dawnlantern**: Second Dawn's cast × 0.6; heals you give also shield 15% (cap 15) — and `ember_lens` **Ember Lens**: Hearthfall's cast × 0.75; a reaction you trigger gives +10 Momentum |
 
 | off-hand | starter | T1 | T2 | T3 |
@@ -373,8 +373,8 @@ export interface InventorySave {
 |---|---|---|---|
 | `equip` | `uid, slot` | anywhere | the bag item fits the slot and the **current** job; replaces that job's slot (the old item stays in the bag; if that makes the bag exceed `BAG_SLOTS` → `'bag-full'`) |
 | `unequip` | `slot` | anywhere | head, chest, legs, hands, feet and back go back to the starter piece; weapon and off-hand cannot be emptied (`'fit'`) |
-| `bank` / `unbank` | `uid` | the Vault | a worn item cannot be banked (`'worn'`) |
-| `sell` | `uid` | the Smithy | not worn, not starter |
+| `bank` / `unbank` | `uid` | the Vault | a worn item cannot be banked (`'worn'`); nor can a starter piece (`'starter'`: an unequip would mint another) |
+| `sell` | `uid` | the Smithy | not worn, not starter; refused `'purse-full'` when the gold would pass `GOLD_MAX` |
 | `buy` | `stall, item` | that stall | the Smithy sells T1 for gold; the Lampwright sells T3 for Seals; the bag needs room |
 | `buyCostume` | `costume` | the Tailor | not owned (`'owned'`); not event-only (`'unknown'`) |
 | `wear` | `slot: CostumeSlot, costume: CostumeId \| null` | anywhere | the current job's outfit; owned only |
@@ -385,7 +385,9 @@ export interface InventorySave {
 | `respec` | — | the Guild Board (town only) | clears the current job's talents; the first per job is free, then `RESPEC_PRICE = 25` gold × rows chosen |
 
 - Every op also needs: alive, out of combat (`'combat'`), not casting or charging (`'busy'`), not travelling.
-- **Refusals:** `InvRefusal = 'where' | 'combat' | 'busy' | 'dead' | 'unknown' | 'fit' | 'worn' | 'starter' | 'bag-full' | 'bank-full' | 'gold' | 'seals' | 'owned' | 'level' | 'taken' | 'rate'`. Each has a fixed English line in `INV_TEXT`.
+- **Operation ids** (ruling P5-e): an `id` is a random string of 12–40 characters (`[A-Za-z0-9_-]`; shorter is refused); `buy`, `buyCostume` (gold), Seal purchases and bank moves without one are refused `'no-id'`; applied ops are remembered as `${op}:${id}`, the last `RECENT_OPS = 64`.
+- **Uids:** when no uid is left to mint (`nextUid` past 2³¹ − 1), `buy` and a minting `unequip` are refused `'uids'`, and a loot drop is sold at once (never lost).
+- **Refusals:** `InvRefusal = 'where' | 'combat' | 'busy' | 'dead' | 'unknown' | 'fit' | 'worn' | 'starter' | 'bag-full' | 'bank-full' | 'gold' | 'seals' | 'owned' | 'level' | 'taken' | 'rate' | 'no-id' | 'purse-full' | 'uids'`. Each has a fixed English line in `INV_TEXT`.
 - Talents and outfits live in each job's `JobRecord`, gear in the inventory. The store writes inventory, gold, Seals, look and jobs together (Task 6), so a paid respec and its cleared talents land in one write.
 
 ### Stalls (`shared/src/world/zones.ts`)
@@ -500,13 +502,15 @@ Each job has three rows. A row unlocks at its job level (4, 7, 10). The adventur
 
 ```ts
 export type ModSlot = 'quick' | 'finisher' | 'signature';
-export type MomentumEvent = 'parry' | 'perfectDodge' | 'interrupt' | 'hitTaken' | 'detonate' | 'react' | 'castDone';
+export type MomentumEvent = 'parry' | 'perfectDodge' | 'interrupt' | 'hitTaken' | 'detonate' | 'react' | 'castDone'
+  | 'cleanse' | 'revive' | 'behind';   // ruling P5-b: an ability's cleanse lands; a revive lands; a hit counts as from behind
 export type Mod =
   | { k: 'coef'; ability: AbilityId; mult: number }                 // its damage effects' coef
   | { k: 'amount'; ability: AbilityId; mult: number }               // its heal and shield amounts
   | { k: 'cd'; ability: AbilityId; add: number }                    // cooldown, never below 1 s
   | { k: 'cast'; ability: AbilityId | 'all'; mult: number }         // cast time, never below 0.3 s (instants stay instant)
   | { k: 'buffS'; ability: AbilityId; add: number }                 // its buff, debuff and shield durations
+  | { k: 'given'; mult: number }                                    // ruling P5-b: × every ability heal and shield amount it gives
   | { k: 'hpCost'; ability: AbilityId; mult: number }               // its hp-cost (0 allowed)
   | { k: 'stagger'; ability: AbilityId; add: number }
   | { k: 'finisherCost'; add: number }                              // finishers' cost, never below 30
@@ -531,7 +535,9 @@ export function parseMods(v: unknown): Mod[];   // strict; drops unknown kinds, 
 - `healShield` entries sum their `frac`, and the largest `cap` wins;
 - `auraTaken` uses the strongest single aura on the receiver (no stacking across sources);
 - `resetOn` is idempotent;
-- `lastStand` and `lowHpShield` use the shortest `everyS`.
+- `lastStand` and `lowHpShield` use the shortest `everyS`;
+- `given` multiplies like any `mult`, except that two sources of it follow ruling P5-a (the larger applies);
+- ranges (Task 2 review): `lastStand.everyS` is at least 30, and a `momentumOn.everyS`, when given, is above 0.
 
 ## Looks (`shared/src/look.ts`)
 

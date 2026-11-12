@@ -98,15 +98,18 @@ export function pickLootItem(tier: 1 | 2 | 3, job: JobId, owned: ReadonlySet<Ite
 /**
  * The adventurer's roll for one kill or clear: gold uniform in the row's range, then the item. `daily`:
  * the row's guaranteed first drop of the UTC day was used (lootDays[key] !== day); the server then records
- * the day with addLoot. Never throws; an unknown source or job rolls nothing.
+ * the day with addLoot; a `day` that is not YYYY-MM-DD gives no daily drop. Never throws; an unknown source or job rolls nothing.
  */
+/** A UTC day as rollLoot takes it: YYYY-MM-DD. */
+const LOOT_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 export function rollLoot(src: LootSource, ctx: LootCtx, seedParts: readonly (string | number)[]): { gold: number; item: ItemId | null; daily: boolean } {
   const row = lootTable(src);
   const rng = lootRng(seedParts);
   const [lo, hi] = row.gold;
   const gold = lo + Math.floor(rng() * (hi - lo + 1));
   if (row.tier === null || !Object.prototype.hasOwnProperty.call(JOBS, ctx.job)) return { gold, item: null, daily: false };
-  const daily = row.daily !== undefined && ctx.lootDays[row.daily] !== ctx.day;
+  // a malformed day never counts as a new day (else every kill would be the day's first)
+  const daily = row.daily !== undefined && typeof ctx.day === 'string' && LOOT_DAY.test(ctx.day) && ctx.lootDays[row.daily] !== ctx.day;
   const drops = daily || rng() < row.chance;
   if (!drops) return { gold, item: null, daily: false };
   return { gold, item: pickLootItem(row.tier, ctx.job, ctx.owned, rng), daily };
