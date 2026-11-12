@@ -4,7 +4,7 @@ import { Matrix, Vector3, type Scene } from '@babylonjs/core';
 import type { CharacterView, WorldApi } from '../core/contracts';
 import { makeCharacter } from '../player/character';
 import { PoseBuffer } from './interp';
-import type { GroveRoom } from './session';
+import type { ZoneRoom } from './session';
 
 /** Speed (m/s) above which a remote adventurer plays the run cycle. */
 const RUN_ABOVE = 0.8;
@@ -39,8 +39,24 @@ export interface Remotes {
   dispose(): void;
 }
 
-/** Character views are kept and reused, so adventurers coming and going do not pile up shadow casters. */
+/**
+ * Character views are kept and reused, so adventurers coming and going do not pile up shadow casters. The pool
+ * belongs to one scene: when the scene changes (a zone change) or is disposed, its spare views are disposed.
+ */
 const spare: CharacterView[] = [];
+let spareScene: Scene | null = null;
+function clearSpare(): void {
+  for (const v of spare.splice(0)) v.dispose();
+  spareScene = null;
+}
+function useScene(scene: Scene): void {
+  if (spareScene === scene) return;
+  clearSpare();
+  spareScene = scene;
+  scene.onDisposeObservable.addOnce(() => { if (spareScene === scene) clearSpare(); });
+}
+/** Spare character views waiting for reuse (tests and leak checks). */
+export const spareViews = (): number => spare.length;
 
 function injectStyles(): void {
   if (document.getElementById('sg-net-labels-css')) return;
@@ -50,8 +66,9 @@ function injectStyles(): void {
   document.head.appendChild(s);
 }
 
-export function createRemotes(scene: Scene, world: WorldApi, room: GroveRoom, mySessionId: string): Remotes {
+export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, mySessionId: string): Remotes {
   injectStyles();
+  useScene(scene);
   const layer = document.createElement('div');
   layer.className = 'sg-hud sg-labels';
   // Under the HUD panels (#hud), above the 3D view.
@@ -84,6 +101,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: GroveRoom, my
     if (!r) return;
     remotes.delete(sessionId);
     r.label.remove();
+    if (scene.isDisposed || spareScene !== scene) { r.view.dispose(); return; }
     r.view.root.position.copyFrom(PARK);
     r.view.root.setEnabled(false);
     spare.push(r.view);

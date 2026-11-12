@@ -1,14 +1,20 @@
-// Shady Grove 2 — online: sign in, then walk the grove with everyone else who is here.
-// The server owns positions; this page sends the adventurer's pose and draws the others.
+// Shady Grove 2 — online: sign in, then walk the world with everyone else who is here.
+// The server owns positions; this page sends the adventurer's pose and draws the others and the enemies.
+// One room per zone: the page asks the server which zone the adventurer is in, builds that zone and joins
+// its room. Walking through an open gate makes the server send `travel`: the screen fades, the room ends,
+// the next zone is built on the same engine, its room is joined, and the screen fades back in.
 import { Matrix, Vector3 } from '@babylonjs/core';
 import {
   CLIENT_RECONNECTION,
-  REASON_GROVE_FULL,
+  REASON_ELSEWHERE,
   REASON_NAME_FIRST,
   RECONNECT_SECONDS,
   TICK_HZ,
+  zoneDef,
+  zoneFullReason,
   type C2S,
   type S2C,
+  type ZoneId,
 } from '@sg2/shared';
 import type { HudState } from './core/contracts';
 import { bootGame } from './boot';
@@ -17,6 +23,7 @@ import { createChat } from './net/chatBox';
 import { showLogin } from './net/loginScreen';
 import { LeaveNameScreen, showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
+import { createEnemies, type Enemies } from './net/enemies';
 import {
   UNREACHABLE,
   connect,
@@ -26,16 +33,19 @@ import {
   rememberName,
   savedAccount,
   savedToken,
-  type GroveRoom,
+  zoneFor,
   type PlayerView,
   type SentPose,
+  type ZoneRoom,
 } from './net/session';
 
 const CONNECTION_LOST = 'Connection lost';
 const CONNECTING = 'Connecting…';
 const RECONNECTING = 'Reconnecting…';
 /** Join refusals that say nothing against the account: its saved token is kept, so "Continue as" stays on offer. */
-const KEEP_TOKEN_ON = new Set([UNREACHABLE, REASON_GROVE_FULL]);
+const KEEP_TOKEN_ON = new Set([UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway')]);
+/** How long the screen takes to fade out and back in around a zone change, in s. */
+const TRAVEL_FADE_S = 0.6;
 /** Longest wait after joining for the room to show this adventurer. */
 const ENTER_TIMEOUT_MS = 15_000;
 
@@ -47,17 +57,36 @@ const CSS = /* css */ `
 .sg-net-off{display:none}
 .sg-hurt-edge{position:absolute;inset:0;opacity:0;pointer-events:none;
   background:radial-gradient(ellipse at center,transparent 50%,rgba(214,40,32,.55))}
+.sg-travel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;pointer-events:none;
+  font:600 18px/1.3 var(--sans,system-ui,sans-serif);color:#fff6e6;letter-spacing:.04em;text-shadow:0 1px 6px rgba(0,0,0,.6);
+  opacity:0;transition:opacity .3s}
+.sg-travel.on{opacity:1}
 `;
 
-interface NetDebug { remotes: { name: string; x: number; z: number; y: number }[] }
+interface NetDebug {
+  remotes: { name: string; x: number; z: number; y: number }[];
+  /** The room's enemies as the server states them. */
+  enemies: { eid: number; kind: string; x: number; z: number; hp: number; mode: string; windup: string }[];
+  /** The zone whose room this page is in (or is joining). */
+  zone: ZoneId;
+  /** Zone changes so far, and how long the last took from `travel` to standing in the next room (ms, wall clock). */
+  travels: number;
+  lastTravelMs: number;
+  /** How long building the last zone took (ms, wall clock). */
+  lastLoadMs: number;
+}
+/** What ended a connection: a reason for the login screen, or a travel to another zone. */
+type Ended = { reason: string } | { travel: ZoneId };
 
 function boot(): void {
-  let room: GroveRoom | null = null;
+  let room: ZoneRoom | null = null;
   let remotes: Remotes | null = null;
+  let enemies: Enemies | null = null;
 
   const game = bootGame({ busy: () => !room });
-  const { hud, rig, scene, world, hudRoot } = game;
-  rig.setMoveScale(0);
+  const { hud, hudRoot } = game;
+  game.rig.setMoveScale(0);
+  game.onZoneLoaded(() => game.rig.setMoveScale(0)); // a new zone's adventurer waits for its room
   hud.setVisible(false);
 
   const style = document.createElement('style');
@@ -68,11 +97,16 @@ function boot(): void {
   const status = h('div', 'sg-online', h('div', 'sg-hud', hudRoot));
   const chat = createChat(netUi, (text) => room && send(room, 'chat', { text }));
   const hurtEdge = h('div', 'sg-hurt-edge', hudRoot);
+  const travelLabel = h('div', 'sg-travel', document.body);
 
-  const net: NetDebug = { remotes: [] };
+  const net: NetDebug = { remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0 };
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
   // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
-  (window as unknown as Record<string, unknown>).__sg2 = { rig, world, hud, scene, engine: game.engine };
+  // Getters: a zone change replaces the scene, world and rig.
+  (window as unknown as Record<string, unknown>).__sg2 = {
+    get rig() { return game.rig; }, get world() { return game.world; }, get scene() { return game.scene; },
+    hud, engine: game.engine, game,
+  };
 
   const state: HudState = {
     player: { name: 'Adventurer', hp: 100, maxHp: 100, statuses: [], level: 1, weapon: 'blade', cast: null },
@@ -89,6 +123,7 @@ function boot(): void {
   let statusText = '';
   game.start((dt) => {
     remotes?.update(dt);
+    enemies?.update(dt);
     let text = connecting ? CONNECTING : '';
     if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.players?.size ?? 0}`;
     if (text !== statusText) {
@@ -101,6 +136,7 @@ function boot(): void {
 
   /** A fall cost health: "−n" floats up from the adventurer, and the screen edge flashes red. */
   const showHurt = (amount: number) => {
+    const { scene, rig } = game;
     const canvas = scene.getEngine().getRenderingCanvas();
     const w = canvas?.clientWidth ?? window.innerWidth, ht = canvas?.clientHeight ?? window.innerHeight;
     const camera = scene.activeCamera;
@@ -115,10 +151,15 @@ function boot(): void {
     hurtEdge.animate([{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 0 }], { duration: 600, easing: 'ease-out' });
   };
 
-  /** Plays one connection until it ends; resolves with what the login screen should say. */
-  function play(r: GroveRoom): Promise<string> {
+  /** Set from a `travel` message until the next room is entered: the zone, the fade and when it began. */
+  let travelling: { zone: ZoneId; fade: Promise<void>; since: number } | null = null;
+
+  /** Plays one connection (to zone `zone`'s room) until it ends; resolves with what ended it. */
+  function play(r: ZoneRoom, zone: ZoneId): Promise<Ended> {
+    const rig = game.rig;
     return new Promise((resolve) => {
       let kickedFor = '';
+      let travelTo: ZoneId | null = null;
       let lostTimer = 0;
       let sendTimer = 0;
       let entered = false;
@@ -145,11 +186,26 @@ function boot(): void {
         Object.assign(sent, { x: m.x, z: m.z, y: m.y });
       });
       r.onMessage('hurt', (m: S2C['hurt']) => { if (m.amount > 0) showHurt(m.amount); });
+      r.onMessage('notice', (m: S2C['notice']) => hud.toast(m.text));
+      r.onMessage('travel', (m: S2C['travel']) => {
+        // The server has moved the adventurer to `m.zone` and ends this session: fade out meanwhile.
+        if (travelTo) return;
+        travelTo = m.zone;
+        rig.setMoveScale(0);
+        game.walkTo(null);
+        clearInterval(sendTimer);
+        travelLabel.textContent = `${zoneDef(m.zone).name}…`;
+        travelLabel.classList.add('on');
+        travelling = { zone: m.zone, fade: hud.fade(true, '#16122a', TRAVEL_FADE_S), since: performance.now() };
+      });
 
       const onState = () => {
         const list: NetDebug['remotes'] = [];
         r.state.players?.forEach((p, id) => { if (id !== r.sessionId) list.push({ name: p.name, x: p.x, z: p.z, y: p.y }); });
         net.remotes = list;
+        const foes: NetDebug['enemies'] = [];
+        r.state.enemies?.forEach((e) => foes.push({ eid: e.eid, kind: e.kind, x: e.x, z: e.z, hp: e.hp, mode: e.mode, windup: e.windup }));
+        net.enemies = foes;
         const me = r.state.players?.get(r.sessionId);
         if (me && !entered) enter(me);
         if (me) { state.player.hp = me.hp; state.player.maxHp = me.maxHp; }
@@ -163,11 +219,20 @@ function boot(): void {
         rig.place(new Vector3(me.x, me.y, me.z)); // a re-join in mid-air carries on falling from there
         Object.assign(sent, { x: me.x, z: me.z, y: me.y, facing: me.facing, moving: false });
         room = r;
-        remotes = createRemotes(scene, world, r, r.sessionId);
+        remotes = createRemotes(game.scene, game.world, r, r.sessionId);
+        enemies = createEnemies(game.scene, game.world, r);
         rig.setMoveScale(1);
         hud.setVisible(true);
         netUi.className = '';
-        hud.banner('The Plaza of the Two', 'Shady Grove');
+        if (travelling) {
+          net.travels++;
+          net.lastTravelMs = performance.now() - travelling.since;
+          travelling = null;
+          travelLabel.classList.remove('on');
+          void hud.fade(false, '#16122a', TRAVEL_FADE_S);
+        }
+        const [title, subtitle] = zoneDef(zone).banner;
+        hud.banner(title, subtitle);
         sendTimer = window.setInterval(sendPose, 1000 / TICK_HZ);
       };
       const sendPose = () => {
@@ -189,15 +254,19 @@ function boot(): void {
         clearInterval(sendTimer);
         remotes?.dispose();
         remotes = null;
+        enemies?.dispose();
+        enemies = null;
         room = null;
         net.remotes = [];
+        net.enemies = [];
         rig.setMoveScale(0);
         game.walkTo(null);
         hud.setVisible(false);
         netUi.className = 'sg-net-off';
         (document.activeElement as HTMLElement | null)?.blur?.();
+        if (travelTo && !kickedFor) { resolve({ travel: travelTo }); return; }
         if (kickedFor) forgetToken(); // a reload must not sign in again and kick the other place
-        resolve(kickedFor || CONNECTION_LOST);
+        resolve({ reason: kickedFor || CONNECTION_LOST });
       });
     });
   }
@@ -223,20 +292,49 @@ function boot(): void {
         return false;
       }
     };
+    /** Builds `zone` if it is not the one loaded. */
+    const ensureZone = (zone: ZoneId) => {
+      net.zone = zone;
+      if (game.zone === zone) return;
+      const t0 = performance.now();
+      game.loadZone(zone);
+      net.lastLoadMs = performance.now() - t0;
+    };
+    /**
+     * Joins the adventurer's zone: `zone` when known (a travel), else whatever /api/zone says. A join refused
+     * because the adventurer is somewhere else asks /api/zone again and tries once more.
+     */
+    const join = async (token: string, zone: ZoneId | null): Promise<{ r: ZoneRoom; zone: ZoneId }> => {
+      let z = zone ?? await zoneFor(token);
+      ensureZone(z);
+      try {
+        return { r: await connect(token, z), zone: z };
+      } catch (err) {
+        if (!(err instanceof Error) || err.message !== REASON_ELSEWHERE) throw err;
+        z = await zoneFor(token);
+        ensureZone(z);
+        return { r: await connect(token, z), zone: z };
+      }
+    };
+    let travelToken: string | null = null;
     for (;;) {
-      let token = resume;
+      let token: string | null = travelToken ?? resume;
+      const arriving = travelling as { zone: ZoneId; fade: Promise<void>; since: number } | null;
+      travelToken = null;
       resume = null;
       if (!token) {
         const session = await showLogin(hudRoot, notice, savedAccount());
         token = session.token;
         if (session.name === null && !(await chooseName(token))) continue;
       }
-      let r: GroveRoom;
+      let joined: { r: ZoneRoom; zone: ZoneId };
       connecting = true;
       try {
-        r = await connect(token);
+        if (arriving) await arriving.fade; // build the next zone behind the faded screen
+        joined = await join(token, arriving?.zone ?? null);
       } catch (err) {
         connecting = false;
+        if (arriving) { travelling = null; travelLabel.classList.remove('on'); void hud.fade(false, '#16122a', TRAVEL_FADE_S); }
         const message = err instanceof Error ? err.message : CONNECTION_LOST;
         if (message === REASON_NAME_FIRST) {
           // A reload while choosing a name: carry on choosing it, then join.
@@ -247,12 +345,14 @@ function boot(): void {
         notice = message;
         continue;
       }
-      notice = await play(r);
+      const ended = await play(joined.r, joined.zone);
+      if ('travel' in ended) { travelToken = token; continue; }
+      notice = ended.reason;
     }
   })();
 }
 
-function send<K extends keyof C2S>(r: GroveRoom, type: K, message: C2S[K]): void {
+function send<K extends keyof C2S>(r: ZoneRoom, type: K, message: C2S[K]): void {
   r.send(type, message);
 }
 

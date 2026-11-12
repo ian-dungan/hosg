@@ -1,8 +1,11 @@
 // Shady Grove 2 — what every entry starts with: engine, world, HUD, the adventurer and their camera,
 // tap-to-walk, the touch Jump button and a render loop that steps quality down on slow devices.
-import { Color3, Engine, MeshBuilder, Scene, StandardMaterial, Vector3 } from '@babylonjs/core';
-import type { HudApi, PlayerRig, Quality, TapInfo, WorldApi } from './core/contracts';
+// A zone change (loadZone) disposes the scene and builds the next zone's world, rig and camera in a new
+// Scene on the same Engine; the HUD, settings, quality and tap-to-walk state carry over.
+import { Color3, Engine, MeshBuilder, Scene, StandardMaterial, Vector3, type Mesh } from '@babylonjs/core';
+import type { HudApi, PlayerRig, Quality, TapInfo, WorldApi, ZoneId } from './core/contracts';
 import { buildWorld } from './world/index';
+import { buildGreenway } from './world/greenway';
 import { createPlayerRig } from './player/rig';
 import { createHud } from './hud/index';
 import { SAFE_FALL, findPath, withClearance, type Vec2 } from '@sg2/shared';
@@ -21,6 +24,8 @@ export interface GameOpts {
   onTap?: (tap: TapInfo) => boolean;
   /** True while something holds the adventurer (dialogue, cutscene): tap-to-walk stops and Jump does nothing. */
   busy?: () => boolean;
+  /** The zone to build first (default 'grove'). */
+  zone?: ZoneId;
 }
 
 export interface Game {
@@ -28,10 +33,19 @@ export interface Game {
   readonly hudRoot: HTMLElement;
   readonly touch: boolean;
   readonly engine: Engine;
+  /** The current zone's scene, world and rig: each zone change replaces them (read them through the game). */
   readonly scene: Scene;
   readonly world: WorldApi;
   readonly hud: HudApi;
   readonly rig: PlayerRig;
+  readonly zone: ZoneId;
+  /**
+   * Disposes the current scene and builds `zone`'s world, rig and camera in a new Scene on the same Engine
+   * (the adventurer stands at the zone's start until placed). The HUD, settings and quality carry over.
+   */
+  loadZone(zone: ZoneId): void;
+  /** Called after every loadZone, with the zone now loaded. */
+  onZoneLoaded(cb: (zone: ZoneId) => void): void;
   /**
    * Tap-to-walk: find a way to `p` and walk it (null stops). With `arrive`, stop `within` metres of it and call
    * `then`. Does nothing while the "Tap to walk" setting is off; toasts "Can't get there" when there is no way.
@@ -56,9 +70,10 @@ export function bootGame(opts: GameOpts = {}): Game {
   const engine = new Engine(canvas, !touch, { stencil: true, powerPreference: 'high-performance' });
   // Cap render resolution so phones stay smooth.
   engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, touch ? 1.5 : 2));
-  const scene = new Scene(engine);
-
-  const world = buildWorld(scene);
+  let scene = new Scene(engine);
+  let zone: ZoneId = opts.zone ?? 'grove';
+  const build = (z: ZoneId) => (z === 'greenway' ? buildGreenway : buildWorld)(scene);
+  let world = build(zone);
   // Every device starts on full settings; a device that cannot keep up steps down by itself (see the render loop).
   let quality: Quality = 'high';
   world.setQuality(quality);
@@ -69,7 +84,7 @@ export function bootGame(opts: GameOpts = {}): Game {
   // ── tap-to-walk: tap the ground (or a person) and the character finds a way there round obstacles ──
   // Routes keep to the ground (no jumps, platforms count as blocked) and stay CLEARANCE m from anything
   // blocked, so the adventurer does not snag on corners.
-  const passable = withClearance((x, z) => world.groundAt(x, z) !== null, CLEARANCE);
+  let passable = withClearance((x, z) => world.groundAt(x, z) !== null, CLEARANCE);
   let rigRef: PlayerRig | null = null;
   let route: Vec2[] = [];                  // waypoints still to reach; the last is where the walk ends
   let walkGoal: Vector3 | null = null;     // the tapped point or person
@@ -77,13 +92,17 @@ export function bootGame(opts: GameOpts = {}): Game {
   let walkOnGround = false;                // the walk has had the adventurer on the ground (not up on something)
   let stuckTime = 0;
   const lastPos = new Vector3();
-  const marker = MeshBuilder.CreateTorus('walkMarker', { diameter: 1.1, thickness: 0.09, tessellation: 24 }, scene);
-  const markerMat = new StandardMaterial('walkMarkerMat', scene);
-  markerMat.emissiveColor = Color3.FromHexString('#F2B742');
-  markerMat.disableLighting = true;
-  marker.material = markerMat;
-  marker.isPickable = false;
-  marker.setEnabled(false);
+  const makeMarker = (): Mesh => {
+    const m = MeshBuilder.CreateTorus('walkMarker', { diameter: 1.1, thickness: 0.09, tessellation: 24 }, scene);
+    const mat = new StandardMaterial('walkMarkerMat', scene);
+    mat.emissiveColor = Color3.FromHexString('#F2B742');
+    mat.disableLighting = true;
+    m.material = mat;
+    m.isPickable = false;
+    m.setEnabled(false);
+    return m;
+  };
+  let marker = makeMarker();
   const stopWalk = () => {
     route = []; walkGoal = null; walkThen = null; stuckTime = 0; walkOnGround = false;
     marker.setEnabled(false);
@@ -149,34 +168,62 @@ export function bootGame(opts: GameOpts = {}): Game {
     if (!isTyping(e) && /^(Key[WASD]|Arrow)/.test(e.code)) stopWalk();
   });
 
-  const rig = createPlayerRig(scene, {
-    canvas,
-    world,
-    joystick: () => walkInput(),
-    onTap: (tap: TapInfo) => {
-      if (opts.onTap?.(tap)) return;
-      if (busy() || !hud.settings.tapToWalk) return;
-      if (tap.point) walkTo(tap.point);        // tap the ground (or something on it) to walk there
-    },
-  });
+  const makeRig = (): PlayerRig => {
+    const r = createPlayerRig(scene, {
+      canvas,
+      world,
+      joystick: () => walkInput(),
+      onTap: (tap: TapInfo) => {
+        if (opts.onTap?.(tap)) return;
+        if (busy() || !hud.settings.tapToWalk) return;
+        if (tap.point) walkTo(tap.point);        // tap the ground (or something on it) to walk there
+      },
+    });
+    world.attachCamera(r.camera);
+    world.addShadowCaster(r.view.root);
+    r.camera.maxZ = 8000;   // the sky dome must never be clipped, even when the camera looks up
+    const start = world.anchor('playerStart');
+    r.teleport(start.pos, start.facing);
+    return r;
+  };
+  let rig = makeRig();
   rigRef = rig;
-  world.attachCamera(rig.camera);
-  world.addShadowCaster(rig.view.root);
-  rig.camera.maxZ = 8000;   // the sky dome must never be clipped, even when the camera looks up
-  const start = world.anchor('playerStart');
-  rig.teleport(start.pos, start.facing);
+
+  const zoneLoaded: ((z: ZoneId) => void)[] = [];
+  function loadZone(z: ZoneId): void {
+    stopWalk();
+    rig.dispose();
+    rigRef = null;
+    scene.dispose();
+    scene = new Scene(engine);
+    zone = z;
+    world = build(z);
+    world.setQuality(quality);
+    fpsSettle = 4; slowTime = 0;
+    passable = withClearance((x, zz) => world.groundAt(x, zz) !== null, CLEARANCE);
+    marker = makeMarker();
+    rig = makeRig();
+    rigRef = rig;
+    for (const cb of zoneLoaded) cb(z);
+  }
 
   if (touch) {
     const jb = document.createElement('div');
     jb.textContent = 'Jump';
     jb.style.cssText = 'position:fixed;right:max(18px,env(safe-area-inset-right));bottom:calc(max(18px,env(safe-area-inset-bottom)) + 96px);width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 15px system-ui,sans-serif;color:#3a2a08;background:rgba(242,183,66,.88);box-shadow:0 2px 10px rgba(0,0,0,.3);pointer-events:auto;touch-action:none;';
-    jb.addEventListener('pointerdown', (e) => { e.preventDefault(); if (!busy()) rig.jump(); });
+    jb.addEventListener('pointerdown', (e) => { e.preventDefault(); if (!busy()) rigRef?.jump(); });
     hudRoot.appendChild(jb);
   }
   window.addEventListener('resize', () => engine.resize());
 
   return {
-    canvas, hudRoot, touch, engine, scene, world, hud, rig,
+    canvas, hudRoot, touch, engine, hud,
+    get scene() { return scene; },
+    get world() { return world; },
+    get rig() { return rig; },
+    get zone() { return zone; },
+    loadZone,
+    onZoneLoaded(cb) { zoneLoaded.push(cb); },
     walkTo,
     start(frame) {
       let last = performance.now();

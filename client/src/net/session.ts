@@ -1,9 +1,11 @@
-// Talking to the Shady Grove 2 server: the accounts API and joining the grove room.
+// Talking to the Shady Grove 2 server: the accounts API, asking which zone the adventurer is in, and joining
+// that zone's room (one room per zone, named by the zone id).
 // The server is the origin that served the page. In development builds only, `?server=http://host:port`
 // points the room connection somewhere else (the /api requests stay on the page's origin, which the
 // dev server proxies; see vite.config.ts). Production builds never read it: a crafted link must not
 // send the player's token to another server.
 import { Client, ErrorCode, type Room } from '@colyseus/sdk';
+import { isZoneId, type ZoneId } from '@sg2/shared';
 
 /** One adventurer as the room state shows it (the server's PlayerState). */
 export interface PlayerView {
@@ -19,16 +21,42 @@ export interface PlayerView {
   readonly maxHp: number;
 }
 
-/** The grove room's synchronised state (the server's ZoneState), keyed by sessionId; `players` is missing until the first state arrives. */
-export interface ZoneState {
-  readonly players?: {
-    get(sessionId: string): PlayerView | undefined;
-    forEach(cb: (player: PlayerView, sessionId: string) => void): void;
-    readonly size: number;
-  };
+/** One enemy as the room state shows it (the server's EnemyState, from Task 6). */
+export interface EnemyStateView {
+  readonly eid: number;
+  readonly kind: string;
+  readonly x: number;
+  readonly z: number;
+  readonly y: number;
+  readonly facing: number;
+  readonly hp: number;
+  readonly maxHp: number;
+  /** 'idle' | 'fight' | 'windup' | 'stunned' | 'return' | 'dead'. */
+  readonly mode: string;
+  /** The attack being wound up ('' when none) and its whole wind-up time in s. */
+  readonly windup: string;
+  readonly windupTotal: number;
 }
 
-export type GroveRoom = Room<ZoneState>;
+/** A synchronised map in the room state (a Colyseus MapSchema as the client sees it). */
+export interface StateMap<T> {
+  get(key: string): T | undefined;
+  forEach(cb: (value: T, key: string) => void): void;
+  readonly size: number;
+}
+
+/**
+ * A zone room's synchronised state (the server's ZoneState): players keyed by sessionId, enemies keyed by
+ * String(eid). Each is missing until the first state arrives (enemies until the server has combat).
+ */
+export interface ZoneState {
+  readonly players?: StateMap<PlayerView>;
+  readonly enemies?: StateMap<EnemyStateView>;
+}
+
+export type ZoneRoom = Room<ZoneState>;
+/** Kept for older callers: every zone room has the same state. */
+export type GroveRoom = ZoneRoom;
 
 /** Smallest pose change worth sending (m or rad); the rig's slow-down never quite reaches zero. */
 const POSE_EPSILON = 1e-3;
@@ -50,7 +78,7 @@ const NAME_KEY = 'sg2.name';
 const TIMEOUT_MS = 15_000;
 export const UNREACHABLE = 'Cannot reach the server';
 /** A join refused because the token is no good (expired, or its account is gone). */
-const SIGN_IN_AGAIN = 'Please sign in again';
+export const SIGN_IN_AGAIN = 'Please sign in again';
 
 /**
  * The room server: the page's own origin, or in a development build `?server=` when it is a valid
@@ -184,11 +212,31 @@ export async function nameAdventurer(token: string, name: string): Promise<NameR
   }
 }
 
-/** Joins the grove with a token. Throws an Error with the server's reason if the join is refused. */
-export async function connect(token: string): Promise<GroveRoom> {
+/**
+ * Which zone the token's adventurer is in (GET /api/zone): the room to join. Throws Error(SIGN_IN_AGAIN) when
+ * the token is no good, else Error(UNREACHABLE) when the server cannot answer.
+ */
+export async function zoneFor(token: string): Promise<ZoneId> {
+  const controller = new AbortController();
+  let res: Response, body: unknown;
+  try {
+    res = await withTimeout(fetch('/api/zone', { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }), UNREACHABLE);
+    body = await withTimeout(res.json(), UNREACHABLE).catch(() => null);
+  } catch {
+    controller.abort();
+    throw new Error(UNREACHABLE);
+  }
+  if (res.status === 401) throw new Error(SIGN_IN_AGAIN);
+  const zone = (body as { zone?: unknown } | null)?.zone;
+  if (!res.ok || !isZoneId(zone)) throw new Error(UNREACHABLE);
+  return zone;
+}
+
+/** Joins zone `zone`'s room with a token. Throws an Error with the server's reason if the join is refused. */
+export async function connect(token: string, zone: ZoneId = 'grove'): Promise<ZoneRoom> {
   const client = new Client(serverUrl());
   for (let attempt = 1; ; attempt++) {
-    const joining = client.joinOrCreate<ZoneState>('grove', { token });
+    const joining = client.joinOrCreate<ZoneState>(zone, { token });
     try {
       return await withTimeout(joining, UNREACHABLE);
     } catch (err) {

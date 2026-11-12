@@ -282,6 +282,22 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
         camera.radius += (radiusGoal - camera.radius) * (1 - Math.exp(-10 * dt));
       }
     },
+    dispose() {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onCancel);
+      canvas.removeEventListener('lostpointercapture', onCancel);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('contextmenu', onCtx);
+      for (const id of ptrs.keys()) { try { canvas.releasePointerCapture(id); } catch { /* ignore */ } }
+      ptrs.clear(); keys.clear();
+      view.dispose();
+      camera.dispose();
+    },
   };
   view.root.position.copyFrom(position);
   return rig;

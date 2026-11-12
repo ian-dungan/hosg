@@ -8,7 +8,7 @@ import type { Body } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
-export type ZoneId = 'grove' | 'beacon' | 'arena';
+export type ZoneId = 'grove' | 'beacon' | 'arena' | 'greenway';
 export type Quality = 'low' | 'med' | 'high';
 export type WeaponId = 'blade' | 'bow';
 export type EntityKind = 'player' | 'companion' | 'grunt' | 'archer' | 'brute' | 'warden';
@@ -126,6 +126,8 @@ export interface PlayerRig {
   /** Jump on the next step if on the ground (Space also does this). */
   jump(): void;
   update(dt: number): void;
+  /** Removes the rig's input listeners and disposes its character and camera (a zone change builds a new rig). */
+  dispose(): void;
 }
 /** Implemented in src/player/rig.ts. Desktop: WASD/arrows move, drag rotates, wheel zooms.
  *  Touch: joystick moves, one-finger drag on the view rotates, pinch zooms. Movement is camera-relative. */

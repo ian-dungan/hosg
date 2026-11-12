@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { forgetToken, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl } from './session';
+import { SIGN_IN_AGAIN, UNREACHABLE, forgetToken, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, zoneFor } from './session';
 
 const page = (search: string) => ({ origin: 'http://game.example:2570', search });
 
@@ -126,5 +126,35 @@ describe('poseWorthSending', () => {
   });
   it('always sends when nothing has been sent yet (NaN)', () => {
     expect(poseWorthSending(last, { x: NaN, z: NaN, y: NaN, facing: NaN, moving: false })).toBe(true);
+  });
+});
+
+describe('zoneFor', () => {
+  const answer = (status: number, body: unknown, seen?: { url?: string; auth?: string | null }) => {
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (seen) { seen.url = url; seen.auth = new Headers(init?.headers).get('Authorization'); }
+      return new Response(JSON.stringify(body), { status });
+    });
+  };
+
+  it('asks GET /api/zone with the token and answers the zone', async () => {
+    const seen: { url?: string; auth?: string | null } = {};
+    answer(200, { zone: 'greenway' }, seen);
+    await expect(zoneFor('tok')).resolves.toBe('greenway');
+    expect(seen).toEqual({ url: '/api/zone', auth: 'Bearer tok' });
+    answer(200, { zone: 'grove' });
+    await expect(zoneFor('tok')).resolves.toBe('grove');
+  });
+
+  it('a refused token means signing in again; anything else is an unreachable server', async () => {
+    answer(401, { error: 'Please sign in again' });
+    await expect(zoneFor('bad')).rejects.toThrow(SIGN_IN_AGAIN);
+    answer(200, { zone: 'narnia' });
+    await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
+    answer(500, { error: 'boom' });
+    await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
+    vi.stubGlobal('fetch', async () => { throw new TypeError('Failed to fetch'); });
+    await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
   });
 });
