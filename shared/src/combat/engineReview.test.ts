@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCombat, worldOf, type CampSpawn, type CombatZone } from './engine';
 import { applyStagger, hurtAdventurer, killEnemy } from './adventurer';
-import { DEFAULT_LOADOUT, type Loadout } from './abilities';
+import { PLAN3_DEFAULT_LOADOUT as DEFAULT_LOADOUT, type Plan3Loadout as Loadout } from './abilities'; // Plan 3 shapes until Task 2
 import { ENEMY_ATTACKS } from './enemies';
 
 const flat = (camps: CampSpawn[]): CombatZone => {

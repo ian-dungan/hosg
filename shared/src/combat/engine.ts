@@ -2,7 +2,7 @@
 // advances the fight one tick at a time. Server-authoritative: the client only ever sends intents.
 // Pure and deterministic: the same seed, poses, intents and tick times give the same TickOut stream.
 import type { Surface } from '../body';
-import type { AbilityId, Loadout, WeaponId } from './abilities';
+import type { AbilityId, Loadout, Plan3Loadout, WeaponId } from './abilities';
 import type { EnemyAttackId, EnemyKindData, EnemyKindId } from './enemies';
 import { ENEMY_KINDS } from './enemies';
 import type { FxEvent } from './fx';
@@ -74,7 +74,7 @@ export interface Carry {
  */
 export interface Combat {
   /** carry: what a relog keeps (see Carry); clamped to the real numbers. Without it everything starts fresh. */
-  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Loadout; carry?: Carry }, nowS: number): number;
+  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Plan3Loadout | Loadout; carry?: Carry }, nowS: number): number;
   /** The relog snapshot of a present adventurer (take it before removeAdventurer), else undefined. */
   carryOf(id: number): Carry | undefined;
   /** Also drops it from every threat table. */
@@ -91,7 +91,8 @@ export interface Combat {
   all(): Iterable<CombatantView>; telegraphs(): Iterable<TelegraphView>;
   /** 1.4 while sprinting (+SPEED_GRACE_S), 0.4 from CHARGE_SLOW_GRACE_S into a charge, else 1 (both: the product). */
   speedScale(id: number, nowS: number): number;
-  loadout(id: number): Loadout | undefined;
+  /** Until Task 2: the Plan 3 loadout the engine runs. */
+  loadout(id: number): Plan3Loadout | undefined;
 }
 
 // ───────── internal state (shared with adventurer.ts and the enemy AI) ─────────
@@ -101,7 +102,8 @@ export interface AdventurerState {
   stats: Stats; hp: number; alive: boolean; diedAt: number;
   /** '' | 'dodge' | 'knock' | 'dead' ('charge' is derived from `charge`); dodge and knock last until actUntil. */
   act: Act; actUntil: number;
-  loadout: Loadout; slots: AbilityId[];
+  /** Until Task 2 the engine runs Plan 3 loadouts (plan3LoadoutOf). */
+  loadout: Plan3Loadout; slots: AbilityId[];
   momentum: number;
   /** Last combat damage dealt (Momentum decay), dealt or taken (in combat), and any damage taken (regen delay). */
   lastDealtAt: number; lastCombatAt: number; lastHurtAt: number;

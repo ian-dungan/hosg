@@ -1,4 +1,5 @@
 // Enemy kinds and their telegraphed attacks. Raw damage is before the adventurer's defence.
+import type { ElementId } from './elements';
 
 export type EnemyKindId = 'thornling' | 'boar' | 'archer' | 'mossback' | 'dummy';
 export type EnemyAttackId = 'thorn_burst' | 'gore_charge' | 'briar_volley' | 'ground_slam' | 'thorn_hail';
@@ -21,6 +22,8 @@ export interface EnemyKindData {
   /** keepRange: a ranged enemy stops closing in at this distance. */
   auto: { reach: number; every: number; raw: number; ranged: boolean } | null; keepRange?: number;
   attacks: EnemyAttackId[];
+  /** Elemental damage of `weak` deals ELEMENT_WEAK_MULT, of `resist` ELEMENT_RESIST_MULT. */
+  weak?: ElementId; resist?: ElementId;
 }
 
 export const ENEMY_ATTACKS: Record<EnemyAttackId, EnemyAttackData> = {
@@ -52,22 +55,22 @@ export const ENEMY_KINDS: Record<EnemyKindId, EnemyKindData> = {
   thornling: {
     id: 'thornling', name: 'Thornling', elite: false, hp: 210, defence: 6, radius: 0.5, speed: 5.0,
     aggro: 7, leash: 25, respawn: 25, stagger: 0,
-    auto: { reach: 1.8, every: 1.6, raw: 6, ranged: false }, attacks: ['thorn_burst'],
+    auto: { reach: 1.8, every: 1.6, raw: 6, ranged: false }, attacks: ['thorn_burst'], weak: 'fire', resist: 'water',
   },
   boar: {
     id: 'boar', name: 'Bramble Boar', elite: false, hp: 180, defence: 12, radius: 0.8, speed: 4.5,
     aggro: 7, leash: 25, respawn: 25, stagger: 0,
-    auto: { reach: 2.2, every: 2.0, raw: 8, ranged: false }, attacks: ['gore_charge'],
+    auto: { reach: 2.2, every: 2.0, raw: 8, ranged: false }, attacks: ['gore_charge'], weak: 'water', resist: 'earth',
   },
   archer: {
     id: 'archer', name: 'Hollow Archer', elite: false, hp: 210, defence: 6, radius: 0.5, speed: 4.0,
     aggro: 9, leash: 25, respawn: 25, stagger: 0,
-    auto: { reach: 14, every: 2.2, raw: 7, ranged: true }, keepRange: 12, attacks: ['briar_volley'],
+    auto: { reach: 14, every: 2.2, raw: 7, ranged: true }, keepRange: 12, attacks: ['briar_volley'], weak: 'lightning',
   },
   mossback: {
     id: 'mossback', name: 'Mossback', elite: true, hp: 750, defence: 15, radius: 1.3, speed: 4.0,
     aggro: 9, leash: 30, respawn: 90, stagger: 100,
-    auto: { reach: 2.8, every: 2.4, raw: 7, ranged: false }, attacks: ['ground_slam', 'thorn_hail'],
+    auto: { reach: 2.8, every: 2.4, raw: 7, ranged: false }, attacks: ['ground_slam', 'thorn_hail'], weak: 'fire', resist: 'earth',
   },
   /** For tests only: never moves, attacks or aggroes. */
   dummy: {

@@ -113,3 +113,64 @@ export const CHARGE_SLOW_GRACE_S = 0.25;
 export const SPEED_GRACE_S = 0.5;
 /** Client only: telegraph decals fill this much early. */
 export const TELEGRAPH_LEAD_S = 0.15;
+
+// ───────── jobs and magic ─────────
+/** Run-speed scale while casting, from CHARGE_SLOW_GRACE_S into the cast. */
+export const CAST_MOVE_SCALE = 0.5;
+/** Extra range at the end of a cast, beyond range + RANGE_FUZZ. */
+export const CAST_RANGE_SLACK = 2;
+/** Cooldown given to a spell whose cast was interrupted. */
+export const CAST_BREAK_LOCK_S = 1.5;
+/** Default range of ally-aimed abilities. */
+export const ALLY_RANGE = 18;
+/** An enemy carrying Rooted moves at this scale. */
+export const ROOTED_SPEED_SCALE = 0.6;
+/** Elemental damage against a weakness, and against a resistance. */
+export const ELEMENT_WEAK_MULT = 1.25;
+export const ELEMENT_RESIST_MULT = 0.75;
+/** Reactions: blast (fire on Marked). */
+export const BLAST_COEF = 4.5;
+export const BLAST_SPLASH_FRAC = 0.5;
+export const BLAST_SPLASH_R = 3;
+/** Reactions: conduct (lightning on Soaked). */
+export const CONDUCT_STUN_S = 1.5;
+export const CONDUCT_STAGGER = 20;
+/** Reactions: steam (water on Burning). */
+export const STEAM_R = 6;
+export const STEAM_HEAL = 12;
+/** Reactions: bedrock (earth on Dazed). */
+export const BEDROCK_R = 6;
+export const BEDROCK_SHIELD = 15;
+export const BEDROCK_S = 6;
+/** Outgoing damage multipliers. */
+export const ROAR_MULT = 1.2;
+export const PACT_MULT = 1.2;
+/** Crimson Pact multiplies the Dark Knight's lifesteal by this. */
+export const PACT_LIFESTEAL_MULT = 2;
+export const WEAKPOINT_MULT = 1.15;
+export const BEHIND_MULT = 1.25;
+/** "Behind": dot(facingDir(enemy), unit(attacker − enemy)) < BEHIND_COS (110° off the enemy's front). */
+export const BEHIND_COS = -0.342;
+export const PINPOINT_MULT = 1.1;
+export const OVERFLOW_MULT = 1.1;
+/** Damage taken: Steadfast, and Aegis on the Paladin and on its allies (the lowest applies, never both). */
+export const STEADFAST_TAKEN = 0.85;
+export const AEGIS_TAKEN = 0.4;
+export const AEGIS_ALLY_TAKEN = 0.7;
+/** Sheltered: this share of each hit (floored) moves to the sheltering Paladin. */
+export const SHELTER_SHARE = 0.5;
+/** Bloodbond shares each lifesteal heal with the lowest-hp other adventurer within this. */
+export const BLOODBOND_R = 15;
+/** Traits. */
+export const RHYTHM_AUTO_MOMENTUM = 15;
+export const STEADFAST_THREAT = 1.5;
+export const BLOCK_MOMENTUM = 5;
+export const BLOOD_LIFESTEAL = 0.2;
+export const BLOOD_MOMENTUM_PER_HP = 1 / 3;
+export const NINJA_DODGE_CHARGES = 3;
+export const EVASION_PERFECT_MOMENTUM = 25;
+export const OVERFLOW_CAST_MOMENTUM = 10;
+export const FONT_HEAL_MULT = 1.2;
+export const FONT_MOMENTUM_PER_HP = 0.5;
+export const FONT_MOMENTUM_CAP = 20;
+export const FONT_THREAT_MULT = 0.5;

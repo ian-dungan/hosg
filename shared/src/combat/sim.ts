@@ -2,13 +2,13 @@
 // through the real engine at TICK_HZ. It is how the time-to-kill and survival bands are checked.
 import { makeBody, stepBody, type Body } from '../body';
 import { RUN_SPEED, TICK_HZ } from '../constants';
-import { DEFAULT_LOADOUT, type WeaponId } from './abilities';
+import { PLAN3_DEFAULT_LOADOUT, type Plan3Loadout } from './abilities';
 import { adventurerBrain, newBrainMemory, REACTION_S, type BrainInput, type BrainMemory } from './brain';
 import type { EnemyKindId } from './enemies';
 import { createCombat, type Combat, type CombatZone } from './engine';
 
 export interface FightResult { firstHitAt: number | null; killedAt: number | null; ttk: number | null; died: boolean; hpLeft: number; dodges: number }
-export interface PartyMember { weapon: WeaponId; careful: boolean }
+export interface PartyMember { weapon: Plan3Loadout['weapon']; careful: boolean }
 export interface PartyResult {
   firstHitAt: number | null; killedAt: number | null; ttk: number | null;
   /** Per member, in the order given. */
@@ -47,7 +47,7 @@ export function brainInputFor(c: Combat, id: number, targetId: number | null, no
 
 /**
  * Scripted adventurers against one camp of `enemy` at (0, 0) on a flat 80 × 80 m field. Each starts
- * 12 m away with DEFAULT_LOADOUT's free picks and its weapon; the seed varies the approach angle
+ * 12 m away with PLAN3_DEFAULT_LOADOUT's free picks and its weapon; the seed varies the approach angle
  * (within ±45° of (0, −12), the members side by side), a careful brain's reaction (0.4–0.6 s) and
  * when each starts (0–0.5 s). Every 1/TICK_HZ s: the brain, the move toward moveTo with stepBody at
  * RUN_SPEED × speedScale (none while dodging or knocked), setPose, intents, tick; displacements are
@@ -64,7 +64,7 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
   const members = o.party.map((m, i) => {
     const side = (i - (n - 1) / 2) * 3; // 3 m apart, across the approach
     const x = Math.sin(angle) * -12 + Math.cos(angle) * side, z = Math.cos(angle) * -12 - Math.sin(angle) * side;
-    const id = c.addAdventurer({ x, z, y: 0, facing: angle, hp: 100, loadout: { weapon: m.weapon, free: [DEFAULT_LOADOUT.free[0], DEFAULT_LOADOUT.free[1]] } }, 0);
+    const id = c.addAdventurer({ x, z, y: 0, facing: angle, hp: 100, loadout: { weapon: m.weapon, free: [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]] } }, 0);
     const memory: BrainMemory = newBrainMemory(REACTION_S + rng() * 0.2);
     return { ...m, id, memory, body: makeBody(x, z, zone.surface) as Body, startAt: rng() * 0.5, died: false, dodges: 0, damage: 0, facing: angle };
   });
@@ -127,7 +127,7 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
 }
 
 /** One scripted adventurer against one camp (see simulateParty); ttk = killedAt − firstHitAt. */
-export function simulateFight(o: { seed: number; weapon: WeaponId; enemy: EnemyKindId; careful: boolean; maxS?: number }): FightResult {
+export function simulateFight(o: { seed: number; weapon: Plan3Loadout['weapon']; enemy: EnemyKindId; careful: boolean; maxS?: number }): FightResult {
   const r = simulateParty({ seed: o.seed, party: [{ weapon: o.weapon, careful: o.careful }], enemy: o.enemy, maxS: o.maxS });
   const m = r.members[0];
   return { firstHitAt: r.firstHitAt, killedAt: r.killedAt, ttk: r.ttk, died: m.died, hpLeft: m.hpLeft, dodges: m.dodges };

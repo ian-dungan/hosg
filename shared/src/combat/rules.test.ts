@@ -74,7 +74,7 @@ describe('marks', () => {
     expect(liveMarks(marks, MARK_S + 1)).toEqual(['burning']);
   });
   it('markBits packs live marks', () => {
-    expect(MARK_BITS).toEqual({ soaked: 1, burning: 2, marked: 4 });
+    expect(MARK_BITS).toEqual({ soaked: 1, burning: 2, marked: 4, rooted: 8, dazed: 16 });
     const marks: Marks = { soaked: 10, burning: 3, marked: 10 };
     expect(markBits(marks, 5)).toBe(1 | 4);
     expect(markBits({}, 0)).toBe(0);

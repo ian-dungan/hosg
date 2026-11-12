@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createCombat, worldOf, type CampSpawn, type Combat, type CombatZone, type Intent, type TickOut } from './engine';
 import { hurtAdventurer, isInCombat, isInvulnerable, knockAdventurer } from './adventurer';
-import { DEFAULT_LOADOUT, slotsFor, type Loadout } from './abilities';
+// Until Task 2 the engine runs Plan 3 loadouts: these tests use the deprecated Plan 3 shapes.
+import { PLAN3_DEFAULT_LOADOUT as DEFAULT_LOADOUT, plan3Slots as slotsFor, type Plan3Loadout as Loadout } from './abilities';
 import { hitDamage } from './stats';
 import type { FxEvent } from './fx';
 import type { EnemyKindId } from './enemies';

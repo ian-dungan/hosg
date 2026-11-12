@@ -2,8 +2,8 @@
 // hit and hurt helpers the enemy AI reuses. All state lives in the engine's CombatWorld.
 import { HP_REGEN_DELAY_S, HP_REGEN_PER_S, TICK_HZ } from '../constants';
 import {
-  ABILITIES, BULWARK_ABSORB, FREE_POOL, BULWARK_S, CHARGE_MAX_S, CHARGE_MOVE_SCALE, DEFAULT_LOADOUT, MEND_HEAL, PARRY_WINDOW_S,
-  SPRINT_S, SPRINT_SCALE, WEAPONS, chargedShot, parseLoadout, slotsFor, type AbilityId,
+  ABILITIES, BULWARK_ABSORB, BULWARK_S, CHARGE_MAX_S, CHARGE_MOVE_SCALE, MEND_HEAL, PARRY_WINDOW_S,
+  SPRINT_S, SPRINT_SCALE, WEAPONS, chargedShot, damageCoef, parsePlan3Loadout, plan3LoadoutOf, plan3Slots, type AbilityId,
 } from './abilities';
 import {
   AUTO_MOMENTUM, BREAK_DAMAGE_MULT, BURNING_COEF_PER_S, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S, COMBO_COEF, COMBO_STAGGER,
@@ -93,12 +93,13 @@ const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFi
 
 // ───────── lifecycle ─────────
 export function newAdventurer(id: number, s: { x: number; z: number; y: number; facing: number; hp: number; loadout: unknown }, nowS: number): AdventurerState {
-  const loadout = parseLoadout(s.loadout) ?? { weapon: DEFAULT_LOADOUT.weapon, free: [DEFAULT_LOADOUT.free[0], DEFAULT_LOADOUT.free[1]] };
+  // Until Task 2 the engine runs Plan 3 loadouts: a Plan 3 one as it is, a Warrior or Ranger one as its weapon.
+  const loadout = plan3LoadoutOf(s.loadout);
   const stats = { ...STARTER_STATS };
   const a: AdventurerState = {
     id, team: 'adventurer', x: finite(s.x) ? s.x : 0, z: finite(s.z) ? s.z : 0, y: finite(s.y) ? s.y : 0, facing: finite(s.facing) ? s.facing : 0,
     stats, hp: finite(s.hp) ? Math.min(stats.maxHp, Math.max(1, s.hp)) : stats.maxHp, alive: true, diedAt: -Infinity,
-    act: '', actUntil: -Infinity, loadout, slots: slotsFor(loadout), momentum: 0,
+    act: '', actUntil: -Infinity, loadout, slots: plan3Slots(loadout), momentum: 0,
     lastDealtAt: -Infinity, lastCombatAt: -Infinity, lastHurtAt: -Infinity,
     readyAt: {}, gcdUntil: -Infinity, swapReadyAt: -Infinity, targetId: null, nextAutoAt: -Infinity,
     shield: 0, shieldUntil: -Infinity, sprintUntil: -Infinity, parryUntil: -Infinity, iframeUntil: -Infinity,
@@ -111,7 +112,6 @@ export function newAdventurer(id: number, s: { x: number; z: number; y: number; 
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) => (finite(v) ? Math.min(hi, Math.max(lo, v)) : dflt);
 const ALL_ABILITIES = Object.keys(ABILITIES) as AbilityId[];
-void FREE_POOL;
 
 /** The relog snapshot: seconds remaining on each cooldown still running, the GCD, dodge charges, Momentum. */
 export function carryOfState(a: AdventurerState, nowS: number): Carry {
@@ -419,7 +419,7 @@ function useAbility(w: CombatWorld, a: AdventurerState, id: AbilityId, target: E
   switch (id) {
     case 'slash': case 'snap_shot': case 'sunder': case 'pitch_arrow':
       if (ab.cost !== undefined) a.momentum = gainMomentum(a.momentum, -FINISHER_COST);
-      strike(w, a, target!, { coef: ab.coef ?? 0, by: id, momentum: ab.momentum, mark: ab.mark, stagger: ab.stagger, interrupts: ab.interrupts }, nowS);
+      strike(w, a, target!, { coef: damageCoef(ab), by: id, momentum: ab.momentum, mark: ab.mark, stagger: ab.stagger, interrupts: ab.interrupts }, nowS);
       return;
     case 'parry': a.parryUntil = nowS + PARRY_WINDOW_S; return;
     case 'mend': healAdventurer(w, a, MEND_HEAL, a.id, nowS); return;
@@ -451,7 +451,7 @@ export function swapIntent(w: CombatWorld, a: AdventurerState, nowS: number): Re
   if (nowS < a.swapReadyAt - TIME_EPS) return 'cooldown';
   cancelCharge(a);
   a.loadout = { weapon: a.loadout.weapon === 'blade' ? 'bow' : 'blade', free: [a.loadout.free[0], a.loadout.free[1]] };
-  a.slots = slotsFor(a.loadout);
+  a.slots = plan3Slots(a.loadout);
   a.swapReadyAt = nowS + SWAP_COOLDOWN_S;
   return null;
 }
@@ -459,11 +459,11 @@ export function swapIntent(w: CombatWorld, a: AdventurerState, nowS: number): Re
 export function loadoutIntent(w: CombatWorld, a: AdventurerState, free: unknown, nowS: number): Refusal | null {
   if (!a.alive) return 'dead';
   if (isDisplaced(a, nowS) || a.charge) return 'busy';
-  const l = parseLoadout({ weapon: a.loadout.weapon, free });
+  const l = parsePlan3Loadout({ weapon: a.loadout.weapon, free });
   if (!l) return 'invalid';
   if (adventurerInCombat(w, a, nowS)) return 'in-combat';
   a.loadout = l;
-  a.slots = slotsFor(l);
+  a.slots = plan3Slots(l);
   return null;
 }
 

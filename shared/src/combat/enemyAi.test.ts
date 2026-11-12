@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createCombat, worldOf, type CampSpawn, type Combat, type CombatZone, type EnemyState, type Intent, type TickOut } from './engine';
-import { DEFAULT_LOADOUT, type Loadout } from './abilities';
+import { PLAN3_DEFAULT_LOADOUT as DEFAULT_LOADOUT, type Plan3Loadout as Loadout } from './abilities'; // Plan 3 shapes until Task 2
 import type { EnemyKindId } from './enemies';
 import type { FxEvent } from './fx';
 import { enemyAiStats, enemyPassable, NO_TARGET_S } from './enemyAi';

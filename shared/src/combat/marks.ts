@@ -1,14 +1,15 @@
-// Marks left by finishers. A finisher detonates every other live mark (a combo), then leaves its own.
+// Marks left by finishers and primers. A finisher detonates every other live mark (a combo), then
+// leaves its own; a primer only sets (or refreshes) its own.
 import { MARK_S } from './constants';
 
-export type MarkId = 'soaked' | 'burning' | 'marked';
-export const MARK_BITS: Record<MarkId, number> = { soaked: 1, burning: 2, marked: 4 };
+export type MarkId = 'soaked' | 'burning' | 'marked' | 'rooted' | 'dazed';
+export const MARK_BITS: Record<MarkId, number> = { soaked: 1, burning: 2, marked: 4, rooted: 8, dazed: 16 };
 /** Mark -> the time (s) it expires. */
 export type Marks = Partial<Record<MarkId, number>>;
 
-const ORDER: readonly MarkId[] = ['soaked', 'burning', 'marked'];
+const ORDER: readonly MarkId[] = ['soaked', 'burning', 'marked', 'rooted', 'dazed'];
 
-/** The marks live at nowS (expiry after nowS), in the order soaked, burning, marked. */
+/** The marks live at nowS (expiry after nowS), in the order soaked, burning, marked, rooted, dazed. */
 export function liveMarks(marks: Marks, nowS: number): MarkId[] {
   return ORDER.filter((m) => (marks[m] ?? -Infinity) > nowS);
 }
@@ -23,6 +24,11 @@ export function applyFinisherMark(marks: Marks, mark: MarkId, nowS: number): Mar
   for (const m of ORDER) if (m !== mark) delete marks[m];
   marks[mark] = nowS + MARK_S;
   return detonated;
+}
+
+/** A primer leaving `mark` lands: `mark` is set (or refreshed) to nowS + MARK_S; nothing detonates. Mutates `marks`. */
+export function applyPrimerMark(marks: Marks, mark: MarkId, nowS: number): void {
+  marks[mark] = nowS + MARK_S;
 }
 
 /** The live marks as MARK_BITS flags. */
