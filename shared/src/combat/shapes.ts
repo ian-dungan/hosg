@@ -5,7 +5,13 @@ export type Shape =
   | { kind: 'circle'; x: number; z: number; r: number }
   /** angle = full width (rad). */
   | { kind: 'cone'; x: number; z: number; dir: number; r: number; angle: number }
-  | { kind: 'line'; x: number; z: number; dir: number; length: number; width: number };
+  | { kind: 'line'; x: number; z: number; dir: number; length: number; width: number }
+  /**
+   * Inside when inner ≤ d ≤ r (d: the distance from the centre). dir is never read by the rules (a ring has
+   * no direction): a telegraph carries its owner's facing, a field 0. It keeps every non-circle shape's `dir`
+   * readable, so code written for Plan 3's shapes still compiles (a ring draws as its outer circle there).
+   */
+  | { kind: 'ring'; x: number; z: number; dir: number; inner: number; r: number };
 
 /** Signed angle in (-π, π]. */
 function wrap(a: number): number {
@@ -40,6 +46,10 @@ export function inShape(s: Shape, x: number, z: number): boolean {
       const p = local(s, x, z);
       return p.along >= 0 && p.along <= s.length && Math.abs(p.aside) <= s.width / 2;
     }
+    case 'ring': {
+      const d = Math.hypot(x - s.x, z - s.z);
+      return d >= s.inner && d <= s.r;
+    }
   }
 }
 
@@ -47,7 +57,8 @@ export function inShape(s: Shape, x: number, z: number): boolean {
  * A unit vector from (x, z) toward the nearest boundary of `s`, the way out of it:
  * - circle: radially outward (+Z from the very centre);
  * - cone: perpendicular out through the nearer side edge, or radially out through the arc, whichever is nearer;
- * - line: sideways, toward the nearer long side (to the right when on the centre line).
+ * - line: sideways, toward the nearer long side (to the right when on the centre line);
+ * - ring: radially toward the nearer edge (inward when d − inner < r − d, else outward; +Z from the very centre).
  */
 export function escapeDir(s: Shape, x: number, z: number): { x: number; z: number } {
   switch (s.kind) {
@@ -68,6 +79,12 @@ export function escapeDir(s: Shape, x: number, z: number): { x: number; z: numbe
     case 'line': {
       const p = local(s, x, z);
       return unit(s.dir + (p.aside >= 0 ? Math.PI / 2 : -Math.PI / 2));
+    }
+    case 'ring': {
+      const dx = x - s.x, dz = z - s.z, d = Math.hypot(dx, dz);
+      if (d === 0) return { x: 0, z: 1 };
+      const k = d - s.inner < s.r - d ? -1 : 1;
+      return { x: (k * dx) / d, z: (k * dz) / d };
     }
   }
 }

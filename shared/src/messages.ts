@@ -6,6 +6,8 @@ import type { Displacement } from './combat/displace';
 import type { Refusal, SelfView } from './combat/engine';
 import type { EnemyKindId } from './combat/enemies';
 import type { FxEvent } from './combat/fx';
+import type { InstanceView, VictoryView } from './instance';
+import type { PartyOp, PartyRefusal, PartyView } from './party';
 import type { Pose } from './movement';
 import type { ZoneId } from './world/zones';
 
@@ -29,7 +31,8 @@ export const REASON_TRAVEL_FAILED = 'The way is blocked for now, try again soon'
 /** Client → server. */
 export type C2S = {
   move: Pose;
-  chat: { text: string };
+  /** channel 'party': to every online member of the sender's party, in any room (absent: 'zone'). */
+  chat: { text: string; channel?: 'zone' | 'party' };
   /** Target an enemy by engine id, or clear the target (null). */
   target: { id: number | null };
   /**
@@ -64,6 +67,12 @@ export type C2S = {
   job: { job: JobId };
   /** Get up again after dying (from DEATH_MIN_S on). */
   respawn: Record<string, never>;
+  /** A party request (`parsePartyOp` checks it; anything else is dropped). */
+  party: PartyOp;
+  /** Dead in an instance: get up at its current checkpoint (from RELEASE_MIN_S on). */
+  release: Record<string, never>;
+  /** Leave the Lampfall for the crater mouth (the victory screen's button). */
+  leaveInstance: Record<string, never>;
 };
 
 /** What a refused intent was. */
@@ -76,7 +85,8 @@ export interface JobsView { current: JobId; jobs: Record<JobId, JobView> }
 
 /** Server → client. */
 export type S2C = {
-  chat: { from: string; text: string };
+  /** channel: where the line was said (absent: 'zone', as before Plan 4). */
+  chat: { from: string; text: string; channel?: 'zone' | 'party' };
   /** The move was refused: go back to the last accepted pose. */
   correct: { x: number; z: number; y: number };
   /** Health lost (already taken off the adventurer's hp). */
@@ -84,9 +94,10 @@ export type S2C = {
   kicked: { reason: string };
   /**
    * The adventurer walked through an open exit and is now saved in `zone`, at that exit's arrival
-   * point. The server ends this session (consented) right after: the client joins the room named `zone`.
+   * point. The server ends this session (consented) right after: the client joins the room named `zone`,
+   * or with `instance`, the room with that id (a Lampfall instance) by id.
    */
-  travel: { zone: ZoneId };
+  travel: { zone: ZoneId; instance?: string };
   /** A short line to show the player (for example why an exit refused them). */
   notice: { text: string };
   /** Combat events near this adventurer (or involving it), once per tick, only when there are any. */
@@ -130,4 +141,14 @@ export type S2C = {
    * poses from now on carry `ack: seq`.
    */
   respawned: { x: number; z: number; y: number; seq: number };
+  /** The receiver's party (null: none), after any change, and at most PARTY_STATUS_HZ for member status. */
+  party: { party: PartyView | null };
+  /** An invite to join party `partyId`, from its leader `from`; size: its members now. */
+  partyInvite: { partyId: string; from: string; size: number };
+  /** A party request the server refused (text: PARTY_TEXT[reason]). */
+  partyRefused: { reason: PartyRefusal; text: string };
+  /** The instance this adventurer is in: on join and when it changes. */
+  instance: InstanceView;
+  /** A boss kill this adventurer is credited with. */
+  victory: VictoryView;
 };

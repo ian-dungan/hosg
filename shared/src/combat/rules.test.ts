@@ -208,12 +208,21 @@ function attackShape(a: EnemyAttackData, ox: number, oz: number, dir: number, tx
     case 'circle-target': return { kind: 'circle', x: tx, z: tz, r: a.r! };
     case 'cone': return { kind: 'cone', x: ox, z: oz, dir, r: a.r!, angle: a.angle! };
     case 'line': return { kind: 'line', x: ox, z: oz, dir, length: a.length!, width: a.width! };
+    case 'ring-self': return { kind: 'ring', x: ox, z: oz, dir, inner: a.inner!, r: a.r! };
   }
 }
+
+/**
+ * Attacks too big for one dodge to leave from every point inside, answered otherwise (Plan 4): Keeper's Toll
+ * and Last Light cover the whole arena (interrupt, Break or heal through them); Lamp Sweep's wide cone is
+ * walked out of during its wind-up.
+ */
+const NOT_ONE_DODGE: ReadonlySet<string> = new Set(['keepers_toll', 'last_light', 'lamp_sweep']);
 
 describe('escapeDir', () => {
   const ownerOf = (id: string) => Object.values(ENEMY_KINDS).find((k) => k.attacks.includes(id as never))!;
   for (const a of Object.values(ENEMY_ATTACKS)) {
+    if (NOT_ONE_DODGE.has(a.id)) continue;
     for (const dir of [0, 1.0, -2.3]) {
       it(`a dodge along it leaves ${a.id} (dir ${dir}) from every grid point inside`, () => {
         const ownerR = ownerOf(a.id).radius;
@@ -222,7 +231,7 @@ describe('escapeDir', () => {
         for (let x = -15; x <= 15; x += 0.25) {
           for (let z = -15; z <= 15; z += 0.25) {
             if (!inShape(s, x, z)) continue;
-            if (a.shape === 'circle-self' && Math.hypot(x - 1.3, z + 0.7) < ownerR) continue;
+            if ((a.shape === 'circle-self' || a.shape === 'ring-self') && Math.hypot(x - 1.3, z + 0.7) < ownerR) continue;
             const e = escapeDir(s, x, z);
             expect(Math.hypot(e.x, e.z)).toBeCloseTo(1, 9);
             expect(inShape(s, x + e.x * DODGE_DISTANCE, z + e.z * DODGE_DISTANCE)).toBe(false);

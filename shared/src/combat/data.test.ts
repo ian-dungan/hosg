@@ -87,14 +87,15 @@ describe('weapons and abilities', () => {
 
 describe('enemies', () => {
   const kinds = Object.values(ENEMY_KINDS);
-  it('3 ordinary kinds besides the dummy, each with exactly 1 attack and no stagger bar', () => {
+  it('4 ordinary kinds besides the dummy (the Lens Shard is an add), each with exactly 1 attack and no stagger bar', () => {
     const ordinary = kinds.filter((k) => !k.elite && k.id !== 'dummy');
-    expect(ordinary.map((k) => k.id).sort()).toEqual(['archer', 'boar', 'thornling']);
-    for (const k of ordinary) { expect(k.attacks.length).toBe(1); expect(k.stagger).toBe(0); }
+    expect(ordinary.map((k) => k.id).sort()).toEqual(['archer', 'boar', 'lens_shard', 'thornling']);
+    for (const k of ordinary) { expect(k.tier).toBe('ordinary'); expect(k.attacks.length).toBe(1); expect(k.stagger).toBe(0); expect(k.boss).toBeUndefined(); }
   });
-  it('exactly 1 elite with 2 attacks, exactly one of them interruptible, and a stagger bar', () => {
-    const elites = kinds.filter((k) => k.elite);
+  it('exactly 1 elite-tier kind with 2 attacks, exactly one of them interruptible, and a stagger bar', () => {
+    const elites = kinds.filter((k) => k.tier === 'elite');
     expect(elites.length).toBe(1);
+    expect(elites[0].elite).toBe(true);
     const [e] = elites;
     expect(e.attacks.length).toBe(2);
     expect(e.attacks.filter((a) => ENEMY_ATTACKS[a].interruptible).length).toBe(1);
@@ -114,6 +115,21 @@ describe('enemies', () => {
       if (a.shape === 'line') { expect(a.length).toBeGreaterThan(0); expect(a.width).toBeGreaterThan(0); }
       else expect(a.r).toBeGreaterThan(0);
       if (a.shape === 'cone') expect(a.angle).toBeGreaterThan(0);
+      if (a.shape === 'ring-self') { expect(a.inner).toBeGreaterThan(0); expect(a.inner).toBeLessThan(a.r!); }
+      else expect(a.inner).toBeUndefined();
+      if (a.targets === 'each') expect(a.shape).toBe('circle-target');
+      expect(a.useRange).toBeGreaterThan(0);
+    }
+  });
+  it('every kind keeps the data rules: radius > 0, leash ≥ aggro for movers, a tier, bosses elite with a stagger bar', () => {
+    for (const k of kinds) {
+      expect(k.radius, k.id).toBeGreaterThan(0);
+      expect(k.hp, k.id).toBeGreaterThan(0);
+      if (k.speed > 0) expect(k.leash, k.id).toBeGreaterThanOrEqual(k.aggro);
+      expect(['ordinary', 'elite', 'boss', 'mega']).toContain(k.tier);
+      expect(k.elite, k.id).toBe(k.tier !== 'ordinary');
+      if (k.elite) expect(k.stagger, k.id).toBeGreaterThan(0);
+      if (k.tier === 'boss' || k.tier === 'mega') { expect(k.boss, k.id).toBeDefined(); expect(k.respawn).toBe(Infinity); }
     }
   });
   it('the table values', () => {
@@ -124,6 +140,7 @@ describe('enemies', () => {
     expect(ENEMY_KINDS.dummy).toMatchObject({ hp: 40, defence: 0, radius: 0.5, speed: 0, aggro: 0, auto: null, attacks: [], respawn: 5 });
     expect(Object.fromEntries(kinds.map((k) => [k.id, [k.weak ?? null, k.resist ?? null]]))).toEqual({
       thornling: ['fire', 'water'], boar: ['water', 'earth'], archer: ['lightning', null], mossback: ['fire', 'earth'], dummy: [null, null],
+      wickhound: ['water', 'fire'], fallen_warden: ['water', 'fire'], lens_shard: ['lightning', null],
     });
     expect(ENEMY_ATTACKS.thorn_burst).toMatchObject({ shape: 'circle-self', r: 3, windup: 1.0, raw: 18, cooldown: 7, firstAt: 3, parryable: true });
     expect(ENEMY_ATTACKS.gore_charge).toMatchObject({ shape: 'line', length: 9, width: 1.8, useRange: 8, windup: 1.3, raw: 22, knock: { speed: 10, seconds: 0.35, vy: 4 }, dashToEnd: true, cooldown: 8, firstAt: 3 });

@@ -367,7 +367,7 @@ describe('xp', () => {
     expect(xpToNext(0)).toBe(100);
     expect(xpToNext(130)).toBe(70);
     expect(xpToNext(950)).toBe(0);
-    expect(KILL_XP).toEqual({ thornling: 10, boar: 10, archer: 10, mossback: 40, dummy: 0 });
+    expect(KILL_XP).toEqual({ thornling: 10, boar: 10, archer: 10, mossback: 40, dummy: 0, wickhound: 120, fallen_warden: 300, lens_shard: 0 });
   });
   it('addJobXp is pure and reports a level-up', () => {
     const s: JobsSave = { current: 'ranger', jobs: { ranger: { level: 1, xp: 95, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null } } };

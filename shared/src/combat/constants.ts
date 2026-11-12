@@ -78,6 +78,10 @@ export const THREAT_PER_HEAL = 0.5;
 export const TAUNT_S = 4;
 export const TAUNT_MULT = 1.1;
 export const TAUNT_BONUS = 10;
+/** Elites scale with the adventurers engaged (on their threat table, alive): ×(1 + this × (n − 1))… */
+export const ELITE_SCALE_PER = 0.7;
+/** …counting at most this many. */
+export const ELITE_SCALE_CAP = 4;
 /** An enemy switches target only to one with at least this × its current target's threat. */
 export const TARGET_SWITCH_MULT = 1.1;
 
@@ -180,3 +184,9 @@ export const FONT_HEAL_MULT = 1.2;
 export const FONT_MOMENTUM_PER_HP = 0.5;
 export const FONT_MOMENTUM_CAP = 20;
 export const FONT_THREAT_MULT = 0.5;
+
+// ───────── parties and bosses ─────────
+/** A boss's scale table is indexed by the distinct live adventurers on its threat table, counting at most this many. */
+export const BOSS_SCALE_CAP = 4;
+/** A standing field hits every live adventurer inside it once each whole second after it starts. */
+export const FIELD_TICK_S = 1;

@@ -5,6 +5,8 @@ export { BAD_WORDS } from './badwords';
 export * from './movement';
 export * from './body';
 export * from './messages';
+export * from './party';
+export * from './instance';
 export * from './world/layout';
 export { GROVE_OBSTACLES } from './world/obstacles';
 export * from './path';

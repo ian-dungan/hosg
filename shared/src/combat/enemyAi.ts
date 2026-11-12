@@ -16,6 +16,7 @@ import { findPath, withClearance, type Vec2 } from '../path';
 import {
   AGGRO_THREAT, DISPLACE_SUBSTEP_M, ENEMY_PATH_NODES, ENEMY_REPLAN_S, PARRY_MOMENTUM, PARRY_STAGGER, PARRY_STUN_S, PATHS_PER_TICK,
   PERFECT_DODGE_MOMENTUM, PERFECT_DODGE_STAGGER, PERFECT_DODGE_WINDOW_S, UNREACHABLE_S, EVASION_PERFECT_MOMENTUM, ROOTED_SPEED_SCALE, SHELTER_SHARE,
+  ELITE_SCALE_PER, ELITE_SCALE_CAP,
 } from './constants';
 import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
@@ -43,10 +44,6 @@ export const SURGE_AFTER_S = 3;
  * than starting a telegraph. So plain running never kites it; Sprint and dodges break away briefly.
  */
 export const SURGE_SCALE = 1.3;
-/** Elites scale with the adventurers engaged (on their threat table, alive): ×(1 + this × (n − 1))… */
-export const ELITE_SCALE_PER = 0.7;
-/** …counting at most this many. */
-export const ELITE_SCALE_CAP = 4;
 /** An ordinary enemy cannot be parry-stunned again for this long after a parry stun ends. */
 export const PARRY_STUN_IMMUNE_S = 3;
 /** Expanded path-search nodes shared by every enemy of a zone per tick. */
@@ -568,6 +565,7 @@ function shapeFor(e: EnemyState, atk: EnemyAttackData, t: AdventurerState): Shap
     case 'circle-target': return { kind: 'circle', x: t.x, z: t.z, r: atk.r ?? 0 };
     case 'cone': return { kind: 'cone', x: e.x, z: e.z, dir, r: atk.r ?? 0, angle: atk.angle ?? 0 };
     case 'line': return { kind: 'line', x: e.x, z: e.z, dir, length: atk.length ?? 0, width: atk.width ?? 0 };
+    case 'ring-self': return { kind: 'ring', x: e.x, z: e.z, dir, inner: atk.inner ?? 0, r: atk.r ?? 0 };
   }
 }
 
