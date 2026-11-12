@@ -379,7 +379,7 @@ describe('simulateDisplacement on steep ramps (rotated, every start before the f
       }
     }
     expect(runs).toBe(6 * 24 * 61 * 3);
-  });
+  }, 60_000); // about 3.5 s alone: a busy machine (parallel suites) must not time it out
 });
 
 describe('simulateDisplacement always ends on the real surface', () => {

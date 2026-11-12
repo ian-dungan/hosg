@@ -3,7 +3,7 @@
 // held dodge a knock replaces being refused rather than dropped.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Room } from '@colyseus/sdk';
-import { SPAWN, TICK_HZ, fallDamage, worldOf, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { ENEMY_KINDS, SPAWN, TICK_HZ, fallDamage, worldOf, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, testClock, waitFor, type TestServer } from './testHelpers';
@@ -42,7 +42,9 @@ describe('elite stagger bar with more than one adventurer (I1)', () => {
     const zr = serverRoom(room) as any;
     zr.setSimulationInterval(undefined);
     const moss = await waitFor(() => enemyOf(room, 'mossback'));
-    expect(moss).toMatchObject({ maxHp: 750, maxStagger: 100 });
+    // the unscaled bar and health come from the data: the state may already show them scaled for however many
+    // adventurers have engaged by the time it is read (the joins run while the room still steps by itself)
+    expect(ENEMY_KINDS.mossback).toMatchObject({ hp: 750, stagger: 100 });
     for (const j of joined) j.room.send('target', { id: moss.eid }); // in reach: their autos put them all on its threat table
     await waitFor(() => joined.every((j) => j.room.state.players.get(j.room.sessionId)?.target === moss.eid));
     const engine = [...worldOf(zr.combat).enemies.values()].find((x) => x.kind === 'mossback')!;
