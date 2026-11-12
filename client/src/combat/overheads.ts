@@ -35,6 +35,8 @@ const CSS = /* css */ `
 
 const MARK_ICON: Record<MarkId, { g: string; c: string }> = {
   marked: { g: '◎', c: '#F2B742' }, burning: { g: '✷', c: '#ff8a4c' }, soaked: { g: '≈', c: '#5fd0c4' },
+  // placeholders until Task 7 styles them (nothing sets these marks before Task 3)
+  rooted: { g: '⤓', c: '#8fcf6a' }, dazed: { g: '⊛', c: '#c9a6ff' },
 };
 
 interface El { root: HTMLElement; name: HTMLElement; hp: HTMLElement; st: HTMLElement; stFill: HTMLElement; marks: HTMLElement; k: { hp: number; st: number; marks: number; immune: boolean; on: boolean; tgt: boolean; surge: boolean } }

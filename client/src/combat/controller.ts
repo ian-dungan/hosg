@@ -13,7 +13,7 @@
 import { Color3, MeshBuilder, StandardMaterial, Vector3 } from '@babylonjs/core';
 import {
   ABILITIES, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, DEATH_MIN_S, AUTO_RESPAWN_S, DODGE_CHARGES, DODGE_MIN_GAP_S, DODGE_REFILL_S,
-  ENEMY_ATTACKS, ENEMY_KINDS, FREE_POOL, MARK_BITS, SPRINT_S, SPRINT_SCALE, TARGET_RANGE, TELEGRAPH_LEAD_S, WEAPONS,
+  ENEMY_ATTACKS, ENEMY_KINDS, PLAN3_FREE_POOL, MARK_BITS, SPRINT_S, SPRINT_SCALE, TARGET_RANGE, TELEGRAPH_LEAD_S, WEAPONS,
   dodgeDisplacement, simulateDisplacement,
   type AbilityId, type C2S, type EnemyAttackId, type EnemyKindId, type FxEvent, type MarkId, type S2C, type SelfView, type WeaponId,
 } from '@sg2/shared';
@@ -91,7 +91,8 @@ export function screenToWorld(dir: { x: number; y: number } | null, alpha: numbe
 }
 
 const GUARDED: StatusId[] = ['guard'], UNGUARDED: StatusId[] = [];
-const MARK_IDS: readonly MarkId[] = ['marked', 'burning', 'soaked'];
+/** The Plan 3 marks the HUD has statuses for (Rooted and Dazed get theirs in Task 7). */
+const MARK_IDS: readonly Extract<MarkId, StatusId>[] = ['marked', 'burning', 'soaked'];
 /** The marks set in `bits` as HUD status ids, written into `out` (emptied first) and returned. */
 export function markStatuses(bits: number, out: StatusId[] = []): StatusId[] {
   out.length = 0;
@@ -302,7 +303,8 @@ export function createCombat(o: CombatOpts): CombatController {
 
   // ── helpers ──
   const myEid = () => meState()?.eid ?? -1;
-  const weapon = (): WeaponId => (self?.weapon ?? (meState()?.weapon as WeaponId | undefined) ?? 'blade');
+  // Until Task 7 the HUD knows only the Plan 3 weapons: anything but the Bow shows as the Blade.
+  const weapon = (): 'blade' | 'bow' => ((self?.weapon ?? (meState()?.weapon as WeaponId | undefined)) === 'bow' ? 'bow' : 'blade');
   const range = () => WEAPONS[weapon()].autoRange;
   const isDead = () => !!meState()?.dead;
   const enemyView = (eid: number) => room.state.enemies?.get(String(eid));
@@ -402,7 +404,7 @@ export function createCombat(o: CombatOpts): CombatController {
         if (!self || isDead()) return;
         if (self.inCombat) { toast(refusalText('in-combat')); return; }
         const current = self.slots.slice(3, 5);
-        void hud.loadout(FREE_POOL.map((id) => ABILITY_DEFS[id]), current, weapon(), 2).then((ids) => {
+        void hud.loadout(PLAN3_FREE_POOL.map((id) => ABILITY_DEFS[id]), current, weapon(), 2).then((ids) => {
           if (disposed || ids.length !== 2 || (ids[0] === current[0] && ids[1] === current[1])) return;
           o.send('loadout', { free: [ids[0] as AbilityId, ids[1] as AbilityId] });
         });

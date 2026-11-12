@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ABILITIES, FINISHER_COST, TELEGRAPH_LEAD_S, type SelfView } from '@sg2/shared';
-import { ABILITY_DEFS } from './abilityDefs';
+import { ABILITY_DEFS, plan3WeaponOf } from './abilityDefs';
 import { CHARGE_CONFIRM_MS, chargeStillHeld, createChargeHold, cycleTarget, isNewSeq, keepFollowing, markStatuses, refusalIsForCharge, screenToWorld, slotView, tapAction, telegraphFill, type SelfSnap } from './controller';
 
 const P = { x: 1, y: 0, z: 2 };
@@ -22,12 +22,12 @@ describe('tapAction', () => {
 });
 
 describe('abilityDefs', () => {
-  it('maps all ten abilities with their glyph, cooldown and kind', () => {
+  it('maps every ability with its glyph, cooldown and kind', () => {
     const ids = Object.keys(ABILITIES);
-    expect(ids).toHaveLength(10);
+    expect(ids).toHaveLength(49);
     for (const id of ids) {
       const a = ABILITIES[id as keyof typeof ABILITIES], d = ABILITY_DEFS[id as keyof typeof ABILITIES];
-      expect(d).toMatchObject({ id, name: a.name, glyph: a.glyph, cooldown: a.cooldown, kind: a.kind, weapon: a.weapon, range: a.range, desc: a.desc });
+      expect(d).toMatchObject({ id, name: a.name, glyph: a.glyph, cooldown: a.cooldown, kind: a.kind, weapon: plan3WeaponOf(a.id), range: a.range, desc: a.desc });
     }
     expect(ABILITY_DEFS.charged_shot.castTime).toBe(1.5);
     expect(ABILITY_DEFS.slash.castTime).toBe(0);
