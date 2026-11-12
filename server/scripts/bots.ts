@@ -70,7 +70,10 @@ class Bot {
   /** The first few corrections: what the bot last sent, and where the server put it. */
   correctionLog: string[] = [];
   jumps = 0;
-  /** Ticks on which no step it tried would be accepted (it sent nothing). */
+  /** Health lost to falls, and how many falls cost any. */
+  hurtHp = 0;
+  hurts = 0;
+  /** Ticks on which no step it tried would be accepted (it sent its first try anyway, as a client would). */
   stalledTicks = 0;
   /** Of those, ticks it was in the air: its check and the server's disagree with its own controller. */
   airStalls = 0;
@@ -78,6 +81,9 @@ class Bot {
   longestStall = 0;
   private stallRun = 0;
   private lastSent: unknown = null;
+  /** The first stall in the air, in full: the body, the mirrored air track and why each try was refused. */
+  airStallLog: string | null = null;
+  private lastStepAt = 0;
   chatsHeard = 0;
   disconnected: string | null = null;
   private body: Body = makeBody(0, 0, groveTownSurface);
@@ -98,9 +104,17 @@ class Bot {
     this.name = body.name ?? `bot ${this.index}`;
     this.room = await new Client(url).joinOrCreate('grove', { token: body.token });
     this.room.reconnection.enabled = false; // a drop is a failure, not something to ride out
-    this.room.onMessage('correct', (m: unknown) => {
+    this.room.onMessage('correct', (m: { x: number; z: number; y: number }) => {
       this.corrections++;
       if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}`);
+      // go where the server says, standing, as the browser does
+      this.body = makeBody(m.x, m.z, groveTownSurface);
+      this.body.y = m.y;
+      this.air = makeAirTrack(m.y);
+    });
+    this.room.onMessage('hurt', (m: { amount: number }) => {
+      this.hurts++;
+      this.hurtHp += m.amount;
     });
     this.room.onMessage('chat', () => this.chatsHeard++);
     this.room.onMessage('kicked', (m: { reason: string }) => (this.disconnected ??= `kicked: ${m.reason}`));
@@ -133,22 +147,35 @@ class Bot {
 
   /**
    * One tick of running in a wandering direction with the shared controller, jumping now and then.
-   * Turns away from walls, and from any step the server's own check would refuse.
+   * Like a browser frame, it simulates the time that really passed since the last tick (timers run
+   * late when the process is busy), capped by the controller. Turns away from walls, and from any
+   * step the server's own check would refuse; if every try is refused it sends the first anyway, as
+   * a client would, and the server's correction puts it right.
    */
   private step() {
     const now = Date.now();
+    const sinceLastStep = now - this.lastStepAt;
+    const dt = this.lastStepAt ? sinceLastStep / 1000 : 1 / TICK_HZ;
+    this.lastStepAt = now;
+    const refusals: string[] = [];
+    let first: { body: Body; next: { x: number; z: number; y: number; facing: number; moving: boolean }; heading: number } | null = null;
     for (let attempt = 0; attempt < 12; attempt++) {
       const heading = attempt === 0 ? this.heading + (Math.random() - 0.5) * 0.4 : Math.random() * 2 * Math.PI;
       const body = { ...this.body };
       const jump = attempt === 0 && Math.random() < JUMP_CHANCE;
-      const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, 1 / TICK_HZ, groveTownSurface);
+      const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, dt, groveTownSurface);
       const moved = Math.hypot(body.x - this.body.x, body.z - this.body.z);
       // stuck against something (in the air it carries on regardless, so its fall keeps up with the clock)
-      if (body.grounded && moved < (RUN_SPEED / TICK_HZ) * 0.5) continue;
+      if (body.grounded && moved < RUN_SPEED * Math.min(dt, 0.25) * 0.5) continue;
       const next = { x: body.x, z: body.z, y: body.y, facing: heading, moving: true };
+      first ??= { body, next, heading };
       const air = { ...this.air };
       // running speed is well inside the server's allowance, so only the height check can refuse it
-      if (checkPose(this.body, air, next, now, Infinity, groveTownSurface).result !== 'ok') continue;
+      const checked = checkPose(this.body, air, next, now, Infinity, groveTownSurface);
+      if (checked.result !== 'ok') {
+        refusals.push(`${checked.result} y ${body.y.toFixed(2)} surface ${groveTownSurface(body.x, body.z)?.toFixed(2)}`);
+        continue;
+      }
       this.heading = heading;
       this.body = body;
       this.air = air;
@@ -159,8 +186,17 @@ class Bot {
       return;
     }
     this.stalledTicks++;
-    if (!this.body.grounded) this.airStalls++;
+    if (!this.body.grounded) {
+      this.airStalls++;
+      this.airStallLog ??= `${this.name}: ${sinceLastStep} ms since the last tick, ${now - this.air.airStartMs} ms in the air; body ${JSON.stringify(this.body)}; track ${JSON.stringify(this.air)}; refused: ${refusals.join(' | ')}`;
+    }
     this.longestStall = Math.max(this.longestStall, ++this.stallRun);
+    if (first) {
+      this.heading = first.heading;
+      this.body = first.body;
+      this.room.send('move', first.next);
+      this.lastSent = first.next;
+    }
   }
 
   private chat() {
@@ -207,6 +243,8 @@ const jumps = bots.reduce((n, bot) => n + bot.jumps, 0);
 const stalledTicks = bots.reduce((n, bot) => n + bot.stalledTicks, 0);
 const airStalls = bots.reduce((n, bot) => n + bot.airStalls, 0);
 const longestStall = Math.max(...bots.map((bot) => bot.longestStall));
+const hurts = bots.reduce((n, bot) => n + bot.hurts, 0);
+const hurtHp = bots.reduce((n, bot) => n + bot.hurtHp, 0);
 await Promise.all(bots.map((bot) => bot.stop()));
 
 const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
@@ -219,8 +257,10 @@ console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFi
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
 console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}; jumps: ${jumps}`);
+console.log(`falls that hurt: ${hurts} (${hurtHp} hp in all)`);
 console.log(`ticks with no sendable pose: ${stalledTicks} (${airStalls} in the air); longest run: ${longestStall} ticks`);
 for (const line of bots.flatMap((bot) => bot.correctionLog).slice(0, 5)) console.log(`  correction: ${line}`);
+for (const line of bots.flatMap((bot) => bot.airStallLog ?? []).slice(0, 5)) console.log(`  stalled in the air: ${line}`);
 
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);

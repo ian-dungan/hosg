@@ -23,6 +23,13 @@ export const STEP_SLACK = 0.5;
 export const MAX_MOVE_ALLOWANCE = MAX_MOVE_SPEED * 1 + STEP_SLACK;
 /** Distance between the points checked along a step, so thin obstacles cannot be stepped over. */
 const WALK_SAMPLE = 0.25;
+/**
+ * Sideways offsets (m) tried at a refused point inside a step. A body sliding round a tree, a lamp
+ * or a corner moves along its edge, and the straight line between two of its poses cuts into it (by
+ * about L²/8r for a circle of radius r, up to ~0.15 m at a corner): if a point this far to either side
+ * is free, the body went round. A wall across the whole step is still refused.
+ */
+const ROUND_THE_EDGE = [0.1, 0.2];
 
 type Walkable = (x: number, z: number) => boolean;
 
@@ -115,6 +122,8 @@ const CLOCK_SLACK_S = 0.25;
 const GROUND_EPSILON = 0.05;
 /** Seconds from take-off to the top of a full jump. */
 const APEX_S = JUMP_SPEED / GRAVITY;
+/** Longest gap between two poses a landing and a new jump are looked for in: one and a half send intervals. */
+const REJUMP_GAP_S = 1.5 / TICK_HZ;
 
 /**
  * Highest y a body may have t seconds after leaving the ground at y0: its jump arc
@@ -129,12 +138,21 @@ export function jumpCeiling(y0: number, tSeconds: number): number {
  * Horizontal + vertical check of one reported pose. Mutates `track` only when the result is 'ok'.
  * - 'too-fast': further than `allowance` (as checkMove).
  * - 'blocked': some point along the step (every WALK_SAMPLE m, and the end) has no surface or one more
- *   than STEP_UP above the body's height there (interpolated); the end is below the surface; or a
- *   standing body rose more than STEP_UP without being in the air.
+ *   than STEP_UP above the body's height there (interpolated), and, inside the step, no free point
+ *   ROUND_THE_EDGE to either side; the end is below the surface; or a standing body rose more than
+ *   STEP_UP without being in the air.
  * - 'floating': in the air (or landing) higher than jumpCeiling allows since the air phase began.
  *   Once that ceiling has fallen below the ground (late messages, a reconnect, a re-join), the arc is
  *   surely over: a landing on the surface no higher than the last accepted height is accepted, and
  *   anything in the air is refused, so an expired track can only come down.
+ * - With jump held, a body can land and take off again between two poses (stepBody lands and jumps
+ *   in one call), so the landing is never reported. A pose in the air that is higher than the last
+ *   one after the arc's top (an arc never rises again once it falls) or above the ceiling is taken
+ *   as such a new jump when some point along the step has ground the body could have come down to
+ *   within REJUMP_GAP_S at the speed it falls from its highest point (no more than STEP_UP above the
+ *   last height), and the pose is no higher than a jump from that ground reaches in that time. The
+ *   landing's drop is reported, and a new air phase starts from that ground, so the height gained is
+ *   never more than one jump above it.
  * landedDrop: on landing (or dropping straight onto lower ground), how far it fell (never negative).
  */
 export function checkPose(
@@ -149,15 +167,22 @@ export function checkPose(
   const distance = Math.hypot(dx, dz);
   if (distance > allowance) return { result: 'too-fast', landedDrop: 0 };
   const samples = Math.max(1, Math.ceil(distance / WALK_SAMPLE));
-  let end = 0;
-  for (let i = 1; i <= samples; i++) {
-    const f = i / samples;
-    const x = i === samples ? to.x : from.x + dx * f;
-    const z = i === samples ? to.z : from.z + dz * f;
+  // sideways unit vector, for going round the edge of something the straight line clips
+  const sx = distance > 0 ? -dz / distance : 0, sz = distance > 0 ? dx / distance : 0;
+  const passable = (x: number, z: number, h: number) => {
     const s = surface(x, z);
-    if (s === null || s > track.y + (to.y - track.y) * f + STEP_UP) return { result: 'blocked', landedDrop: 0 };
-    end = s;
+    return s !== null && s <= h + STEP_UP;
+  };
+  for (let i = 1; i < samples; i++) {
+    const f = i / samples;
+    const x = from.x + dx * f, z = from.z + dz * f, h = track.y + (to.y - track.y) * f;
+    if (passable(x, z, h)) continue;
+    if (!ROUND_THE_EDGE.some((d) => passable(x + sx * d, z + sz * d, h) || passable(x - sx * d, z - sz * d, h))) {
+      return { result: 'blocked', landedDrop: 0 };
+    }
   }
+  const end = surface(to.x, to.z);
+  if (end === null || end > to.y + STEP_UP) return { result: 'blocked', landedDrop: 0 };
   if (to.y < end - GROUND_EPSILON) return { result: 'blocked', landedDrop: 0 };
   const grounded = to.y <= end + GROUND_EPSILON;
 
@@ -174,10 +199,40 @@ export function checkPose(
   // the arc's highest point over [t − slack, t]: it rises until APEX_S, then falls
   const ceiling = jumpCeiling(airStartY, Math.min(t, Math.max(APEX_S, t - CLOCK_SLACK_S)));
   const arcOver = grounded && !track.grounded && to.y <= track.y + GROUND_EPSILON;
+  // Going up again once the arc is surely past its top (a send interval after it, for timing), or
+  // above the ceiling: maybe it landed and jumped again in between.
+  const risingAgain = to.y > track.y && t > APEX_S + 1 / TICK_HZ;
+  if (!grounded && !track.grounded && (risingAgain || to.y > ceiling)) {
+    const ground = rejumpGround(from, track, to, surface, samples);
+    if (ground !== null) {
+      const landedDrop = landAirTrack(track, ground);
+      Object.assign(track, { grounded: false, airStartMs: nowMs - 1000 / TICK_HZ, airStartY: ground, peakY: Math.max(ground, to.y), y: to.y });
+      return { result: 'ok', landedDrop };
+    }
+  }
   if (to.y > ceiling && !arcOver) return { result: 'floating', landedDrop: 0 };
 
   if (grounded) return { result: 'ok', landedDrop: landAirTrack(track, to.y) };
   const peakY = track.grounded ? Math.max(track.y, to.y) : Math.max(track.peakY, to.y);
   Object.assign(track, { grounded: false, airStartMs, airStartY, peakY, y: to.y });
   return { result: 'ok', landedDrop: 0 };
+}
+
+/**
+ * The highest ground along the step (from `from` to `to`, at `samples` + 1 points) that an airborne
+ * track could have landed on and jumped from again before reporting `to`, or null if there is none.
+ * The highest, because a later pose of that jump is judged from it (a body coming down beside a
+ * platform can land on its edge); it is never more than STEP_UP above the last height.
+ */
+function rejumpGround(from: { x: number; z: number }, track: AirTrack, to: Pose, surface: Surface, samples: number): number | null {
+  const top = Math.max(track.peakY, track.airStartY);
+  let best: number | null = null;
+  for (let i = 0; i <= samples; i++) {
+    const f = i / samples;
+    const s = surface(from.x + (to.x - from.x) * f, from.z + (to.z - from.z) * f);
+    if (s === null || s > track.y + STEP_UP || (best !== null && s <= best)) continue;
+    const fallReach = Math.sqrt(2 * GRAVITY * Math.max(0, top - s)) * REJUMP_GAP_S + GROUND_EPSILON;
+    if (track.y - s <= fallReach && to.y <= jumpCeiling(s, REJUMP_GAP_S)) best = s;
+  }
+  return best;
 }

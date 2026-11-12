@@ -361,6 +361,122 @@ describe('checkPose once the arc is surely over (lag, reconnect, re-join)', () =
   });
 });
 
+describe('checkPose with jump held (landing and jumping again between two poses)', () => {
+  for (const dt of DTS) {
+    it(`accepts bunny-hopping on flat ground with jump held for 4 s (frames every ${(dt * 1000).toFixed(1)} ms)`, () => {
+      const c = new SimClient(flat, 0, 0, dt);
+      for (let t = 0; t < 4; t += dt) c.frame({ vx: RUN_SPEED, vz: 0, jump: true });
+      expect(c.steps.filter((s) => s.jumped).length).toBeGreaterThan(4);
+      expect(rejected(replay(flat, { x: 0, z: 0, y: 0 }, c.sent))).toEqual([]);
+    });
+  }
+
+  it('accepts jump held over hilly ground and up onto a platform', () => {
+    const hills: Surface = (x, z) => (x > 6 && x < 9 ? 0.8 + 0.3 * Math.sin(z) : 0.5 * Math.sin(x * 0.7) + 0.3 * Math.cos(z * 0.5));
+    for (const dt of DTS) {
+      const c = new SimClient(hills, 0, 0, dt);
+      for (let t = 0; t < 4; t += dt) c.frame({ vx: RUN_SPEED * 0.8, vz: RUN_SPEED * 0.3, jump: true });
+      expect(rejected(replay(hills, { x: 0, z: 0, y: c.sent.length ? hills(0, 0)! : 0 }, c.sent)), `dt ${dt}`).toEqual([]);
+    }
+  });
+
+  it('accepts coming down onto a 0.8 m platform from a jump and jumping again from it before the next pose', () => {
+    // found by fuzzing: the step passes over the ground (0) and the platform (0.8); the new jump is from 0.8
+    const crate: Surface = (x) => (x > 4.2 ? 0.8 : 0);
+    for (const dt of DTS) for (let start = 0; start <= 0.6; start += 0.05) {
+      const c = new SimClient(crate, start, 0, dt);
+      for (let t = 0; t < 2; t += dt) c.frame({ vx: RUN_SPEED, vz: 0, jump: true });
+      expect(rejected(replay(crate, { x: start, z: 0, y: 0 }, c.sent)), `dt ${dt}, start ${start}`).toEqual([]);
+    }
+  });
+
+  it('still charges the fall when it lands from a 4.5 m ledge and jumps again before the next pose', () => {
+    const ledge: Surface = (x) => (x < 1 ? 4.5 : 0);
+    const c = new SimClient(ledge, 0, 0, 1 / 60);
+    for (let t = 0; t < 2; t += 1 / 60) c.frame({ vx: RUN_SPEED, vz: 0, jump: c.body.y < 4 });
+    const results = replay(ledge, { x: 0, z: 0, y: 4.5 }, c.sent);
+    expect(rejected(results)).toEqual([]);
+    expect(Math.max(...results.map((r) => r.landedDrop))).toBeGreaterThan(4.4);
+  });
+
+  it('cannot use a pretend landing to climb in the air or to hover high up', () => {
+    // a jump, then poses claiming to be ever higher each tick
+    const track = makeAirTrack(0);
+    let best = 0;
+    for (let i = 1; i <= 45; i++) {
+      checkPose({ x: 0, z: 0 }, track, at(0, 0, best + 0.5), 1000 + (i * 1000) / TICK_HZ, 5, flat);
+      best = Math.max(best, track.y);
+    }
+    expect(best).toBeLessThanOrEqual(2);
+    // a jump off the ground, then holding 1.5 m up for 3 s: refused soon, and never accepted again
+    const hover = makeAirTrack(0);
+    const results = Array.from({ length: 45 }, (_, i) => checkPose({ x: 0, z: 0 }, hover, at(0, 0, 1.5), 1000 + ((i + 1) * 1000) / TICK_HZ, 5, flat).result);
+    expect(results.slice(15)).not.toContain('ok');
+  });
+});
+
+describe('checkPose when a body slides round an obstacle', () => {
+  for (const r of [0.2, 0.5, 1.2]) {
+    it(`accepts running into a post of radius ${r} m and sliding round it, on foot and in the air`, () => {
+      const post: Surface = (x, z) => (Math.hypot(x - 3, z - 0.05) < r ? null : 0);
+      for (const dt of DTS) for (const jumpAt of [null, 1.5, 2.2]) {
+        const c = new SimClient(post, 0, 0, dt);
+        let jumped = false;
+        for (let t = 0; t < 3; t += dt) {
+          const jump = jumpAt !== null && !jumped && c.body.x >= jumpAt;
+          if (jump) jumped = true;
+          c.frame({ vx: RUN_SPEED, vz: 0.8, jump }); // mostly head-on, so it slides along the post's edge
+        }
+        expect(c.body.x, `got past (dt ${dt}, jump ${jumpAt})`).toBeGreaterThan(3);
+        expect(rejected(replay(post, { x: 0, z: 0, y: 0 }, c.sent)), `dt ${dt}, jump ${jumpAt}`).toEqual([]);
+      }
+    });
+  }
+
+  it('accepts sliding round the corner of a square block', () => {
+    const block: Surface = (x, z) => (x > 2 && x < 4 && z > -2 && z < 0.1 ? null : 0);
+    for (const dt of DTS) {
+      const c = new SimClient(block, 0, 0, dt);
+      for (let t = 0; t < 1.5; t += dt) c.frame({ vx: RUN_SPEED * 0.8, vz: RUN_SPEED * 0.6, jump: false });
+      expect(c.body.x).toBeGreaterThan(3);
+      expect(rejected(replay(block, { x: 0, z: 0, y: 0 }, c.sent)), `dt ${dt}`).toEqual([]);
+    }
+  });
+
+  it('still refuses a step through a wall 1 m long', () => {
+    const wall: Surface = (x, z) => (x > 1.1 && x < 1.4 && Math.abs(z) < 0.5 ? null : 0);
+    expect(checkPose({ x: 0.8, z: 0 }, makeAirTrack(0), at(1.7, 0, 0), 1000, 5, wall).result).toBe('blocked');
+    expect(checkPose({ x: 0.8, z: 0.25 }, makeAirTrack(0), at(1.7, 0.25, 0), 1000, 5, wall).result).toBe('blocked');
+    // within 0.2 m of its end is going round it
+    expect(checkPose({ x: 0.8, z: 0.35 }, makeAirTrack(0), at(1.7, 0.35, 0), 1000, 5, wall).result).toBe('ok');
+  });
+});
+
+describe('checkPose against honest clients wandering the grove', () => {
+  it('accepts every pose of 24 seeded runs of 20 s: running, turning, tapping and holding jump', () => {
+    let seed = 12345;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const surface = groveTownSurface;
+    const starts = [SPAWN, { x: 30, z: -24 }, { x: 12, z: 22 }, { x: -20, z: -30 }];
+    for (let run = 0; run < 24; run++) {
+      const dt = DTS[run % DTS.length];
+      const st = starts[run % starts.length];
+      expect(surface(st.x, st.z), `start ${run}`).not.toBeNull();
+      const c = new SimClient(surface, st.x, st.z, dt);
+      let heading = rand() * Math.PI * 2, hold = 0;
+      for (let t = 0; t < 20; t += dt) {
+        if (rand() < dt * 0.7) heading += (rand() - 0.5) * 2.5;
+        if (hold <= 0 && rand() < dt * 0.5) hold = rand() < 0.5 ? dt : 0.5 + rand() * 2; // a tap, or jump held
+        c.frame({ vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump: hold > 0 });
+        hold -= dt;
+      }
+      expect(c.steps.some((s) => s.jumped), `run ${run} jumps`).toBe(true);
+      const results = replay(surface, { x: st.x, z: st.z, y: surface(st.x, st.z)! }, c.sent);
+      expect(rejected(results), `run ${run} (dt ${dt.toFixed(4)})`).toEqual([]);
+    }
+  });
+});
+
 describe('landAirTrack', () => {
   it('puts a track on the ground and returns how far it fell from its highest point', () => {
     const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 4.5, peakY: 5, y: 3 };
