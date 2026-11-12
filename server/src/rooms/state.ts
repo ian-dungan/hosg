@@ -2,6 +2,7 @@
 // enemies and live telegraphs (keyed by their engine id), mirrored from the combat engine. Each
 // client sees only those within its interest radius, and the zone's head count as `online`.
 import { schema, t, type SchemaType } from '@colyseus/schema';
+import { STATE_XZ_LIMIT_M, STATE_Y_MAX_M, STATE_Y_MIN_M } from '@sg2/shared';
 
 /**
  * Positions and facings are quantised on the wire (the client's decoder turns them back into plain
@@ -16,9 +17,10 @@ import { schema, t, type SchemaType } from '@colyseus/schema';
  * floor at 0) comes back exactly. A change smaller than a step sends nothing: the quantisation is the
  * dead band.
  */
-export const POS_LIMIT_M = 512;
-const pos = () => t.quantized({ min: -POS_LIMIT_M, max: POS_LIMIT_M, mode: 'wrap' });
-const height = () => t.quantized({ min: -64, max: 192, mode: 'wrap' });
+// The ranges are shared/src/world/limits.ts's STATE_* limits: every zone must fit inside them (the
+// zone registry and the generator throw otherwise), since a value outside would wrap.
+const pos = () => t.quantized({ min: -STATE_XZ_LIMIT_M, max: STATE_XZ_LIMIT_M, mode: 'wrap' });
+const height = () => t.quantized({ min: STATE_Y_MIN_M, max: STATE_Y_MAX_M, mode: 'wrap' });
 const facing = () => t.angle({ bits: 8 });
 
 export const PlayerState = schema(

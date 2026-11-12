@@ -5,11 +5,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { matchMaker } from '@colyseus/core';
 import type { Room } from '@colyseus/sdk';
-import { CLIENT_RECONNECTION, INTEREST_HYSTERESIS, INTEREST_RADIUS, SPAWN, TICK_HZ, worldOf, type CampSpawn, type Surface, type ZoneDef } from '@sg2/shared';
+import { CLIENT_RECONNECTION, INTEREST_HYSTERESIS, INTEREST_MAX_ADVENTURERS, INTEREST_RADIUS, INTEREST_RANK_HYSTERESIS, STATE_XZ_LIMIT_M, SPAWN, TICK_HZ, worldOf, type CampSpawn, type Surface, type ZoneDef } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer';
 import type { Store } from '../store/types';
 import { Grid, LEAVE_R, interested, telegraphInterested } from './interest';
-import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, testClock, waitFor, walk, type TestServer } from './testHelpers';
+import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, sx, testClock, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -39,6 +39,14 @@ async function joinAt(url: string, store: Store, name: string, x: number, z: num
   return { ...joined, ...account };
 }
 
+/** Stops the room's engine from ticking (its state stays as set), so a test can pin targets by hand. */
+function freezeEngine(room: Room<any, any>) {
+  const server = serverRoom(room) as any;
+  server.combat.tick = () => ({ fx: [], displaced: [], died: [], kills: [] });
+  return worldOf(server.combat);
+}
+const enemyIds = (room: Room<any, any>) => [...(room.state.enemies?.values() ?? [])].map((e: any) => e.eid);
+
 /** A few patches' time: long enough for the room to have stepped and patched twice. */
 const patches = () => sleep(4 * (1000 / TICK_HZ));
 
@@ -56,6 +64,13 @@ describe('the interest rule', () => {
     expect(telegraphInterested(viewer, { x: INTEREST_RADIUS + 2.9, z: 0, shape: 'circle', r: 3, width: 0 })).toBe(true);
     expect(telegraphInterested(viewer, { x: INTEREST_RADIUS + 3.1, z: 0, shape: 'circle', r: 3, width: 0 })).toBe(false);
     expect(telegraphInterested(viewer, { x: INTEREST_RADIUS + 9, z: 0, shape: 'line', r: 9, width: 1.8 })).toBe(true);
+  });
+
+  it('the state\'s position range is the shared zone limit (it wraps beyond)', () => {
+    expect(sx(STATE_XZ_LIMIT_M - 1)).toBe(STATE_XZ_LIMIT_M - 1);
+    expect(sx(STATE_XZ_LIMIT_M)).toBe(-STATE_XZ_LIMIT_M);
+    expect(INTEREST_MAX_ADVENTURERS).toBe(50);
+    expect(INTEREST_RANK_HYSTERESIS).toBe(10);
   });
 
   it('the grid returns everything within a cell of a point, and not far things', () => {
@@ -121,13 +136,48 @@ describe('who a client sees', () => {
     await waitFor(() => a.room.state.online === 2);
   });
 
-  it('/healthz reports each zone\'s patch time (p95, ms): one encode per client view', async () => {
+  it('/healthz reports each zone\'s patch time (p95, ms: one encode per client view) and the event-loop delay p99', async () => {
     const { url, store } = await start(flatGrove());
     await joinAt(url, store, 'Alice', 0, 0);
     await patches();
     const health: any = await (await fetch(`${url}/healthz`)).json();
     expect(Number.isFinite(health.zones.grove.patchMs)).toBe(true);
     expect(health.zones.grove.patchMs).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(health.eventLoopP99Ms)).toBe(true); // the process's event-loop delay p99 (ms, last 5 s)
+    expect(health.eventLoopP99Ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('`online` stays true when an account signs in again (its older session is kicked)', async () => {
+    const { url, store } = await start(flatGrove());
+    const a = await joinAt(url, store, 'Alice', 0, 0);
+    const b = await joinAt(url, store, 'Bob', 0, 150);
+    await waitFor(() => a.room.state.online === 2);
+    collect(b.room, 'kicked');
+    const again = await joinZone(url, b.token, 'grove');
+    await waitFor(() => serverRoom(a.room).playerCount === 2 && a.room.state.online === 2);
+    await patches();
+    expect(a.room.state.online).toBe(2);
+    await again.room.leave();
+    await waitFor(() => a.room.state.online === 1);
+  });
+
+  it('caps the adventurers in a view at the nearest K, with rank hysteresis (enter at rank K, leave past K + slack)', async () => {
+    const { url, store } = await start({ ...flatGrove(), viewCap: { max: 2, slack: 1 } });
+    const a = await joinAt(url, store, 'Alice', 0, 0);
+    const b = await joinAt(url, store, 'Bob', 0, 10);
+    const c = await joinAt(url, store, 'Cara', 0, 20);
+    const d = await joinAt(url, store, 'Dan', 0, 30);
+    await waitFor(() => sees(a, b) && sees(a, c));
+    await patches();
+    expect(sees(a, d)).toBe(false); // rank 3 > K
+    expect(sees(a, a)).toBe(true);
+    await walk(d.room, { x: 0, z: 30 }, { x: 0, z: 15 }, flat); // D rank 2, C rank 3: D comes in, C stays
+    await waitFor(() => sees(a, d));
+    expect(sees(a, c)).toBe(true);
+    const e = await joinAt(url, store, 'Eve', 0, 3); // E 1, B 2, D 3, C 4: C leaves, E comes in
+    await waitFor(() => sees(a, e) && !sees(a, c));
+    expect(sees(a, b) && sees(a, d)).toBe(true);
+    expect(a.room.state.online).toBe(5);
   });
 
   it('chat stays zone-wide', async () => {
@@ -240,6 +290,45 @@ describe('enemies and telegraphs in view', () => {
     expect(far.room.state.telegraphs?.size ?? 0).toBe(0);
     expect(far.room.state.enemies?.size ?? 0).toBe(0);
     await waitFor(() => (a.room.state.telegraphs?.size ?? 0) === 0, 6000); // resolved: deleted from the view too
+  });
+
+  it('the targeted enemy stays in view however far (beyond the hysteresis band)', async () => {
+    const { url, store } = await start(flatGrove([{ kind: 'dummy', x: 0, z: 30, facing: 0 }, { kind: 'dummy', x: 0, z: 100, facing: 0 }]));
+    const a = await joinAt(url, store, 'Alice', 0, 0);
+    await waitFor(() => a.room.state.enemies?.size === 1);
+    const w = freezeEngine(a.room);
+    const far = [...w.enemies.values()].find((e: any) => e.z === 100)!;
+    w.adventurers.get(players(a.room).get(a.room.sessionId).eid)!.targetId = far.id;
+    await waitFor(() => enemyIds(a.room).includes(far.id));
+    await patches();
+    expect(enemyIds(a.room)).toContain(far.id);
+    expect(players(a.room).get(a.room.sessionId).target).toBe(far.id);
+  });
+
+  it('an enemy targeting the client is brought into view however far', async () => {
+    const { url, store } = await start(flatGrove([{ kind: 'dummy', x: 0, z: 100, facing: 0 }]));
+    const a = await joinAt(url, store, 'Alice', 0, 0);
+    await patches();
+    expect(enemyIds(a.room)).toEqual([]);
+    const w = freezeEngine(a.room);
+    const far = [...w.enemies.values()][0] as any;
+    far.targetId = players(a.room).get(a.room.sessionId).eid;
+    await waitFor(() => enemyIds(a.room).includes(far.id));
+  });
+
+  it('a telegraph owner seen only for its telegraph leaves the view once the telegraph resolves', async () => {
+    const clock = testClock(4);
+    // A Bramble Boar 70.5 m from Alice (beyond the 70 m band): its Gore Charge line (9 m, 1.8 wide)
+    // reaches within 60 m, so the telegraph and the boar are seen; it charges away, toward Bob.
+    const { url, store } = await start({ ...flatGrove([{ kind: 'boar', x: 0, z: 70.5, facing: 0 }]), combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', 0, 0);
+    await joinAt(url, store, 'Bob', 0, 72.5);
+    await patches();
+    expect(enemyIds(a.room)).toEqual([]);
+    await waitFor(() => (a.room.state.telegraphs?.size ?? 0) > 0, 6000);
+    expect(enemyIds(a.room)).toHaveLength(1);
+    await waitFor(() => (a.room.state.telegraphs?.size ?? 0) === 0, 6000);
+    await waitFor(() => enemyIds(a.room).length === 0);
   });
 
   it('fx follow the view: a hit on an enemy in view arrives, one out of view does not', async () => {

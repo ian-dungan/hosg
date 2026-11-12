@@ -15,6 +15,8 @@ import {
   DODGE_CHARGES,
   DODGE_MIN_GAP_S,
   DODGE_REFILL_S,
+  INTEREST_MAX_ADVENTURERS,
+  INTEREST_RANK_HYSTERESIS,
   MAX_HP,
   MAX_MOVE_ALLOWANCE,
   MOMENTUM_DECAY_PER_S,
@@ -54,7 +56,7 @@ import {
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
 import type { Adventurer, AdventurerSave, Store } from '../store/types';
-import { Grid, dist2, interested, telegraphInterested, type Placed } from './interest';
+import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
 import type { Allowance, Presence } from './presence';
 import { EnemyState as EnemySchema, PlayerState, TelegraphState as TelegraphSchema, ZoneState } from './state';
@@ -86,6 +88,8 @@ export interface ZoneRoomOptions {
   wallClock?: () => number;
   /** Test-only: how long a failed respawn save waits before it is tried again (ms; default 5000). */
   respawnRetryMs?: number;
+  /** Test-only: the most other adventurers a view holds, and the rank slack before one leaves. */
+  viewCap?: { max: number; slack: number };
 }
 
 /** Where the dead get up again: the statue in this zone. */
@@ -257,6 +261,9 @@ interface Session {
   lastNotice?: { text: string; at: number };
 }
 
+const NO_ENEMIES: readonly EnemySchema[] = [];
+const NO_ADVENTURERS: readonly PlayerState[] = [];
+
 /** Something a client's view can hold. */
 type Viewed = PlayerState | EnemySchema | TelegraphSchema;
 
@@ -338,6 +345,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private owners = new Set<number>();
   /** Joins so far (spreads the views' radius checks over the steps). */
   private joins = 0;
+  /** Enemies by the engine id of the adventurer they target, rebuilt with the grid. */
+  private targeting = new Map<number, EnemySchema[]>();
+  /** Adventurers within a view's radius rule, and their squared distances (reused by updateView). */
+  private near: PlayerState[] = [];
+  private nearD2: number[] = [];
+  private order: number[] = [];
+  /** The adventurers a view keeps this check (reused by updateView). */
+  private keep = new Set<PlayerState>();
+  /** The view cap: at most `max` other adventurers, leaving past rank max + slack. */
+  private viewCap = { max: INTEREST_MAX_ADVENTURERS, slack: INTEREST_RANK_HYSTERESIS };
 
   onCreate(options: ZoneRoomOptions) {
     // Never a second room for a zone (Colyseus would open one if it ever saw this one as full).
@@ -355,6 +372,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.autoRespawnSeconds = options.autoRespawnSeconds;
     this.wallMs = options.wallClock ?? Date.now;
     this.respawnRetryMs = options.respawnRetryMs ?? RESPAWN_RETRY_MS;
+    if (options.viewCap) this.viewCap = { ...options.viewCap };
     const createdAt = performance.now();
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
@@ -1242,7 +1260,22 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const grid = this.grid;
     grid.clear();
     for (const session of this.sessions.values()) grid.insert(session.player);
-    for (const e of this.state.enemies.values()) grid.insert(e);
+    for (const list of this.targeting.values()) list.length = 0;
+    for (const e of this.state.enemies.values()) {
+      grid.insert(e);
+      if (e.target < 0) continue;
+      let list = this.targeting.get(e.target);
+      if (!list) this.targeting.set(e.target, (list = []));
+      list.push(e);
+    }
+  }
+
+  /**
+   * Adventurers a view keeps whatever the radius and the cap. None yet: parties (Plan 4) go here,
+   * and are then shown and kept like the target.
+   */
+  private pinnedAdventurers(_session: Session): readonly PlayerState[] {
+    return NO_ADVENTURERS;
   }
 
   /** One client's view brought up to date now (a join, a reconnect), from a fresh grid. */
@@ -1255,12 +1288,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /**
    * One client's view, by the interest rule (interested): adventurers and enemies within the radius
-   * come in, and go out only beyond the hysteresis band. Its own adventurer is always in it. Kept in
-   * whatever the radius: the enemy it targets, enemies targeting it, and the owner of any telegraph it
-   * sees; a telegraph is seen when any part of it reaches within the radius (telegraphInterested) or
-   * its owner is seen, and stays until it resolves. Telegraphs and the target are checked every step;
-   * the radius (`full`) every VIEW_FULL_EVERY_STEPS steps. Cost: the grid cells around it plus what it sees.
-   * (Parties, from Plan 4, belong with the target: kept in whatever the radius.)
+   * come in, and go out only beyond the hysteresis band. Adventurers are capped at the nearest
+   * viewCap.max (rank hysteresis: in at rank ≤ max, out past max + slack); enemies are not. Its own
+   * adventurer is always in it. Shown and kept whatever the radius or the cap: the enemy it targets,
+   * enemies targeting it, the owner of any telegraph it sees, and its pinned adventurers (parties,
+   * later). A telegraph is seen when any part of it reaches within the radius (telegraphInterested)
+   * or its owner is seen, and stays until it resolves. Telegraphs and pins are checked every step;
+   * the radius and the cap (`full`) every VIEW_FULL_EVERY_STEPS steps. Cost: the grid cells around it
+   * plus what it sees (plus a sort of the adventurers in range when there are more than the cap).
    */
   private updateView(session: Session, full = true) {
     const me = session.player, seen = session.seen, view = session.view;
@@ -1280,13 +1315,45 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
     const target = me.target >= 0 ? this.state.enemies.get(this.keyOf(me.target)) : undefined;
     if (target) show(target);
+    for (const e of this.targeting.get(me.eid) ?? NO_ENEMIES) show(e);
+    const pinned = this.pinnedAdventurers(session);
+    for (const p of pinned) show(p);
     if (!full) return;
+
+    // Adventurers within the radius rule, ranked by distance when there are more than the cap.
+    const near = this.near, nearD2 = this.nearD2, keep = this.keep;
+    near.length = 0;
+    nearD2.length = 0;
+    keep.clear();
     this.grid.near(me.x, me.z, (item) => {
-      if (interested(dist2(me, item), false) && item !== me && !seen.has(item)) show(item);
+      if (item === me) return;
+      const d2 = dist2(me, item);
+      if (item instanceof EnemySchema) {
+        if (!seen.has(item) && interested(d2, false)) show(item);
+      } else if (interested(d2, seen.has(item))) {
+        near.push(item as PlayerState);
+        nearD2.push(d2);
+      }
     });
+    const { max, slack } = this.viewCap;
+    if (near.length <= max) {
+      for (const p of near) keep.add(p);
+    } else {
+      const order = this.order;
+      order.length = 0;
+      for (let k = 0; k < near.length; k++) order.push(k);
+      order.sort((i, j) => nearD2[i] - nearD2[j]);
+      for (let rank = 1; rank <= order.length; rank++) {
+        const p = near[order[rank - 1]];
+        if (rank <= max || (rank <= max + slack && seen.has(p))) keep.add(p);
+      }
+    }
+    for (const p of keep) show(p);
     for (const item of seen) {
-      if (item instanceof TelegraphSchema || interested(dist2(me, item as Placed), true)) continue;
-      if (item instanceof EnemySchema && (item === target || item.target === me.eid || owners.has(item.eid))) continue;
+      if (item instanceof TelegraphSchema) continue;
+      if (item instanceof EnemySchema) {
+        if (interested(dist2(me, item), true) || item === target || item.target === me.eid || owners.has(item.eid)) continue;
+      } else if (keep.has(item as PlayerState) || pinned.includes(item as PlayerState)) continue;
       seen.delete(item);
       view.remove(item);
     }

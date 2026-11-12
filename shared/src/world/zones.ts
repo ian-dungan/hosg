@@ -5,6 +5,7 @@ import { REASON_GROVE_FULL } from '../messages';
 import type { Surface } from '../body';
 import { bandR, createGroveWalk, groveTownSurface, roadZ as groveRoadZ } from './layout';
 import { GREENWAY_RECIPE, generateZone, type CampSpawn } from './recipe';
+import { checkZoneLimits } from './limits';
 
 /**
  * What the combat engine needs from a zone (same shape as combat/engine.ts's CombatZone, Task 2;
@@ -50,7 +51,7 @@ function buildGrove(): ZoneDef {
     id: 'grove', name: 'Shady Grove', banner: ['The Plaza of the Two', 'Shady Grove'],
     surface, ground, sight: (x, z) => surface(x, z) !== null, camps: [],
     spawn: { ...SPAWN },
-    exits: [{ to: 'greenway', x: GROVE_EAST_GATE.x, z: GROVE_EAST_GATE.z, r: EXIT_R, arrive: { ...greenwayLayout().entry }, open: false }],
+    exits: [{ to: 'greenway', x: GROVE_EAST_GATE.x, z: GROVE_EAST_GATE.z, r: EXIT_R, arrive: { ...greenwayLayout().entry }, open: true }],
   };
 }
 
@@ -81,10 +82,15 @@ function deepFreeze<T>(o: T): T {
 }
 
 const defs = new Map<ZoneId, ZoneDef>();
-/** The zone's definition, built on first use and cached. */
+/** The zone's definition, built on first use (and checked against the zone limits, limits.ts) and cached. */
 export function zoneDef(id: ZoneId): ZoneDef {
   let d = defs.get(id);
-  if (!d) { d = deepFreeze(id === 'grove' ? buildGrove() : buildGreenway()); defs.set(id, d); }
+  if (!d) {
+    const built = id === 'grove' ? buildGrove() : buildGreenway();
+    checkZoneLimits(built); // throws for a zone the room's state could not carry
+    d = deepFreeze(built);
+    defs.set(id, d);
+  }
   return d;
 }
 

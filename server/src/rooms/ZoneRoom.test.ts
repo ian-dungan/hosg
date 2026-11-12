@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { signToken } from '../auth/tokens';
-import { SECRET, accountFor, collect, joinGrove, saveAs, shown, sleep, startServer, sx, sy, testClock, waitFor, walk, type TestServer } from './testHelpers';
+import { SECRET, accountFor, collect, joinGrove, saveAs, serverRoom, shown, sleep, startServer, sx, sy, testClock, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -143,12 +143,18 @@ describe('movement', () => {
     const { url, store } = await start();
     const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
     const corrections = collect(a.room, 'correct');
-    for (let i = 1; i <= 40; i++) a.room.send('move', pose(SPAWN.x + i * 0.4, SPAWN.z)); // 16 m at once
+    const sent = Array.from({ length: 40 }, (_, i) => pose(SPAWN.x + (i + 1) * 0.4, SPAWN.z)); // 16 m at once
+    for (const p of sent) a.room.send('move', p);
     await waitFor(() => corrections.length > 0);
     await sleep(100);
     const me = a.room.state.players.get(a.room.sessionId);
     expect(me.x - SPAWN.x).toBeLessThanOrEqual(6 * 1.3 + 0.5 + 0.2); // one second's worth plus slack, no more
-    expect(shown(corrections.at(-1))).toEqual({ x: me.x, z: SPAWN.z, y: me.y });
+    // The correction is exact: the server's last accepted pose, which is one of the poses sent (the
+    // state shows it quantised).
+    const last = corrections.at(-1);
+    expect(last).toEqual((serverRoom(a.room) as any).sessions.get(a.room.sessionId).lastGood);
+    expect(sent.map(({ x, z, y }) => ({ x, z, y }))).toContainEqual(last);
+    expect(shown(last)).toEqual({ x: me.x, z: SPAWN.z, y: me.y });
   });
 
   it('does not give a re-joining account a fresh allowance', async () => {

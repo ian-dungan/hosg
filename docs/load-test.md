@@ -49,7 +49,8 @@ The bots stand still for a little over a second after joining (a new session sta
 of movement banked), then measure for `--seconds` after the warmup. It prints:
 
 - the patch rate the bots saw, and the server's own (`/healthz` `tickHz`, 5 s window);
-- the server's peak memory (`/healthz` `peakRssMb`);
+- the server's peak memory (`/healthz` `peakRssMb`) and its event-loop delay p99 (`eventLoopP99Ms`,
+  over 5 s windows: everything shares the loop, steps, patches and sockets);
 - the server's room step time p95 (`tickMs`: the engine, movement, views, fx) and patch time p95
   (`patchMs`: encoding and sending the state, one encode per client's view), both over 5 s windows;
 - bytes received per bot a second (state patches and messages), mean, p95 and max;
@@ -65,37 +66,49 @@ Each client's room state is its own view (a Colyseus `StateView` per client, `se
 - adventurers and enemies within `INTEREST_RADIUS` = 60 m, which leave only beyond 70 m
   (`INTEREST_HYSTERESIS` = 10 m), so nothing flickers at the edge; checked 7.5 times a second from a
   grid of 70 m cells (each check reads the 3 × 3 cells around the client, not the whole zone);
-- whatever the distance: the enemy it targets, enemies targeting it, and the owner of any telegraph
-  it sees; a telegraph is seen as soon as any part of it reaches within 60 m (checked every step, so
-  it arrives in the same patch it appears in);
+- at most the 50 nearest other adventurers (`INTEREST_MAX_ADVENTURERS`): one comes in at rank 50 or
+  nearer and leaves only past rank 60 (`INTEREST_RANK_HYSTERESIS` = 10); enemies are not capped;
+- whatever the distance or the cap: the enemy it targets, enemies targeting it, and the owner of any
+  telegraph it sees (parties, later); a telegraph is seen as soon as any part of it reaches within
+  60 m (checked every step, so it arrives in the same patch it appears in);
 - `online`: the zone's true head count (the HUD's "Adventurers online" should read it).
 
 Combat fx go to clients that see the event's focus (`FX_RADIUS` is the interest radius). Chat is
 zone-wide. Positions and facings are quantised on the wire (x/z 1/64 m, y 1/256 m, facing 1.4°,
-`server/src/rooms/state.ts`); clients decode them to plain numbers.
+`server/src/rooms/state.ts`); clients decode them to plain numbers. The ranges wrap, so every zone
+must fit within ±500 m and heights −52..180 m (`shared/src/world/limits.ts`; the zone registry and
+the generator throw otherwise).
 
 ## Results
 
 2026-11-12, development sandbox (4 CPU cores, 16 GB RAM), server and bots on the same machine,
 `SG2_STORE=memory`, `SG2_AUTH_RATE_PER_MIN=1000`, port 2571, server run with
 `tsx server/src/index.ts`, 100 walking bots, 30 s measured. "Before" is commit 4299dae (every
-adventurer to everyone, positions as float64); "after" is interest management with quantised
-positions. Every run: 0 corrections, 0 disconnections, PASS.
+adventurer to everyone, positions as float64); "views" adds the interest radius and quantised
+positions; "capped" adds the 50-nearest cap (the current code). Every run: 0 corrections, 0
+disconnections, PASS, bot patch rate 15.10–15.13 Hz.
 
-| zone, bots | KiB/s per bot, before | after (mean / p95) | in view (real within 60 m) | bot Hz | step p95, worst 5 s (before → after) | patch p95, worst 5 s | peak RSS (before → after) |
-|---|---|---|---|---|---|---|---|
-| grove, from the spawn (`--warmup 2`) | 54.5 | **11.2** / 13.4 | 61 (54) | 15.13 | 4.35 → 3.20 ms | 8.5 ms | 128 → 140 MB |
-| grove, spread out (`--warmup 40`) | 55.5 | **6.9** / 8.6 | 35 (30) | 15.13 | 1.54 → 1.47 ms | 4.2 ms | 129 → 140 MB |
-| grove, clustered (`--cluster 15`) | 49.6 | **16.5** / 16.5 | 100 (99) | 15.13 | 3.44 → 2.97 ms | 5.4 ms | 127 → 139 MB |
-| Greenway, from the entry | 55.6 | **12.1** / 14.6 | 63 (56) | 15.10 | 5.42 → 5.86 ms | 7.0 ms | 151 → 146 MB |
-| Greenway, spread out (`--warmup 40`) | 58.2 | **6.4** / 8.9 | 30 (25) | 15.13 | 2.43 → 4.34 ms | 4.3 ms | 134 → 147 MB |
-| Greenway, clustered (`--cluster 15`) | 52.8 | **17.6** / 17.6 | 100 (99) | 15.13 | 3.75 → 4.02 ms | 6.7 ms | 130 → 144 MB |
+KiB/s received per bot (mean, p95 in brackets), and adventurers in view (itself included; other bots
+really within 60 m in brackets):
+
+| zone, bots | before | views | capped | in view, capped |
+|---|---|---|---|---|
+| grove, from the spawn (`--warmup 2`) | 54.5 | 11.2 (13.4) | **9.2** (10.7) | 49 (58) |
+| grove, spread out (`--warmup 40`) | 55.5 | 6.9 (8.6) | – | 35 (30), views run |
+| grove, clustered (`--cluster 15`) | 49.6 | 16.5 | **10.5** (10.6) | 56 (99) |
+| Greenway, from the entry | 55.6 | 12.1 (14.6) | **9.3** (10.9) | 47 (55) |
+| Greenway, spread out (`--warmup 40`) | 58.2 | 6.4 (8.9) | – | 30 (25), views run |
+| Greenway, clustered (`--cluster 15`) | 52.8 | 17.6 | **10.9** (11.1) | 56 (99) |
+
+Server, capped runs (worst 5 s window): room step p95 4.3–6.4 ms (before: 3.4–5.4), patch p95
+4.0–6.0 ms, event-loop delay p99 14.6–18.0 ms, peak RSS 142–147 MB (before: 127–151). The spread-out
+runs were not repeated with the cap: fewer than 50 are in range there, so the cap does not act.
 
 Where the bytes go: a walking adventurer's update cost 38 bytes per patch before (x, z, y and facing
 as float64, 9 bytes each with the field index, plus about 2 bytes to address the entry) and costs
-about 11.5 now (3 + 3 + 3 + 2, plus 2). The clustered runs are the floor for 100 adventurers in sight
-of each other: 99 × 15 a second × 11.5 bytes ≈ 17 KB/s. Interest cannot cut that; only fewer fields
-or fewer updates per adventurer can, and the latter needs the client (see the Task 10 report).
+about 11.5 now (3 + 3 + 3 + 2, plus 2). Without the cap, 100 adventurers in sight of each other cost
+99 × 15 a second × 11.5 bytes ≈ 17 KB/s; with it, 50–60 of them plus the cost of the ones swapping in
+and out at the rank edge (each arrives whole, about 25 bytes).
 The bots turn their facing by up to ±0.2 rad every tick, so they cost a little more than players do.
 
 Fighting: 100 brain-driven adventurers at the Greenway's 21 camps (the Task 6 scratch driver) receive

@@ -76,6 +76,8 @@ interface Health {
   tickHz: number;
   rssMb: number;
   peakRssMb: number;
+  /** The server process's event-loop delay p99 over its last 5 s window (ms). */
+  eventLoopP99Ms?: number;
   zones?: Record<string, { players: number; tickHz: number; tickMs?: number; patchMs?: number }>;
 }
 
@@ -361,6 +363,8 @@ console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFi
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
 if (tickSamples.length) console.log(`server step time p95 (/healthz tickMs, 5 s window): max ${Math.max(...tickSamples)} ms, last ${tickMs(final)} ms`);
+const loopSamples = healthSamples.map((h) => h.eventLoopP99Ms ?? 0);
+if (loopSamples.length) console.log(`server event-loop delay p99 (/healthz eventLoopP99Ms, 5 s window): max ${Math.max(...loopSamples)} ms, last ${final.eventLoopP99Ms ?? 0} ms`);
 if (patchSamples.length) console.log(`server patch time p95 (/healthz patchMs, 5 s window): max ${Math.max(...patchSamples)} ms, last ${patchMs(final)} ms`);
 const sortedBytes = [...byteRates].sort((a, b) => a - b);
 console.log(`received per bot: mean ${(byteRates.reduce((a, b) => a + b, 0) / byteRates.length / 1024).toFixed(1)} KiB/s, p95 ${(sortedBytes[Math.floor(sortedBytes.length * 0.95)] / 1024).toFixed(1)} KiB/s, max ${(sortedBytes[sortedBytes.length - 1] / 1024).toFixed(1)} KiB/s`);

@@ -100,6 +100,13 @@ export const UNREACHABLE_S = 3;
  */
 export const INTEREST_RADIUS = 60;
 export const INTEREST_HYSTERESIS = 10;
+/**
+ * At most this many other adventurers in a view, the nearest (a crowded plaza): one comes in at rank
+ * INTEREST_MAX_ADVENTURERS or nearer and goes out only past INTEREST_MAX_ADVENTURERS +
+ * INTEREST_RANK_HYSTERESIS. Enemies are not capped.
+ */
+export const INTEREST_MAX_ADVENTURERS = 50;
+export const INTEREST_RANK_HYSTERESIS = 10;
 /** Combat events are sent to clients that have their focus in view: the interest radius. */
 export const FX_RADIUS = INTEREST_RADIUS;
 export const CHARGE_SLOW_GRACE_S = 0.25;

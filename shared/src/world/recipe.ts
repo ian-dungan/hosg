@@ -8,6 +8,7 @@
 import type { Obstacle } from './layout';
 import { ENEMY_KINDS, type EnemyKindId } from '../combat/enemies';
 import { ZoneWalk } from './zoneWalk';
+import { ZONE_Y_MAX_M, ZONE_Y_MIN_M, assertInsideZoneLimits } from './limits';
 
 // Where one enemy starts (and respawns), facing as Pose.facing: forward = (sin f, cos f). Same shape as combat's CampSpawn.
 export interface CampSpawn { kind: EnemyKindId; x: number; z: number; facing: number }
@@ -116,6 +117,13 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
   const rng = prng(r.seed);
   const { width, depth, hills, seed } = r;
   const halfD = depth / 2;
+  // The zone must fit inside what the room's state can carry (limits.ts): x 0..width, z ±depth/2,
+  // and its highest ground (hills, the rise at the bounds, a rock platform's top) and lowest.
+  assertInsideZoneLimits(`Zone recipe '${r.id}': its far corner`, width, halfD);
+  const peak = hills * 1.35 + BOUND_RISE + 1.05, trough = -hills * 1.35;
+  if (peak > ZONE_Y_MAX_M || trough < ZONE_Y_MIN_M) {
+    throw new Error(`Zone recipe '${r.id}': heights ${trough}..${peak} m are outside the zone limits (${ZONE_Y_MIN_M}..${ZONE_Y_MAX_M} m)`);
+  }
   const bounds = { x0: 0.5, x1: width - 2, z0: -(halfD - 1), z1: halfD - 1 };
 
   // 1. road: control points every ROAD_STEP m, smoothstep between them

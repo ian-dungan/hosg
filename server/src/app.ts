@@ -1,6 +1,7 @@
 // The game server: the accounts API, health check and client files over Express, and one Colyseus room per zone, on one port.
 import { once } from 'node:events';
 import type { Server as HttpServer } from 'node:http';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
@@ -35,6 +36,8 @@ export interface AppOptions {
   wallClock?: () => number;
   /** Test-only: how long a failed respawn save waits before it is tried again (ms; default 5000). */
   respawnRetryMs?: number;
+  /** Test-only: the view cap (default INTEREST_MAX_ADVENTURERS, with INTEREST_RANK_HYSTERESIS of slack). */
+  viewCap?: { max: number; slack: number };
 }
 
 /** One zone's numbers in stats() and /healthz. */
@@ -60,6 +63,9 @@ export interface App {
 // Room messages are small; this leaves room for a full chat line (CHAT_MAX characters of any script).
 const MAX_WS_PAYLOAD = 16 * 1024;
 
+/** Window of /healthz's eventLoopP99Ms (ms). */
+const EVENT_LOOP_WINDOW_MS = 5000;
+
 export function createApp(opts: AppOptions): App {
   const rooms = new Map<ZoneId, ZoneRoom>();
   const presence = new Presence();
@@ -73,6 +79,17 @@ export function createApp(opts: AppOptions): App {
     for (const to of tos) openGates.add(gate(from, to));
   }
   const isExitOpen = (from: ZoneId, to: ZoneId) => openGates.has(gate(from, to));
+
+  // The process's event-loop delay (everything shares the loop: steps, patches, sockets): its p99 over
+  // the last whole EVENT_LOOP_WINDOW_MS, in /healthz.
+  const loop = monitorEventLoopDelay({ resolution: 10 });
+  loop.enable();
+  let loopP99Ms = 0;
+  const loopTimer = setInterval(() => {
+    loopP99Ms = Math.round((loop.percentile(99) / 1e6) * 100) / 100;
+    loop.reset();
+  }, EVENT_LOOP_WINDOW_MS);
+  loopTimer.unref();
 
   const round = (hz: number) => Math.round(hz * 10) / 10;
   const stats = () => {
@@ -105,7 +122,7 @@ export function createApp(opts: AppOptions): App {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
         const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
         const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-        res.json({ ok: true, ...stats(), rssMb, peakRssMb });
+        res.json({ ok: true, ...stats(), rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms });
       });
       if (opts.clientDir) app.use(express.static(opts.clientDir));
     },
@@ -126,6 +143,7 @@ export function createApp(opts: AppOptions): App {
       autoRespawnSeconds: opts.autoRespawnSeconds ?? AUTO_RESPAWN_S,
       wallClock: opts.wallClock,
       respawnRetryMs: opts.respawnRetryMs,
+      viewCap: opts.viewCap,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }
@@ -158,6 +176,8 @@ export function createApp(opts: AppOptions): App {
       await gameServer.gracefullyShutdown(false); // also stops the HTTP server accepting connections
       http?.closeAllConnections(); // idle keep-alive connections would hold it open
       await closed;
+      clearInterval(loopTimer);
+      loop.disable();
     },
 
     stats,

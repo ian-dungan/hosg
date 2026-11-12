@@ -65,7 +65,7 @@ describe('generateZone(GREENWAY_RECIPE)', () => {
     const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
     const bad = /Math\.(sin|cos|tan|asin|acos|atan2?|exp|expm1|log\w*|pow|hypot|cbrt|random)\b|\*\*/;
     /** The generator's modules, relative to this folder. */
-    const GENERATOR = ['./recipe', './zoneWalk'];
+    const GENERATOR = ['./recipe', './zoneWalk', './limits'];
     /** Pure data tables the generator may read (no arithmetic that shapes the layout). */
     const DATA_TABLES = ['../combat/enemies'];
     let imports = 0;

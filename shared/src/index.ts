@@ -10,5 +10,6 @@ export { GROVE_OBSTACLES } from './world/obstacles';
 export * from './path';
 export { GREENWAY_RECIPE, generateZone, prng, noise2, type ZoneRecipe, type ZoneLayout } from './world/recipe';
 export { ZoneWalk } from './world/zoneWalk';
+export * from './world/limits';
 export { ZONE_IDS, isZoneId, zoneDef, zoneFullReason, greenwayLayout, GROVE_EAST_GATE, type ZoneId, type ZoneExit, type ZoneDef } from './world/zones';
 export * from './combat';
