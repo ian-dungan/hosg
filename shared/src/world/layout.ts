@@ -244,13 +244,7 @@ export function createGroveWalk(): Walk { return new Walk(GROVE_OBSTACLES); }
 
 let groveWalk: Walk | null = null;
 const defaultWalk = () => (groveWalk ??= createGroveWalk());
-/** Ground height where an adventurer can stand, or null (obstacle, water, out of bounds). */
-export function groveGroundY(x: number, z: number): number | null { return defaultWalk().groundAt(x, z); }
-/** True if an adventurer can stand at (x, z). */
-export function groveWalkable(x: number, z: number): boolean { return groveGroundY(x, z) !== null; }
-/** True if an adventurer can stand at (x, z) in the grove town area, which is all the online zone allows (not the Beacon clearing). */
-export function groveTownWalkable(x: number, z: number): boolean { return x * x + z * z < TOWN_R * TOWN_R && groveWalkable(x, z); }
 /** Height of what an adventurer stands on at (x, z) in the grove (terrain or a platform top), or null. */
 export function groveSurface(x: number, z: number): number | null { return defaultWalk().surfaceAt(x, z); }
-/** groveSurface limited to the grove town area (null outside the radius groveTownWalkable uses). */
+/** groveSurface limited to the grove town area, which is all the online zone allows (null outside it, so not the Beacon clearing). */
 export function groveTownSurface(x: number, z: number): number | null { return x * x + z * z < TOWN_R * TOWN_R ? groveSurface(x, z) : null; }

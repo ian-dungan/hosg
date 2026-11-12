@@ -24,10 +24,6 @@ export const MAX_MOVE_ALLOWANCE = MAX_MOVE_SPEED * 1 + STEP_SLACK;
 /** Distance between the points checked along a step, so thin obstacles cannot be stepped over. */
 const WALK_SAMPLE = 0.25;
 
-type Walkable = (x: number, z: number) => boolean;
-
-const clampDt = (dtSeconds: number) => (Number.isFinite(dtSeconds) ? Math.min(1, Math.max(0, dtSeconds)) : 0);
-
 /**
  * A movement allowance after `dtSeconds` more: it refills at MAX_MOVE_SPEED and is capped at
  * MAX_MOVE_ALLOWANCE. A non-finite or negative dt adds nothing.
@@ -35,42 +31,6 @@ const clampDt = (dtSeconds: number) => (Number.isFinite(dtSeconds) ? Math.min(1,
 export function refillAllowance(allowance: number, dtSeconds: number): number {
   const dt = Number.isFinite(dtSeconds) ? Math.max(0, dtSeconds) : 0;
   return Math.min(MAX_MOVE_ALLOWANCE, allowance + MAX_MOVE_SPEED * dt);
-}
-
-/**
- * Whether an adventurer at `from` can move to `to` with `allowance` metres left: 'too-fast' if the
- * step is longer, 'blocked' if any point along it (every WALK_SAMPLE m, and the end) is not walkable.
- */
-export function checkMove(
-  from: { x: number; z: number },
-  to: Pose,
-  allowance: number,
-  walkable: Walkable,
-): 'ok' | 'too-fast' | 'blocked' {
-  const dx = to.x - from.x, dz = to.z - from.z;
-  const distance = Math.hypot(dx, dz);
-  if (distance > allowance) return 'too-fast';
-  const samples = Math.max(1, Math.ceil(distance / WALK_SAMPLE));
-  for (let i = 1; i <= samples; i++) {
-    const x = i === samples ? to.x : from.x + (dx * i) / samples;
-    const z = i === samples ? to.z : from.z + (dz * i) / samples;
-    if (!walkable(x, z)) return 'blocked';
-  }
-  return 'ok';
-}
-
-/**
- * A single step on its own: `checkMove` with the allowance earned in `dtSeconds` (capped at 1 s, a
- * non-finite dt counts as 0) plus the slack. The server uses `checkMove` with a running allowance
- * instead, so the slack cannot be claimed again on every message.
- */
-export function checkStep(
-  from: { x: number; z: number },
-  to: Pose,
-  dtSeconds: number,
-  walkable: Walkable,
-): 'ok' | 'too-fast' | 'blocked' {
-  return checkMove(from, to, MAX_MOVE_SPEED * clampDt(dtSeconds) + STEP_SLACK, walkable);
 }
 
 // ───────── height ─────────
@@ -148,12 +108,14 @@ function arcCeiling(airStartMs: number, airStartY: number, ms: number): number {
  * What it guarantees is a height and reach bound, not that the body touches the ground: a pose is
  * never more than one jump (CEILING_CAP, 2 m) above real ground the body was over (where its air
  * phase began, or ground along the step it is taken to have jumped from again), a single take-off
- * never reaches ground more than 2 m above where it began, every step is within the allowance and
- * clear of walls and gaps, and drops are charged. A bounded hover within one jump of real ground is
+ * never stands on ground more than 2.00 m above where it began (measured by a brute-force search in
+ * the task report; the standing tolerance GROUND_EPSILON adds nothing, because a standing track
+ * keeps the surface height, not the reported one, and a landing is judged by its surface), every
+ * step is within the allowance and clear of walls and gaps, and drops are charged between surfaces. A bounded hover within one jump of real ground is
  * accepted, since a player holding jump is in the air almost all the time anyway: game rules must
  * never treat "airborne" as avoiding ground effects unless the server simulates it.
  *
- * - 'too-fast': further than `allowance` (as checkMove).
+ * - 'too-fast': further than `allowance`.
  * - 'blocked': the body could not have got from `from` to `to`. Points every WALK_SAMPLE (0.25 m)
  *   along the straight line must have a surface no more than STEP_UP above the body's height there
  *   (interpolated), so an obstacle thinner than that can fall between two points (the thinnest in
@@ -168,7 +130,7 @@ function arcCeiling(airStartMs: number, airStartY: number, ms: number): number {
  * - 'floating': higher than the air phase's ceiling (jumpCeiling since it began, with clock slack),
  *   unless one of these explains it:
  *   - landing, once the ceiling has fallen below the ground (late messages, a reconnect, a re-join):
- *     a pose on the surface no higher than the last accepted height is accepted;
+ *     a pose on a surface no higher than the last accepted height is accepted;
  *   - jumping again: with jump held, stepBody can land and take off again between two poses, so the
  *     landing is never reported; and after a frame hitch a take-off can be longer ago than the one
  *     send interval assumed. A pose in the air above the ceiling is taken as a jump from the
@@ -204,18 +166,19 @@ export function checkPose(
       if (prev - s > STEP_UP) overLedge = true;
       prev = s;
     }
-    const landedDrop = overLedge ? Math.max(0, track.y - to.y) : 0;
-    Object.assign(track, makeAirTrack(to.y));
+    const landedDrop = overLedge ? Math.max(0, track.y - end) : 0;
+    Object.assign(track, makeAirTrack(end)); // the surface, not the reported height (it may be 5 cm off)
     return { result: 'ok', landedDrop };
   }
 
   const airStartMs = track.grounded ? nowMs - 1000 / TICK_HZ : track.airStartMs;
   const airStartY = track.grounded ? track.y : track.airStartY;
   const ceiling = arcCeiling(airStartMs, airStartY, nowMs);
-  if (to.y > ceiling) {
+  // a landing is judged by the surface it stands on, so the standing tolerance never adds height
+  if ((grounded ? Math.max(to.y, end) : to.y) > ceiling) {
     // landed (the arc is surely over) on ground no higher than it last was
-    if (grounded && !track.grounded && to.y <= track.y + GROUND_EPSILON) {
-      return { result: 'ok', landedDrop: landAirTrack(track, to.y) };
+    if (grounded && !track.grounded && end <= track.y) {
+      return { result: 'ok', landedDrop: landAirTrack(track, end) };
     }
     // (landed and) jumped since the last pose, longer ago than the send interval assumed (a frame hitch)
     const ground = grounded ? null : rejumpGround(from, track, to, surface, samples);
@@ -225,7 +188,7 @@ export function checkPose(
     return { result: 'ok', landedDrop };
   }
 
-  if (grounded) return { result: 'ok', landedDrop: landAirTrack(track, to.y) };
+  if (grounded) return { result: 'ok', landedDrop: landAirTrack(track, end) };
   const peakY = track.grounded ? Math.max(track.y, to.y) : Math.max(track.peakY, to.y);
   Object.assign(track, { grounded: false, airStartMs, airStartY, peakY, y: to.y });
   return { result: 'ok', landedDrop: 0 };

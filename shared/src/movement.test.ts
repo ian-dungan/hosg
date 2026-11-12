@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  parsePose, checkStep, checkMove, checkPose, jumpCeiling, landAirTrack, makeAirTrack, refillAllowance,
+  parsePose, checkPose, jumpCeiling, landAirTrack, makeAirTrack, refillAllowance,
   MAX_MOVE_ALLOWANCE, MAX_MOVE_SPEED, type AirTrack, type Pose,
 } from './movement';
 import { makeBody, stepBody, fallDamage, type Body, type BodyInput, type BodyStep, type Surface } from './body';
-import { groveWalkable, groveTownWalkable, groveTownSurface, groveGroundY, groundHeight, BEACON_C, PLAZA_R, type Rect } from './world/layout';
+import { groveSurface, groveTownSurface, groundHeight, BEACON_C, PLAZA_R, type Rect } from './world/layout';
 import { GROVE_OBSTACLES } from './world/obstacles';
 import { GRAVITY, JUMP_SPEED, RUN_SPEED, SPAWN, STEP_UP, TICK_HZ } from './constants';
 
@@ -30,41 +30,7 @@ describe('parsePose', () => {
   });
 });
 
-describe('checkStep', () => {
-  const open = () => true;
-  it('allows a normal running step', () => {
-    expect(checkStep({ x: 0, z: 0 }, { x: 0.4, z: 0, y: 0, facing: 0, moving: true }, 1 / 15, open)).toBe('ok');
-  });
-  it('rejects a step longer than RUN_SPEED * 1.3 * dt + 0.5', () => {
-    expect(checkStep({ x: 0, z: 0 }, { x: 2000, z: 0, y: 0, facing: 0, moving: true }, 1 / 15, open)).toBe('too-fast');
-    expect(checkStep({ x: 0, z: 0 }, { x: 6 * 1.3 + 0.5 + 0.01, z: 0, y: 0, facing: 0, moving: true }, 1, open)).toBe('too-fast');
-  });
-  it('caps dt at 1 second', () => {
-    expect(checkStep({ x: 0, z: 0 }, { x: 9, z: 0, y: 0, facing: 0, moving: true }, 10, open)).toBe('too-fast');
-    expect(checkStep({ x: 0, z: 0 }, { x: 8, z: 0, y: 0, facing: 0, moving: true }, 10, open)).toBe('ok');
-  });
-  it('treats a non-finite dt as no time at all', () => {
-    const step = { x: 2, z: 0, y: 0, facing: 0, moving: true };
-    expect(checkStep({ x: 0, z: 0 }, step, NaN, open)).toBe('too-fast');
-    expect(checkStep({ x: 0, z: 0 }, step, Infinity, open)).toBe('too-fast');
-    expect(checkStep({ x: 0, z: 0 }, { x: 0.4, z: 0, y: 0, facing: 0, moving: true }, NaN, open)).toBe('ok');
-  });
-  it('reports blocked when the target is not walkable', () => {
-    expect(checkStep({ x: 0, z: 0 }, { x: 0.4, z: 0, y: 0, facing: 0, moving: true }, 1 / 15, () => false)).toBe('blocked');
-  });
-});
-
-describe('checkStep along the segment', () => {
-  it('is blocked by an obstacle thinner than the step, between from and to', () => {
-    const fence = (x: number) => !(x > 1.1 && x < 1.4); // a 0.3 m strip
-    expect(checkStep({ x: 0, z: 0 }, { x: 2, z: 0, y: 0, facing: 0, moving: true }, 1, fence)).toBe('blocked');
-    expect(checkStep({ x: 0, z: 0 }, { x: 1, z: 0, y: 0, facing: 0, moving: true }, 1, fence)).toBe('ok');
-    expect(checkStep({ x: 1.5, z: 0 }, { x: 3, z: 0, y: 0, facing: 0, moving: true }, 1, fence)).toBe('ok');
-  });
-});
-
 describe('movement allowance', () => {
-  const open = () => true;
   it('refills at MAX_MOVE_SPEED, capped at one second plus the slack', () => {
     expect(MAX_MOVE_ALLOWANCE).toBeCloseTo(6 * 1.3 + 0.5);
     expect(refillAllowance(0, 0.5)).toBeCloseTo(MAX_MOVE_SPEED * 0.5);
@@ -79,7 +45,7 @@ describe('movement allowance', () => {
     let accepted = 0;
     for (let i = 1; i <= 40; i++) {
       const to = { x: i * 0.4, z: 0, y: 0, facing: 0, moving: true };
-      if (checkMove(at, to, allowance, open) !== 'ok') break;
+      if (checkPose(at, makeAirTrack(0), to, 1000, allowance, flat).result !== 'ok') break;
       allowance -= 0.4;
       at = to;
       accepted++;
@@ -88,23 +54,15 @@ describe('movement allowance', () => {
   });
 });
 
-describe('grove walkability', () => {
-  it('spawn is walkable, the statue plinth and far away are not', () => {
-    expect(groveWalkable(SPAWN.x, SPAWN.z)).toBe(true);
-    expect(groveWalkable(0, -11)).toBe(true);
-    expect(groveWalkable(0, 0)).toBe(false);
-    expect(groveWalkable(5000, 5000)).toBe(false);
+describe('the grove surface the server checks against', () => {
+  it('spawn has the terrain height; the statue and far away have no surface', () => {
+    expect(groveTownSurface(SPAWN.x, SPAWN.z)).toBe(groundHeight(SPAWN.x, SPAWN.z));
+    expect(groveTownSurface(0, 0)).toBeNull();
+    expect(groveTownSurface(5000, 5000)).toBeNull();
   });
-  it('groveTownWalkable is the town area only: the far Beacon clearing does not count', () => {
-    expect(groveWalkable(BEACON_C.x, BEACON_C.z)).toBe(true); // standable for the client's anchors
-    expect(groveTownWalkable(BEACON_C.x, BEACON_C.z)).toBe(false);
-    expect(groveTownWalkable(SPAWN.x, SPAWN.z)).toBe(true);
-    expect(groveTownWalkable(0, 0)).toBe(false);
-    expect(groveTownWalkable(5000, 5000)).toBe(false);
-  });
-  it('groveGroundY gives terrain height where walkable and null elsewhere', () => {
-    expect(groveGroundY(0, -11)).toBe(groundHeight(0, -11));
-    expect(groveGroundY(0, 0)).toBeNull();
+  it('is the town area only: the far Beacon clearing does not count', () => {
+    expect(groveSurface(BEACON_C.x, BEACON_C.z)).not.toBeNull(); // standable for the client's anchors
+    expect(groveTownSurface(BEACON_C.x, BEACON_C.z)).toBeNull();
   });
 });
 
@@ -407,6 +365,47 @@ describe('checkPose with jump held (landing and jumping again between two poses)
   });
 });
 
+describe('checkPose: the standing tolerance cannot be stacked into extra height', () => {
+  /** Stands 0.05 m high at (0, 0), rides the jump ceiling towards a ledge at x > 4, then claims to land 0.05 m low on it. */
+  function stackedLanding(L: number): string {
+    const ledge: Surface = (x, z) => (Math.hypot(x, z) > 40 ? null : x > 4 && x < 8 && Math.abs(z) < 2 ? L : 0);
+    const track = makeAirTrack(0);
+    let from = { x: 0, z: 0 }, now = 1000;
+    const send = (x: number, y: number) => {
+      const r = checkPose(from, track, at(x, 0, y), now, MAX_MOVE_ALLOWANCE, ledge).result;
+      if (r === 'ok') from = { x, z: 0 };
+      return r;
+    };
+    send(0, 0.05); // standing, 5 cm up
+    const t0 = now;
+    for (let k = 1; k <= 6; k++) {
+      now += (1000 / TICK_HZ) * (k === 6 ? 0.45 : 1);
+      // just under the ceiling of a jump from the reported 5 cm (the reviewer's sequence)
+      if (send((4.2 * k) / 7, jumpCeiling(0.05, (now - t0) / 1000) - 1e-6) !== 'ok') return `in the air at ${now - t0} ms`;
+    }
+    now += 67;
+    return send(4.2, L - 0.05);
+  }
+
+  for (const L of [2.01, 2.06, 2.1, 2.14]) {
+    it(`refuses standing high, riding the ceiling and landing low on a ${L} m ledge`, () => {
+      expect(stackedLanding(L)).not.toBe('ok');
+    });
+  }
+
+  it('a stand reported 5 cm high does not raise the next jump, and a fall is charged between the surfaces', () => {
+    const track = makeAirTrack(0);
+    expect(checkPose({ x: 0, z: 0 }, track, at(0.2, 0, 0.05), 1000, 5, flat).result).toBe('ok');
+    expect(track.y).toBe(0); // the surface, not the reported height
+    const ledge: Surface = (x) => (x < 1 ? 4.5 : 0);
+    const high = makeAirTrack(4.5);
+    expect(checkPose({ x: 0.5, z: 0 }, high, at(0.8, 0, 4.55), 1000, 5, ledge).result).toBe('ok');
+    const r = checkPose({ x: 0.8, z: 0 }, high, at(1.2, 0, 0.05), 1067, 5, ledge);
+    expect(r.result).toBe('ok');
+    expect(r.landedDrop).toBeCloseTo(4.5, 9); // not 4.5 shaved by the tolerance
+  });
+});
+
 // ───────── the ruling above checkPose: height and reach bounds hold against cheaters (G1–G3) ─────────
 
 describe('checkPose bounds against cheaters (G1 height and ledges, G2 walls, G3 falls)', () => {
@@ -425,7 +424,7 @@ describe('checkPose bounds against cheaters (G1 height and ledges, G2 walls, G3 
     const { surface, start, target } = scene;
     const violations: string[] = [];
     const rate = 5 + rand() * 40;
-    const strategy = (['constant', 'saw-tooth', 'random', 'highest', 'ground'] as const)[Math.floor(rand() * 5)];
+    const strategy = (['constant', 'saw-tooth', 'random', 'highest', 'ground', 'stacked'] as const)[Math.floor(rand() * 6)];
     const c = rand() * 3, lo = rand() * 2, hi = lo + rand() * 1.5;
     const ignoreCorrections = rand() < 0.5;
     const speed = MAX_MOVE_SPEED * (0.3 + rand());
@@ -451,6 +450,9 @@ describe('checkPose bounds against cheaters (G1 height and ledges, G2 walls, G3 
       else if (strategy === 'saw-tooth') y = g + (i % 2 ? hi : lo);
       else if (strategy === 'random') y = g + rand() * 3;
       else if (strategy === 'ground') y = g;
+      // the standing tolerance stacked: stand 5 cm high, ride the ceiling, land 5 cm low on anything higher
+      else if (strategy === 'stacked' && track.grounded) y = g + 0.049;
+      else if (strategy === 'stacked' && g > track.y + STEP_UP) y = g - 0.049;
       else {
         let a = g - 0.05, b = g + 4; // the highest height it will accept here
         for (let k = 0; k < 16; k++) { const m = (a + b) / 2; if (tryY(m)) a = m; else b = m; }
@@ -473,7 +475,7 @@ describe('checkPose bounds against cheaters (G1 height and ledges, G2 walls, G3 
         worstAbove = Math.max(worstAbove, y - recent);
         if (y > recent + 2.05) violations.push(`G1 ${strategy}@${rate.toFixed(0)}/s: y ${y.toFixed(2)} with ground ${recent.toFixed(2)}`);
         // G1: never stands on, or jumps from, a ledge 2.1 m or more above its surroundings
-        if (scene.ledge !== undefined && ((track.grounded && track.y >= scene.ledge - 0.05) || track.airStartY >= scene.ledge - 0.05)) {
+        if (scene.ledge !== undefined && ((track.grounded && track.y >= scene.ledge) || track.airStartY >= scene.ledge)) {
           violations.push(`G1 ledge ${scene.ledge} reached by ${strategy}@${rate.toFixed(0)}/s`);
         }
         // G2: never across the wall
@@ -499,7 +501,7 @@ describe('checkPose bounds against cheaters (G1 height and ledges, G2 walls, G3 
       surface: (x, z) => (!inWorld(x, z) ? null : Math.abs(z) < 1 && x > 3 && x < 15 ? 0.5 + 1.3 * Math.floor((x - 3) / 3) / 3 : 0),
       start: { x: 0, z: 0 }, target: { x: 15, z: 0 },
     }],
-    ...[2.1, 2.3, 2.6, 3].map((L): [string, Scene] => [`a ${L} m ledge`, {
+    ...[2.01, 2.05, 2.1, 2.3, 2.6, 3].map((L): [string, Scene] => [`a ${L} m ledge`, {
       surface: (x, z) => (!inWorld(x, z) ? null : x > 4 && x < 8 && Math.abs(z) < 2 ? L : 0), start: { x: 0, z: 0 }, target: { x: 6, z: 0 }, ledge: L,
     }]),
     ['a 0.4 m wall across the world', { surface: (x, z) => (!inWorld(x, z) || Math.abs(x - 3.2) < 0.2 ? null : 0), start: { x: 0, z: 0 }, target: { x: 10, z: 0 }, wallX: 3.4 }],

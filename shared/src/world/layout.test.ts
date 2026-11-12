@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GROVE_OBSTACLES } from './obstacles';
-import { Walk, groveSurface, groveTownSurface, groveGroundY, BEACON_C, type Obstacle } from './layout';
+import { Walk, createGroveWalk, groveSurface, groveTownSurface, BEACON_C, type Obstacle } from './layout';
 
 // A 2 m x 2 m box on the flat plaza (the plaza is at terrain height 0).
 const box = (top?: number): Obstacle => ({ kind: 'r', x: 6, z: -6, hw: 1, hd: 1, c: 1, s: 0, ...(top === undefined ? {} : { top }) });
@@ -51,12 +51,12 @@ describe('Walk.surfaceAt', () => {
 
 describe('groveSurface / groveTownSurface', () => {
   it('groveSurface is the default walk surface', () => {
-    expect(groveSurface(0, -11)).toBe(groveGroundY(0, -11));
+    expect(groveSurface(0, -11)).toBe(createGroveWalk().groundAt(0, -11));
     expect(groveSurface(0, 0)).toBeNull(); // statue plinth (a wall)
     expect(groveSurface(BEACON_C.x, BEACON_C.z)).not.toBeNull();
   });
   it('groveTownSurface is null outside the town radius', () => {
-    expect(groveTownSurface(0, -11)).toBe(groveGroundY(0, -11));
+    expect(groveTownSurface(0, -11)).toBe(createGroveWalk().groundAt(0, -11));
     expect(groveTownSurface(BEACON_C.x, BEACON_C.z)).toBeNull();
     expect(groveTownSurface(5000, 5000)).toBeNull();
   });
