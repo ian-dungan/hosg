@@ -2,9 +2,9 @@
 // health bar once hurt, a cast bar while they cast), and movement (and height: jumps, falls, platforms)
 // smoothed between server updates. Their meshes carry their engine id, so a tap on one can focus them.
 import { Matrix, Vector3, type Scene } from '@babylonjs/core';
-import { ABILITIES, JOBS, TICK_HZ, isJobId, type AbilityId } from '@sg2/shared';
+import { ABILITIES, BUFF_BITS, JOBS, TICK_HZ, WEAPONS, isJobId, type AbilityId, type WeaponId } from '@sg2/shared';
 import type { CharacterView, WorldApi } from '../core/contracts';
-import { makeCharacter } from '../player/character';
+import { capeFor, makeCharacter } from '../player/character';
 import { PoseBuffer } from './interp';
 import type { ZoneRoom } from './session';
 
@@ -46,6 +46,9 @@ interface Remote {
   castId: string; castAt: number; castTotal: number; castSince: number;
   eid: number;
   job: string;
+  /** The weapon and staff tint, cast pose and Mist Form fade the state asks for (applied on the next frame), and as drawn. */
+  want: { weapon: WeaponId | 'none'; tint: 'white' | 'black' | undefined; casting: boolean; faded: boolean };
+  drawn: { weapon: WeaponId | 'none' | ''; tint: 'white' | 'black' | undefined; casting: boolean; faded: boolean; job: string };
   hpEl: HTMLElement;
   hpFill: HTMLElement;
   hp: number;
@@ -137,7 +140,8 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     castEl.append(castName, castBar);
     label.append(top, hpEl, castEl);
     layer.appendChild(label);
-    const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, castId: '', castAt: 0, castTotal: 1, castSince: 0, eid: -1, job: '', hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
+    const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, castId: '', castAt: 0, castTotal: 1, castSince: 0,
+      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
     remotes.set(sessionId, r);
     return r;
   }
@@ -148,6 +152,8 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     remotes.delete(sessionId);
     r.label.remove();
     if (scene.isDisposed || spareScene !== scene) { r.view.dispose(); return; }
+    // a spare view goes back to the plain look: the next adventurer to use it gets their own on its first frame
+    r.view.setWeapon('sword'); r.view.setCape(null); r.view.setCasting(false); r.view.setFade(1);
     r.view.root.position.copyFrom(PARK);
     r.view.root.setEnabled(false);
     spare.push(r.view);
@@ -168,6 +174,12 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
       if (eid !== r.eid) { r.eid = eid; if (eid >= 0) r.view.setEntityId(eid); r.label.classList.toggle('focus', eid === focus && eid >= 0); }
       const job = p.job ?? '';
       if (job !== r.job) { r.job = job; r.jobEl.textContent = isJobId(job) ? JOBS[job].glyph : ''; r.jobEl.title = isJobId(job) ? JOBS[job].name : ''; }
+      // the look: the job's weapon (the state's `weapon`, else the job's), the staff's tint from the job
+      const w = p.weapon ?? '';
+      r.want.weapon = Object.prototype.hasOwnProperty.call(WEAPONS, w) ? (w as WeaponId) : isJobId(job) ? JOBS[job].weapon : 'blade';
+      r.want.tint = job === 'white_mage' ? 'white' : job === 'black_mage' ? 'black' : undefined;
+      r.want.casting = !p.dead && !!p.cast;
+      r.want.faded = !p.dead && !!((p.buffs ?? 0) & BUFF_BITS.mist);
       // a cast: from when the server says it began (the clock), so one first seen late shows how far along it is
       const castId = p.cast ?? '', castAt = castId ? p.castAt ?? 0 : 0;
       if (castId !== r.castId || castAt !== r.castAt) {
@@ -212,6 +224,13 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
         r.placed = true;
         const running = speed > RUN_ABOVE;
         if (running !== r.running) { r.running = running; r.view.setPose(running ? 'run' : 'idle'); }
+        const wa = r.want, dr = r.drawn;
+        if (wa.weapon !== dr.weapon || wa.tint !== dr.tint || r.job !== dr.job) {
+          dr.weapon = wa.weapon; dr.tint = wa.tint; dr.job = r.job;
+          r.view.setWeapon(wa.weapon, wa.tint); r.view.setCape(capeFor(r.job));
+        }
+        if (wa.casting !== dr.casting) { dr.casting = wa.casting; r.view.setCasting(wa.casting); }
+        if (wa.faded !== dr.faded) { dr.faded = wa.faded; r.view.setFade(wa.faded ? 0.5 : 1); }
         r.view.update(dt);
 
         // Name label: project the point above the head to CSS pixels.

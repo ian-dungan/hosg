@@ -51,6 +51,8 @@ export interface Game {
   readonly hud: HudApi;
   readonly rig: PlayerRig;
   readonly zone: ZoneId;
+  /** The quality tier now (steps down by itself on slow devices; `?q=low|med|high` sets and holds it). */
+  readonly quality: Quality;
   /**
    * Disposes the current scene and builds `zone`'s world, rig and camera in a new Scene on the same Engine
    * (the adventurer stands at the zone's start until placed). The HUD, settings and quality carry over.
@@ -91,10 +93,12 @@ export function bootGame(opts: GameOpts = {}): Game {
   const build = (z: ZoneId) => (z === 'greenway' ? buildGreenway : buildWorld)(scene);
   let world = build(zone);
   // Every device starts on full settings; a device that cannot keep up steps down by itself (see the render loop).
-  let quality: Quality = 'high';
+  // `?q=low|med|high` starts on (and holds) a tier: playtests and budget checks
+  const askedQ = /[?&]q=(low|med|high)\b/.exec(location.search)?.[1] as Quality | undefined;
+  let quality: Quality = askedQ ?? 'high';
   world.setQuality(quality);
   let slowTime = 0, fpsSettle = 4;
-  const lockQuality = /[?&]lockq/.test(location.search);   // playtests keep full settings even when slow
+  const lockQuality = !!askedQ || /[?&]lockq/.test(location.search);   // playtests keep full settings even when slow
   const hud = createHud(hudRoot);
 
   // ── tap-to-walk: tap the ground (or a person) and the character finds a way there round obstacles ──
@@ -263,6 +267,7 @@ export function bootGame(opts: GameOpts = {}): Game {
     get world() { return world; },
     get rig() { return rig; },
     get zone() { return zone; },
+    get quality() { return quality; },
     get walking() { return walkGoal !== null; },
     get walkOverriddenAt() { return overriddenAt; },
     loadZone,

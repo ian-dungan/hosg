@@ -3,7 +3,7 @@
 // One room per zone: the page asks the server which zone the adventurer is in, builds that zone and joins
 // its room. Walking through an open gate makes the server send `travel`: the screen fades, the room ends,
 // the next zone is built on the same engine, its room is joined, and the screen fades back in.
-import { Matrix, Vector3 } from '@babylonjs/core';
+import { Matrix, Vector3, type Scene } from '@babylonjs/core';
 import {
   CLIENT_RECONNECTION,
   GUILD_BOARD,
@@ -152,6 +152,23 @@ function boot(): void {
     /** The combat controller of the room this page is in (null between rooms). */
     get combat() { return combat; },
     get room() { return room; },
+    /**
+     * Rendering counters for budget checks: draw calls per frame since the previous call (null on the first), active
+     * meshes and their triangles, and the spell pool (live visuals, instances drawn).
+     */
+    gfx() {
+      // draw calls per frame since the last call (the engine's running total over the frames between)
+      const sc = game.scene as Scene & { __gfx?: { total: number; frame: number } };
+      const e = sc.getEngine() as unknown as { _drawCalls: { total: number }; frameId: number };
+      const prev = sc.__gfx, total = e._drawCalls.total, frame = e.frameId;
+      sc.__gfx = { total, frame };
+      const act = sc.getActiveMeshes();
+      let tris = 0;
+      for (let i = 0; i < act.length; i++) tris += act.data[i].getTotalIndices() / 3;
+      const sp = combat?.debug.spells;
+      const drawCalls = prev && frame > prev.frame ? Math.round((total - prev.total) / (frame - prev.frame)) : null;
+      return { drawCalls, activeMeshes: act.length, tris: Math.round(tris), spellsLive: sp?.live ?? 0, spellsDrawn: sp?.drawn ?? 0, quality: game.quality };
+    },
   };
 
   const state: HudState = {

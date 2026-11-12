@@ -87,7 +87,17 @@ export interface CharacterView {
   /** Looping poses (idle, run, staggered, dead, charge) persist; one-shot poses
    *  (attack, cast, hit, parry) play once (~0.4 s) then return to the last looping pose. */
   setPose(pose: Pose): void;
-  setWeapon(w: WeaponId | 'none'): void;
+  /**
+   * The weapon carried (drawn in combat, sheathed on the back or hip otherwise). `tint` picks the staff: 'white'
+   * (teal-white crystal in a pale ring, the White Mage) or 'black' (ember-violet crystal in iron prongs, the Black Mage).
+   */
+  setWeapon(w: WeaponId | 'none', tint?: 'white' | 'black'): void;
+  /** Loops the cast pose (staff raised, free hand forward) over the legs' pose while on. */
+  setCasting(on: boolean): void;
+  /** The body's opacity (Mist Form: 0.5; 1: solid). */
+  setFade(alpha: number): void;
+  /** Recolours the cape (and hood) to `color` (hex), keeping its shading; null: the colour it was built in. */
+  setCape(color: string | null): void;
   /** Ring under the feet when targeted. */
   setTargeted(on: boolean): void;
   /** A short white flash (it was hit). */

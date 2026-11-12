@@ -54,7 +54,8 @@ const C = {
 // ───────────────────────── skeleton layout ─────────────────────────
 const JOINTS = ['base', 'hips', 'torso', 'head', 'eyes', 'hair', 'capeA', 'capeB', 'scarf',
   'uArmL', 'fArmL', 'uArmR', 'fArmR', 'thighL', 'shinL', 'thighR', 'shinR',
-  'bladeHand', 'shieldArm', 'bowHand', 'prop', 'propL', 'bladeHip', 'shieldBack', 'bowBack'] as const;
+  'bladeHand', 'shieldArm', 'bowHand', 'prop', 'propL', 'bladeHip', 'shieldBack', 'bowBack',
+  'gsHand', 'gsBack', 'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'bladeBack'] as const;
 type Joint = typeof JOINTS[number];
 const PARENT: Record<Joint, Joint | null> = {
   base: null, hips: 'base', torso: 'hips', head: 'torso', eyes: 'head', hair: 'head',
@@ -63,6 +64,8 @@ const PARENT: Record<Joint, Joint | null> = {
   thighL: 'hips', shinL: 'thighL', thighR: 'hips', shinR: 'thighR',
   bladeHand: 'fArmR', shieldArm: 'fArmL', bowHand: 'fArmL', prop: 'fArmR', propL: 'fArmL',
   bladeHip: 'hips', shieldBack: 'capeA', bowBack: 'torso',
+  gsHand: 'fArmR', gsBack: 'capeA', dagR: 'fArmR', dagL: 'fArmL', dagBack: 'capeB',
+  staffWHand: 'fArmR', staffBHand: 'fArmR', staffWBack: 'capeA', staffBBack: 'capeA', bladeBack: 'capeA',
 };
 type V3 = [number, number, number];
 type Pivots = Record<Joint, V3>;
@@ -77,6 +80,8 @@ function humanPivots(sh = 0.235): Pivots {
     bladeHand: [sh + 0.025, 0.73, 0.02], shieldArm: [-sh - 0.06, 0.9, 0], bowHand: [-sh - 0.025, 0.73, 0.02],
     prop: [sh + 0.025, 0.73, 0.02], propL: [-sh - 0.025, 0.73, 0.02],
     bladeHip: [-0.19, 0.9, 0.06], shieldBack: [0, 1.12, -0.21], bowBack: [0, 1.1, -0.2],
+    gsHand: [sh + 0.025, 0.73, 0.02], gsBack: [0, 1.3, -0.14], dagR: [sh + 0.025, 0.73, 0.02], dagL: [-sh - 0.025, 0.73, 0.02], dagBack: [0, 0.98, -0.2],
+    staffWHand: [sh + 0.025, 0.73, 0.02], staffBHand: [sh + 0.025, 0.73, 0.02], staffWBack: [0, 1.3, -0.14], staffBBack: [0, 1.3, -0.14], bladeBack: [0, 1.3, -0.14],
   };
 }
 /** The old compact layout, kept for the (minimal) enemy models. */
@@ -88,6 +93,8 @@ function legacyPivots(): Pivots {
     thighL: [-0.12, 0.62, 0], shinL: [-0.12, 0.32, 0], thighR: [0.12, 0.62, 0], shinR: [0.12, 0.32, 0],
     bladeHand: [0.3, 0.6, 0.02], shieldArm: [-0.36, 0.78, 0], bowHand: [-0.3, 0.6, 0.02], prop: [0.3, 0.6, 0.02], propL: [-0.3, 0.6, 0.02],
     bladeHip: [-0.2, 0.65, 0.05], shieldBack: [0, 0.9, -0.2], bowBack: [0, 0.9, -0.2],
+    gsHand: [0.3, 0.6, 0.02], gsBack: [0, 0.9, -0.2], dagR: [0.3, 0.6, 0.02], dagL: [-0.3, 0.6, 0.02], dagBack: [0, 0.7, -0.15],
+    staffWHand: [0.3, 0.6, 0.02], staffBHand: [0.3, 0.6, 0.02], staffWBack: [0, 0.9, -0.2], staffBBack: [0, 0.9, -0.2], bladeBack: [0, 0.9, -0.2],
   };
 }
 
@@ -100,6 +107,11 @@ interface Occ { c: Vector3; r: number; prim: number }
 class Geo {
   pos: number[] = []; nrm: number[] = []; col: number[] = []; mi: number[] = []; mw: number[] = []; idx: number[] = [];
   prim: number[] = [];
+  /** Per vertex: the job-coloured cloth it belongs to (1 the cape and hood, 2 the scarf), 0 for everything else. */
+  tag: number[] = [];
+  /** While set, vertices added are tagged, except those painted exactly `tagSkip` (the cape's trim). */
+  tagNow = 0;
+  tagSkip: Color3 | null = null;
   occ: Occ[] = [];
   primCount = 0;
   heightScale = 1;
@@ -117,7 +129,8 @@ class Geo {
       const o = out[t[i]].add(out[t[i + 1]]).add(out[t[i + 2]]);
       if (Vector3.Dot(n, o) < 0) { const k = t[i + 1]; t[i + 1] = t[i + 2]; t[i + 2] = k; }
     }
-    const pushV = (p: Vector3, n: Vector3, c: Color3) => {
+    const pushV = (p: Vector3, n: Vector3, c: Color3, src?: Color3) => {
+      this.tag.push(this.tagNow && src !== this.tagSkip ? this.tagNow : 0);
       const [b0, b1, w0] = this.resolve(group, p);
       this.pos.push(p.x, p.y, p.z); this.nrm.push(n.x, n.y, n.z); this.col.push(c.r, c.g, c.b, 1);
       this.mi.push(b0, b1, 0, 0); this.mw.push(w0, 1 - w0, 0, 0); this.prim.push(prim);
@@ -131,7 +144,7 @@ class Geo {
         n.normalize();
         const h = Math.sin(Math.round(n.x * 6) * 12.9898 + Math.round(n.y * 6) * 78.233 + Math.round(n.z * 6) * 37.719 + prim * 4.13) * 43758.5453;
         const f = 1 + (h - Math.floor(h) - 0.5) * 2 * this.jitter;
-        for (const k of [t[i], t[i + 1], t[i + 2]]) this.idx.push(pushV(P[k], n, shade(cols[k], f)));
+        for (const k of [t[i], t[i + 1], t[i + 2]]) this.idx.push(pushV(P[k], n, shade(cols[k], f), cols[k]));
       }
       return;
     }
@@ -141,7 +154,7 @@ class Geo {
       const n = Vector3.Cross(c.subtract(a), b.subtract(a));
       N[t[i]].addInPlace(n); N[t[i + 1]].addInPlace(n); N[t[i + 2]].addInPlace(n);
     }
-    const base = P.map((p, i) => { const n = N[i]; if (n.lengthSquared() < 1e-16) n.copyFrom(out[i]); n.normalize(); return pushV(p, n, cols[i]); });
+    const base = P.map((p, i) => { const n = N[i]; if (n.lengthSquared() < 1e-16) n.copyFrom(out[i]); n.normalize(); return pushV(p, n, cols[i], cols[i]); });
     for (const k of t) this.idx.push(base[k]);
   }
 
@@ -177,7 +190,7 @@ class Geo {
     const vd = new VertexData();
     vd.positions = this.pos; vd.normals = this.nrm; vd.colors = this.col; vd.indices = this.idx;
     vd.matricesIndices = this.mi; vd.matricesWeights = this.mw;
-    vd.applyToMesh(mesh, false);
+    vd.applyToMesh(mesh, this.tag.some((t) => t > 0)); // updatable when it has job-coloured cloth (its colours change)
     return mesh;
   }
 }
@@ -685,6 +698,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
   // ── scarf ──
   if (sp.scarf) {
     const sc = sp.scarf;
+    k.g.tagNow = 2;   // the scarf takes the job's colour too (it is what shows from the front)
     k.lathe('torso', [0, 0, 0.0], [[1.26, 0.13], [1.29, 0.145], [1.35, 0.125], [1.38, 0.1]], sc, { seg: 14, sz: 0.95, paint: (w) => (Math.abs(w.y - 1.315) < 0.012 ? shade(sc, 0.82) : undefined) });
     const tail = (x0: number, len: number, wid: number) => {
       const grid: V3[][] = [];
@@ -696,6 +710,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
       k.sheet('scarf', grid, 0.018, sc, { paint: (_w, uv) => (uv[1] > 0.86 ? shade(sc, 0.8) : undefined) });
     };
     tail(0.07, 0.42, 0.085); tail(0.13, 0.32, 0.08);
+    k.g.tagNow = 0;
   }
   // ── cape (with folded hood at the shoulders) ──
   if (sp.cape) {
@@ -715,10 +730,12 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
       }
       grid.push(row);
     }
+    k.g.tagNow = 1; k.g.tagSkip = cp.trim;   // the cloth takes the job's colour (setCape); the gold trim stays
     k.sheet('cape', grid, 0.022, cp.color, { paint: (w, uv) => (w.y < 1.31 - 0.93 * cp.len ? cp.trim : shade(cp.color, 0.96 + 0.04 * Math.cos(uv[0] * Math.PI * 6))) });
     // hood folded over the shoulders
     k.lathe('torso', [0, 0, -0.015], [[1.22, 0.2], [1.27, 0.215], [1.33, 0.17], [1.37, 0.12]], cp.color, { seg: 16, sz: 0.88, arc: [Math.PI * 0.42, Math.PI * 1.58],
       paint: (w) => (w.y < 1.235 ? cp.trim : undefined) });
+    k.g.tagNow = 0; k.g.tagSkip = null;
     // shield strap across the chest
     k.tube('body', [[0.13, 1.3, 0.04], [0.06, 1.2, 0.155], [-0.06, 1.06, 0.165], [-0.16, 0.95, 0.13], [-0.2, 0.93, 0.0]], 0.018, C.leather, { seg: 4, noOcc: true, flatten: 0.45 });
     k.tube('body', [[0.13, 1.3, 0.04], [0.15, 1.28, -0.1], [0.06, 1.15, -0.18], [-0.12, 0.98, -0.16], [-0.2, 0.93, 0.0]], 0.018, C.leather, { seg: 4, noOcc: true, flatten: 0.45 });
@@ -767,8 +784,130 @@ function buildWeapons(k: Kit, shieldFace: Color3, legacy: boolean) {
     for (let i = 0; i <= 6; i++) { const a = -1.15 + (2.3 * i) / 6; bp.push([0.5 * Math.sin(a) * 0.9, 1.08 + 0.5 * Math.sin(a) * 0.45, -0.22 - 0.1 * Math.cos(a)]); }
     k.tube('bowBack', bp, [0.012, 0.02, 0.026, 0.03, 0.026, 0.02, 0.012], P.gold, { seg: 5 });
     k.tube('bowBack', [bp[0], bp[6]], 0.006, P.cloud, { seg: 3, noOcc: true });
+    // the Warrior's sword sheathed on the back (the Paladin's stays at the hip, under the shield): a dark scabbard,
+    // hilt over the left shoulder
+    {
+      const f = frameAt([-0.3, 1.74, -0.27], -0.08, -Math.PI + 0.5);
+      const at = (y: number) => f(0, y, 0);
+      k.tube('bladeBack', [at(0.12), at(0.86)], [0.045, 0.034], shade(C.leather, 0.7), { seg: 6, flatten: 0.45 });
+      k.tube('bladeBack', [at(0.8), at(0.88)], 0.04, P.gold, { seg: 6, flatten: 0.5 });
+      k.box('bladeBack', [0.22, 0.045, 0.06], at(0.09), P.gold, [-0.08, 0, -Math.PI + 0.5]);
+      k.tube('bladeBack', [at(0.07), at(-0.08)], 0.022, C.leather, { seg: 6 });
+      k.ball('bladeBack', 0.036, at(-0.11), P.gold, [1, 1, 1], [-0.08, 0, -Math.PI + 0.5]);
+    }
+    // a quiver beside the bow, red fletching showing over the shoulder
+    k.lathe('bowBack', [0.17, 0.88, -0.27], [[0, 0.055], [0.42, 0.065], [0.44, 0.07]], C.leather, { seg: 8, rot: [0, 0, -0.35], caps: true });
+    for (let i = 0; i < 3; i++) {
+      const ox = 0.17 + (i - 1) * 0.03 + 0.46 * Math.sin(0.35), oy = 0.88 + 0.46 * Math.cos(0.35);
+      k.box('bowBack', [0.05, 0.12, 0.012], [ox + 0.03 * Math.sin(0.35), oy + 0.04, -0.27 + (i - 1) * 0.02], P.roof, [0, 0, -0.35]);
+    }
+    buildJobWeapons(k);
   }
 }
+
+// ── the Plan 3b weapons: greatsword, twin daggers and the two staffs ──
+const DARK_STEEL = shade(mix(P.rock, P.sky, 0.25), 0.62);
+const IRON = shade(P.rock, 0.42);
+/** A point in a frame: origin `o`, turned `rx` about X then `rz` about Z (model space, metres). */
+function frameAt(o: V3, rx: number, rz: number) {
+  const cx = Math.cos(rx), sx = Math.sin(rx), cz = Math.cos(rz), sz = Math.sin(rz);
+  return (x: number, y: number, z: number): V3 => {
+    const y1 = y * cx - z * sx, z1 = y * sx + z * cx;             // about X
+    const x2 = x * cz - y1 * sz, y2 = x * sz + y1 * cz;           // about Z
+    return [o[0] + x2, o[1] + y2, o[2] + z1];
+  };
+}
+function buildJobWeapons(k: Kit) {
+  const hx = 0.26, hy = 0.725;
+  // Greatsword (the Dark Knight): 1.4 m, dark steel with a red fuller; in the right hand pointing forward (the drawn
+  // pose holds it up in both hands), and across the back with the hilt over the right shoulder.
+  const greatsword = (j: Joint, f: (x: number, y: number, z: number) => V3, rot: V3) => {
+    // built along +y from the grip's end: grip 0..0.32, guard 0.34, blade 0.36..1.4
+    const at = (y: number, x = 0, z = 0) => f(x, y, z);
+    k.ball(j, 0.045, at(-0.02), P.roof, [1, 1, 1], rot);
+    k.tube(j, [at(0), at(0.32)], 0.024, C.leather, { seg: 6 });
+    k.box(j, [0.34, 0.05, 0.07], at(0.34), DARK_STEEL, rot);
+    k.ball(j, 0.035, at(0.34, 0, 0.035), P.roof, [1, 1, 0.6], rot);
+    k.box(j, [0.15, 0.96, 0.034], at(0.86), DARK_STEEL, rot);
+    k.box(j, [0.04, 0.84, 0.042], at(0.82), P.roof, rot);       // the red fuller, on both faces
+    k.box(j, [0.15, 0.1, 0.034], at(1.36), shade(DARK_STEEL, 1.15), [rot[0], rot[1], rot[2] + Math.PI / 4]);
+  };
+  // in the hand: along +z (forward), a little up; the grip's end just behind the hand
+  greatsword('gsHand', (x, y, z) => [hx + x, hy - 0.02 + y * 0.12 + z, -0.12 + y * 0.99], [Math.PI / 2 - 0.12, 0, 0]);
+  // on the back: hilt over the right shoulder, the blade down to the left hip
+  {
+    const f = frameAt([0.33, 1.86, -0.27], -0.1, Math.PI - 0.42);   // the hilt stands over the right shoulder
+    greatsword('gsBack', (x, y, z) => f(x, y, z), [-0.1, 0, Math.PI - 0.42]);
+  }
+  // Twin daggers (the Ninja): two 0.35 m curved blades, one per hand; crossed at the small of the back.
+  const dagger = (j: Joint, f: (x: number, y: number, z: number) => V3) => {
+    k.tube(j, [f(0, -0.06, 0), f(0, 0.06, 0)], 0.024, IRON, { seg: 4 });
+    k.ellip(j, f(0, 0.078, 0), [0.07, 0.02, 0.04], P.gold, { seg: 4, lat: 2, flat: true, noOcc: true });
+    const pts: V3[] = [], rad: number[] = [];
+    for (let i = 0; i <= 4; i++) { const t = i / 4; pts.push(f(0, 0.09 + t * 0.38, 0.1 * t * t)); rad.push((0.055 * (1 - t * 0.9) + 0.003) * 0.3); }
+    k.tube(j, pts, rad, mix(C.steel, P.cloud, 0.5), { seg: 4, flatten: 1 / 0.3 });
+    k.tube(j, [f(0, -0.06, 0), f(0, -0.14, -0.04), f(0, -0.24, -0.03)], [0.02, 0.017, 0.006], P.roof, { seg: 3, noOcc: true }); // a red tassel
+  };
+  for (const [j, side] of [['dagR', 1], ['dagL', -1]] as [Joint, number][]) {
+    // held point-forward, curving up
+    dagger(j, (x, y, z) => [side * hx + x, hy - 0.01 + z, 0.02 + y]);
+  }
+  for (const side of [-1, 1]) {
+    const f = frameAt([side * 0.17, 0.8, -0.33], 0, side * 1.05);
+    dagger('dagBack', (x, y, z) => f(x, y, -z));
+  }
+  // Staffs (the mages): 1.6 m of wood with a faceted crystal head. White: pale wood, a teal-white crystal in a
+  // pale ring. Black: dark wood, an ember-violet crystal held in dark iron prongs.
+  const staff = (j: Joint, white: boolean, f: (x: number, y: number, z: number) => V3, rot: V3) => {
+    const wood = white ? mix(P.stone, P.cloud, 0.35) : shade(mix(P.rock, P.cliff, 0.3), 0.48);
+    const trim = white ? P.gold : IRON;
+    const crystal = white ? mix(P.teal, P.cloud, 0.62) : mix(P.rock, P.roof, 0.42);
+    const core = white ? P.cloud : mix(P.roof, P.gold, 0.4);
+    k.tube(j, [f(0, -0.66, 0), f(0, -0.2, 0.012), f(0, 0.3, -0.012), f(0, 0.84, 0)], [0.03, 0.034, 0.035, 0.04], wood, { seg: 5 });
+    k.tube(j, [f(0, -0.08, 0), f(0, 0.14, 0)], 0.042, white ? mix(P.teal, P.cloud, 0.3) : P.roof, { seg: 5 });   // the grip wrap
+    k.tube(j, [f(0, 0.82, 0), f(0, 0.93, 0)], 0.056, trim, { seg: 5 });                                         // the collar
+    k.ellip(j, f(0, 1.13, 0), [0.13, 0.23, 0.13], crystal, { seg: 6, lat: 4, flat: true, rot, noOcc: true });
+    k.ellip(j, f(0, 1.13, 0.05), [0.06, 0.11, 0.06], core, { seg: 5, lat: 3, flat: true, rot, noOcc: true });
+    if (white) {
+      // a pale ring round the crystal, with wings of light at its sides, and a gold knot under it
+      const ring: V3[] = [];
+      for (let i = 0; i <= 12; i++) { const a = (i / 12) * Math.PI * 2; ring.push(f(Math.cos(a) * 0.25, 1.13 + Math.sin(a) * 0.25, 0)); }
+      k.tube(j, ring, 0.026, mix(P.cloud, P.gold, 0.2), { seg: 3, caps: false, noOcc: true });
+      for (const sd of [-1, 1]) k.ellip(j, f(sd * 0.27, 1.13, 0), [0.05, 0.05, 0.03], P.gold, { seg: 4, lat: 2, flat: true, rot, noOcc: true });
+      k.ellip(j, f(0, 0.97, 0), [0.06, 0.045, 0.06], P.gold, { seg: 5, lat: 3, flat: true, noOcc: true });
+    } else {
+      // three dark iron prongs curling up round the crystal, with ember tips
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + 0.5, c = Math.cos(a), sn = Math.sin(a);
+        k.tube(j, [f(c * 0.05, 0.9, sn * 0.05), f(c * 0.19, 1.0, sn * 0.19), f(c * 0.18, 1.26, sn * 0.18), f(c * 0.06, 1.44, sn * 0.06)], [0.032, 0.03, 0.022, 0.006], IRON, { seg: 3, noOcc: true });
+        k.ellip(j, f(c * 0.07, 1.42, sn * 0.07), [0.035, 0.035, 0.035], mix(P.roof, P.gold, 0.55), { seg: 4, lat: 2, flat: true, noOcc: true });
+      }
+    }
+  };
+  // in the hand: through the fist, tipped forward so the drawn pose (forearm raised) stands it upright
+  const tip = 0.8;
+  for (const [j, white] of [['staffWHand', true], ['staffBHand', false]] as [Joint, boolean][]) {
+    const f = frameAt([hx + 0.01, hy - 0.01, 0.04], tip, 0);
+    staff(j, white, f, [tip, 0, 0]);
+  }
+  for (const [j, white] of [['staffWBack', true], ['staffBBack', false]] as [Joint, boolean][]) {
+    const f = frameAt([0.0, 1.12, -0.28], -0.08, -0.42);
+    staff(j, white, f, [-0.08, 0, -0.42]);
+  }
+}
+
+/**
+ * Each job's cape: with its weapon, how an adventurer's job reads at a glance from any side (PALETTE colours).
+ * Warrior red, Ranger green, Paladin gold, Dark Knight dark crimson, Ninja charcoal violet, White Mage white,
+ * Black Mage royal blue.
+ */
+export const JOB_CAPE: Record<string, string> = {
+  warrior: PALETTE.roof, ranger: shade(hex(PALETTE.meadow), 0.72).toHexString(), paladin: PALETTE.gold,
+  dark_knight: shade(hex(PALETTE.cliff), 0.42).toHexString(), ninja: shade(hex(PALETTE.rock), 0.42).toHexString(),
+  white_mage: PALETTE.cloud, black_mage: PALETTE.skyDeep,
+};
+/** The cape colour for a job (null: the default look). */
+export const capeFor = (job: string): string | null => (Object.prototype.hasOwnProperty.call(JOB_CAPE, job) ? JOB_CAPE[job] : null);
 
 // ───────────────────────── enemies & boss (minimal, legacy layout) ─────────────────────────
 function buildGrunt(k: Kit, cloth: Color3) {
@@ -942,7 +1081,7 @@ const TRAITS: Record<EntityKind | 'npc', Traits> = {
   warden:    { height: 4.5, cadence: 0.6, stride: 0.4, armSwing: 0.3, bob: 0.12, lean: 0.05, heavy: true, ringR: 2.2, legacyScale: 2.5 },
 };
 const DEFAULT_WEAPON: Record<EntityKind | 'npc', WeaponId | 'none'> = {
-  player: 'blade', companion: 'bow', npc: 'none', grunt: 'none', archer: 'bow', brute: 'none', warden: 'none',
+  player: 'sword', companion: 'bow', npc: 'none', grunt: 'none', archer: 'bow', brute: 'none', warden: 'none',
 };
 
 // ───────────────────────── pose / animation ─────────────────────────
@@ -957,7 +1096,33 @@ const ONE_SHOT_DUR = 0.42;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const ease = (x: number) => x * x * (3 - 2 * x);
 
-interface AnimCtx { T: number; t: number; phase: number; speed: number; tr: Traits; d: Design; weapon: WeaponId | 'none'; drawn: boolean; shift: number; humanoid: boolean }
+interface AnimCtx { T: number; t: number; phase: number; speed: number; tr: Traits; d: Design; weapon: WeaponId | 'none'; drawn: boolean; shift: number; humanoid: boolean; stabLeft?: boolean }
+
+/** The arms holding a drawn weapon at rest (over the idle arms). */
+function drawnArms(o: PoseVals, c: AnimCtx, br: number) {
+  if (!c.humanoid) return;
+  switch (c.weapon) {
+    case 'blade': case 'sword':
+      // the sword raised at an angle, ready (the Paladin's shield up beside it)
+      o['uArmR.rx'] = -0.3; o['fArmR.rx'] = -1.0; o['uArmR.rz'] = 0.12;
+      if (c.weapon === 'sword') { o['uArmL.rx'] = -0.45; o['fArmL.rx'] = -1.0; o['uArmL.rz'] = -0.25; o['fArmL.ry'] = 0; o['fArmL.rz'] = 0; }
+      break;
+    case 'greatsword':
+      // both hands on the long hilt, the blade standing up in front
+      o['uArmR.rx'] = -0.42 + br * 0.02; o['fArmR.rx'] = -0.86; o['uArmR.rz'] = 0.05;
+      o['uArmL.rx'] = -0.48 + br * 0.02; o['fArmL.rx'] = -0.92; o['uArmL.rz'] = 0.32; o['fArmL.ry'] = -0.55; o['fArmL.rz'] = 0;
+      break;
+    case 'daggers':
+      o['uArmL.rx'] = -0.32; o['uArmR.rx'] = -0.32; o['fArmL.rx'] = -1.35; o['fArmR.rx'] = -1.35;
+      o['uArmL.rz'] = -0.18; o['uArmR.rz'] = 0.18; o['fArmL.ry'] = 0; o['fArmL.rz'] = 0;
+      break;
+    case 'staff':
+      // the staff upright at the right side
+      o['uArmR.rx'] = -0.25 + br * 0.015; o['uArmR.rz'] = 0.14; o['fArmR.rx'] = -0.55;
+      break;
+    default: break;
+  }
+}
 
 /** Arms at rest, per idle style. */
 function idleArms(o: PoseVals, c: AnimCtx, br: number) {
@@ -1012,7 +1177,12 @@ function computePose(o: PoseVals, pose: Pose, c: AnimCtx) {
     o['torso.rz'] = w * 0.05; o['torso.rx'] = hunch + 0.02 * br;
     o['head.rx'] = -hunch * 0.75 - 0.015 * br; o['head.rz'] = -w * 0.04;
     idleArms(o, c, br);
-    if (c.weapon === 'blade' && c.drawn) { o['uArmR.rx'] = -0.2; o['fArmR.rx'] = -0.5; }
+    const sword = c.weapon === 'blade' || c.weapon === 'sword';
+    if (d.idle === 'hero' && !sword) {
+      // the hand-on-the-hilt rest is for a sword at the hip: other weapons hang the left arm loose
+      o['uArmL.rx'] = 0.02 + Math.sin(T * 0.9) * 0.03; o['uArmL.rz'] = -0.1 - 0.025 * br; o['fArmL.rx'] = -0.22; o['fArmL.ry'] = 0; o['fArmL.rz'] = 0;
+    }
+    if (c.drawn) drawnArms(o, c, br);
   };
   switch (pose) {
     case 'idle': idle(); break;
@@ -1033,12 +1203,45 @@ function computePose(o: PoseVals, pose: Pose, c: AnimCtx) {
       if (d.idle === 'cane') { o['uArmR.rx'] = -0.35 - sn * 0.2; o['fArmR.rx'] = -0.45; o['prop.rx'] = 0.6 + sn * 0.2; }
       if (d.idle === 'basket') { o['uArmR.rx'] = -0.1; o['fArmR.rx'] = -1.3; }
       if (tr.heavy) o['base.rz'] = sn * 0.05;
-      if (c.weapon === 'blade' && c.drawn) { o['uArmR.rx'] = -0.4 - sn * 0.3; o['fArmR.rx'] = -0.6; }
+      if (c.drawn && c.humanoid) {
+        if (c.weapon === 'blade' || c.weapon === 'sword') { o['uArmR.rx'] = -0.4 - sn * 0.3; o['fArmR.rx'] = -0.6; }
+        else if (c.weapon === 'greatsword') { o['uArmR.rx'] = -0.3 - sn * 0.08; o['fArmR.rx'] = -0.8; o['uArmL.rx'] = -0.35 - sn * 0.08; o['fArmL.rx'] = -0.9; o['uArmL.rz'] = 0.25; o['fArmL.ry'] = -0.5; }
+        else if (c.weapon === 'staff') { o['uArmR.rx'] = -0.25 - sn * 0.12; o['uArmR.rz'] = 0.15; o['fArmR.rx'] = -0.55; }
+        else if (c.weapon === 'daggers') { o['fArmL.rx'] = -1.45; o['fArmR.rx'] = -1.45; }
+      }
       break;
     }
     case 'attack': {
       idle();
       const p = clamp01(t / ONE_SHOT_DUR);
+      if (c.humanoid && c.weapon === 'greatsword') {
+        // an overhead cleave in both hands
+        const up = p < 0.42 ? ease(p / 0.42) : 1 - ease(clamp01((p - 0.42) / 0.25));
+        const r = -0.55 - 2.35 * up;
+        o['uArmR.rx'] = r; o['uArmL.rx'] = r; o['uArmR.rz'] = 0.05; o['uArmL.rz'] = 0.3;
+        o['fArmR.rx'] = -0.5 * up - 0.5; o['fArmL.rx'] = -0.5 * up - 0.6; o['fArmL.ry'] = -0.5;
+        o['torso.rx'] = p > 0.42 ? 0.3 * (1 - up) : -0.12 * up; o['head.rx'] = p > 0.42 ? -0.15 : 0;
+        o['thighL.rx'] = -0.45; o['shinL.rx'] = 0.35; o['thighR.rx'] = 0.35; o['shinR.rx'] = 0.25; o['hips.py'] = p > 0.42 ? -0.07 : 0;
+        break;
+      }
+      if (c.humanoid && c.weapon === 'daggers') {
+        // alternating stabs: one hand thrusts, the other guards
+        const [a, b] = c.stabLeft ? ['L', 'R'] : ['R', 'L'];
+        const sd = c.stabLeft ? -1 : 1;
+        const k = p < 0.3 ? ease(p / 0.3) : 1 - ease(clamp01((p - 0.45) / 0.4));
+        o[`uArm${a}.rx`] = -0.4 - 1.15 * k; o[`fArm${a}.rx`] = -1.4 + 1.25 * k; o[`uArm${a}.rz`] = sd * 0.08;
+        o[`uArm${b}.rx`] = -0.5; o[`fArm${b}.rx`] = -1.6; o[`uArm${b}.rz`] = -sd * 0.15;
+        o['torso.ry'] = -sd * 0.35 * k; o['torso.rx'] = 0.12 * k;
+        o['thighL.rx'] = -0.35 * k; o['shinL.rx'] = 0.3 * k; o['thighR.rx'] = 0.25 * k;
+        break;
+      }
+      if (c.humanoid && c.weapon === 'staff') {
+        // a short thrust of the staff toward the target, the free hand following
+        const k = p < 0.35 ? ease(p / 0.35) : 1 - ease(clamp01((p - 0.4) / 0.5));
+        o['uArmR.rx'] = -0.3 - 0.9 * k; o['uArmR.rz'] = 0.15; o['fArmR.rx'] = -0.55 + 0.25 * k;
+        o['uArmL.rx'] = -0.2 - 0.9 * k; o['fArmL.rx'] = -0.3; o['torso.rx'] = 0.08 * k; o['torso.ry'] = -0.15 * k;
+        break;
+      }
       if (c.weapon === 'bow') {
         o['uArmL.rx'] = -1.5; o['fArmL.rx'] = 0; o['uArmR.rx'] = -1.4 + 0.3 * ease(p); o['fArmR.rx'] = -1.2; o['uArmR.rz'] = -0.35; o['torso.ry'] = -0.35;
       } else if (tr.heavy) {
@@ -1244,6 +1447,14 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
 
   const pickables: Mesh[] = [];
   const body = geo.build(`body_${id}`, scene);
+  // the job-coloured cloth: its vertices, their baked colours and the colour they were built in
+  const capeIdx: number[] = [];
+  geo.tag.forEach((t, i) => { if (t) capeIdx.push(i); });
+  const capeBase = Float32Array.from(capeIdx.flatMap((i) => [geo.col[i * 4], geo.col[i * 4 + 1], geo.col[i * 4 + 2]]));
+  const capeKind = Uint8Array.from(capeIdx.map((i) => geo.tag[i]));   // (copied: the Geo itself is not kept)
+  const capeFrom = des.spec?.cape?.color ?? null, scarfFrom = des.spec?.scarf ?? null;
+  const colors = capeIdx.length ? Float32Array.from(geo.col) : null;
+  let capeNow = '';
   body.parent = rigRoot;
   body.material = mats.body;
   body.skeleton = skeleton;
@@ -1295,16 +1506,30 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
 
   // weapon visibility via bone scaling (keeps one draw call)
   let weapon: WeaponId | 'none' = opts.weapon ?? DEFAULT_WEAPON[kind];
+  let tint: 'white' | 'black' = 'white';
   let drawn = !humanoid;
   let lastCombat = -1e9;
   const applyWeapon = () => {
     const show = (j: Joint, on: boolean) => nodes[j].scaling.setAll(on ? 1 : 0);
-    show('bladeHand', weapon === 'blade' && drawn);
-    show('shieldArm', weapon === 'blade' && drawn && humanoid);
-    show('bladeHip', weapon === 'blade' && !drawn);
-    show('shieldBack', weapon === 'blade' && !drawn);
-    show('bowHand', weapon === 'bow' && drawn);
-    show('bowBack', weapon === 'bow' && !drawn);
+    // legacy (enemy) models only ever carry Plan 3's blade or bow
+    const w = humanoid ? weapon : weapon === 'bow' ? 'bow' : weapon === 'none' ? 'none' : 'blade';
+    const sword = w === 'blade' || w === 'sword';
+    show('bladeHand', sword && drawn);
+    show('shieldArm', (humanoid ? w === 'sword' : sword) && drawn);
+    show('bladeHip', (humanoid ? w === 'sword' : sword) && !drawn);
+    show('bladeBack', humanoid && w === 'blade' && !drawn);
+    show('shieldBack', w === 'sword' && !drawn);
+    show('bowHand', w === 'bow' && drawn);
+    show('bowBack', w === 'bow' && !drawn);
+    show('gsHand', w === 'greatsword' && drawn);
+    show('gsBack', w === 'greatsword' && !drawn);
+    show('dagR', w === 'daggers' && drawn);
+    show('dagL', w === 'daggers' && drawn);
+    show('dagBack', w === 'daggers' && !drawn);
+    show('staffWHand', w === 'staff' && tint === 'white' && drawn);
+    show('staffBHand', w === 'staff' && tint === 'black' && drawn);
+    show('staffWBack', w === 'staff' && tint === 'white' && !drawn);
+    show('staffBBack', w === 'staff' && tint === 'black' && !drawn);
     show('prop', des.prop !== null && des.prop !== 'rag' && !(drawn && weapon !== 'none'));
     show('propL', des.prop === 'rag');
   };
@@ -1318,6 +1543,10 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const cur = zeroPose(), from = zeroPose(), out = zeroPose();
   let blend = 1;
   const BLEND_TIME = 0.2;
+  /** Casting a spell (looped while the state says so) and its weight, blended over the upper body. */
+  let casting = false, castW = 0;
+  /** Which hand stabs next (the daggers alternate). */
+  let stabLeft = false;
   let phase = Math.random();
   // idle life
   let shiftTarget = 0, shift = 0, shiftTimer = 2 + Math.random() * 3;
@@ -1332,6 +1561,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const startPose = (p: Pose) => {
     for (const c of CH) from[c] = out[c];
     blend = 0; pose = p; poseT = 0;
+    if (p === 'attack') stabLeft = !stabLeft;
   };
 
   const view: CharacterView = {
@@ -1353,7 +1583,39 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         startPose(p);
       }
     },
-    setWeapon(w) { weapon = w; applyWeapon(); },
+    setWeapon(w, t) {
+      if (w === weapon && (t ?? 'white') === tint) return;
+      weapon = w; tint = t ?? 'white';
+      applyWeapon();
+    },
+    setCape(color) {
+      const c = color ?? '';
+      if (c === capeNow || !colors || !capeFrom) return;
+      capeNow = c;
+      // each vertex keeps its baked shading: scaled by the new colour over the one it was built in
+      const ratio = (from: Color3 | null) => {
+        const to = c ? hex(c) : from ?? capeFrom;
+        const f = from ?? capeFrom;
+        return [to.r / Math.max(0.02, f.r), to.g / Math.max(0.02, f.g), to.b / Math.max(0.02, f.b)];
+      };
+      const rc = ratio(capeFrom), rs = ratio(scarfFrom);
+      capeIdx.forEach((v, k) => {
+        const r = capeKind[k] === 2 ? rs : rc;
+        colors[v * 4] = Math.min(1, capeBase[k * 3] * r[0]); colors[v * 4 + 1] = Math.min(1, capeBase[k * 3 + 1] * r[1]); colors[v * 4 + 2] = Math.min(1, capeBase[k * 3 + 2] * r[2]);
+      });
+      body.updateVerticesData('color', colors);
+    },
+    setCasting(on) {
+      if (on === casting) return;
+      casting = on;
+      if (on) { lastCombat = T; if (!drawn) { drawn = true; applyWeapon(); } }
+    },
+    setFade(a) {
+      const v = Math.max(0.05, Math.min(1, a));
+      if (v === body.visibility) return;
+      body.visibility = v;   // per mesh, so the material shared by every character is untouched
+      for (const m of pickables) if (m !== body && m.visibility > 0) m.visibility = v;
+    },
     flash() { flashT = 0; body.renderOverlay = true; body.overlayAlpha = 0.85; },
     setTargeted(on: boolean) {
       targeted = on;
@@ -1409,9 +1671,18 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       if (pose === 'run') phase += dt * (speed > 0.5 ? 0.9 + speed * 0.13 : tr.cadence);
       if (!LOOPING.includes(pose) && poseT >= ONE_SHOT_DUR) startPose(looping);
       blend = Math.min(1, blend + dt / BLEND_TIME);
-      computePose(cur, pose, { T, t: poseT, phase, speed, tr, d: des, weapon, drawn, shift, humanoid });
+      computePose(cur, pose, { T, t: poseT, phase, speed, tr, d: des, weapon, drawn, shift, humanoid, stabLeft });
       const b = ease(blend);
       for (const c of CH) out[c] = from[c] + (cur[c] - from[c]) * b;
+      // ── the cast loop: the staff raised, the free hand forward (over whatever the legs are doing) ──
+      castW += ((casting && looping !== 'dead' ? 1 : 0) - castW) * Math.min(1, dt * 10);
+      if (castW > 0.001 && humanoid) {
+        const k = castW, pulse = Math.sin(T * 6) * 0.05;
+        const set = (c: Ch, v: number) => { out[c] += (v - out[c]) * k; };
+        set('uArmR.rx', -2.35 + pulse); set('uArmR.rz', 0.22); set('fArmR.rx', -0.15); set('fArmR.ry', 0);
+        set('uArmL.rx', -1.35 - pulse); set('uArmL.rz', -0.12); set('fArmL.rx', -0.25); set('fArmL.ry', 0.2); set('fArmL.rz', 0);
+        set('torso.rx', -0.06); set('head.rx', -0.12);
+      }
       // ── additive layers ──
       const idleW = pose === 'idle' ? b : 0;
       out['head.ry'] += look * idleW;

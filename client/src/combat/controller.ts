@@ -259,6 +259,8 @@ export interface CombatDebug {
   log: { t: number; e: unknown }[];
   /** The enemy tap-to-walk keeps in range (null for none). */
   chasing: number | null;
+  /** The spell pool: visuals live and instances drawn last frame (set once the effects exist). */
+  spells?: { readonly live: number; readonly drawn: number };
 }
 
 /** The room messages the controller handles. */
@@ -368,6 +370,7 @@ export function createCombat(o: CombatOpts): CombatController {
   const telegraphs: Telegraphs = createTelegraphs(game.scene, game.world, room);
   const overheads: Overheads = createOverheads(game.scene, room, o.enemies);
   const effects: Effects = createEffects({ game, hud, room, remotes: o.remotes, enemies: o.enemies });
+  debug.spells = effects.spells;
   // A soft ring on the ground under this adventurer, so it reads at a glance in a crowd of enemies and trees.
   const ringMat = new StandardMaterial('selfRingMat', game.scene);
   ringMat.disableLighting = true; ringMat.emissiveColor = new Color3(1, 0.93, 0.72); ringMat.alpha = 0.55; ringMat.zOffset = -2;
