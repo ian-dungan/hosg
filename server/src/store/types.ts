@@ -1,7 +1,7 @@
 // What the server keeps between sessions: accounts and their adventurers.
 import {
-  GOLD_MAX, JOB_IDS, defaultLook, isJobsSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook,
-  type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type ZoneId,
+  GOLD_MAX, JOB_IDS, defaultLook, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook,
+  parseQuests, type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type QuestSave, type ZoneId,
 } from '@sg2/shared';
 
 import type { GmGrant, GrantOutcome } from '../gm/grant';
@@ -63,6 +63,13 @@ export interface Adventurer {
   look: Look | null;
   /** The one free creator visit is still unused. */
   lookFree: boolean;
+  /**
+   * Quest progress (Plan 6): read with parseQuests (NULL reads as the main quest at its first step, with no write;
+   * anything else that needed repair sets questsRepaired). Written only by writeInventory, with the inventory.
+   */
+  quests: QuestSave;
+  /** Present (true) only when the stored quests had to be repaired to read: the room writes them back once on join. */
+  questsRepaired?: true;
 }
 
 /**
@@ -74,6 +81,8 @@ export interface InvWrite {
   /** Absent: the stored jobs (and level) are left as they are (writes made without a session: offline loot, GM grants, the creator's dyes). */
   jobs?: JobsSave;
   dGold: number; dSeals: number; look?: Look; lookFree?: false;
+  /** Absent: the stored quests are left as they are. Present: written in the same compare-and-set as the inventory. */
+  quests?: QuestSave;
 }
 
 /** The new version and the gold and Seals after a write. */
@@ -106,7 +115,13 @@ export function checkedInvWrite(w: InvWrite): InvWrite {
     if (!Number.isSafeInteger(w[k])) throw new TypeError(`writeInventory: ${k} is not a whole number`);
   }
   if (w.lookFree !== undefined && w.lookFree !== false) throw new TypeError('writeInventory: lookFree can only be spent');
-  return { inventory: inv.inv, ...(w.jobs !== undefined ? { jobs: parseJobsSave(w.jobs) } : {}), dGold: w.dGold, dSeals: w.dSeals, ...(look ? { look } : {}), ...(w.lookFree === false ? { lookFree: false as const } : {}) };
+  if (w.quests !== undefined && !isQuestSave(w.quests)) throw new TypeError('writeInventory: not a quest save');
+  return {
+    inventory: inv.inv, ...(w.jobs !== undefined ? { jobs: parseJobsSave(w.jobs) } : {}), dGold: w.dGold, dSeals: w.dSeals, ...(look ? { look } : {}),
+    ...(w.lookFree === false ? { lookFree: false as const } : {}),
+    // (a deep copy: nothing is shared with the caller; isQuestSave said it reads back exactly as it is)
+    ...(w.quests !== undefined ? { quests: JSON.parse(JSON.stringify(w.quests)) as QuestSave } : {}),
+  };
 }
 
 /** Checks a GM audit entry (both stores): a command of 1..64 characters, a result of at most 500, a target of at most 64. */
@@ -129,6 +144,18 @@ export function readInvLook(inventory: unknown, look: unknown, accountId: string
   const outfit = (l ?? defaultLook(accountId)).outfit;
   const read = parseInventory(inventory, [outfit.dye1, outfit.dye2]);
   return { inventory: read.inv, look: l, ...(read.repaired ? { inventoryRepaired: true as const } : {}) };
+}
+
+/**
+ * A stored `quests` value as both stores read it (parseQuests on today's UTC day): NULL is the main quest at its first
+ * step with no repair flag (nothing is written for it); anything that needed repair sets questsRepaired. `fresh`
+ * (test-only, SG2_TEST_QUEST) is what NULL reads as instead.
+ */
+export function readQuests(quests: unknown, nowMs: number = Date.now(), fresh?: (day: string) => QuestSave): Pick<Adventurer, 'quests' | 'questsRepaired'> {
+  const day = utcDay(nowMs);
+  if ((quests === null || quests === undefined) && fresh) return { quests: fresh(day) };
+  const read = parseQuests(quests, day);
+  return { quests: read.save, ...(read.repaired ? { questsRepaired: true as const } : {}) };
 }
 
 /** Clamped gold after a delta (never above GOLD_MAX). */
@@ -155,8 +182,11 @@ export function testKitInventory(tier: 1 | 2 | 3, dyes: [DyeId, DyeId] = [0, 0])
   return inv;
 }
 
-/** How a store makes new adventurers beyond the start spot (test-only switches: SG2_TEST_START_GOLD, SG2_TEST_KIT). */
-export interface NewAdventurerOpts { gold?: number; kit?: 1 | 2 | 3 }
+/**
+ * How a store makes new adventurers beyond the start spot (test-only switches: SG2_TEST_START_GOLD, SG2_TEST_KIT,
+ * and SG2_TEST_QUEST with the memory store: what a NULL quests value reads as).
+ */
+export interface NewAdventurerOpts { gold?: number; kit?: 1 | 2 | 3; quests?: (day: string) => QuestSave }
 
 /** One boss kill for the leaderboard: the party size, seconds from the boss's wake to its death, the credited names. */
 export interface BossKill { boss: 'wickhound' | 'fallen_warden'; partySize: number; seconds: number; names: string[]; at: Date }

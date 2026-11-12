@@ -774,6 +774,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const look = adventurer.look ?? defaultLook(accountId);
     const snapshot: InvSnapshot = {
       inv: adventurer.inventory, gold: adventurer.gold, seals: adventurer.seals, look, lookFree: adventurer.lookFree, version: adventurer.invVersion,
+      quests: adventurer.quests,
     };
     if (this.zone.id === RESPAWN_ZONE) this.accounts.respawns.delete(accountId);
     // Combat state a relog keeps (cooldowns, timers, combat, shield, sprint, Momentum), from its last
@@ -893,7 +894,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (adventurer.inventoryRepaired) {
       void session.queue.push({
         retries: 1,
-        run: (s, jobs) => ({ kind: 'write', write: { inventory: s.inv, jobs, dGold: 0, dSeals: 0 }, next: { inv: s.inv, gold: s.gold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree }, info: null }),
+        run: (s, jobs) => ({ kind: 'write', write: { inventory: s.inv, jobs, dGold: 0, dSeals: 0 }, next: { inv: s.inv, gold: s.gold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree, quests: s.quests }, info: null }),
         settle: (r) => { if (r.status === 'failed') this.logFailure('inventory', 'Writing back a repaired inventory failed', r.error); },
       });
     }
@@ -1150,7 +1151,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       write: (expect, w) => this.store.writeInventory(adventurerId, expect, w),
       load: async () => {
         const a = await this.store.getOrCreateAdventurer(accountId);
-        return { inv: a.inventory, gold: a.gold, seals: a.seals, look: a.look ?? defaultLook(accountId), lookFree: a.lookFree, version: a.invVersion };
+        return { inv: a.inventory, gold: a.gold, seals: a.seals, look: a.look ?? defaultLook(accountId), lookFree: a.lookFree, version: a.invVersion, quests: a.quests };
       },
       onWrite: () => this.onInvWrite?.(),
       onError: (err) => this.logFailure('inventory', 'Applying an inventory result failed', err),
@@ -1261,7 +1262,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         return {
           kind: 'write', info: null,
           write: { inventory: r.state.inv, jobs: r.state.jobs, dGold: r.dGold, dSeals: r.dSeals },
-          next: { ...r.state, look: s.look, lookFree: s.lookFree },
+          next: { ...r.state, look: s.look, lookFree: s.lookFree, quests: s.quests },
         };
       },
       settle: (r) => this.settleInv(session, op.op, r),
@@ -1294,7 +1295,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         return {
           kind: 'write', info: s.lookFree,
           write: { inventory: s.inv, jobs, dGold: -cost, dSeals: 0, look, ...(s.lookFree ? { lookFree: false as const } : {}) },
-          next: { inv: s.inv, gold: s.gold - cost, seals: s.seals, jobs, look, lookFree: false },
+          next: { inv: s.inv, gold: s.gold - cost, seals: s.seals, jobs, look, lookFree: false, quests: s.quests },
         };
       },
       settle: (r) => {
@@ -1372,7 +1373,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         return {
           kind: 'write', info: out.given,
           write: { inventory: out.state.inv, jobs, dGold: out.dGold, dSeals: 0 },
-          next: { ...out.state, look: s.look, lookFree: s.lookFree },
+          next: { ...out.state, look: s.look, lookFree: s.lookFree, quests: s.quests },
         };
       },
       settle: (r) => {
@@ -1424,7 +1425,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs: j }, awards, this.lootAlways);
         if (out.given.every((g) => g.dup)) return { kind: 'none', info: null };
         // (jobs left as stored: this write has no session, and a newer one may hold newer jobs)
-        return { kind: 'write', info: null, write: { inventory: out.state.inv, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree } };
+        return { kind: 'write', info: null, write: { inventory: out.state.inv, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree, quests: s.quests } };
       },
       unbounded: true,
       settle: (r) => {
@@ -2127,7 +2128,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         if ('refusal' in r) return { kind: 'refuse', reason: r.refusal };
         if (r.dup) return { kind: 'none', info: false };
         // (jobs left as stored: a grant changes none)
-        return { kind: 'write', info: true, write: { inventory: r.inv, dGold: r.dGold, dSeals: 0 }, next: { inv: r.inv, gold: s.gold + r.dGold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree } };
+        return { kind: 'write', info: true, write: { inventory: r.inv, dGold: r.dGold, dSeals: 0 }, next: { inv: r.inv, gold: s.gold + r.dGold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree, quests: s.quests } };
       },
       settle: (r) => {
         if (this.sessions.get(session.client.sessionId) !== session) return;

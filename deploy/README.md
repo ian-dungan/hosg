@@ -252,6 +252,20 @@ moved onto the new curve a second time (an adventurer could jump several levels)
 3. **Do not go back** to a version from before this update. If you really must, restore the backup
    from step 1 instead (everything played since is lost), never just `git checkout` the older version.
 
+**The update that brings the opening quest (database migration 008) is not one-way.** It only adds one
+adventurer column, `quests` (each adventurer's quest progress), empty for everyone. Nothing existing is
+changed, and it is safe to run again. An empty `quests` reads as the opening quest at its first step, so
+every adventurer, new or old, starts The Solstice Crossing at Old Marrow on its next join; nothing is
+written for it until the adventurer makes progress. Quest progress is only ever written together with the
+inventory, in the same write as the reward it pays. So:
+
+1. A backup first is still good practice (see "Back up the database" below), but no special steps are
+   needed: `git pull` and `docker compose up -d --build` as usual.
+2. Going back to an older version afterwards works: the older server ignores the column (and keeps
+   saving the inventory without touching it). Quest progress made on the older version is simply not
+   recorded, and the progress made before comes back into use when you update again. Rewards already paid
+   (xp, gold, items, the title) are kept either way.
+
 ### Back up the database
 
 ```

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { GOLD_MAX, MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave, parseLook } from '@sg2/shared';
 import {
-  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, readInvLook,
+  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, readInvLook, readQuests,
   testKitInventory, type Account, type Adventurer, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
 import { grantByCas, type GrantStore } from '../gm/grant';
@@ -83,10 +83,12 @@ interface AdventurerRow {
   inv_version: number;
   look: unknown;
   look_free: boolean;
+  /** Plan 6 (migration 008): NULL until first written. */
+  quests: unknown;
 }
 
 const ACCOUNT_COLUMNS = 'id, username, password_hash, is_guest, is_gm';
-const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold, seals, to_char(seal_day, \'YYYY-MM-DD\') AS seal_day, titles, inventory, inv_version, look, look_free';
+const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold, seals, to_char(seal_day, \'YYYY-MM-DD\') AS seal_day, titles, inventory, inv_version, look, look_free, quests';
 
 function toAccount(r: AccountRow): Account {
   return { id: r.id, username: r.username, passwordHash: r.password_hash, isGuest: r.is_guest, isGm: r.is_gm };
@@ -115,6 +117,7 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     ...readInvLook(r.inventory, r.look, r.account_id),
     invVersion: r.inv_version ?? 0,
     lookFree: r.look_free ?? true,
+    ...readQuests(r.quests),
   };
 }
 
@@ -284,13 +287,13 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
       // a GM grant or another write in between bumps inv_version, and this one writes nothing).
       const { rows } = await pool.query<{ inv_version: number; gold: number; seals: number }>(
         `UPDATE adventurers SET inventory = $3::jsonb, jobs = COALESCE($4::jsonb, jobs), level = COALESCE($5::integer, level), gold = LEAST($8::integer, gold + $6::integer), seals = seals + $7::integer,
-           look = COALESCE($9::jsonb, look), look_free = CASE WHEN $10::boolean THEN false ELSE look_free END,
+           look = COALESCE($9::jsonb, look), look_free = CASE WHEN $10::boolean THEN false ELSE look_free END, quests = COALESCE($11::jsonb, quests),
            inv_version = inv_version + 1, updated_at = now()
          WHERE id = $1 AND inv_version = $2 AND gold + $6::integer >= 0 AND seals + $7::integer >= 0
          RETURNING inv_version, gold, seals`,
         [
           adventurerId, expect, JSON.stringify(v.inventory), v.jobs ? JSON.stringify(v.jobs) : null, v.jobs ? highestLevel(v.jobs) : null, v.dGold, v.dSeals, GOLD_MAX,
-          v.look ? JSON.stringify(v.look) : null, v.lookFree === false,
+          v.look ? JSON.stringify(v.look) : null, v.lookFree === false, v.quests ? JSON.stringify(v.quests) : null,
         ],
       );
       const r = rows[0];

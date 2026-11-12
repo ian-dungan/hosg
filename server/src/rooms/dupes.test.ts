@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Room } from '@colyseus/sdk';
 import {
-  INV_OPS_PER_S, ITEMS, LAMPFALL_MOUTH, SMITHY_PRICE, TOWN_STALLS, newInventory, newJobsSave, zoneDef, type InventorySave, type StallId,
+  INV_OPS_PER_S, ITEMS, LAMPFALL_MOUTH, SMITHY_PRICE, TOWN_STALLS, newInventory, newJobsSave, newQuestSave, zoneDef, type InventorySave, type StallId,
 } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
@@ -227,7 +227,7 @@ describe('dupes', () => {
     const store = createMemoryStore();
     const account = await store.createAccount({ username: 'Alice', passwordHash: null, isGuest: true });
     const a = await store.getOrCreateAdventurer(account.id);
-    const snap: InvSnapshot = { inv: a.inventory, gold: 0, seals: 0, look: a.look ?? (await import('@sg2/shared')).defaultLook(account.id), lookFree: true, version: a.invVersion };
+    const snap: InvSnapshot = { inv: a.inventory, gold: 0, seals: 0, look: a.look ?? (await import('@sg2/shared')).defaultLook(account.id), lookFree: true, version: a.invVersion, quests: a.quests };
     const queue = new InventoryQueue(snap, {
       lock: new WriteLock(), jobs: () => newJobsSave(), write: (e, w) => store.writeInventory(a.id, e, w),
       load: async () => { const b = await store.getOrCreateAdventurer(account.id); return { ...snap, inv: b.inventory, gold: b.gold, seals: b.seals, version: b.invVersion }; },
@@ -238,7 +238,7 @@ describe('dupes', () => {
       run: (s: InvSnapshot, jobs: ReturnType<typeof newJobsSave>) => {
         const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, [award], true);
         return out.given.every((x) => x.dup) ? { kind: 'none' as const, info: null }
-          : { kind: 'write' as const, info: null, write: { inventory: out.state.inv, jobs, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree } };
+          : { kind: 'write' as const, info: null, write: { inventory: out.state.inv, jobs, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree, quests: s.quests } };
       },
     });
     const [r1, r2] = await Promise.all([queue.push(task()), queue.push(task())]);
@@ -334,7 +334,7 @@ describe('the inventory queue', () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => (release = r));
     let version = 0, writes = 0;
-    const snap: InvSnapshot = { inv: newInventory([0, 0]), gold: 0, seals: 0, look: (await import('@sg2/shared')).defaultLook('x'), lookFree: true, version: 0 };
+    const snap: InvSnapshot = { inv: newInventory([0, 0]), gold: 0, seals: 0, look: (await import('@sg2/shared')).defaultLook('x'), lookFree: true, version: 0, quests: newQuestSave('2026-11-12') };
     const q = new InventoryQueue(snap, {
       lock: new WriteLock(), jobs: () => newJobsSave(), onError: (e) => errors.push(e),
       load: async () => ({ ...snap, version }),
@@ -342,7 +342,7 @@ describe('the inventory queue', () => {
     });
     const task = (settle?: () => void) => ({
       retries: 1, settle,
-      run: (s: InvSnapshot, jobs: ReturnType<typeof newJobsSave>) => ({ kind: 'write' as const, info: null, write: { inventory: s.inv, jobs, dGold: 0, dSeals: 0 }, next: { inv: s.inv, gold: 0, seals: 0, jobs, look: s.look, lookFree: true } }),
+      run: (s: InvSnapshot, jobs: ReturnType<typeof newJobsSave>) => ({ kind: 'write' as const, info: null, write: { inventory: s.inv, jobs, dGold: 0, dSeals: 0 }, next: { inv: s.inv, gold: 0, seals: 0, jobs, look: s.look, lookFree: true, quests: s.quests } }),
     });
     const first = q.push(task(() => { throw new Error('boom'); }));
     const second = q.push(task());

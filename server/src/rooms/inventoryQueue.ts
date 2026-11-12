@@ -12,15 +12,16 @@
 //   finish (it is atomic) and drops the rest.
 // The session's saves (position, hp, jobs) share its WriteLock with these writes, so a save computed before
 // a talent change can never land after it.
-import { INV_OPS_PER_S, type InvState, type InventorySave, type JobsSave, type Look } from '@sg2/shared';
+import { INV_OPS_PER_S, type InvState, type InventorySave, type JobsSave, type Look, type QuestSave } from '@sg2/shared';
 import type { InvWrite, InvWritten } from '../store/types';
 
-/** What the queue holds between tasks: the stored inventory, gold, Seals and look, and their version. */
-export interface InvSnapshot { inv: InventorySave; gold: number; seals: number; look: Look; lookFree: boolean; version: number }
+/** What the queue holds between tasks: the stored inventory, gold, Seals, look and quests, and their version. */
+export interface InvSnapshot { inv: InventorySave; gold: number; seals: number; look: Look; lookFree: boolean; version: number; quests: QuestSave }
 
 /** What a task's run gives: a write (and the state after it), nothing to write, or a refusal. */
 export type TaskOutcome<T> =
-  | { kind: 'write'; write: InvWrite; next: InvState & { look: Look; lookFree: boolean }; info: T }
+  /** next.quests: the quests after the write (the write's own, or the snapshot's when it leaves them as they are). */
+  | { kind: 'write'; write: InvWrite; next: InvState & { look: Look; lookFree: boolean; quests: QuestSave }; info: T }
   | { kind: 'none'; info: T }
   | { kind: 'refuse'; reason: string };
 
@@ -51,6 +52,12 @@ export interface InvTask<T> {
   settle?(r: TaskResult<T>): void;
   /** Never refused for a full queue (loot: a stalled store must never drop an award). */
   unbounded?: boolean;
+  /**
+   * The task's own write landed: called inside the write lock right after deps.landed, before any save waiting on
+   * the lock (also for a session that ended meanwhile); never for a stale or failed write. (Quests apply their xp to
+   * the session's live jobs here, so a save never stores jobs without it.)
+   */
+  landed?(): void;
 }
 
 /** Serialises a session's store writes (inventory writes and saves). */
@@ -235,6 +242,11 @@ export class InventoryQueue {
             } catch (err) {
               this.deps.onError?.(err);
             }
+            try {
+              task.landed?.();
+            } catch (err) {
+              this.deps.onError?.(err);
+            }
           }
           return w;
         });
@@ -246,6 +258,7 @@ export class InventoryQueue {
         this.deps.onWrite?.();
         this.snap = {
           inv: out.next.inv, gold: written.gold, seals: written.seals, look: out.next.look, lookFree: out.next.lookFree, version: written.version,
+          quests: out.write.quests ?? out.next.quests,
         };
         return { status: 'applied', snapshot: this.snap, jobs: out.next.jobs, info: out.info };
       }

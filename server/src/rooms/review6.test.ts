@@ -134,7 +134,7 @@ describe('Task 6 review round 1', () => {
     const room = serverRoom(a.room);
     const hold = holdWrites(server!.store, (await stored(acc.accountId)).id);
     // a write that stalls, and a full queue behind it
-    void room.enqueueInventory(acc.accountId, { retries: 0, run: (s, jobs) => ({ kind: 'write', info: null, write: { inventory: s.inv, jobs, dGold: 1, dSeals: 0 }, next: { inv: s.inv, gold: s.gold + 1, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree } }) });
+    void room.enqueueInventory(acc.accountId, { retries: 0, run: (s, jobs) => ({ kind: 'write', info: null, write: { inventory: s.inv, jobs, dGold: 1, dSeals: 0 }, next: { inv: s.inv, gold: s.gold + 1, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree, quests: s.quests } }) });
     await waitFor(() => hold.held() === 1);
     for (let i = 0; i < 70; i++) void room.enqueueInventory(acc.accountId, { retries: 0, run: () => ({ kind: 'none', info: null }) });
     const loot = collect(a.room, 'loot');

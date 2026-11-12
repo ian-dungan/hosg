@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_HP, SPAWN, isZoneId, newJobsSave, parseJobsSave, parseLook } from '@sg2/shared';
 import {
-  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, readInvLook,
+  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, readInvLook, readQuests,
   testKitInventory, type Account, type Adventurer, type BossKill, type GmAuditRow, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
 import { grantByCas } from '../gm/grant';
@@ -11,18 +11,21 @@ import { grantByCas } from '../gm/grant';
  * A stored adventurer, kept as a database row would be: jobs, inventory and look as stored (as JSON text, so
  * nothing is shared with a caller), and Plan 3's loadout column (legacy rows only).
  */
-type Row = Omit<Adventurer, 'jobs' | 'inventory' | 'look' | 'inventoryRepaired'> & { jobs: unknown; inventory: string | null; look: string | null; legacyLoadout?: unknown };
+type Row = Omit<Adventurer, 'jobs' | 'inventory' | 'look' | 'inventoryRepaired' | 'quests' | 'questsRepaired'> & {
+  jobs: unknown; inventory: string | null; look: string | null; quests: string | null; legacyLoadout?: unknown;
+};
 
-/** Test-only: an adventurer stored by Plan 3 (its old loadout; jobs absent when the migration missed it), or with any stored inventory or look. */
-export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown; inventory?: unknown; look?: unknown }
+/** Test-only: an adventurer stored by Plan 3 (its old loadout; jobs absent when the migration missed it), or with any stored inventory, look or quests. */
+export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown; inventory?: unknown; look?: unknown; quests?: unknown }
 
 const json = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
 const unjson = (s: string | null): unknown => (s === null ? null : JSON.parse(s));
 
-/** A copy that shares nothing with the stored row, read as PgStore reads one (parseJobsSave(jobs, loadout), readInvLook). */
-const copy = ({ legacyLoadout, jobs, titles, inventory, look, ...a }: Row): Adventurer => ({
+/** A copy that shares nothing with the stored row, read as PgStore reads one (parseJobsSave(jobs, loadout), readInvLook, readQuests). */
+const copy = ({ legacyLoadout, jobs, titles, inventory, look, quests, ...a }: Row, fresh?: NewAdventurerOpts['quests']): Adventurer => ({
   ...a, titles: [...titles], jobs: parseJobsSave(jobs, legacyLoadout), ...(jobsNeedRepair(jobs) ? { jobsRepaired: true as const } : {}),
   ...readInvLook(unjson(inventory), unjson(look), a.accountId),
+  ...readQuests(unjson(quests), Date.now(), fresh),
 });
 
 /**
@@ -64,6 +67,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
         invVersion: 0,
         look: null,
         lookFree: true,
+        quests: null, // NULL until first written: the reader gives the main quest at its first step
       };
       adventurersByAccount.set(accountId, adventurer);
       adventurersById.set(adventurer.id, adventurer);
@@ -77,7 +81,9 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     row.legacyLoadout = r.loadout;
     if (r.inventory !== undefined) row.inventory = json(r.inventory);
     if (r.look !== undefined) row.look = json(r.look);
+    if (r.quests !== undefined) row.quests = json(r.quests);
   }
+  const read = (row: Row) => copy(row, opts.newAdventurer?.quests);
 
   return {
     async createAccount({ username, passwordHash, isGuest }) {
@@ -100,7 +106,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     },
 
     async getOrCreateAdventurer(accountId) {
-      return copy(adventurerFor(accountId));
+      return read(adventurerFor(accountId));
     },
 
     async nameAdventurer(accountId, name) {
@@ -110,7 +116,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       if (adventurerNames.has(key)) throw new NameTakenError(name);
       adventurerNames.add(key);
       adventurer.name = name;
-      return copy(adventurer);
+      return read(adventurer);
     },
 
     async saveAdventurer(a, expect) {
@@ -136,6 +142,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       adventurer.seals += v.dSeals;
       if (v.look) adventurer.look = json(v.look);
       if (v.lookFree === false) adventurer.lookFree = false;
+      if (v.quests) adventurer.quests = json(v.quests);
       adventurer.invVersion += 1;
       return { version: adventurer.invVersion, gold: adventurer.gold, seals: adventurer.seals };
     },

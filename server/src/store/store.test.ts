@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import {
-  GOLD_MAX, JOB_IDS, MAX_HP, SPAWN, defaultLook, isJobsSave, levelForXp, newInventory, newJobsSave, parseJobsSave, starterItems, totalTo, type JobsSave,
+  GOLD_MAX, JOB_IDS, MAX_HP, SPAWN, defaultLook, isJobsSave, levelForXp, newInventory, newJobsSave, newQuestSave, parseJobsSave, starterItems, totalTo, type JobsSave,
+  type QuestSave,
 } from '@sg2/shared';
 import { NameTakenError, checkedSave, type Adventurer, type InvWrite, type Store } from './types';
 import { createMemoryStore, type LegacyRow } from './memory';
@@ -576,6 +577,101 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       expect(await store.gmGoldToday(gm.id, '2001-01-01')).toBe(0);
     });
 
+    // ───────── Plan 6: quests (migration 008) ─────────
+    const today = () => new Date().toISOString().slice(0, 10);
+    /** The main quest at `step` (counts for that step), nothing else. */
+    const mainAt = (step: number, counts: number[] = [0]): QuestSave => ({ ...newQuestSave(today()), active: [{ id: 'solstice_crossing', step, counts, since: today() }] });
+
+    it('a row with no quests reads as the main quest at step 0, not repaired', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      expect(a.quests).toEqual(newQuestSave(today()));
+      expect(a.questsRepaired).toBeUndefined();
+      // reading it again changes nothing (nothing was written)
+      expect((await store.getOrCreateAdventurer(account.id)).invVersion).toBe(a.invVersion);
+    });
+
+    it('garbage quests JSON reads repaired', async () => {
+      const { store: legacy, accountIds } = await seedLegacy([
+        { loadout: PLAN3_DEFAULT, jobs: newJobsSave(), quests: { v: 1, active: 'x', done: 7 } },
+        { loadout: PLAN3_DEFAULT, jobs: newJobsSave(), quests: 'junk' },
+        { loadout: PLAN3_DEFAULT, jobs: newJobsSave(), quests: { ...mainAt(3), active: [{ id: 'solstice_crossing', step: 99, counts: [5], since: 'x' }, { id: 'nope', step: 0, counts: [], since: '2026-11-12' }] } },
+      ]);
+      try {
+        for (const id of accountIds) {
+          const a = await legacy.getOrCreateAdventurer(id);
+          expect(a.questsRepaired).toBe(true);
+          expect(a.quests.active[0]!.id).toBe('solstice_crossing');
+          expect(a.quests.active.every((p) => p.id === 'solstice_crossing')).toBe(true);
+        }
+        expect((await legacy.getOrCreateAdventurer(accountIds[2]!)).quests.active[0]!.step).toBe(13); // clamped to the last step
+      } finally {
+        if (legacy !== store) await legacy.close();
+      }
+    });
+
+    it('writeInventory writes quests in the same compare-and-set: a stale version writes neither inventory nor quests', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      const q = mainAt(4);
+      expect(await store.writeInventory(a.id, a.invVersion, invWrite(a, { quests: q, dGold: 7 }))).toMatchObject({ version: a.invVersion + 1, gold: 7 });
+      const b = await store.getOrCreateAdventurer(account.id);
+      expect(b.quests).toEqual(q);
+      expect(b.questsRepaired).toBeUndefined();
+      // stale: nothing at all
+      const bag = [...b.inventory.bag, { uid: b.inventory.nextUid, item: 'hedgecutter' as const, dye: [0, 0] as [number, number] }];
+      expect(await store.writeInventory(a.id, a.invVersion, invWrite(b, { inventory: { ...b.inventory, bag, nextUid: b.inventory.nextUid + 1 }, quests: mainAt(5), dGold: 3 }))).toBeNull();
+      const c = await store.getOrCreateAdventurer(account.id);
+      expect(c.quests).toEqual(q);
+      expect(c.inventory).toEqual(b.inventory);
+      expect(c.gold).toBe(7);
+      // a Seal in between makes the next write stale too
+      await store.awardSeal(a.id, '2026-11-12');
+      expect(await store.writeInventory(a.id, b.invVersion, invWrite(b, { quests: mainAt(6) }))).toBeNull();
+      expect((await store.getOrCreateAdventurer(account.id)).quests).toEqual(q);
+    });
+
+    it('a write without quests leaves the stored quests as they are', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      const q = mainAt(8, [2, 1, 0, 1]);
+      await store.writeInventory(a.id, a.invVersion, invWrite(a, { quests: q }));
+      const b = await store.getOrCreateAdventurer(account.id);
+      expect(await store.writeInventory(b.id, b.invVersion, invWrite(b, { dGold: 4 }))).not.toBeNull();
+      expect(await store.writeInventory(b.id, b.invVersion + 1, { inventory: b.inventory, dGold: 1, dSeals: 0 })).not.toBeNull(); // no jobs either
+      const c = await store.getOrCreateAdventurer(account.id);
+      expect(c.quests).toEqual(q);
+      expect(c.gold).toBe(5);
+    });
+
+    it('writeInventory refuses a quests value isQuestSave refuses', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      for (const bad of [null, 'junk', { v: 2 }, { ...mainAt(0), active: [] }, { ...mainAt(0), extra: 1 }, { ...mainAt(3), active: [{ id: 'solstice_crossing', step: 3, counts: [9], since: today() }] }]) {
+        await expect(store.writeInventory(a.id, a.invVersion, invWrite(a, { quests: bad as never })), JSON.stringify(bad)).rejects.toThrow(TypeError);
+      }
+      const b = await store.getOrCreateAdventurer(account.id);
+      expect(b.invVersion).toBe(a.invVersion);
+      expect(b.quests).toEqual(newQuestSave(today()));
+    });
+
+    it('saveAdventurer, awardSeal, useFreeLook and grantOffline never change quests', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const name = uniqueName('Quester');
+      await store.nameAdventurer(account.id, name);
+      const a = await store.getOrCreateAdventurer(account.id);
+      const q = mainAt(9, [1]);
+      await store.writeInventory(a.id, a.invVersion, invWrite(a, { quests: q }));
+      expect(await store.saveAdventurer(saved(a, { x: 4 }))).toBe(true);
+      await store.awardSeal(a.id, '2026-11-12');
+      expect(await store.useFreeLook(account.id, defaultLook('another look'))).toBe(true);
+      expect(await store.grantOffline(name, { gold: 9, key: 'gm:quest-test-0001' })).toBe('done');
+      await store.addTitle(a.id, 'Witness of the Crossing');
+      const b = await store.getOrCreateAdventurer(account.id);
+      expect(b.quests).toEqual(q);
+      expect(b).toMatchObject({ x: 4, seals: 1, gold: 9, lookFree: false });
+    });
+
     it("refuses to save 'lampfall' (an instance is never a saved zone)", async () => {
       const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
       const a = await store.getOrCreateAdventurer(account.id);
@@ -629,8 +725,9 @@ if (databaseUrl) {
         const account = await store.createAccount({ username: uniqueName('Legacy'), passwordHash: 'h', isGuest: false });
         const { id } = await store.getOrCreateAdventurer(account.id);
         // The jobs column is NOT NULL after 004: a row it missed is stood in for by a JSON null.
-        await db.query('UPDATE adventurers SET loadout = $2::jsonb, jobs = $3::jsonb, inventory = $4::jsonb WHERE id = $1', [
+        await db.query('UPDATE adventurers SET loadout = $2::jsonb, jobs = $3::jsonb, inventory = $4::jsonb, quests = $5::jsonb WHERE id = $1', [
           id, JSON.stringify(r.loadout), r.jobs === undefined ? 'null' : JSON.stringify(r.jobs), r.inventory === undefined ? null : JSON.stringify(r.inventory),
+          r.quests === undefined ? null : JSON.stringify(r.quests),
         ]);
         accountIds.push(account.id);
       }
@@ -720,7 +817,7 @@ if (databaseUrl) {
         const { rows } = await client.query('SELECT name FROM schema_migrations ORDER BY name');
         expect(rows).toEqual([
           { name: '001_init.sql' }, { name: '002_adventurer_names.sql' }, { name: '003_combat.sql' }, { name: '004_jobs.sql' }, { name: '005_parties_and_warden.sql' },
-          { name: '006_progression_gear_looks.sql' }, { name: '007_gm_audit_append_only.sql' },
+          { name: '006_progression_gear_looks.sql' }, { name: '007_gm_audit_append_only.sql' }, { name: '008_quests.sql' },
         ]);
       } finally {
         await client.end();
@@ -928,7 +1025,7 @@ if (databaseUrl) {
           await db.query(await sql('004_jobs.sql'));
           expect(await raw()).toEqual(first);
           const { rows } = await db.query('SELECT name FROM schema_migrations ORDER BY name');
-          expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql', '006_progression_gear_looks.sql', '007_gm_audit_append_only.sql']);
+          expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql', '006_progression_gear_looks.sql', '007_gm_audit_append_only.sql', '008_quests.sql']);
           // A row made after 004 without jobs gets the column default (a new Warrior), and NULL is refused.
           const { rows: acc } = await db.query(`INSERT INTO accounts (username, password_hash, is_guest) VALUES ('New', 'h', false) RETURNING id`);
           const { rows: made } = await db.query(
@@ -1042,6 +1139,64 @@ if (databaseUrl) {
           await expect(db2.query(`UPDATE adventurers SET seals = -1`)).rejects.toThrow();
           const { rows } = await db2.query('SELECT count(*)::int AS n FROM gm_audit');
           expect(rows[0].n).toBe(0);
+        } finally {
+          await db2.end();
+        }
+      } finally {
+        await admin.query(`DROP DATABASE ${dbName} WITH (FORCE)`);
+        await admin.end();
+      }
+    });
+
+    it('migration 008 is safe to run twice, and a Plan 5 row reads with its inventory, Seals and look intact', async () => {
+      const dbName = `sg2_migrate_${Math.floor(Math.random() * 1e9)}`;
+      const admin = new pg.Client({ connectionString: databaseUrl });
+      await admin.connect();
+      await admin.query(`CREATE DATABASE ${dbName}`);
+      const url = new URL(databaseUrl);
+      url.pathname = `/${dbName}`;
+      const sql = async (file: string) => readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
+      const files = ['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql', '006_progression_gear_looks.sql', '007_gm_audit_append_only.sql'];
+      const look = defaultLook('a Plan 5 look');
+      const jobs = { curve: 2, current: 'warrior', jobs: { warrior: rec(totalTo(6), ['mend', 'bulwark']) } };
+      const inv = { ...newInventory([look.outfit.dye1, look.outfit.dye2]), recentKills: ['grove:12:3'] };
+      let id = '';
+      try {
+        const db = new pg.Client({ connectionString: url.href });
+        await db.connect();
+        try {
+          for (const f of files) await db.query(await sql(f));
+          await db.query('CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+          for (const f of files) await db.query('INSERT INTO schema_migrations (name) VALUES ($1)', [f]);
+          const { rows } = await db.query(`INSERT INTO accounts (username, password_hash, is_guest) VALUES ('Veteran', 'h', false) RETURNING id`);
+          id = rows[0].id;
+          await db.query(
+            `INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold, hp, jobs, seals, seal_day, titles, inventory, inv_version, look, look_free)
+             VALUES ($1, 'Veteran', 1, 2, 0, 'greenway', 6, 0, 120, 70, $2::jsonb, 3, '2026-11-11', '["Lampbreaker"]'::jsonb, $3::jsonb, 9, $4::jsonb, false)`,
+            [id, JSON.stringify(jobs), JSON.stringify(inv), JSON.stringify(look)],
+          );
+        } finally {
+          await db.end();
+        }
+        const store = await createPgStore(url.href); // applies 008
+        try {
+          const a = await store.getOrCreateAdventurer(id);
+          expect(a).toMatchObject({ seals: 3, sealDay: '2026-11-11', titles: ['Lampbreaker'], gold: 120, hp: 70, zone: 'greenway', look, lookFree: false, invVersion: 9, inventory: inv });
+          expect(a.inventoryRepaired).toBeUndefined();
+          expect(a.quests).toEqual(newQuestSave(new Date().toISOString().slice(0, 10)));
+          expect(a.questsRepaired).toBeUndefined();
+        } finally {
+          await store.close();
+        }
+        const db2 = new pg.Client({ connectionString: url.href });
+        await db2.connect();
+        try {
+          const raw = async () => (await db2.query(`SELECT jobs, inventory, inv_version, look, look_free, gold, seals, quests FROM adventurers ORDER BY name`)).rows;
+          const first = await raw();
+          expect(first[0].quests).toBeNull(); // read, never written
+          await db2.query(await sql('008_quests.sql'));
+          await db2.query(await sql('008_quests.sql'));
+          expect(await raw()).toEqual(first);
         } finally {
           await db2.end();
         }
