@@ -291,6 +291,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       const adventurer = await store.getOrCreateAdventurer(account.id);
       const bad: unknown[] = [
         { zone: 'moon' },
+        { zone: 'lampfall' }, // an instance is never a saved zone (saved at the crater mouth instead)
         { hp: Number.NaN },
         { hp: Infinity },
         { jobs: PLAN3_DEFAULT }, // a Plan 3 loadout is no longer saved

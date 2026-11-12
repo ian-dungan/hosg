@@ -4,7 +4,10 @@ import { SPAWN } from '../constants';
 import { bandR, roadZ as groveRoadZ } from './layout';
 import { GREENWAY_RECIPE, generateZone, prng } from './recipe';
 import { GROVE_OBSTACLES } from './obstacles';
-import { GROVE_EAST_GATE, GUILD_BOARD, REASON_JOB_NOT_HERE, ZONE_IDS, isZoneId, jobSwitchAt, zoneDef, zoneFullReason, type ZoneId } from './zones';
+import { GROVE_EAST_GATE, GUILD_BOARD, LAMPFALL_MOUTH, REASON_JOB_NOT_HERE, SAVE_ZONE_IDS, ZONE_IDS, isSaveZoneId, isZoneId, jobSwitchAt, zoneDef, zoneFullReason, type ZoneId } from './zones';
+import { lampfallLayout } from './dungeon';
+import { REASON_INSTANCES_FULL } from '../instance';
+import { checkZoneLimits } from './limits';
 import { PLAZA_R, type Obstacle } from './layout';
 
 /** Standable: ground (not a platform) here and 0.4 m around (an adventurer's radius). */
@@ -17,8 +20,8 @@ function standable(id: ZoneId, x: number, z: number): boolean {
 
 describe('zone registry', () => {
   it('ZONE_IDS and isZoneId', () => {
-    expect(ZONE_IDS).toEqual(['grove', 'greenway']);
-    expect(isZoneId('grove')).toBe(true); expect(isZoneId('greenway')).toBe(true);
+    expect(ZONE_IDS).toEqual(['grove', 'greenway', 'lampfall']);
+    expect(isZoneId('grove')).toBe(true); expect(isZoneId('greenway')).toBe(true); expect(isZoneId('lampfall')).toBe(true);
     for (const v of ['', 'Grove', 'beacon', 1, null, undefined, {}, ['grove']]) expect(isZoneId(v)).toBe(false);
   });
 
@@ -55,13 +58,13 @@ describe('zone registry', () => {
     expect(grove.banner).toEqual(['The Plaza of the Two', 'Shady Grove']);
   });
 
-  it('greenway: generated, spawns at the entry, every camp spawn listed, one open exit back to the grove', () => {
+  it('greenway: generated, spawns at the entry, every camp spawn listed, an open exit back to the grove and the crater mouth', () => {
     const gw = zoneDef('greenway');
     const layout = generateZone(GREENWAY_RECIPE);
     expect(gw.spawn).toEqual(layout.entry);
     expect(gw.camps).toEqual(layout.camps.flatMap(c => c.spawns));
     expect(gw.camps).toHaveLength(21);
-    expect(gw.exits).toHaveLength(1);
+    expect(gw.exits).toHaveLength(2);
     const e = gw.exits[0];
     expect(e).toMatchObject({ to: 'grove', x: layout.westGate.x, z: layout.westGate.z, r: 2.5, open: true });
     const ax = GROVE_EAST_GATE.x - 5;
@@ -108,6 +111,60 @@ describe('zone registry', () => {
   it('zoneFullReason', () => {
     expect(zoneFullReason('grove')).toBe(REASON_GROVE_FULL);
     expect(zoneFullReason('greenway')).toBe('The Greenway is full, try again soon');
+    expect(zoneFullReason('lampfall')).toBe(REASON_INSTANCES_FULL);
+  });
+
+  it('lampfall is instanced, not a town, with sanctuaries at the rim and the landing only', () => {
+    const lf = zoneDef('lampfall'), layout = lampfallLayout();
+    expect(lf).toMatchObject({ id: 'lampfall', name: 'The Lampfall', banner: ['The Lampfall', 'Where the Warden fell'], town: false, instanced: true });
+    for (const id of SAVE_ZONE_IDS) expect(zoneDef(id).instanced).toBe(false);
+    const rim = layout.rooms.find(r => r.id === 'rim')!, landing = layout.rooms.find(r => r.id === 'landing')!;
+    expect(lf.sanctuaries).toEqual([
+      { x: rim.x, z: rim.z, r: 6, name: 'Crater Rim' }, { x: landing.x, z: landing.z, r: 6, name: "Keeper's Landing" },
+    ]);
+    expect(lf.spawn).toEqual({ x: rim.x, z: rim.z, facing: rim.entryDir });
+    expect(lf.jobSwitch(rim.x, rim.z)).toBe(true); expect(lf.jobSwitch(landing.x + 5.9, landing.z)).toBe(true);
+    for (const r of layout.rooms) if (!r.sanctuary) expect(lf.jobSwitch(r.x, r.z), r.id).toBe(false);
+    // the camps are every room's spawns; surface, ground and sight are the dungeon's
+    expect(lf.camps).toEqual(layout.rooms.flatMap(r => r.spawns));
+    expect(lf.camps).toHaveLength(12);
+    const pillar = layout.pillars[0], rubble = layout.rubble[0];
+    expect(lf.surface(pillar.x, pillar.z)).toBeNull(); expect(lf.sight(pillar.x, pillar.z)).toBe(false);
+    expect(lf.surface(rubble.x, rubble.z)).toBe(rubble.top); expect(lf.ground(rubble.x, rubble.z)).toBeNull(); expect(lf.sight(rubble.x, rubble.z)).toBe(true);
+    expect(lf.surface(0, 0)).toBeNull(); // off the floor
+    // exits: the rim's stair (open) and the lamp-lift (shut until the Warden falls), both to the mouth
+    expect(lf.exits).toEqual([
+      { to: 'greenway', ...layout.exitStair, arrive: { ...LAMPFALL_MOUTH.arrive }, open: true },
+      { to: 'greenway', ...layout.lampLift, arrive: { ...LAMPFALL_MOUTH.arrive }, open: false },
+    ]);
+    expect(() => checkZoneLimits(lf)).not.toThrow();
+  });
+
+  it('SAVE_ZONE_IDS excludes lampfall', () => {
+    expect(SAVE_ZONE_IDS).toEqual(['grove', 'greenway']);
+    expect(isSaveZoneId('grove')).toBe(true); expect(isSaveZoneId('greenway')).toBe(true);
+    for (const v of ['lampfall', '', 'Grove', 1, null, undefined, {}, ['greenway']]) expect(isSaveZoneId(v)).toBe(false);
+  });
+
+  it('the Greenway has the mouth exit, clear of trees and rocks within 10 m and of camps within 20 m', () => {
+    const gw = zoneDef('greenway'), layout = generateZone(GREENWAY_RECIPE);
+    const e = gw.exits.find(x => x.to === 'lampfall')!;
+    expect(e).toEqual({ to: 'lampfall', x: layout.mouth.x, z: layout.mouth.z, r: 2.5, arrive: zoneDef('lampfall').spawn, open: true, instance: true });
+    expect(e.x).toBe(236); expect(e.z).toBe(layout.roadZ(236));
+    expect(LAMPFALL_MOUTH).toMatchObject({ x: e.x, z: e.z, r: 2.5 });
+    for (const o of layout.obstacles) expect(Math.hypot(o.x - e.x, o.z - e.z) - (o as { r: number }).r).toBeGreaterThanOrEqual(10);
+    for (const c of layout.camps) expect(Math.hypot(c.x - e.x, c.z - e.z)).toBeGreaterThanOrEqual(20);
+    expect(gw.exits.filter(x => x.instance)).toEqual([e]);
+  });
+
+  it('LAMPFALL_MOUTH.arrive stands on the Greenway surface', () => {
+    const { arrive } = LAMPFALL_MOUTH;
+    const layout = generateZone(GREENWAY_RECIPE);
+    expect(arrive).toEqual({ x: LAMPFALL_MOUTH.x - 5, z: layout.roadZ(LAMPFALL_MOUTH.x - 5), facing: Math.PI / 2 });
+    expect(zoneDef('greenway').surface(arrive.x, arrive.z)).not.toBeNull();
+    expect(standable('greenway', arrive.x, arrive.z)).toBe(true);
+    expect(Math.hypot(arrive.x - LAMPFALL_MOUTH.x, arrive.z - LAMPFALL_MOUTH.z)).toBeGreaterThan(LAMPFALL_MOUTH.r + 0.5);
+    expect(Object.isFrozen(LAMPFALL_MOUTH)).toBe(true); expect(Object.isFrozen(arrive)).toBe(true);
   });
 
   it("zoneDef('grove').exits[0].open === true (the east gate is open)", () => {
@@ -117,7 +174,7 @@ describe('zone registry', () => {
   it('the grove is a town everywhere; the Greenway is not, anywhere', () => {
     expect(zoneDef('grove')).toMatchObject({ town: true, sanctuaries: [] });
     expect(zoneDef('greenway')).toMatchObject({ town: false, sanctuaries: [] });
-    for (const id of ZONE_IDS) {
+    for (const id of SAVE_ZONE_IDS) {
       const d = zoneDef(id);
       const rng = prng(id === 'grove' ? 501 : 502);
       let found = 0;

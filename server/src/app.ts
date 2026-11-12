@@ -5,7 +5,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, ZONE_IDS, jobSwitchAt, zoneDef, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, SAVE_ZONE_IDS, jobSwitchAt, zoneDef, type SaveZoneId, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
 import { Presence } from './rooms/presence';
@@ -56,7 +56,7 @@ export interface App {
    * state patches (one encode per client's view); stepErrors counts the failures its steps and
    * handlers caught (and carried on from) since it started.
    */
-  stats(): { players: number; tickHz: number; zones: Record<ZoneId, ZoneStats> };
+  stats(): { players: number; tickHz: number; zones: Record<SaveZoneId, ZoneStats> };
   /** Whether the exits from `from` to `to` are open now. */
   isExitOpen(from: ZoneId, to: ZoneId): boolean;
   /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
@@ -78,7 +78,8 @@ function mergedZone(id: ZoneId, over: Partial<ZoneDef> | undefined): ZoneDef {
 export function createApp(opts: AppOptions): App {
   const rooms = new Map<ZoneId, ZoneRoom>();
   const presence = new Presence();
-  const zones = new Map<ZoneId, ZoneDef>(ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));
+  // One shared room per saved zone; the Lampfall's rooms are instances (Plan 4 Task 7), never made here.
+  const zones = new Map<ZoneId, ZoneDef>(SAVE_ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));
 
   // Open gates by "from>to": each exit's own default, then openExits.
   const openGates = new Set<string>();
@@ -103,17 +104,17 @@ export function createApp(opts: AppOptions): App {
   const round = (hz: number) => Math.round(hz * 10) / 10;
   const stats = () => {
     const perZone = Object.fromEntries(
-      ZONE_IDS.map((id) => {
+      SAVE_ZONE_IDS.map((id) => {
         const room = rooms.get(id);
         return [id, {
           players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0), tickMs: Math.round((room?.tickMsP95 ?? 0) * 100) / 100,
           patchMs: Math.round((room?.patchMsP95 ?? 0) * 100) / 100, stepErrors: room?.stepErrors ?? 0,
         }];
       }),
-    ) as Record<ZoneId, ZoneStats>;
-    const busy = ZONE_IDS.filter((id) => perZone[id].players > 0).map((id) => perZone[id].tickHz);
+    ) as Record<SaveZoneId, ZoneStats>;
+    const busy = SAVE_ZONE_IDS.filter((id) => perZone[id].players > 0).map((id) => perZone[id].tickHz);
     return {
-      players: ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),
+      players: SAVE_ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),
       tickHz: busy.length > 0 ? Math.min(...busy) : perZone.grove.tickHz,
       zones: perZone,
     };
@@ -175,7 +176,7 @@ export function createApp(opts: AppOptions): App {
         for (const print of printers) http.on('error', print);
       }
       // Each zone's one room, made up front so joins and travellers find it (a join that got in first already made it).
-      for (const id of ZONE_IDS) if (!rooms.has(id)) await matchMaker.createRoom(id, {});
+      for (const id of SAVE_ZONE_IDS) if (!rooms.has(id)) await matchMaker.createRoom(id, {});
     },
 
     /** Saves and disconnects everyone, then closes the HTTP server and its open connections. */

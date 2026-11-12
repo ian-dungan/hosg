@@ -1,5 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { ZONE_IDS, isZoneId, zoneDef, type CampSpawn, type ZoneId } from '@sg2/shared';
+import { SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -43,7 +43,7 @@ function trustProxyHops(): number | undefined {
 function startZone(): ZoneId {
   const raw = process.env.SG2_START_ZONE;
   if (raw === undefined || raw === '') return 'grove';
-  if (!isZoneId(raw)) fail(`SG2_START_ZONE must be ${ZONE_IDS.join(' or ')} (got "${raw}").`);
+  if (!isSaveZoneId(raw)) fail(`SG2_START_ZONE must be ${SAVE_ZONE_IDS.join(' or ')} (got "${raw}").`);
   return raw;
 }
 

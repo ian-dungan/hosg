@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_ENEMIES_PER_ZONE } from '../combat/constants';
+import { ENEMY_KINDS } from '../combat/enemies';
 import { findPath, withClearance } from '../path';
 import { GREENWAY_RECIPE, generateZone, noise2, prng, type ZoneLayout } from './recipe';
 import { ZoneWalk } from './zoneWalk';
@@ -24,6 +25,7 @@ function digest(z: ZoneLayout): string {
     parts.push(`c${q(c.x)},${q(c.z)},${q(c.r)}`);
     for (const s of c.spawns) parts.push(`s${s.kind},${q(s.x)},${q(s.z)},${q(s.facing)}`);
   }
+  parts.push(`m${q(z.mouth.x)},${q(z.mouth.z)}`);
   for (let x = 0; x <= R.width; x += 2) parts.push(`p${q(z.roadZ(x))},${q(z.height(x, z.roadZ(x) + 20))}`);
   return fnv1a(parts.join(';'));
 }
@@ -51,7 +53,7 @@ describe('prng and noise2', () => {
 describe('generateZone(GREENWAY_RECIPE)', () => {
   it('stable output: deep-equal on a second call; another seed changes the trees; digest snapshot', () => {
     const again = generateZone(GREENWAY_RECIPE);
-    const strip = (z: ZoneLayout) => ({ trees: z.trees, rocks: z.rocks, camps: z.camps, obstacles: z.obstacles, entry: z.entry, westGate: z.westGate });
+    const strip = (z: ZoneLayout) => ({ trees: z.trees, rocks: z.rocks, camps: z.camps, obstacles: z.obstacles, entry: z.entry, westGate: z.westGate, mouth: z.mouth });
     expect(strip(again)).toEqual(strip(zone));
     expect(digest(again)).toBe(digest(zone));
     const other = generateZone({ ...GREENWAY_RECIPE, seed: 7332 });
@@ -65,9 +67,9 @@ describe('generateZone(GREENWAY_RECIPE)', () => {
     const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
     const bad = /Math\.(sin|cos|tan|asin|acos|atan2?|exp|expm1|log\w*|pow|hypot|cbrt|random)\b|\*\*/;
     /** The generator's modules, relative to this folder. */
-    const GENERATOR = ['./recipe', './zoneWalk', './limits'];
+    const GENERATOR = ['./recipe', './zoneWalk', './limits', './dungeon'];
     /** Pure data tables the generator may read (no arithmetic that shapes the layout). */
-    const DATA_TABLES = ['../combat/enemies'];
+    const DATA_TABLES = ['../combat/enemies', '../combat/encounters', '../instance'];
     let imports = 0;
     for (const m of GENERATOR) {
       const src = fs.readFileSync(here + m + '.ts', 'utf8');
@@ -79,7 +81,36 @@ describe('generateZone(GREENWAY_RECIPE)', () => {
         imports++;
       }
     }
-    expect(imports).toBeGreaterThanOrEqual(2); // recipe → zoneWalk and the enemy table: the import check really runs
+    expect(imports).toBeGreaterThanOrEqual(6); // recipe → zoneWalk, dungeon → recipe and the tables: the import check really runs
+  });
+
+  it('the crater mouth step leaves the camps exactly where they were before it (the same doubles)', () => {
+    // FNV-1a of JSON.stringify of the camps ({ x, z, r, spawns }) as generated before the mouth existed (Plan 4 Task 2)
+    const camps = zone.camps.map(c => ({ x: c.x, z: c.z, r: c.r, spawns: c.spawns }));
+    expect(fnv1a(JSON.stringify(camps))).toBe('3b1b42d0');
+    expect(zone.camps.flatMap(c => c.spawns)).toHaveLength(21);
+  });
+
+  it('the crater mouth: on the road near its east end, 20 m from every camp centre, out of every spawn\'s aggro, clear of rocks and trees by 10 m', () => {
+    const { mouth } = zone;
+    expect(mouth.z).toBe(zone.roadZ(mouth.x));
+    expect(mouth.x).toBe(R.width - R.mouth.fromEast); // the first spot was clear
+    for (const c of zone.camps) expect(Math.sqrt((c.x - mouth.x) * (c.x - mouth.x) + (c.z - mouth.z) * (c.z - mouth.z))).toBeGreaterThanOrEqual(R.mouth.campGap);
+    for (const s of zone.camps.flatMap(c => c.spawns)) {
+      // the mouth's circle (2.5 m) and the arrival spot 5 m west of it are beyond every enemy's aggro
+      const ax = mouth.x - 5, az = zone.roadZ(ax);
+      expect(Math.sqrt((s.x - mouth.x) * (s.x - mouth.x) + (s.z - mouth.z) * (s.z - mouth.z)) - 2.5).toBeGreaterThan(ENEMY_KINDS[s.kind].aggro);
+      expect(Math.sqrt((s.x - ax) * (s.x - ax) + (s.z - az) * (s.z - az))).toBeGreaterThan(ENEMY_KINDS[s.kind].aggro);
+    }
+    for (const o of zone.obstacles) {
+      const dx = o.x - mouth.x, dz = o.z - mouth.z;
+      expect(Math.sqrt(dx * dx + dz * dz) - (o as { r: number }).r).toBeGreaterThanOrEqual(R.mouth.clear);
+    }
+    // a camp in the way pushes it west along the road, 4 m at a time
+    const pushed = generateZone({ ...GREENWAY_RECIPE, mouth: { ...GREENWAY_RECIPE.mouth, campGap: 30 } });
+    expect(pushed.mouth.x).toBeLessThan(mouth.x);
+    expect((mouth.x - pushed.mouth.x) % 4).toBe(0);
+    for (const c of pushed.camps) expect(Math.sqrt((c.x - pushed.mouth.x) * (c.x - pushed.mouth.x) + (c.z - pushed.mouth.z) * (c.z - pushed.mouth.z))).toBeGreaterThanOrEqual(30);
   });
 
   it('counts: trees, rocks, and six camps whose spawns match the groups exactly', () => {
@@ -223,7 +254,7 @@ describe('generateZone(GREENWAY_RECIPE)', () => {
       const rec = { ...GREENWAY_RECIPE, seed, width };
       let z: ZoneLayout;
       try { z = generateZone(rec); } catch (e) {
-        expect(String((e as Error).message)).toMatch(/^generateZone\(greenway\): no (valid site for camp \d+|room for a \w+ in camp \d+)$/);
+        expect(String((e as Error).message)).toMatch(/^generateZone\(greenway\): no (valid site for camp \d+|room for a \w+ in camp \d+|site for the crater mouth)$/);
         threw++; continue;
       }
       held++;

@@ -13,5 +13,6 @@ export * from './path';
 export { GREENWAY_RECIPE, generateZone, prng, noise2, type ZoneRecipe, type ZoneLayout } from './world/recipe';
 export { ZoneWalk } from './world/zoneWalk';
 export * from './world/limits';
-export { ZONE_IDS, isZoneId, zoneDef, zoneFullReason, greenwayLayout, GROVE_EAST_GATE, GUILD_BOARD, REASON_JOB_NOT_HERE, jobSwitchAt, type ZoneId, type ZoneExit, type ZoneDef, type Sanctuary } from './world/zones';
+export { ZONE_IDS, isZoneId, SAVE_ZONE_IDS, isSaveZoneId, LAMPFALL_MOUTH, zoneDef, zoneFullReason, greenwayLayout, GROVE_EAST_GATE, GUILD_BOARD, REASON_JOB_NOT_HERE, jobSwitchAt, type ZoneId, type SaveZoneId, type ZoneExit, type ZoneDef, type Sanctuary } from './world/zones';
+export { LAMPFALL_RECIPE, SANCTUARY_R, generateDungeon, lampfallLayout, yawOf, DungeonWalk, type RoomId, type RoomSpec, type DungeonRecipe, type DungeonRoom, type DungeonCorridor, type DungeonLayout, type Gate } from './world/dungeon';
 export * from './combat';

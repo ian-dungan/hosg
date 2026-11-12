@@ -22,6 +22,9 @@ export interface ZoneRecipe {
   trees: { count: number; spacing: number };
   rocks: { count: number; platformShare: number };
   camps: { groups: Partial<Record<EnemyKindId, number>>[]; deep: number[]; offset: [number, number]; deepOffset: [number, number]; radius: number; spacing: number };
+  // The crater mouth on the road: fromEast m from the east end, stepped west `step` m at a time while a
+  // camp centre is within campGap; no rock or tree within clear m of it.
+  mouth: { fromEast: number; campGap: number; step: number; clear: number };
 }
 
 // The Greenway: the woods beyond Shady Grove's east gate.
@@ -37,6 +40,7 @@ export const GREENWAY_RECIPE: ZoneRecipe = {
     ],
     deep: [5], offset: [16, 24], deepOffset: [45, 55], radius: 9, spacing: 5,
   },
+  mouth: { fromEast: 24, campGap: 20, step: 4, clear: 10 },
 };
 
 export interface ZoneLayout {
@@ -52,6 +56,8 @@ export interface ZoneLayout {
   obstacles: Obstacle[];
   entry: { x: number; z: number; facing: number };
   westGate: { x: number; z: number };
+  // The crater mouth (the way down into the Lampfall), on the road's centre line.
+  mouth: { x: number; z: number };
   walk: ZoneWalk;
 }
 
@@ -217,6 +223,17 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
     }
   });
 
+  // 8. the crater mouth: found here, before the rocks and trees (steps 4 and 5 keep clear of it), and
+  // from the road and the camps alone (no random numbers), so the camps never move for it
+  const m = r.mouth;
+  let mx = width - m.fromEast;
+  while (camps.some(c => dist(mx, roadZ(mx), c.x, c.z) < m.campGap)) {
+    mx -= m.step;
+    if (mx < CAMP_ENTRY_GAP) throw new Error(`generateZone(${r.id}): no site for the crater mouth`);
+  }
+  const mouth = { x: mx, z: roadZ(mx) };
+  const nearMouth = (x: number, z: number, rr: number) => dist(x, z, mouth.x, mouth.z) < m.clear + rr;
+
   // 4. rocks
   const bw = bounds.x1 - bounds.x0, bd = bounds.z1 - bounds.z0;
   const rocks: ZoneLayout['rocks'] = [];
@@ -225,6 +242,7 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
     if (roadDist(x, z, 5) < 5) continue;
     if (camps.some(c => dist(x, z, c.x, c.z) < c.r + 3 + rr)) continue;
     if (dist(x, z, entry.x, entry.z) < rr + GATE_CLEAR || dist(x, z, westGate.x, westGate.z) < rr + GATE_CLEAR) continue;
+    if (nearMouth(x, z, rr)) continue;
     if (rocks.some(o => dist(x, z, o.x, o.z) < o.r + rr + ROCK_GAP)) continue;
     const platform = rng() < r.rocks.platformShare;
     const top = platform ? height(x, z) + 0.45 + 0.6 * rng() : null;
@@ -251,6 +269,7 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
     if (roadDist(x, z, 6) < 6) continue;
     if (camps.some(c => dist(x, z, c.x, c.z) < c.r + 2)) continue;
     if (dist(x, z, entry.x, entry.z) < 10) continue;
+    if (nearMouth(x, z, TREE_R_MAX)) continue;
     if (rocks.some(o => dist(x, z, o.x, o.z) < o.r + TREE_R_MAX + ROCK_TREE_GAP)) continue;
     if (crowded(x, z)) continue;
     const s = 1 + 0.8 * rng(), kind = Math.floor(3 * rng()) as 0 | 1 | 2;
@@ -269,6 +288,6 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
   return {
     recipe: r, height, roadZ, trees, rocks,
     camps: camps.map(c => ({ x: c.x, z: c.z, r: c.r, spawns: c.spawns })),
-    obstacles, entry, westGate, walk,
+    obstacles, entry, westGate, mouth, walk,
   };
 }

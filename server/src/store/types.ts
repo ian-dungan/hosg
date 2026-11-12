@@ -1,5 +1,5 @@
 // What the server keeps between sessions: accounts and their adventurers.
-import { isJobsSave, isZoneId, parseJobsSave, type JobsSave, type ZoneId } from '@sg2/shared';
+import { isJobsSave, isSaveZoneId, parseJobsSave, type JobsSave, type ZoneId } from '@sg2/shared';
 
 export interface Account {
   id: string;
@@ -79,7 +79,7 @@ export type AdventurerSave = Pick<Adventurer, 'id' | 'x' | 'z' | 'facing' | 'zon
  * write, with hp rounded to a whole number and a deep copy of jobs.
  */
 export function checkedSave(a: AdventurerSave): AdventurerSave {
-  if (!isZoneId(a.zone)) throw new TypeError(`saveAdventurer: unknown zone ${String(a.zone)}`);
+  if (!isSaveZoneId(a.zone)) throw new TypeError(`saveAdventurer: unknown zone ${String(a.zone)}`);
   if (!isJobsSave(a.jobs)) throw new TypeError('saveAdventurer: not a jobs save');
   for (const k of ['x', 'z', 'facing', 'hp'] as const) {
     if (!Number.isFinite(a[k])) throw new TypeError(`saveAdventurer: ${k} is not a finite number`);
