@@ -219,8 +219,12 @@ export function resetAdventurer(w: CombatWorld, a: AdventurerState, at: { x: num
   Object.assign(a, newAdventurer(a.id, { ...at, facing: a.facing, hp: a.stats.maxHp, loadout: a.plan3 ?? a.loadout }, nowS));
 }
 
-/** Drops id from every threat table and enemy target; its Burning keeps burning, but credits no one now. */
+/**
+ * Drops id from every threat table and enemy target; its Burning keeps burning and its Soft Rain keeps
+ * healing, but they credit no one now (no threat, no Momentum, even after a revive).
+ */
 export function removeFromThreat(w: CombatWorld, id: number): void {
+  for (const b of w.adventurers.values()) if (b.buffs.rain && b.buffs.rain.src === id) b.buffs.rain.orphan = true;
   for (const e of w.enemies.values()) {
     if (e.burning && e.burning.src === id) e.burning.orphan = true;
     e.threat.remove(id);
@@ -419,13 +423,20 @@ export function knockAdventurer(w: CombatWorld, a: AdventurerState, d: Displacem
   return out;
 }
 
-/** Heals up to the maximum; `heal` fx; THREAT_PER_HEAL × healed for `src` on every table that holds the healed. */
-export function healAdventurer(w: CombatWorld, a: AdventurerState, amount: number, src: number, nowS: number): number {
+/**
+ * Heals up to the maximum; `heal` fx (none when nothing is healed); THREAT_PER_HEAL × healed for `src`
+ * on every table that holds the healed, only with `credit` and while `src` is a live adventurer here.
+ */
+export function healAdventurer(w: CombatWorld, a: AdventurerState, amount: number, src: number, nowS: number, credit = true): number {
   if (!a.alive) return 0;
   const healed = Math.max(0, Math.min(amount, a.stats.maxHp - a.hp));
+  if (!(healed > 0)) return 0;
   a.hp += healed;
   fx(w, { t: 'heal', src, dst: a.id, amount: healed });
-  if (healed > 0) for (const e of w.enemies.values()) if (e.alive && e.threat.has(a.id)) e.threat.add(src, healed * THREAT_PER_HEAL);
+  // heal threat only for a healer who is here and alive (a dead healer's Soft Rain keeps healing, quietly)
+  if (credit && w.adventurers.get(src)?.alive === true) {
+    for (const e of w.enemies.values()) if (e.alive && e.threat.has(a.id)) e.threat.add(src, healed * THREAT_PER_HEAL);
+  }
   void nowS;
   return healed;
 }
@@ -595,7 +606,8 @@ export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number,
   if ((a.act === 'dodge' || a.act === 'knock') && nowS >= a.actUntil - TIME_EPS) a.act = '';
   refillDodges(a, nowS);
   if (a.shield > 0 && nowS >= a.shieldUntil) a.shield = 0;
-  a.momentum = decayMomentum(a.momentum, nowS - a.lastDealtAt, dt);
+  // decay pauses while casting, so the Momentum checked at a cast's start is still there at completion
+  if (!a.cast) a.momentum = decayMomentum(a.momentum, nowS - a.lastDealtAt, dt);
   if (a.hp < a.stats.maxHp && !adventurerInCombat(w, a, nowS)) {
     const s = Math.min(dt, nowS - a.lastHurtAt - HP_REGEN_DELAY_S);
     if (s > 0) a.hp = Math.min(a.stats.maxHp, a.hp + HP_REGEN_PER_S * s);

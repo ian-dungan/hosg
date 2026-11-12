@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { hurtAdventurer } from './adventurer';
 import type { Loadout } from './abilities';
 import { BUFF_BITS, DEBUFF_BITS } from './abilities';
-import { DODGE_REFILL_S } from './constants';
+import { DODGE_REFILL_S, REVIVE_IFRAMES_S } from './constants';
 import type { Intent } from './engine';
 import { Rig, camp } from './testRig';
 
@@ -349,5 +349,75 @@ describe('Plan 3 loadouts (deprecated, until Tasks 5–7)', () => {
     expect(r.c.loadout(a)).toEqual({ weapon: 'blade', free: ['mend', 'bulwark'] });
     const b = r.add(5, 5, WARRIOR);
     expect(r.i(b, { t: 'swap' })).toBe('invalid');
+  });
+});
+
+describe('Task 2 review round 1', () => {
+  const WM: Loadout = { job: 'white_mage', picks: ['second_dawn', 'soft_rain'] };
+  const onTables = (r: Rig, id: number) => [...r.w.enemies.values()].some((e) => e.threat.has(id));
+
+  it('a dead healer is on no threat table while its Soft Rain keeps ticking; a revive does not put it back', () => {
+    const r = new Rig([camp('dummy', 30, 0)]);
+    const d = r.enemy('dummy');
+    const wm = r.add(0, 0, WM, 50), b = r.add(6, 0, WARRIOR, 50), wm2 = r.add(-3, 0, WM);
+    r.engage(b, d);
+    expect(r.press(wm, 4)).toBeNull(); // Soft Rain
+    r.at(1.1);
+    expect(r.w.enemies.get(d)!.threat.get(wm)).toBe(4 * 0.5); // heal threat while alive
+    kill(r, wm);
+    expect(onTables(r, wm)).toBe(false);
+    r.at(2.1);
+    expect(r.fx('heal').filter((h) => h.dst === b && h.at === 2).map((h) => h.src)).toEqual([wm]); // still heals
+    expect(onTables(r, wm)).toBe(false);
+    expect(r.press(wm2, 3, wm)).toBeNull(); // Second Dawn, 3 s
+    r.at(5.5);
+    expect(r.c.get(wm)!.alive).toBe(true);
+    expect(r.fx('heal').filter((h) => h.dst === b && h.at === 5).length).toBe(1);
+    expect(onTables(r, wm)).toBe(false);
+  });
+
+  it('Momentum decay pauses while casting', () => {
+    const r = new Rig([camp('thornling', 0, 0)]);
+    const e = r.enemy('thornling');
+    const bm = r.add(0, -17.5, { job: 'black_mage', picks: ['rootbreak', 'stormcage'] }); // beyond the Staff's auto range
+    r.i(bm, { t: 'target', id: e });
+    r.w.adventurers.get(bm)!.momentum = 55; // never dealt damage: decaying
+    r.tick(); r.tick();
+    const m0 = r.c.self(bm)!.momentum;
+    expect(m0).toBeLessThan(55);
+    expect(r.press(bm, 1)).toBeNull(); // Skyfall Arc 1.2 s
+    r.at(1.1);
+    expect(r.c.self(bm)!.momentum).toBe(m0);
+    r.until('castEnd');
+    expect(r.fx('castEnd')[0].ok).toBe(true);
+  });
+
+  it('Second Dawn needs sight of the dead ally', () => {
+    const r = new Rig([], { walls: [{ x: 0, z: 4, r: 1 }] });
+    const wm = r.add(0, 0, WM), b = r.add(0, 8), c = r.add(8, 0);
+    kill(r, b); kill(r, c);
+    expect(r.press(wm, 3, b)).toBeNull(); // b is behind the wall: the nearest dead one in sight, c
+    expect(r.w.adventurers.get(wm)!.cast!.allyId).toBe(c);
+    const r2 = new Rig([], { walls: [{ x: 0, z: 4, r: 1 }] });
+    const wm2 = r2.add(0, 0, WM), b2 = r2.add(0, 8);
+    kill(r2, b2);
+    expect(r2.press(wm2, 3, b2)).toBe('no-ally');
+  });
+
+  it('a revive gives REVIVE_IFRAMES_S of i-frames', () => {
+    const r = new Rig([]);
+    const wm = r.add(0, 0, WM), b = r.add(5, 0);
+    kill(r, b);
+    expect(r.press(wm, 3, b)).toBeNull();
+    r.until('revive');
+    const at = r.now - 1 / 15;
+    expect(r.w.adventurers.get(b)!.iframeUntil).toBeCloseTo(at + REVIVE_IFRAMES_S, 6);
+  });
+
+  it('no heal fx with amount 0', () => {
+    const r = new Rig([]);
+    const a = r.add(0, 0, WARRIOR);
+    expect(r.press(a, 3)).toBeNull(); // Mend at full hp
+    expect(r.fx('heal')).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@
 // (applyEffects), and the shields, buffs, debuffs, heals, revives and hp costs behind them. Every
 // adventurer in the zone counts as an ally (no parties before Plan 4); aims never pick enemies.
 import { ABILITIES, type AbilityData, type AbilityId, type BuffId, type DebuffId, type Effect } from './abilities';
-import { ALLY_RANGE, RANGE_FUZZ } from './constants';
+import { ALLY_RANGE, RANGE_FUZZ, REVIVE_IFRAMES_S } from './constants';
 import type { AdventurerState, CombatWorld, EnemyState, Refusal } from './engine';
 import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, strike, TIME_EPS, type Strike } from './adventurer';
 import type { FxEvent } from './fx';
@@ -56,28 +56,32 @@ export function targetFor(w: CombatWorld, a: AdventurerState, targetId: number |
  * with the lowest hp/maxHp (ties: the caster, then the lower id). null when none qualifies.
  */
 function pickAlly(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: number, withSelf: boolean): AdventurerState | null {
-  const ok = (b: AdventurerState) => b.alive && (withSelf || b !== a) && (b === a || (dist(a, b) <= limit && lineOfSight(w.zone.sight, a.x, a.z, b.x, b.z)));
+  const near = (b: AdventurerState) => b.alive && (withSelf || b !== a) && (b === a || dist(a, b) <= limit);
+  const seen = (b: AdventurerState) => b === a || lineOfSight(w.zone.sight, a.x, a.z, b.x, b.z);
   const want = typeof wanted === 'number' ? w.adventurers.get(wanted) : undefined;
-  if (want && ok(want)) return want;
+  if (want && near(want) && seen(want)) return want;
   let best: AdventurerState | null = null, bestF = Infinity;
   for (const b of w.adventurers.values()) {
-    if (!ok(b)) continue;
+    if (!near(b)) continue;
     const f = b.hp / b.stats.maxHp;
-    if (f < bestF - 1e-12 || (Math.abs(f - bestF) <= 1e-12 && best !== a && (b === a || b.id < best!.id))) { best = b; bestF = f; }
+    // priority first; the line-of-sight trace only for a candidate that would win
+    const wins = f < bestF - 1e-12 || (Math.abs(f - bestF) <= 1e-12 && best !== a && (b === a || b.id < best!.id));
+    if (wins && seen(b)) { best = b; bestF = f; }
   }
   return best;
 }
 
-/** A dead adventurer within `limit`: `wanted` if it qualifies, else the nearest (ties: the lower id). No sight needed. */
+/** A dead adventurer within `limit` and in sight: `wanted` if it qualifies, else the nearest (ties: the lower id). */
 function pickDead(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: number): AdventurerState | null {
   const ok = (b: AdventurerState) => !b.alive && b !== a && dist(a, b) <= limit;
+  const seen = (b: AdventurerState) => lineOfSight(w.zone.sight, a.x, a.z, b.x, b.z);
   const want = typeof wanted === 'number' ? w.adventurers.get(wanted) : undefined;
-  if (want && ok(want)) return want;
+  if (want && ok(want) && seen(want)) return want;
   let best: AdventurerState | null = null, bestD = Infinity;
   for (const b of w.adventurers.values()) {
     if (!ok(b)) continue;
     const d = dist(a, b);
-    if (d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && b.id < best!.id)) { best = b; bestD = d; }
+    if ((d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && b.id < best!.id)) && seen(b)) { best = b; bestD = d; }
   }
   return best;
 }
@@ -112,13 +116,13 @@ export function applyShield(w: CombatWorld, src: AdventurerState, dst: Adventure
   return true;
 }
 
-/** lastHealAt: Soft Rain's latest heal. */
-export interface BuffState { until: number; src: number; startedAt: number; lastHealAt?: number }
+/** lastHealAt: Soft Rain's latest heal; orphan: its src died or left since (it heals, but credits no one). */
+export interface BuffState { until: number; src: number; startedAt: number; lastHealAt?: number; orphan?: boolean }
 /** A buff on an adventurer: a new application refreshes it (the later expiry, the newer src); `buff` fx when it starts. */
 export function applyBuff(w: CombatWorld, src: AdventurerState, dst: AdventurerState, buff: BuffId, s: number, nowS: number): void {
   if (!dst.alive) return;
   const cur = dst.buffs[buff];
-  if (cur && cur.until > nowS) { cur.until = Math.max(cur.until, nowS + s); cur.src = src.id; return; }
+  if (cur && cur.until > nowS) { cur.until = Math.max(cur.until, nowS + s); cur.src = src.id; delete cur.orphan; return; }
   dst.buffs[buff] = { until: nowS + s, src: src.id, startedAt: nowS };
   fx(w, { t: 'buff', src: src.id, dst: dst.id, buff, on: true });
 }
@@ -149,8 +153,8 @@ export function tickBuffs(w: CombatWorld, a: AdventurerState, nowS: number): voi
     let k = Math.floor((rain.lastHealAt ?? rain.startedAt) - rain.startedAt + TIME_EPS) + 1;
     while (a.alive && rain.startedAt + k <= nowS + TIME_EPS && rain.startedAt + k <= rain.until + TIME_EPS) {
       rain.lastHealAt = rain.startedAt + k;
-      const src = w.adventurers.get(rain.src);
-      const healed = healAdventurer(w, a, RAIN_HEAL * (src ? healMult(src, a) : 1), rain.src, nowS);
+      const src = rain.orphan ? undefined : w.adventurers.get(rain.src);
+      const healed = healAdventurer(w, a, RAIN_HEAL * (src ? healMult(src, a) : 1), rain.src, nowS, src !== undefined);
       onHealDone(w, src, a, healed, nowS);
       k++;
     }
@@ -167,12 +171,13 @@ export function tickDebuffs(w: CombatWorld, e: EnemyState, nowS: number): void {
 }
 
 // ───────── revive, hp cost ─────────
-/** A dead adventurer back where it lies: round(frac × maxHp) hp, Momentum 0, act '', cooldowns kept; `revive` fx and out.revived. */
+/** A dead adventurer back where it lies: round(frac × maxHp) hp, Momentum 0, act '', REVIVE_IFRAMES_S of i-frames, cooldowns kept; `revive` fx and out.revived. */
 export function reviveAdventurer(w: CombatWorld, by: AdventurerState, a: AdventurerState, frac: number, nowS: number): void {
   if (a.alive) return;
   const hp = Math.max(1, Math.round(frac * a.stats.maxHp));
   a.alive = true; a.hp = hp; a.momentum = 0; a.act = ''; a.actUntil = -Infinity;
   a.lastHurtAt = nowS; a.nextAutoAt = -Infinity; a.autoWaiting = false;
+  a.iframeUntil = nowS + REVIVE_IFRAMES_S;
   fx(w, { t: 'revive', src: by.id, dst: a.id, hp });
   (w.out.revived ??= []).push({ id: a.id, by: by.id, hp });
 }

@@ -123,6 +123,8 @@ export const CAST_RANGE_SLACK = 2;
 export const CAST_BREAK_LOCK_S = 1.5;
 /** Default range of ally-aimed abilities. */
 export const ALLY_RANGE = 18;
+/** A revived adventurer cannot be hit for this long (dodge i-frames: enemy hits miss). */
+export const REVIVE_IFRAMES_S = 2;
 /** An enemy carrying Rooted moves at this scale. */
 export const ROOTED_SPEED_SCALE = 0.6;
 /** Elemental damage against a weakness, and against a resistance. */

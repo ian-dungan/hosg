@@ -1,6 +1,6 @@
 // Test support only (no test of its own): a flat synthetic zone and a 15 Hz rig over the real engine,
 // for jobsEngine.test.ts and casting.test.ts. Enemies are held still (stunned for good) unless asked.
-import type { Loadout } from './abilities';
+import type { Loadout, Plan3Loadout } from './abilities';
 import { createCombat, worldOf, type CampSpawn, type Combat, type CombatZone, type Intent, type TickOut } from './engine';
 import type { EnemyKindId } from './enemies';
 import type { FxEvent } from './fx';
@@ -30,7 +30,7 @@ export class Rig {
     for (const v of this.c.all()) if (v.kind === kind) return v.id;
     throw new Error(`no ${kind}`);
   }
-  add(x: number, z: number, loadout: Loadout = { job: 'warrior', picks: ['mend', 'bulwark'] }, hp = 100, facing = 0): number {
+  add(x: number, z: number, loadout: Loadout | Plan3Loadout = { job: 'warrior', picks: ['mend', 'bulwark'] }, hp = 100, facing = 0): number {
     return this.c.addAdventurer({ x, z, y: 0, facing, hp, loadout }, this.now);
   }
   tick(): TickOut {
@@ -61,6 +61,21 @@ export class Rig {
   }
   hits(src?: number) {
     return this.fx('hit').filter((h) => src === undefined || h.src === src);
+  }
+  /** Clears adventurer `id`'s cooldowns and GCD (and sets its Momentum, when given). */
+  ready(id: number, momentum?: number) {
+    const a = this.w.adventurers.get(id)!;
+    a.readyAt = {}; a.gcdUntil = -Infinity;
+    if (momentum !== undefined) a.momentum = momentum;
+  }
+  /** Ticks until an fx of type `t` (beyond the `n` already logged) has been logged; throws after `maxS`. */
+  until<T extends FxEvent['t']>(t: T, n = this.fx(t).length, maxS = 10) {
+    const end = this.now + maxS;
+    while (this.fx(t).length <= n) {
+      if (this.now > end) throw new Error(`no ${t} fx`);
+      this.tick();
+    }
+    return this;
   }
   /** Puts adventurer `id` in combat with enemy `e` (on its threat table). */
   engage(id: number, e: number) { this.w.enemies.get(e)!.threat.add(id, 1); }
