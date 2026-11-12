@@ -42,8 +42,8 @@ interface Remote {
   castEl: HTMLElement;
   castName: HTMLElement;
   castFill: HTMLElement;
-  /** The cast shown (ability, castAt) and when it began here (performance.now ms). */
-  cast: { key: string; total: number; since: number } | null;
+  /** The cast shown (ability and castAt, '' and 0: none), and when it began here (performance.now ms). */
+  castId: string; castAt: number; castTotal: number; castSince: number;
   eid: number;
   job: string;
   hpEl: HTMLElement;
@@ -137,7 +137,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     castEl.append(castName, castBar);
     label.append(top, hpEl, castEl);
     layer.appendChild(label);
-    const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, cast: null, eid: -1, job: '', hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
+    const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, castId: '', castAt: 0, castTotal: 1, castSince: 0, eid: -1, job: '', hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
     remotes.set(sessionId, r);
     return r;
   }
@@ -154,9 +154,10 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
   }
 
   // Every state patch: record each adventurer's pose at the time it arrived, add newcomers, drop leavers.
+  const seen = new Set<string>();
   const onState = () => {
     const now = performance.now();
-    const seen = new Set<string>();
+    seen.clear();
     room.state.players?.forEach((p, sessionId) => {
       if (sessionId === mySessionId) return;
       seen.add(sessionId);
@@ -168,14 +169,15 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
       const job = p.job ?? '';
       if (job !== r.job) { r.job = job; r.jobEl.textContent = isJobId(job) ? JOBS[job].glyph : ''; r.jobEl.title = isJobId(job) ? JOBS[job].name : ''; }
       // a cast: from when the server says it began (the clock), so one first seen late shows how far along it is
-      const castId = p.cast ?? '', key = castId ? `${castId}@${p.castAt ?? 0}` : '';
-      if (key !== (r.cast?.key ?? '')) {
-        if (key && Object.prototype.hasOwnProperty.call(ABILITIES, castId)) {
+      const castId = p.cast ?? '', castAt = castId ? p.castAt ?? 0 : 0;
+      if (castId !== r.castId || castAt !== r.castAt) {
+        r.castId = castId; r.castAt = castAt;
+        if (castId && Object.prototype.hasOwnProperty.call(ABILITIES, castId)) {
           const el = typeof room.state.clock === 'number' && typeof p.castAt === 'number' ? Math.max(0, (room.state.clock - p.castAt) / TICK_HZ) : 0;
-          r.cast = { key, total: Math.max(0.1, p.castTotal ?? 1), since: now - el * 1000 };
+          r.castTotal = Math.max(0.1, p.castTotal ?? 1); r.castSince = now - el * 1000;
           r.castName.textContent = ABILITIES[castId as AbilityId].name;
           r.castEl.classList.add('on');
-        } else { r.cast = null; r.castEl.classList.remove('on'); }
+        } else { r.castId = ''; r.castEl.classList.remove('on'); }
       }
       // health under the name once it is not full (and greyed when dead)
       const f = p.maxHp > 0 ? Math.max(0, Math.min(1, p.hp / p.maxHp)) : 1;
@@ -220,8 +222,10 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
           shown = screen.z > 0 && screen.z < 1 && screen.x > -100 && screen.x < w + 100 && screen.y > -40 && screen.y < h + 40;
           if (shown) r.label.style.transform = `translate(${screen.x.toFixed(1)}px,${screen.y.toFixed(1)}px) translate(-50%,-100%)`;
         }
+        // the focused adventurer's frame (top left) names them: their label would only repeat it
+        if (focus !== null && r.eid === focus) shown = false;
         r.label.style.visibility = shown ? 'visible' : 'hidden';
-        if (r.cast && shown) r.castFill.style.transform = `scaleX(${Math.min(1, (now - r.cast.since) / 1000 / r.cast.total).toFixed(3)})`;
+        if (r.castId && shown) r.castFill.style.transform = `scaleX(${Math.min(1, (now - r.castSince) / 1000 / r.castTotal).toFixed(3)})`;
       }
     },
     count: () => remotes.size,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ABILITIES, BUFF_BITS, CHARGE_FULL_S, DEBUFF_BITS, FINISHER_COST, JOBS, JOB_IDS, MARK_BITS, REASON_JOB_NOT_HERE, TELEGRAPH_LEAD_S, slotsFor, type SelfView } from '@sg2/shared';
 import { ABILITY_DEFS } from './abilityDefs';
 import {
-  CHARGE_CONFIRM_MS, buffStatuses, castFrac, chargeStillHeld, createChargeHold, cycleTarget, isNewSeq, keepFollowing, markStatuses, refusalIsForCharge, refusalText, screenToWorld, slotView, tapAction, telegraphFill,
+  CHARGE_CONFIRM_MS, buffStatuses, castFrac, chargeStillHeld, createChargeHold, cycleTarget, isNewSeq, keepFollowing, markStatuses, refusalIsForCharge, refusalText, screenToWorld, slotView, tapAction, tapSubject, telegraphFill,
   type SelfSnap,
 } from './controller';
 
@@ -21,6 +21,19 @@ describe('tapAction', () => {
     // something that is not an enemy (a person, the adventurer itself) is ground for combat
     expect(tapAction({ entityId: 3, point: P }, { tapToWalk: true }, enemies, Infinity, 2.5)).toEqual({ target: undefined, walk: 'ground' });
     expect(tapAction({ entityId: null, point: null }, { tapToWalk: true }, enemies, Infinity, 2.5)).toEqual({ target: undefined, walk: null });
+  });
+});
+
+describe('tapSubject', () => {
+  const enemy = (id: number) => id >= 100, adv = (id: number) => id < 100;
+  it('an enemy anywhere under the tap wins over an adventurer in front of it', () => {
+    expect(tapSubject([5, 101], enemy, adv, 1)).toEqual({ kind: 'enemy', id: 101 });
+    expect(tapSubject([102, 5], enemy, adv, 1)).toEqual({ kind: 'enemy', id: 102 });
+  });
+  it('else another adventurer, never this one', () => {
+    expect(tapSubject([1, 5], enemy, adv, 1)).toEqual({ kind: 'ally', id: 5 });
+    expect(tapSubject([1], enemy, adv, 1)).toBeNull();
+    expect(tapSubject([], enemy, adv, 1)).toBeNull();
   });
 });
 
@@ -195,6 +208,7 @@ describe('casts, refusals and status icons', () => {
     expect(refusalText('not-here', 'job')).toBe(REASON_JOB_NOT_HERE);
     expect(refusalText('in-combat', 'job')).toBe('Not during a fight');
     expect(refusalText('busy', 'job')).toBe('Finish what you are doing first');
+    expect(refusalText('busy', 'loadout')).toBe('Finish what you are doing first');
     expect(refusalText('no-ally', 'ability')).toBe('Nobody to help here');
     expect(refusalText('busy', 'ability')).toBeNull();
     expect(refusalText('dead', 'job')).toBeNull();

@@ -1252,7 +1252,15 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const R = Math.max(height, 1.2);
   const bounds = new BoundingInfo(new Vector3(-R, -0.2, -R), new Vector3(R, height * 1.3, R));
   body.setBoundingInfo(bounds);
-  pickables.push(body);
+  // Adventurers are picked by a body-sized capsule, never by their skinned mesh: picking reads the bind pose, where the
+  // sheathed and drawn weapons all stand full size (an invisible bow or greatsword would catch taps meant for others).
+  if (kind === 'player') {
+    body.isPickable = false;
+    const pick = MeshBuilder.CreateCylinder(`pick_${id}`, { height: height * 0.95, diameter: 0.7 * s, tessellation: 8 }, scene);
+    pick.parent = root; pick.position.y = height * 0.475; pick.visibility = 0; pick.isPickable = true;
+    pick.doNotSyncBoundingInfo = true;
+    pickables.push(pick);
+  } else pickables.push(body);
 
   let glowMat: StandardMaterial | null = null;
   if (!glowGeo.empty) {

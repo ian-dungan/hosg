@@ -168,6 +168,12 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
   const doTap = (x: number, y: number) => {
     const pick = scene.pick(x, y, (m) => m.isPickable && m.isEnabled() && m.isVisible, false, camera);
     const entityId = pick?.hit ? entityOf(pick.pickedMesh) : null;
+    // everything with an entity id under the tap, nearest first (an enemy behind an ally can still be chosen)
+    const entityIds: number[] = [];
+    const all = scene.multiPick(x, y, (m) => m.isPickable && m.isEnabled() && m.isVisible && entityOf(m) !== null, camera) ?? [];
+    all.sort((a, b) => a.distance - b.distance);
+    for (const h of all) { const id = entityOf(h.pickedMesh); if (id !== null && !entityIds.includes(id)) entityIds.push(id); }
+    if (entityId !== null && !entityIds.includes(entityId)) entityIds.unshift(entityId);
     let point: Vector3 | null = null;
     if (pick?.hit && entityId === null && pick.pickedPoint) point = pick.pickedPoint.clone();
     else {
@@ -180,7 +186,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
         if (d !== null && d > 0) point = ray.origin.add(ray.direction.scale(d));
       }
     }
-    const tap: TapInfo = { entityId, point };
+    const tap: TapInfo = { entityId, point, entityIds };
     opts.onTap(tap);
   };
 

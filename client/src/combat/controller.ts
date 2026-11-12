@@ -58,6 +58,18 @@ export function tapAction(
 }
 
 /**
+ * What a tap is on, from everything under it (nearest first): an enemy anywhere in the list wins (one standing
+ * behind an ally can still be chosen), else another adventurer (`me` never counts), else nothing.
+ */
+export function tapSubject(
+  ids: readonly number[], isEnemy: (id: number) => boolean, isAdventurer: (id: number) => boolean, me: number,
+): { kind: 'enemy' | 'ally'; id: number } | null {
+  for (const id of ids) if (isEnemy(id)) return { kind: 'enemy', id };
+  for (const id of ids) if (id !== me && isAdventurer(id)) return { kind: 'ally', id };
+  return null;
+}
+
+/**
  * The five ability slots as the HUD shows them, timers counted down from when `self` arrived. Written into
  * `out` (its entries reused, so nothing is allocated per frame) and returned.
  */
@@ -211,7 +223,7 @@ const REFUSAL_TEXT: Record<string, string> = {
  * for a job change, which says to finish first: a press during a cast is silent).
  */
 export function refusalText(reason: string, action?: string): string | null {
-  if (action === 'job' && reason === 'busy') return 'Finish what you are doing first';
+  if ((action === 'job' || action === 'loadout') && reason === 'busy') return 'Finish what you are doing first';
   return REFUSAL_TEXT[reason] ?? null;
 }
 
@@ -373,23 +385,39 @@ export function createCombat(o: CombatOpts): CombatController {
   const weapon = () => JOBS[job()].weapon;
   const range = () => WEAPONS[weapon()].autoRange;
   /** Every other adventurer in view, as the aim hint and F see them. */
+  // (pooled: they run every frame for the revive prompt and the focus, so they allocate nothing once warm)
+  const otherPool: AllyPos[] = [], othersList: AllyPos[] = [];
+  let otherN = 0;
+  const collectOther = (p: PlayerView, sid: string) => {
+    if (sid === room.sessionId || p.eid === undefined || p.eid < 0) return;
+    const a = (otherPool[otherN] ??= { id: 0, x: 0, z: 0, hp: 0, maxHp: 1, alive: true });
+    a.id = p.eid; a.x = p.x; a.z = p.z; a.hp = p.hp; a.maxHp = Math.max(1, p.maxHp); a.alive = !p.dead;
+    otherN++;
+  };
   const others = (): AllyPos[] => {
-    const list: AllyPos[] = [];
-    room.state.players?.forEach((p, sid) => {
-      if (sid === room.sessionId || p.eid === undefined || p.eid < 0) return;
-      list.push({ id: p.eid, x: p.x, z: p.z, hp: p.hp, maxHp: Math.max(1, p.maxHp), alive: !p.dead });
-    });
-    return list;
+    otherN = 0;
+    room.state.players?.forEach(collectOther);
+    othersList.length = 0;
+    for (let i = 0; i < otherN; i++) othersList.push(otherPool[i]);
+    return othersList;
   };
+  const meAllyBuf: AllyPos = { id: -1, x: 0, z: 0, hp: 1, maxHp: 1, alive: true };
   const meAlly = (): AllyPos => {
-    const m = meState(), r = rig().position;
-    return { id: myEid(), x: r.x, z: r.z, hp: m?.hp ?? 1, maxHp: Math.max(1, m?.maxHp ?? 1), alive: !m?.dead };
+    const m = meState(), r = rig().position, a = meAllyBuf;
+    a.id = myEid(); a.x = r.x; a.z = r.z; a.hp = m?.hp ?? 1; a.maxHp = Math.max(1, m?.maxHp ?? 1); a.alive = !m?.dead;
+    return a;
   };
-  const playerByEid = (eid: number) => {
-    let found: { sid: string; p: PlayerView } | null = null;
-    room.state.players?.forEach((p, sid) => { if (!found && sid !== room.sessionId && p.eid === eid) found = { sid, p }; });
-    return found as { sid: string; p: PlayerView } | null;
+  const found = { sid: '', p: null as PlayerView | null };
+  let findEid = -1;
+  const findPlayer = (p: PlayerView, sid: string) => { if (!found.p && sid !== room.sessionId && p.eid === findEid) { found.sid = sid; found.p = p; } };
+  /** Another adventurer by engine id (one reused answer: read it before the next call). */
+  const playerByEid = (eid: number): { sid: string; p: PlayerView } | null => {
+    found.p = null; findEid = eid;
+    room.state.players?.forEach(findPlayer);
+    return found.p ? (found as { sid: string; p: PlayerView }) : null;
   };
+  const isPlayerEid = (eid: number) => playerByEid(eid) !== null;
+  const isReviveId = (id: AbilityId) => ABILITIES[id].aim === 'dead-ally';
   const setFocus = (id: number | null) => { o.remotes.setFocus(id); debug.allyFocus = id; };
   const isDead = () => !!meState()?.dead;
   const enemyView = (eid: number) => room.state.enemies?.get(String(eid));
@@ -466,11 +494,9 @@ export function createCombat(o: CombatOpts): CombatController {
     const to = ally ?? (allyAimed && focus.id !== null ? focus.id : undefined);
     if (to !== undefined) focus.use(now);
     o.send('ability', to === undefined ? { slot, phase: 'press' } : { slot, phase: 'press', ally: to });
-    // who it will most likely land on: their name label flashes (the server decides)
-    if (a && allyAimed) {
-      const hint = aimHint(a, to ?? null, meAlly(), others());
-      if (hint !== null && hint !== myEid()) o.remotes.pulse(hint);
-    }
+    // aimed at someone (the focus, the revive prompt): their name label flashes at once. With no aim the server's
+    // own pick may follow rules this client cannot see (parties), so nothing flashes until the heal fx names them.
+    if (a && allyAimed && to !== undefined && to !== myEid()) o.remotes.pulse(to);
     // a spell: slowed from the press (the server slows from a moment into the cast), never faster than allowed
     if (a && (a.cast ?? 0) > 0 && !self?.cast && !castPress) castPress = { slot, at: now, seenAt: null };
   };
@@ -784,7 +810,7 @@ export function createCombat(o: CombatOpts): CombatController {
     } else state.target = null;
 
     // ally focus: dropped when they leave the view or go unused; the ring under them and their frame
-    focus.update((eid) => playerByEid(eid) !== null, now);
+    focus.update(isPlayerEid, now);
     if (focus.id !== debug.allyFocus) setFocus(focus.id);
     const fp = focus.id !== null ? playerByEid(focus.id) : null;
     focusRing.attach(fp ? o.remotes.viewOfEid(focus.id!)?.root ?? null : null);
@@ -810,8 +836,10 @@ export function createCombat(o: CombatOpts): CombatController {
     // the context prompt: revive a fallen adventurer in reach (Second Dawn on the bar), or the Guild Board
     promptAction = null;
     let promptText: string | null = null;
-    const reviveSlot = self ? self.slots.findIndex((id) => ABILITIES[id].aim === 'dead-ally') : -1;
-    if (!dead && reviveSlot >= 0 && self) {
+    const reviveSlot = self ? self.slots.findIndex(isReviveId) : -1;
+    // only while it can be cast now: not cooling down, and no other cast under way
+    const reviveReady = reviveSlot >= 0 && !!self && (self.cd[reviveSlot] ?? 0) - (now - self.at) / 1000 <= 0 && !self.cast && !castFx;
+    if (!dead && reviveReady && self) {
       const ab = ABILITIES[self.slots[reviveSlot]];
       const want = aimHint(ab, focus.id, meAlly(), others());
       const who = want !== null ? playerByEid(want) : null;
@@ -858,15 +886,18 @@ export function createCombat(o: CombatOpts): CombatController {
         if (!game.walkTo(new Vector3(GUILD_BOARD.x, y, GUILD_BOARD.z), { within: GUILD_BOARD_REACH - 0.3, then: () => { if (!disposed) openJobs(); } })) openJobs();
         return true;
       }
-      // another adventurer: focus them for ally abilities (again: clear it); never a walk to them
-      if (tap.entityId !== null && tap.entityId !== myEid() && playerByEid(tap.entityId)) {
-        const id = focus.tap(tap.entityId, performance.now());
-        setFocus(id);
+      const ids = tapIds; ids.clear();
+      room.state.enemies?.forEach((e) => { if (e.mode !== 'dead') ids.add(e.eid); });
+      const subject = tapSubject(tap.entityIds ?? (tap.entityId !== null ? [tap.entityId] : []), (id) => ids.has(id), (id) => playerByEid(id) !== null, myEid());
+      // another adventurer (and no enemy under the tap): focus them for ally abilities (again: clear it). In a town
+      // the tap still walks to the ground there (boot.ts, with tap-to-walk on); out in the wild it only focuses.
+      if (subject?.kind === 'ally') {
+        setFocus(focus.tap(subject.id, performance.now()));
+        if (o.zone === 'grove' && hud.settings.tapToWalk && tap.point && !isDead()) { followEid = null; chase = null; return false; }
         return true;
       }
       if (isDead()) return true;
-      const ids = tapIds; ids.clear();
-      room.state.enemies?.forEach((e) => { if (e.mode !== 'dead') ids.add(e.eid); });
+      if (subject?.kind === 'enemy' && subject.id !== tap.entityId) tap = { ...tap, entityId: subject.id };
       let reach = Infinity;
       if (tap.entityId !== null && ids.has(tap.entityId)) {
         const e = enemyView(tap.entityId)!, pos = rig().position;
@@ -896,6 +927,7 @@ export function createCombat(o: CombatOpts): CombatController {
       state.prompt = null; state.ally = null;
       effects.dispose();
       if (deathScreen) hud.dismissEndScreen();
+      hud.closeSheets(); // the board and the picks belong to this room: their answers would go nowhere
       hud.danger('off');
     },
   };

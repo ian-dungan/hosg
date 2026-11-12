@@ -3,6 +3,7 @@ import type { JobId } from '@sg2/shared';
 import type { AbilityDef, JobBoardView } from '../core/contracts';
 import { h } from './dom';
 import { abilityMeta, openJobBoard } from './jobs';
+import { Sheets } from './sheets';
 
 type KeyHandler = (e: KeyboardEvent) => boolean;
 
@@ -11,6 +12,8 @@ export class Overlays {
   private handlers: KeyHandler[] = [];
   private dlgChain: Promise<unknown> = Promise.resolve();
   private fadeEl: HTMLElement;
+  /** The open job board and picks chooser (closeSheets closes them). */
+  readonly sheets = new Sheets();
   constructor(private layer: HTMLElement, private setModal: (kind: string, on: boolean) => void, private isTouch: () => boolean) {
     this.fadeEl = h('div', 'sg-fade', layer);
   }
@@ -197,7 +200,9 @@ export class Overlays {
         countEl.textContent = `${chosen.length} / ${count} chosen`;
         ok.classList.toggle('disabled', chosen.length !== count);
       };
-      const done = (ids: string[]) => { off(); this.close(root); resolve(ids); };
+      let answered = false;
+      const done = (ids: string[]) => { if (answered) return; answered = true; this.sheets.remove('loadout', cancelIt); off(); this.close(root); resolve(ids); };
+      const cancelIt = () => done(current.slice());
       ok.addEventListener('click', () => { if (chosen.length === count) done(chosen.slice()); });
       cancel.addEventListener('click', () => done(current.slice()));
       root.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -207,13 +212,16 @@ export class Overlays {
         return true;
       });
       refresh();
+      this.sheets.add('loadout', cancelIt);
       this.show(root);
     });
   }
 
   // ───────────── job board ─────────────
   jobs(view: JobBoardView): Promise<JobId | null> {
-    return openJobBoard(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el));
+    let closer: () => void = () => {};
+    const p = openJobBoard(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el), (c) => { closer = c; this.sheets.add('jobs', c); });
+    return p.finally(() => this.sheets.remove('jobs', closer));
   }
 
   // ───────────── end screen ─────────────
@@ -258,6 +266,8 @@ export class Overlays {
   }
   /** Closes the end screen, if one is open (it resolves with -1). */
   dismissEndScreen(): void { this.endDone?.(-1); }
+  /** Closes the job board and the picks chooser, if open (they resolve as cancelled). */
+  closeSheets(): void { this.sheets.closeAll(); }
 
   // ───────────── fade ─────────────
   fade(toOpaque: boolean, color = '#000', seconds = 0.8): Promise<void> {

@@ -85,9 +85,12 @@ export function abilityCard(parent: HTMLElement, d: AbilityDef, cls = ''): HTMLE
  * Opens the sheet in `layer`; resolves with the job chosen, or null when closed. `push` registers its key
  * handler as the top-most modal and returns the function that removes it.
  */
+const WORDS = ['none', 'one', 'two', 'three', 'four', 'five'];
+const countWord = (n: number) => WORDS[n] ?? String(n);
+
 export function openJobBoard(
   layer: HTMLElement, v: JobBoardView, push: (kind: string, keys: (e: KeyboardEvent) => boolean) => () => void,
-  show: (el: HTMLElement) => void, close: (el: HTMLElement) => void,
+  show: (el: HTMLElement) => void, close: (el: HTMLElement) => void, register?: (cancel: () => void) => void,
 ): Promise<JobId | null> {
   return new Promise((resolve) => {
     const root = h('div', 'sg-jobs sg-ctl', layer);
@@ -101,7 +104,9 @@ export function openJobBoard(
     if (v.note) h('div', 'sg-jb-note', panel, v.note);
     const list = h('div', 'sg-jb-list', panel);
     let open: HTMLElement | null = null;
-    const done = (id: JobId | null) => { off(); close(root); resolve(id); };
+    let answered = false;
+    const done = (id: JobId | null) => { if (answered) return; answered = true; off(); close(root); resolve(id); };
+    register?.(() => done(null));
     for (const r of v.rows) {
       const row = h('div', 'sg-jb-row' + (r.id === v.current ? ' cur' : ''), list);
       row.dataset.job = r.id;
@@ -123,10 +128,10 @@ export function openJobBoard(
       const tr = h('div', 'sg-jb-trait', more);
       h('b', '', tr, r.traitName);
       tr.append(' ' + r.trait);
-      h('div', 'sg-jb-h', more, 'Buttons 1–3');
+      h('div', 'sg-jb-h', more, `Buttons 1–${r.bar.length}`);
       const bar = h('div', 'sg-jb-abs', more);
       for (const d of r.bar) abilityCard(bar, d);
-      h('div', 'sg-jb-h', more, 'Picks · two at a time');
+      h('div', 'sg-jb-h', more, `Picks · ${countWord(r.chosen.length)} at a time`);
       const picks = h('div', 'sg-jb-abs', more);
       for (const d of r.picks) {
         const c = abilityCard(picks, d, r.chosen.includes(d.id) ? 'picked' : '');
@@ -226,6 +231,8 @@ export const JOBS_CSS = /* css */ `
 .sg-jb-row.locked .sg-jb-top{cursor:default}
 .sg-jb-row.locked .sg-jb-glyph{background:rgba(90,86,120,.6);color:#d8d2ee;filter:grayscale(.4)}
 @media (max-width:700px),(max-height:500px){
+  /* the open row's button stays in reach at the bottom of the sheet while its abilities scroll past */
+  .sg-jb-row.open .sg-jb-go{position:sticky;bottom:6px;z-index:1;box-shadow:0 -10px 18px 4px rgba(18,20,46,.92),0 4px 14px rgba(0,0,0,.35)}
   .sg-jobs{padding:0;background:none}
   .sg-jb-panel{width:100%;border-radius:0;padding:var(--st) var(--sr) var(--sb) var(--sl);transform:translateY(24px)}
   .sg-jb-title{font-size:22px}

@@ -98,7 +98,13 @@ export interface CharacterView {
 /** Implemented in src/player/character.ts */
 export type MakeCharacter = (scene: Scene, opts: CharacterOpts) => CharacterView;
 
-export interface TapInfo { entityId: number | null; point: Vector3 | null }
+export interface TapInfo {
+  /** The nearest entity under the tap (null: none). */
+  entityId: number | null;
+  point: Vector3 | null;
+  /** Every entity under the tap, nearest first (absent: only `entityId`). */
+  entityIds?: readonly number[];
+}
 export interface PlayerRigOpts {
   canvas: HTMLCanvasElement;
   world: WorldApi;
@@ -321,6 +327,8 @@ export interface HudApi {
   endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts?: { countdown?: { seconds: number; text: string }; waitS?: number }): Promise<number>;
   /** Closes the end screen, if one is open (it resolves with -1). */
   dismissEndScreen(): void;
+  /** Closes the job board and the picks chooser, if open (each resolves as cancelled). */
+  closeSheets(): void;
   /** The red screen edge: a flash (hurt), or held on while standing in a telegraph. */
   danger(mode: 'flash' | 'on' | 'off'): void;
   /** Fade to/from a colour for cutscenes (resolves when done). */

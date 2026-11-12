@@ -13,11 +13,12 @@ export const CLUSTER_ARC: [number, number][] = [[-96, 0], [-68, -68], [0, -96], 
 /** Phones in landscape: three short rows (the screen is low and wide). */
 export const CLUSTER_ROWS: [number, number][] = [[-92, 0], [-86, -84], [0, -90], [-172, -80], [-86, -168], [-178, 0], [0, 0], [0, -170], [-164, -160]];
 /**
- * Narrow portrait phones: the right-hand column (the screen's edge) holds Jump, slots 2–5 and Jobs at the top; the
- * inner column only its two lowest rows (Dodge, slot 1), so nothing reaches the middle third of the screen, over the
- * adventurer and the fight. The loadout's entry here is unused: style.ts puts it in the top row, left of the gear.
+ * Narrow portrait phones: a compact grid under the right thumb, read left to right and bottom to top: Dodge and
+ * Jump on the bottom row, slots 1–3 above them, 4–5 above 2–3. It stays within the bottom 30% of the screen and right
+ * of the joystick's zone (38vw). Jobs and Picks are small, in the top row left of the gear (style.ts): their
+ * entries here are unused.
  */
-export const CLUSTER_COLUMNS: [number, number][] = [[-94, -92], [0, -88], [0, -174], [0, -260], [0, -346], [-94, 0], [0, 0], [0, -432], [0, -420]];
+export const CLUSTER_COLUMNS: [number, number][] = [[-138, -70], [-69, -70], [0, -70], [-69, -140], [0, -140], [-69, 0], [0, 0], [0, 0], [0, 0]];
 const KIND_C: Record<AbilityDef['kind'], string> = { damage: '#EC6A4C', heal: '#8FD16A', defence: '#479AF2', utility: '#3FB0A6' };
 
 interface Slot { el: HTMLElement; glyph: HTMLElement; name: HTMLElement; sec: HTMLElement; id: string; cd: number; sTxt: string; usable: boolean; casting: boolean; def: AbilityDef | null }
@@ -61,7 +62,7 @@ export class AbilityBar {
     h('span', 'sg-ab-name', this.jumpBtn, 'Jump');
     this.loadoutBtn = this.button('sg-ab-loadout', 'L', () => emit({ type: 'openLoadout' }));
     h('span', 'sg-ab-icon', this.loadoutBtn).innerHTML = ICONS.book;
-    h('span', 'sg-ab-name', this.loadoutBtn, 'Loadout');
+    h('span', 'sg-ab-name', this.loadoutBtn, 'Picks');
     // cluster offsets as CSS variables: the layout's media queries pick the set
     const all = [...this.slots.map((s) => s.el), this.dodgeBtn, this.jumpBtn, this.jobsBtn, this.loadoutBtn];
     all.forEach((el, i) => {

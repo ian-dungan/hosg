@@ -21,7 +21,7 @@ import {
   type ZoneId,
 } from '@sg2/shared';
 import type { HudState } from './core/contracts';
-import { bootGame } from './boot';
+import { bootGame, isZoneBuilt } from './boot';
 import { h } from './hud/dom';
 import { createChat } from './net/chatBox';
 import { showLogin } from './net/loginScreen';
@@ -51,6 +51,8 @@ const RECONNECTING = 'Reconnecting…';
 /** Join refusals that say nothing against the account: its saved token is kept, so "Continue as" stays on offer. */
 /** The page could not build the zone the adventurer is in (the previous one was put back, or the page reloads). */
 const LOAD_FAILED = "Couldn't load that area, try again";
+/** The adventurer is in a zone this version of the client cannot draw. */
+const zoneClosedNotice = (zone: ZoneId) => `Your adventurer is in ${zoneDef(zone).name}, which this version of the game can't show yet. Reload to update the game, or try again later.`;
 const KEEP_TOKEN_ON = new Set([LOAD_FAILED, UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway')]);
 /** How long the screen takes to fade out and back in around a zone change, in s. */
 const TRAVEL_FADE_S = 0.6;
@@ -374,6 +376,9 @@ function boot(): void {
       net.zone = zone;
       if (game.zone === zone) return;
       const t0 = performance.now();
+      // a zone this client cannot draw yet (a newer server): say so plainly rather than "try again", which would fail
+      // the same way (Plan 4 may add a way back to the grove from the server's side)
+      if (!isZoneBuilt(zone)) { net.zone = game.zone as ZoneId; throw new Error(zoneClosedNotice(zone)); }
       try { game.loadZone(zone); } catch { net.zone = game.zone as ZoneId; throw new Error(LOAD_FAILED); }
       net.lastLoadMs = performance.now() - t0;
     };
@@ -418,7 +423,7 @@ function boot(): void {
           if (await chooseName(token)) resume = token;
           continue;
         }
-        if (!KEEP_TOKEN_ON.has(message)) forgetToken(); // refused: back to the plain login screen
+        if (!KEEP_TOKEN_ON.has(message) && !message.startsWith('Your adventurer is in ')) forgetToken(); // refused: back to the plain login screen
         notice = message;
         continue;
       }

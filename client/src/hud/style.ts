@@ -177,6 +177,8 @@ const CSS = /* css */ `
 .sg-ab.down{scale:.92}
 .sg-ab-glyph{font:700 24px/1 var(--serif);color:var(--cream)}
 .sg-ab-name{font-size:9.5px;font-weight:600;max-width:62px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.92}
+/* ability names wrap onto two short lines rather than truncating ("Lantern Flare", "Second Dawn") */
+.sg-ab-skill .sg-ab-name{white-space:normal;text-align:center;line-height:1.05;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;hyphens:auto}
 .sg-ab-icon{width:24px;height:24px;color:var(--goldl)}
 .sg-ab-cd{position:absolute;inset:0;border-radius:inherit;pointer-events:none;
   background:conic-gradient(rgba(8,10,26,.72) calc(var(--cd,0) * 360deg),transparent 0)}
@@ -222,14 +224,15 @@ const CSS = /* css */ `
   width:0;height:0;padding:0;background:none;display:block}
 .sg-touch .sg-ab{position:absolute;left:0;top:0;width:64px;height:64px;border-radius:50%;
   transform:translate(-50%,-50%) translate(calc(var(--ax,0) * var(--k) * 1px),calc(var(--ay,0) * var(--k) * 1px))}
-.sg-touch .sg-ab-skill .sg-ab-name{font-size:8.5px;max-width:50px}
+.sg-touch .sg-ab-skill .sg-ab-name{font-size:8.5px;max-width:52px}
 .sg-touch .sg-ab-jobs{width:60px;height:60px}
 .sg-touch .sg-ab-skill .sg-ab-glyph{width:32px;height:32px;font-size:18px}
 .sg-touch .sg-ab-loadout{width:56px;height:56px}
 .sg-touch .sg-ab-jump{width:72px;height:72px;--kc:rgba(255,240,200,.85);background:radial-gradient(circle at 40% 30%,#ffe9a8,#F2B742 70%,#d99a24)}
 .sg-touch .sg-ab-jump .sg-ab-name{font:700 15px var(--sans);color:#3a2a08;text-shadow:none;max-width:none}
 .sg-touch .sg-ab-dodge .sg-ab-name{font-size:9px}
-.sg-touch .sg-ab-loadout .sg-ab-name{display:none}
+.sg-touch .sg-ab-loadout .sg-ab-name{font-size:9px}
+.sg-touch .sg-ab-loadout .sg-ab-icon{width:20px;height:20px}
 .sg-touch .sg-castslot{top:62%;bottom:auto}
 .sg-touch .sg-promptrow{top:auto;bottom:calc(var(--sb) + 40px)}
 .sg-touch .sg-prompt{height:58px;padding:0 24px 0 7px;border-radius:29px;gap:12px;
@@ -466,12 +469,25 @@ const CSS = /* css */ `
 /* portrait phones: the thumb cluster stands in two columns (clear of the joystick); the prompt sits above it */
 @media (max-width:700px) and (orientation:portrait){
   .sg-touch .sg-ab{transform:translate(-50%,-50%) translate(calc(var(--cx,0) * var(--k) * 1px),calc(var(--cy,0) * var(--k) * 1px))}
-  .sg-touch .sg-castslot{left:calc(var(--sl) + var(--g));transform:none;width:min(180px,42vw);top:auto;bottom:calc(var(--sb) + min(52vh,420px) + 14px)}
   /* the target frame takes the second row, under the player frame (the right column keeps the gear and Chat) */
   .sg-tf{left:calc(var(--sl) + var(--g));right:auto;top:calc(var(--st) + var(--g) + 72px);width:calc(100% - 2 * var(--g) - 84px)}
-  /* Jobs tops the right-hand column (CLUSTER_COLUMNS); the loadout (out of combat only) sits in the top row, left of the gear */
-  .sg-touch .sg-ab-loadout{transform:translate(-50%,-50%) translate(-46px,calc(var(--st) + var(--sb) + 2 * var(--g) + 66px - 100vh));
-    transform:translate(-50%,-50%) translate(-46px,calc(var(--st) + var(--sb) + 2 * var(--g) + 66px - 100dvh))}
+  /* Jobs and Picks: small, out of the way in the right-hand column under Chat (the cluster keeps to the bottom 30%) */
+  .sg-touch .sg-ab-jobs,.sg-touch .sg-ab-loadout{width:52px;height:52px;border-radius:14px}
+  .sg-touch .sg-ab-jobs .sg-ab-jobglyph{width:24px;height:24px;font-size:14px}
+  .sg-touch .sg-ab-jobs .sg-ab-name,.sg-touch .sg-ab-loadout .sg-ab-name{font-size:9px}
+  .sg-touch .sg-ab-jobs{transform:translate(-50%,-50%) translate(0px,calc(var(--st) + var(--sb) + 2 * var(--g) + 190px - 100vh));
+    transform:translate(-50%,-50%) translate(0px,calc(var(--st) + var(--sb) + 2 * var(--g) + 190px - 100dvh))}
+  .sg-touch .sg-ab-loadout{transform:translate(-50%,-50%) translate(0px,calc(var(--st) + var(--sb) + 2 * var(--g) + 248px - 100vh));
+    transform:translate(-50%,-50%) translate(0px,calc(var(--st) + var(--sb) + 2 * var(--g) + 248px - 100dvh))}
+  .sg-touch .sg-ab-jump{width:64px;height:64px}
+  .sg-touch .sg-ab-jump .sg-ab-name{font-size:14px}
+  /* the cast bar: centred above the ability cluster (the cluster spans 138 + 64 px from the right edge) */
+  .sg-touch .sg-castslot{left:auto;right:calc(var(--sr) + var(--g));transform:none;width:202px;top:auto;bottom:calc(var(--sb) + var(--g) + 38px + 140px + 44px)}
+  /* the joystick: further left, so the cluster's third column clears its zone */
+  .sg-joy{left:calc(var(--sl) + 74px)}
+  .sg-pf-name{font-size:14px}
+  .sg-tl{width:min(250px,calc(100vw - 2 * var(--g) - 64px))}
+  .sg-pf{max-width:calc(100vw - 2 * var(--g) - 64px)}
   .sg-boss{top:calc(var(--st) + var(--g) + 80px)}
   .sg-has-boss .sg-quest{top:calc(var(--st) + var(--g) + 210px)}
   /* with the ability cluster up the right edge, the prompt sits near the top, under the frames (never over the cluster or mid-screen) */
@@ -487,7 +503,13 @@ const CSS = /* css */ `
   .sg-touch.sg-no-abilities .sg-promptrow{justify-content:flex-end;bottom:calc(var(--sb) + 132px)}
   .sg-touch .sg-prompt-text{font-size:16px}
   /* the joystick's (invisible) touch zone stays in the bottom third: a tap on an enemy mid-screen is never taken by it */
-  .sg-joyzone{height:33vh}
+  .sg-joyzone{height:33vh;width:38vw}
+}
+/* the narrowest phones (iPhone SE, 320 px): the grid packs a little tighter and the joystick a little smaller */
+@media (max-width:340px) and (orientation:portrait){
+  .sg-touch{--k:.95}
+  .sg-joy{left:calc(var(--sl) + 56px);width:104px;height:104px}
+  .sg-joyzone{width:33vw}
 }
 
 /* ───────── settings (gear + panel) ───────── */

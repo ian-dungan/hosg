@@ -214,6 +214,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     jobs: (view) => overlays.jobs(view),
     endScreen: (kind, lines, buttons, opts) => overlays.endScreen(kind, lines, buttons, opts),
     dismissEndScreen: () => overlays.dismissEndScreen(),
+    closeSheets: () => overlays.closeSheets(),
     danger(mode) {
       if (mode === 'flash') hurtFlash.animate([{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 0 }], { duration: 600, easing: 'ease-out' });
       else toggle(danger, 'on', mode === 'on');

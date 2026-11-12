@@ -12,6 +12,8 @@ import { SAFE_FALL, findPath, withClearance, type Vec2 } from '@sg2/shared';
 
 /** The zones this client can build (Plan 4's 'lampfall' comes with Task 9). */
 const BUILT_ZONES: ReadonlySet<ZoneId> = new Set<ZoneId>(['grove', 'beacon', 'arena', 'greenway']);
+/** True when this client can build zone `z` (a newer server may send the adventurer somewhere this one cannot draw). */
+export const isZoneBuilt = (z: ZoneId): boolean => BUILT_ZONES.has(z);
 /** How far tap-to-walk routes keep from anything blocked, in m. */
 const CLEARANCE = 0.3;
 /** Distance at which a waypoint counts as reached and the walk heads for the next, in m. */
@@ -238,6 +240,7 @@ export function bootGame(opts: GameOpts = {}): Game {
       console.error('loading zone', z, 'failed', err);
       try {
         swapTo(from);
+        for (const cb of zoneLoaded) cb(from); // the restored zone is set up as on any load (the Guild Board, ...)
       } catch (err2) {
         console.error('restoring zone', from, 'failed', err2);
         hud.toast('Something went wrong, reloading…');
