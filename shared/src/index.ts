@@ -11,5 +11,5 @@ export * from './path';
 export { GREENWAY_RECIPE, generateZone, prng, noise2, type ZoneRecipe, type ZoneLayout } from './world/recipe';
 export { ZoneWalk } from './world/zoneWalk';
 export * from './world/limits';
-export { ZONE_IDS, isZoneId, zoneDef, zoneFullReason, greenwayLayout, GROVE_EAST_GATE, type ZoneId, type ZoneExit, type ZoneDef } from './world/zones';
+export { ZONE_IDS, isZoneId, zoneDef, zoneFullReason, greenwayLayout, GROVE_EAST_GATE, GUILD_BOARD, REASON_JOB_NOT_HERE, jobSwitchAt, type ZoneId, type ZoneExit, type ZoneDef, type Sanctuary } from './world/zones';
 export * from './combat';

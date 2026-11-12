@@ -1,10 +1,10 @@
 // A room per zone: travel through exits, refusals at the door, one session per account across rooms,
-// and health, zone and loadout kept with the adventurer.
+// and health, zone and jobs kept with the adventurer.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CloseCode, matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  PLAN3_DEFAULT_LOADOUT,
+  newJobsSave,
   REASON_ELSEWHERE,
   REASON_TRAVEL_FAILED,
   SPAWN,
@@ -12,6 +12,7 @@ import {
   groveTownSurface,
   zoneDef,
   zoneFullReason,
+  type JobsSave,
   type Surface,
   type ZoneExit,
   type ZoneId,
@@ -76,7 +77,7 @@ describe('travel through an open exit', () => {
     expect(travels).toEqual([{ zone: 'greenway' }]);
 
     expect(await store.getOrCreateAdventurer(alice.accountId)).toMatchObject({
-      zone: 'greenway', x: ENTRY.x, z: ENTRY.z, facing: ENTRY.facing, hp: 100, loadout: PLAN3_DEFAULT_LOADOUT,
+      zone: 'greenway', x: ENTRY.x, z: ENTRY.z, facing: ENTRY.facing, hp: 100, jobs: newJobsSave(),
     });
     expect(await zoneOf(url, alice.token)).toEqual({ status: 200, body: { zone: 'greenway' } });
     expect(await refusal(url, alice.token, 'grove')).toBe(REASON_ELSEWHERE);
@@ -308,17 +309,23 @@ describe('saved with the adventurer', () => {
     expect(me(b.room).hp).toBe(100);
   });
 
-  it('the loadout is kept through a session and a travel', async () => {
+  it('the jobs are kept through a session and a travel', async () => {
     const { url, store } = await start(withExit());
     const alice = await accountFor(store, 'Alice');
-    const loadout = { weapon: 'bow' as const, free: ['sprint', 'taunt'] as ['sprint', 'taunt'] };
-    await saveAs(store, alice.accountId, { loadout });
+    const jobs: JobsSave = {
+      current: 'warrior',
+      jobs: {
+        warrior: { level: 2, xp: 120, picks: ['bulwark', 'mend'], talents: [], outfit: null },
+        ranger: { level: 1, xp: 50, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null },
+      },
+    };
+    await saveAs(store, alice.accountId, { jobs });
     const a = await joinGrove(url, alice.token);
     collect(a.room, 'travel');
     const left = leftWith(a.room);
     await walk(a.room, SPAWN, INTO_EXIT);
     await left;
-    expect(await store.getOrCreateAdventurer(alice.accountId)).toMatchObject({ zone: 'greenway', loadout });
+    expect(await store.getOrCreateAdventurer(alice.accountId)).toMatchObject({ zone: 'greenway', jobs });
   });
 
   it('a join where the zone has no ground stands at the zone\'s spawn', async () => {

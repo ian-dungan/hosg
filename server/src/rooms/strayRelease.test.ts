@@ -3,7 +3,7 @@
 // already loosed, or one with no press at all, must change nothing: no second shot, no new charge.
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Room } from '@colyseus/sdk';
-import { SPAWN, type CampSpawn, type Surface } from '@sg2/shared';
+import { SPAWN, newJobsSave, type CampSpawn, type Surface } from '@sg2/shared';
 import { accountFor, collect, joinZone, saveAs, sleep, startServer, waitFor, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
@@ -18,7 +18,7 @@ describe('a stray Charged Shot release', () => {
     server = await startServer({ combatSeed: 7, zones: { grove: { surface: flat, ground: flat, sight: () => true, camps: [DUMMY] } } });
     const { url, store } = server;
     const account = await accountFor(store, 'Alice');
-    await saveAs(store, account.accountId, { x: SPAWN.x, z: SPAWN.z, facing: 0, zone: 'grove', loadout: { weapon: 'bow', free: ['mend', 'bulwark'] } });
+    await saveAs(store, account.accountId, { x: SPAWN.x, z: SPAWN.z, facing: 0, zone: 'grove', jobs: newJobsSave('ranger') });
     const { room } = await joinZone(url, account.token, 'grove');
     const fx = collect(room, 'fx'), refused = collect(room, 'refused'), selves = collect(room, 'self');
     const dummy = await waitFor(() => [...room.state.enemies.values()].find((e: any) => e.kind === 'dummy'));

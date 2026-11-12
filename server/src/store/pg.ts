@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { PLAN3_DEFAULT_LOADOUT, MAX_HP, SPAWN, ZONE_IDS, isZoneId, parsePlan3Loadout } from '@sg2/shared';
+import { MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
 import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
@@ -62,6 +62,8 @@ interface AdventurerRow {
   facing: number;
   zone: string;
   hp: number;
+  jobs: unknown;
+  /** Plan 3's weapon and free picks: read only for a row whose jobs 004 missed, never written. */
   loadout: unknown;
   level: number;
   xp: number;
@@ -69,7 +71,7 @@ interface AdventurerRow {
 }
 
 const ACCOUNT_COLUMNS = 'id, username, password_hash, is_guest, is_gm';
-const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, loadout, level, xp, gold';
+const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold';
 
 function toAccount(r: AccountRow): Account {
   return { id: r.id, username: r.username, passwordHash: r.password_hash, isGuest: r.is_guest, isGm: r.is_gm };
@@ -87,7 +89,7 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     // stands at its spawn if the spot is not walkable there.
     zone: isZoneId(r.zone) ? r.zone : 'grove',
     hp: r.hp,
-    loadout: parsePlan3Loadout(r.loadout) ?? parsePlan3Loadout(PLAN3_DEFAULT_LOADOUT)!,
+    jobs: parseJobsSave(r.jobs, r.loadout),
     level: r.level,
     xp: r.xp,
     gold: r.gold,
@@ -120,10 +122,10 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
   /** Makes the account's adventurer if it has none; insert-or-nothing keeps one per account even if two calls race. */
   async function insertAdventurer(accountId: string): Promise<void> {
     await pool.query(
-      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, hp, loadout, level, xp, gold)
+      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, hp, jobs, level, xp, gold)
        VALUES ($1, NULL, $2, $3, $4, $5, $6, $7::jsonb, 1, 0, 0)
        ON CONFLICT (account_id) DO NOTHING`,
-      [accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(PLAN3_DEFAULT_LOADOUT)],
+      [accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(newJobsSave())],
     );
   }
 
@@ -184,15 +186,15 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
     },
 
     async saveAdventurer(a, expect) {
-      const { id, x, z, facing, zone, hp, loadout } = checkedSave(a);
+      const { id, x, z, facing, zone, hp, jobs } = checkedSave(a);
       // Like findAccountById: an id that is not a uuid is unknown, not a SQL error.
       if (!UUID_RE.test(id)) return false;
       // A stored zone this server does not know reads as the grove (toAdventurer), so it counts as any
       // expected zone here: whoever holds that adventurer may save it into a real one.
       const { rowCount } = await pool.query(
-        `UPDATE adventurers SET x = $2, z = $3, facing = $4, zone = $5, hp = $6, loadout = $7::jsonb, updated_at = now()
+        `UPDATE adventurers SET x = $2, z = $3, facing = $4, zone = $5, hp = $6, jobs = $7::jsonb, updated_at = now()
          WHERE id = $1 AND ($8::text IS NULL OR zone = $8 OR NOT (zone = ANY($9::text[])))`,
-        [id, x, z, facing, zone, hp, JSON.stringify(loadout), expect?.zone ?? null, ZONE_IDS],
+        [id, x, z, facing, zone, hp, JSON.stringify(jobs), expect?.zone ?? null, ZONE_IDS],
       );
       return (rowCount ?? 0) > 0;
     },

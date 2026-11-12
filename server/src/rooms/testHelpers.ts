@@ -99,14 +99,14 @@ export async function walk(
   }
 }
 
-/** Saves the account's adventurer with these changes (position, zone, hp, loadout) before it joins. */
+/** Saves the account's adventurer with these changes (position, zone, hp, jobs) before it joins. */
 export async function saveAs(
   store: Store,
   accountId: string,
-  changes: Partial<Pick<Adventurer, 'x' | 'z' | 'facing' | 'zone' | 'hp' | 'loadout'>>,
+  changes: Partial<Pick<Adventurer, 'x' | 'z' | 'facing' | 'zone' | 'hp' | 'jobs'>>,
 ): Promise<void> {
-  const { id, x, z, facing, zone, hp, loadout } = await store.getOrCreateAdventurer(accountId);
-  await store.saveAdventurer({ id, x, z, facing, zone, hp, loadout, ...changes });
+  const { id, x, z, facing, zone, hp, jobs } = await store.getOrCreateAdventurer(accountId);
+  await store.saveAdventurer({ id, x, z, facing, zone, hp, jobs, ...changes });
 }
 
 /**

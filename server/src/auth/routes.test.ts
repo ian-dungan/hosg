@@ -246,7 +246,7 @@ describe('GET /api/zone', () => {
     expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 200, body: { zone: 'grove' } });
     const account = (await store.findAccountById(verifyToken(token, SECRET)!.accountId))!;
     const a = await store.getOrCreateAdventurer(account.id);
-    await store.saveAdventurer({ id: a.id, x: 8, z: 3, facing: 0, zone: 'greenway', hp: a.hp, loadout: a.loadout });
+    await store.saveAdventurer({ id: a.id, x: 8, z: 3, facing: 0, zone: 'greenway', hp: a.hp, jobs: a.jobs });
     expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 200, body: { zone: 'greenway' } });
   });
 

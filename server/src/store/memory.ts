@@ -1,20 +1,26 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
-import { PLAN3_DEFAULT_LOADOUT, MAX_HP, SPAWN, isZoneId } from '@sg2/shared';
+import { MAX_HP, SPAWN, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
 import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
-/** A copy that shares nothing with the stored adventurer (its loadout is copied too). */
-const copy = (a: Adventurer): Adventurer => ({ ...a, loadout: { weapon: a.loadout.weapon, free: [a.loadout.free[0], a.loadout.free[1]] } });
+/** A stored adventurer, kept as a database row would be: jobs as stored, and Plan 3's loadout column (legacy rows only). */
+type Row = Omit<Adventurer, 'jobs'> & { jobs: unknown; legacyLoadout?: unknown };
 
-export function createMemoryStore(opts: { start?: StartSpot } = {}): Store {
+/** Test-only: an adventurer stored by Plan 3 (its old loadout; jobs absent when the migration missed it). */
+export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown }
+
+/** A copy that shares nothing with the stored row, read as PgStore reads one (parseJobsSave(jobs, loadout)). */
+const copy = ({ legacyLoadout, jobs, ...a }: Row): Adventurer => ({ ...a, jobs: parseJobsSave(jobs, legacyLoadout) });
+
+export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readonly LegacyRow[] } = {}): Store {
   const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const accountsByName = new Map<string, Account>(); // key: lower-cased username
   const accountsById = new Map<string, Account>();
-  const adventurersByAccount = new Map<string, Adventurer>();
-  const adventurersById = new Map<string, Adventurer>();
+  const adventurersByAccount = new Map<string, Row>();
+  const adventurersById = new Map<string, Row>();
   const adventurerNames = new Set<string>(); // lower-cased
 
-  function adventurerFor(accountId: string): Adventurer {
+  function adventurerFor(accountId: string): Row {
     let adventurer = adventurersByAccount.get(accountId);
     if (!adventurer) {
       adventurer = {
@@ -26,7 +32,7 @@ export function createMemoryStore(opts: { start?: StartSpot } = {}): Store {
         facing: start.facing,
         zone: start.zone,
         hp: MAX_HP,
-        loadout: { weapon: PLAN3_DEFAULT_LOADOUT.weapon, free: [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]] },
+        jobs: newJobsSave(),
         level: 1,
         xp: 0,
         gold: 0,
@@ -35,6 +41,12 @@ export function createMemoryStore(opts: { start?: StartSpot } = {}): Store {
       adventurersById.set(adventurer.id, adventurer);
     }
     return adventurer;
+  }
+
+  for (const r of opts.legacyRows ?? []) {
+    const row = adventurerFor(r.accountId);
+    row.jobs = r.jobs;
+    row.legacyLoadout = r.loadout;
   }
 
   return {

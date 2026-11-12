@@ -235,8 +235,15 @@ describe('weapons and loadout', () => {
     expect(refused).toEqual([{ action: 'swap', reason: 'in-combat' }, { action: 'loadout', reason: 'in-combat' }]);
     expect(me(a.room).weapon).toBe('bow');
     await a.room.leave();
-    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).loadout.free[0] === 'taunt');
-    expect((await store.getOrCreateAdventurer(a.accountId)).loadout).toEqual({ weapon: 'bow', free: ['taunt', 'sprint'] });
+    // Saved as a job (until Task 6): the Bow is the Ranger; taunt is not the Ranger's, so its solo picks.
+    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).jobs.current === 'ranger');
+    expect((await store.getOrCreateAdventurer(a.accountId)).jobs).toEqual({
+      current: 'ranger',
+      jobs: {
+        warrior: { level: 1, xp: 0, picks: ['mend', 'bulwark'], talents: [], outfit: null },
+        ranger: { level: 1, xp: 0, picks: ['field_dressing', 'pinning_shot'], talents: [], outfit: null },
+      },
+    });
   });
 });
 

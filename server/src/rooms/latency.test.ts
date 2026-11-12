@@ -7,7 +7,7 @@ import { appendFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DISPLACE_FUZZ_M, DODGE_CHARGES, DODGE_DISTANCE, DODGE_MIN_GAP_S, DODGE_REFILL_S, MAX_MOVE_ALLOWANCE, MAX_MOVE_SPEED, RUN_SPEED, SPAWN, TICK_HZ,
-  SPRINT_SCALE, SPRINT_S, dodgeDisplacement, makeBody, simulateDisplacement, stepBody, type Body, type CampSpawn, type Surface,
+  SPRINT_SCALE, SPRINT_S, dodgeDisplacement, makeBody, simulateDisplacement, stepBody, type Body, type CampSpawn, type JobsSave, type Surface,
 } from '@sg2/shared';
 import { accountFor, joinZone, saveAs, serverRoom, startServer, type TestServer } from './testHelpers';
 
@@ -102,7 +102,7 @@ async function fuzz(o: {
   const { store, url } = server;
   const account = await accountFor(store, `Fuzz${o.seed}`);
   const start = { x: 0, z: -13 };
-  await saveAs(store, account.accountId, { ...start, facing: 0, ...(o.sprint ? { loadout: { weapon: 'blade', free: ['sprint', 'mend'] } } : {}) });
+  await saveAs(store, account.accountId, { ...start, facing: 0, ...(o.sprint ? { jobs: { current: 'ranger', jobs: { ranger: { level: 1, xp: 0, picks: ['sprint', 'field_dressing'], talents: [], outfit: null } } } as JobsSave } : {}) });
   const { room: sdkRoom } = await joinZone(url, account.token, 'grove');
   const room = serverRoom(sdkRoom) as any;
   room.setSimulationInterval(undefined); // stepped by hand, on the virtual clock

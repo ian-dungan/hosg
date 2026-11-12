@@ -35,6 +35,9 @@ import {
   parsePose,
   refillAllowance,
   createCombat,
+  loadoutOf,
+  plan3LoadoutOf,
+  recordFor,
   worldOf,
   zoneFullReason,
   type Carry,
@@ -44,6 +47,8 @@ import {
   type FxEvent,
   type Intent,
   type IntentAction,
+  type JobsSave,
+  type Loadout,
   type Plan3Loadout,
   type Pose,
   type Refusal,
@@ -137,6 +142,22 @@ const CARRY_KEEP_MS = (Math.max(...Object.values(ABILITIES).map((a) => a.cooldow
 
 /** A measured time (ms) and when it was taken (wall ms). */
 interface Timing { at: number; ms: number }
+
+/**
+ * Bridge until Task 6 (the room still offers Plan 3's swap and free picks): what the engine runs for a
+ * saved JobsSave. A Warrior whose picks are both Plan 3 free picks runs as Plan 3's Blade loadout (so
+ * swap and `loadout { free }` work as before); any other job loadout runs as it is.
+ */
+function runLoadout(jobs: JobsSave): Plan3Loadout | Loadout {
+  const l = loadoutOf(jobs), p3 = plan3LoadoutOf(l);
+  return l.job === 'warrior' && p3.free[0] === l.picks[0] && p3.free[1] === l.picks[1] ? p3 : l;
+}
+
+/** Bridge until Task 6: `jobs` with the engine's job loadout as current; every other record, and that job's xp, kept. */
+function jobsWith(jobs: JobsSave, l: Loadout): JobsSave {
+  return { current: l.job, jobs: { ...jobs.jobs, [l.job]: { ...recordFor(jobs, l.job), picks: [l.picks[0], l.picks[1]] } } };
+}
+
 /** Drops timings older than TICK_WINDOW_MS (oldest first). */
 function forgetOld(times: Timing[], now: number) {
   let old = 0;
@@ -207,8 +228,10 @@ interface Session {
   accountId: string;
   adventurerId: string;
   player: PlayerState;
-  /** The equipped weapon and free picks, saved with the adventurer (changed only out of combat, from Task 6). */
+  /** The equipped weapon and free picks the engine runs (Plan 3's shape until Task 6). */
   loadout: Plan3Loadout;
+  /** The adventurer's jobs, saved with it: as loaded, with the engine's job loadout folded in (bridge until Task 6). */
+  jobs: JobsSave;
   /** Last accepted position (exact: the state's copy is quantised). */
   lastGood: { x: number; z: number; y: number };
   /** Last accepted facing (exact, as sent). */
@@ -450,7 +473,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // never heals sooner).
     const carry: Carry = { ...(this.takeCarry(accountId) ?? FRESH_CARRY), ...(hp < MAX_HP ? { sinceHurt: 0 } : {}) };
     const now = this.nowS();
-    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp, loadout: adventurer.loadout, carry }, now);
+    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp, loadout: runLoadout(adventurer.jobs), carry }, now);
     const loadout = this.combat.loadout(eid)!;
     const player = new PlayerState({
       name, x: start.x, z: start.z, y, facing: start.facing, moving: false, hp, maxHp: MAX_HP,
@@ -465,6 +488,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       adventurerId: adventurer.id,
       player,
       loadout,
+      jobs: jobsWith(adventurer.jobs, this.combat.jobLoadout(eid)!),
       lastGood: { x: start.x, z: start.z, y },
       facing: start.facing,
       movement,
@@ -685,6 +709,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** The engine's loadout becomes the one saved with the adventurer. */
   private takeLoadout(session: Session) {
     session.loadout = this.combat.loadout(session.eid)!;
+    session.jobs = jobsWith(session.jobs, this.combat.jobLoadout(session.eid)!);
     session.player.weapon = session.loadout.weapon;
   }
 
@@ -1003,7 +1028,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // The dead are always saved as respawned: at the statue, with full health.
     const dead = session.dead;
     const as = dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: MAX_HP } : to;
-    const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, loadout: session.loadout, ...as };
+    const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, jobs: session.jobs, ...as };
     let result: 'saved' | 'refused' | 'failed';
     try {
       result = (await this.store.saveAdventurer(values, { zone: expectZone })) ? 'saved' : 'refused';
