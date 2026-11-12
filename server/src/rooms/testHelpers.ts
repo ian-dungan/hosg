@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
-import { TICK_HZ, groveTownSurface, type Surface, type ZoneId } from '@sg2/shared';
+import { TICK_HZ, groveTownSurface, worldOf as worldOfCombat, type Surface, type ZoneId } from '@sg2/shared';
 import { createApp, type AppOptions } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
@@ -159,4 +159,26 @@ export function shown<T extends object>(pose: T): T {
   const out = { ...pose } as Record<string, unknown>;
   for (const [k, f] of [['x', sx], ['z', sx], ['y', sy], ['facing', sf]] as const) if (typeof out[k] === 'number') out[k] = f(out[k] as number);
   return out as T;
+}
+
+/**
+ * `leader` invites `member` by name and `member` accepts: resolves with the party id once `member`
+ * has the party view with itself in it.
+ */
+export async function partyUp(leader: Room<any, any>, member: Room<any, any>, memberName: string): Promise<string> {
+  const invites = collect(member, 'partyInvite');
+  const views = collect(member, 'party');
+  leader.send('party', { op: 'invite', name: memberName });
+  const invite = await waitFor(() => invites[0], 3000);
+  member.send('party', { op: 'accept', partyId: invite.partyId });
+  await waitFor(() => views.some((v) => v.party?.members.some((m: any) => m.name.toLowerCase() === memberName.toLowerCase())), 3000);
+  return invite.partyId;
+}
+
+/** The party the engine of the room behind `room` has for that client's adventurer (null: none). */
+export function engineParty(room: Room<any, any>): string | null | undefined {
+  const server = serverRoom(room) as any;
+  const eid = room.state.players.get(room.sessionId)?.eid;
+  const adventurer = server?.combat ? worldOfCombat(server.combat).adventurers.get(eid) : undefined;
+  return adventurer ? adventurer.party : undefined;
 }

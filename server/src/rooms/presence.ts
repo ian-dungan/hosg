@@ -22,6 +22,19 @@ export interface Claim {
 
 export class Presence {
   private claims = new Map<string, Claim>(); // key: accountId
+  /**
+   * Online adventurers by lower-case name -> account id (for an invite by name), kept by joins
+   * (`named`) and removed when the account goes offline everywhere.
+   */
+  readonly names = new Map<string, string>();
+  /** The name each named account was given (accountId -> name as written). */
+  private nameOfAccount = new Map<string, string>();
+  /** Told when an account comes online (its first claim) and goes offline everywhere (its last release). */
+  private readonly onOnline?: (accountId: string, online: boolean) => void;
+
+  constructor(opts: { onOnline?: (accountId: string, online: boolean) => void } = {}) {
+    this.onOnline = opts.onOnline;
+  }
   /** Movement allowances by account id, shared by every room (see Allowance). */
   readonly allowances = new Map<string, Allowance>();
   /**
@@ -47,12 +60,32 @@ export class Presence {
   claim(accountId: string, room: ZoneRoom, sessionId: string): Claim | undefined {
     const previous = this.claims.get(accountId);
     this.claims.set(accountId, { room, sessionId });
+    if (!previous) this.onOnline?.(accountId, true);
     return previous;
+  }
+
+  /** The account's adventurer is called `name` (a join, once the name is loaded): findable by it while online. */
+  named(accountId: string, name: string): void {
+    if (!this.claims.has(accountId)) return;
+    const old = this.nameOfAccount.get(accountId);
+    if (old !== undefined && this.names.get(old.toLowerCase()) === accountId) this.names.delete(old.toLowerCase());
+    this.nameOfAccount.set(accountId, name);
+    this.names.set(name.toLowerCase(), accountId);
+  }
+
+  /** The name of an online, named account. */
+  nameOf(accountId: string): string | undefined {
+    return this.nameOfAccount.get(accountId);
   }
 
   /** Frees the account, but only if this session still holds it (a stale release does nothing). */
   release(accountId: string, sessionId: string): void {
-    if (this.claims.get(accountId)?.sessionId === sessionId) this.claims.delete(accountId);
+    if (this.claims.get(accountId)?.sessionId !== sessionId) return;
+    this.claims.delete(accountId);
+    const name = this.nameOfAccount.get(accountId);
+    this.nameOfAccount.delete(accountId);
+    if (name !== undefined && this.names.get(name.toLowerCase()) === accountId) this.names.delete(name.toLowerCase());
+    this.onOnline?.(accountId, false);
   }
 
   /** Accounts online (joining, in a room, or inside a reconnect window). */

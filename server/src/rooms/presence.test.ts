@@ -37,4 +37,22 @@ describe('Presence', () => {
     got.sessionId = 'forged';
     expect(presence.get('A')?.sessionId).toBe('s1');
   });
+
+  it('names: findable while online, gone when the account goes offline everywhere; onOnline follows the claims', () => {
+    const seen: [string, boolean][] = [];
+    const presence = new Presence({ onOnline: (id, online) => seen.push([id, online]) });
+    presence.named('A', 'Alice'); // not online: ignored
+    expect(presence.names.size).toBe(0);
+    presence.claim('A', grove, 's1');
+    presence.named('A', 'Alice');
+    expect(presence.names.get('alice')).toBe('A');
+    expect(presence.nameOf('A')).toBe('Alice');
+    presence.claim('A', greenway, 's2'); // a travel or a second tab: still online
+    presence.release('A', 's1');
+    expect(presence.names.get('alice')).toBe('A');
+    presence.release('A', 's2');
+    expect(presence.names.size).toBe(0);
+    expect(presence.nameOf('A')).toBeUndefined();
+    expect(seen).toEqual([['A', true], ['A', false]]);
+  });
 });

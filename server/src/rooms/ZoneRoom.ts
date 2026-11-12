@@ -7,7 +7,11 @@
 // (Second Dawn) stands the dead up where they lay.
 // Each client's state is its own view (interest management): itself, and the adventurers, enemies and
 // telegraphs near it (INTEREST_RADIUS, with hysteresis), kept from a spatial grid rebuilt each step;
-// `online` is the zone's head count. Chat stays zone-wide, and fx follow the views.
+// `online` is the zone's head count. Chat is zone-wide (or party-wide), and fx follow the views.
+// Parties (Plan 4): the process's one registry (Parties) decides membership; each room relays it: party
+// requests, invites wherever the invitee is, party chat, the engine's allies (setParty on every way into
+// the engine), pinned party members in each view, member status at most PARTY_STATUS_HZ, and kill
+// credit shared with party members nearby.
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import { StateView } from '@colyseus/schema';
 import {
@@ -26,6 +30,10 @@ import {
   MAX_HP,
   MAX_MOVE_ALLOWANCE,
   MOMENTUM_DECAY_PER_S,
+  PARTY_SHARE_R,
+  PARTY_STATUS_HZ,
+  PARTY_TEXT,
+  parsePartyOp,
   SPAWN,
   REASON_ELSEWHERE,
   REASON_NAME_FIRST,
@@ -63,6 +71,7 @@ import {
   type JobsSave,
   type JobsView,
   type Loadout,
+  type PartyRefusal,
   type Pose,
   type Refusal,
   type S2C,
@@ -73,6 +82,7 @@ import {
   type ZoneId,
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
+import type { MemberStatus, Parties } from '../party/parties';
 import type { Adventurer, AdventurerSave, Store } from '../store/types';
 import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
@@ -108,6 +118,8 @@ export interface ZoneRoomOptions {
   respawnRetryMs?: number;
   /** Test-only: the most other adventurers a view holds, and the rank slack before one leaves. */
   viewCap?: { max: number; slack: number };
+  /** The process's party registry, shared by every room. */
+  parties: Parties;
 }
 
 /** Where the dead get up again: the statue in this zone. */
@@ -152,6 +164,9 @@ const freshCarry = (job: JobId): Carry => ({ cooldowns: {}, gcd: 0, dodgeCharges
  * ms: the longest cooldown anything has, plus a margin. After that everything would be ready anyway.
  */
 const CARRY_KEEP_MS = (Math.max(...Object.values(ABILITIES).map((a) => a.cooldown), DODGE_REFILL_S * DODGE_CHARGES) + 5) * 1000;
+
+/** A member's status is read, and a `party` view sent to one client for status changes, at most this often (ms). */
+const PARTY_STATUS_MS = 1000 / PARTY_STATUS_HZ;
 
 /** A measured time (ms) and when it was taken (wall ms). */
 interface Timing { at: number; ms: number }
@@ -314,10 +329,16 @@ interface Session {
   travelling?: Promise<void>;
   /** The last notice sent, and when (ms): the same line is not repeated within NOTICE_REPEAT_MS. */
   lastNotice?: { text: string; at: number };
+  /** Its party members in this room (their PlayerStates): always in its view. */
+  pins: PlayerState[];
+  /** A member's status changed: a `party` view is due (sent at most every PARTY_STATUS_MS). */
+  partyDue: boolean;
+  /** When its last `party` view was sent, and its own status last read (wall ms). */
+  partySentAt: number;
+  statusAt: number;
 }
 
 const NO_ENEMIES: readonly EnemySchema[] = [];
-const NO_ADVENTURERS: readonly PlayerState[] = [];
 
 /** Something a client's view can hold. */
 type Viewed = PlayerState | EnemySchema | TelegraphSchema;
@@ -408,6 +429,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private keep = new Set<PlayerState>();
   /** The view cap: at most `max` other adventurers, leaving past rank max + slack. */
   private viewCap = { max: INTEREST_MAX_ADVENTURERS, slack: INTEREST_RANK_HYSTERESIS };
+  private parties!: Parties;
 
   onCreate(options: ZoneRoomOptions) {
     // Never a second room for a zone (Colyseus would open one if it ever saw this one as full).
@@ -426,6 +448,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.wallMs = options.wallClock ?? Date.now;
     this.respawnRetryMs = options.respawnRetryMs ?? RESPAWN_RETRY_MS;
     if (options.viewCap) this.viewCap = { ...options.viewCap };
+    this.parties = options.parties;
     const createdAt = performance.now();
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
@@ -444,6 +467,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.onMessage('dodge', this.guard('dodge', (client, message) => this.onDodge(client, message)));
     this.onMessage('loadout', this.guard('loadout', (client, message) => this.onLoadout(client, message)));
     this.onMessage('respawn', this.guard('respawn', (client) => this.onRespawn(client)));
+    this.onMessage('party', this.guard('party', (client, message) => this.onParty(client, message)));
     // (intents spend the intent budget, every other message the message budget: see guard)
     this.clock.setInterval(() => {
       this.forgetIdleAllowances();
@@ -554,6 +578,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       tokens: MESSAGE_BURST,
       tokensAt: this.wallMs(),
       lastChatAt: -Infinity,
+      pins: [],
+      partyDue: false,
+      partySentAt: -Infinity,
+      statusAt: -Infinity,
     };
     this.sessions.set(sessionId, session);
     this.sessionByEid.set(eid, session);
@@ -563,6 +591,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // Its view: itself always, and at once whatever is near (so its first state already shows them).
     session.view.add(player);
     client.view = session.view;
+    // Findable by name while online; its party (if any) learns where it is now, and the engine has it
+    // in the party (the engine forgets parties with the adventurer: every join sets it again).
+    this.accounts.named(accountId, name);
+    this.parties.setStatus(accountId, this.statusOf(session));
+    session.statusAt = this.wallMs();
+    this.partyMoved(accountId);
     this.refreshView(session);
     // A save the store had to repair (a Plan 3 one, or one with bad parts) is written back repaired.
     if (adventurer.jobsRepaired) this.saveJobs(session);
@@ -590,6 +624,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.missedRevive = undefined;
     session.lastSelf = '';
     session.jobsDue = true;
+    this.sendParty(session); // its party may have changed while it was away
   }
 
   async onLeave(client: Client) {
@@ -1002,16 +1037,190 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (amount > 0) this.sendTo(session.client, 'hurt', { amount, cause: 'fall' });
   }
 
-  /** Cleaned text goes to everyone, sender included; empty text and lines within CHAT_MIN_INTERVAL_MS are dropped. */
+  /**
+   * Cleaned text goes to everyone in the room, sender included (channel 'zone', the default), or with
+   * channel 'party' to every online member of the sender's party in any room (none: refused
+   * 'not-member'). Empty text, any other channel, and lines within CHAT_MIN_INTERVAL_MS of the
+   * sender's last (on either channel) are dropped.
+   */
   private onChat(client: Client, message: unknown) {
     const session = this.sessions.get(client.sessionId);
     const text = cleanChat((message as { text?: unknown } | null)?.text);
-    if (!session || text === null) return;
+    const channel = (message as { channel?: unknown } | null)?.channel ?? 'zone';
+    if (!session || text === null || (channel !== 'zone' && channel !== 'party')) return;
+    const party = channel === 'party' ? this.parties.partyOf(session.accountId) : undefined;
+    if (channel === 'party' && !party) return this.refuseParty(session, 'not-member');
     const now = Date.now();
     if (now - session.lastChatAt < CHAT_MIN_INTERVAL_MS) return;
     session.lastChatAt = now;
-    const chat: S2C['chat'] = { from: session.player.name, text };
-    this.broadcast('chat', chat);
+    const chat: S2C['chat'] = { from: session.player.name, text, channel };
+    if (!party) return this.broadcast('chat', chat);
+    for (const m of party.members) {
+      const claim = this.accounts.get(m.accountId);
+      claim?.room.deliver(claim.sessionId, 'chat', chat);
+    }
+  }
+
+  // ───────── parties ─────────
+
+  /**
+   * A party request (parsePartyOp, else dropped). An invite by eid names an adventurer in this
+   * room that the sender's view holds; by name, any online adventurer (exact, any case). Anyone
+   * else is 'unknown', which says nothing about whether it exists or is offline. A valid invite goes
+   * to the invitee wherever it is; every outcome of a change reaches the members through onChange.
+   */
+  private onParty(client: Client, message: unknown) {
+    const session = this.sessions.get(client.sessionId);
+    const op = parsePartyOp(message);
+    if (!session || !op) return;
+    const me = { accountId: session.accountId, name: session.player.name };
+    let refusal: PartyRefusal | undefined;
+    switch (op.op) {
+      case 'invite': {
+        let to: { accountId: string; name: string } | undefined;
+        if ('eid' in op) {
+          const other = this.sessionByEid.get(op.eid);
+          if (other && (other === session || session.seen.has(other.player))) to = { accountId: other.accountId, name: other.player.name };
+        } else {
+          const accountId = this.accounts.names.get(op.name.toLowerCase());
+          const name = accountId === undefined ? undefined : this.accounts.nameOf(accountId);
+          if (accountId !== undefined && name !== undefined && this.accounts.get(accountId)) to = { accountId, name };
+        }
+        if (!to) {
+          refusal = this.parties.inviteUnknown(session.accountId);
+          break;
+        }
+        const r = this.parties.invite(me, to);
+        if (typeof r === 'string') {
+          refusal = r;
+          break;
+        }
+        const claim = this.accounts.get(to.accountId);
+        claim?.room.deliver(claim.sessionId, 'partyInvite', { partyId: r.partyId, from: me.name, size: r.size });
+        break;
+      }
+      case 'accept': {
+        const r = this.parties.accept(session.accountId, me.name, op.partyId);
+        if (typeof r === 'string') refusal = r;
+        break;
+      }
+      case 'decline':
+        this.parties.decline(session.accountId, op.partyId);
+        break;
+      case 'leave':
+        if (!this.parties.partyOf(session.accountId)) refusal = 'not-member';
+        else this.parties.leave(session.accountId);
+        break;
+      case 'kick':
+      case 'lead': {
+        const r = op.op === 'kick' ? this.parties.kick(session.accountId, op.name) : this.parties.lead(session.accountId, op.name);
+        if (typeof r === 'string') refusal = r;
+        break;
+      }
+    }
+    if (refusal) this.refuseParty(session, refusal);
+  }
+
+  private refuseParty(session: Session, reason: PartyRefusal) {
+    this.sendTo(session.client, 'partyRefused', { reason, text: PARTY_TEXT[reason] });
+  }
+
+  /** A message to one session of this room, if it is here and connected (party chat, invites). */
+  public deliver<T extends keyof S2C>(sessionId: string, type: T, message: S2C[T]): void {
+    const session = this.sessions.get(sessionId);
+    if (session && !session.reconnection) this.sendTo(session.client, type, message);
+  }
+
+  /**
+   * The account's party changed (or it has none now): its session here, if any, gets the view now,
+   * the engine has it in the party (or none), and its pins are its members in this room.
+   */
+  public partyChanged(accountId: string): void {
+    const session = this.sessionOf(accountId);
+    if (!session) return;
+    const party = this.parties.partyOf(accountId);
+    this.combat.setParty(session.eid, party?.id || null);
+    // A new member's status is not known yet: read now, and the members who already got a view without it hear soon.
+    if (party && this.parties.setStatus(accountId, this.statusOf(session))) {
+      session.statusAt = this.wallMs();
+      for (const m of party.members) if (m.accountId !== accountId) this.accounts.get(m.accountId)?.room.partyStatusChanged(m.accountId);
+    }
+    session.pins = [];
+    for (const m of party?.members ?? []) {
+      const other = m.accountId === accountId ? undefined : this.sessionOf(m.accountId);
+      if (other) session.pins.push(other.player);
+    }
+    this.sendParty(session);
+  }
+
+  /** A member's status changed: the account's session here gets a view within PARTY_STATUS_MS. */
+  public partyStatusChanged(accountId: string): void {
+    const session = this.sessionOf(accountId);
+    if (session) session.partyDue = true;
+  }
+
+  /** The account came into or left this room: every member of its party hears (eids and pins); without one, its own session. */
+  private partyMoved(accountId: string) {
+    const party = this.parties.partyOf(accountId);
+    if (!party) return this.partyChanged(accountId);
+    for (const m of party.members) {
+      const claim = this.accounts.get(m.accountId);
+      claim?.room.partyChanged(m.accountId);
+    }
+  }
+
+  private sessionOf(accountId: string): Session | undefined {
+    const sessionId = this.sessionByAccount.get(accountId);
+    return sessionId === undefined ? undefined : this.sessions.get(sessionId);
+  }
+
+  /** The session's party view now (when connected; else when it is back). */
+  private sendParty(session: Session) {
+    if (session.reconnection) {
+      session.partyDue = true;
+      return;
+    }
+    const party = this.parties.partyOf(session.accountId);
+    session.partyDue = false;
+    session.partySentAt = this.wallMs();
+    this.sendTo(session.client, 'party', { party: party ? this.parties.view(party, this.roomId) : null });
+  }
+
+  /** What the party is told of this member. */
+  private statusOf(session: Session): MemberStatus {
+    const p = session.player, job = session.jobs.current;
+    return {
+      zone: this.zone.id, roomId: this.roomId, eid: session.eid, job, level: recordFor(session.jobs, job).level,
+      hp: p.hp, maxHp: p.maxHp, dead: p.dead, searing: this.combat.get(session.eid)?.searing ?? 0,
+    };
+  }
+
+  /**
+   * Each member here has its status read every PARTY_STATUS_MS; a change makes a view due for every
+   * member of its party, wherever they are. A due view goes out at most every PARTY_STATUS_MS per client.
+   * Members in the same room are pinned in each other's views, so their hp, maxHp, dead and job are
+   * in the state already: a change of only those makes a view due only for members in other rooms
+   * (the client reads same-room members, eid ≥ 0, from the state; this keeps a duo's fight free of
+   * party traffic).
+   */
+  private relayPartyStatus(wall: number) {
+    for (const session of this.sessions.values()) {
+      if (wall - session.statusAt >= PARTY_STATUS_MS) {
+        session.statusAt = wall;
+        const party = this.parties.partyOf(session.accountId);
+        const before = party ? this.parties.statusOf(session.accountId) : null;
+        const now = party ? this.statusOf(session) : null;
+        if (party && now && this.parties.setStatus(session.accountId, now)) {
+          const inState = before !== null && before.zone === now.zone && before.roomId === now.roomId && before.eid === now.eid
+            && before.level === now.level && before.searing === now.searing;
+          for (const m of party.members) {
+            const claim = this.accounts.get(m.accountId);
+            if (claim && !(inState && claim.room === this)) claim.room.partyStatusChanged(m.accountId);
+          }
+        }
+      }
+      if (session.partyDue && !session.reconnection && wall - session.partySentAt >= PARTY_STATUS_MS) this.sendParty(session);
+    }
   }
 
   /**
@@ -1053,6 +1262,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (session.client.view === session.view) session.client.view = undefined;
     session.view.dispose();
     this.leaveFight(session);
+    // Its party members here stop pinning it; the party sees it gone from this room.
+    for (const other of this.sessions.values()) {
+      const i = other.pins.indexOf(session.player);
+      if (i >= 0) other.pins.splice(i, 1);
+    }
+    if (this.parties.clearRoom(session.accountId, this.roomId)) this.partyMoved(session.accountId);
     if (session.travelling) {
       // The account stays held until the travel's save settles, so a sign-in meanwhile (anywhere)
       // kicks this claim and waits for that save, then loads the adventurer where it really is.
@@ -1313,6 +1528,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       });
     }
     this.safely('mirror', () => this.mirrorAll());
+    this.safely('party', () => this.relayPartyStatus(wall));
     this.safely('views', () => this.updateViews());
     if (fx.length > 0) this.safely('fx', () => this.sendFx(fx));
     if (this.steps % SELF_EVERY_STEPS === 0) {
@@ -1331,9 +1547,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (session && !session.dead) this.safely('death', () => this.died(session));
     }
     for (const kill of out.kills) {
-      for (const id of kill.credit) {
-        const session = this.sessionByEid.get(id);
-        if (!session) continue;
+      for (const session of this.creditedFor(kill)) {
         this.safely('credit', () => {
           this.sendTo(session.client, 'credit', { kind: kill.kind });
           this.gainXp(session, kill.kind);
@@ -1344,6 +1558,28 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       const session = this.sessionByEid.get(r.id);
       if (session) this.safely('revive', () => this.revived(session, r));
     }
+  }
+
+  /**
+   * Who a kill credits: the engine's credited adventurers, and every party member of one of them that is
+   * in this room within PARTY_SHARE_R of the enemy (alive or dead), each once.
+   */
+  private creditedFor(kill: TickOut['kills'][number]): Set<Session> {
+    const credited = new Set<Session>();
+    for (const id of kill.credit) {
+      const session = this.sessionByEid.get(id);
+      if (session) credited.add(session);
+    }
+    const at = this.combat.get(kill.enemy) ?? this.state.enemies.get(this.keyOf(kill.enemy));
+    if (!at) return credited;
+    const r2 = PARTY_SHARE_R * PARTY_SHARE_R;
+    for (const session of [...credited]) {
+      for (const m of this.parties.partyOf(session.accountId)?.members ?? []) {
+        const other = this.sessionOf(m.accountId);
+        if (other && !credited.has(other) && dist2(other.lastGood, at) <= r2) credited.add(other);
+      }
+    }
+    return credited;
   }
 
   /**
@@ -1458,12 +1694,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     for (const [eid, list] of this.targeting) if (list.length === 0) this.targeting.delete(eid);
   }
 
-  /**
-   * Adventurers a view keeps whatever the radius and the cap. None yet: parties (Plan 4) go here,
-   * and are then shown and kept like the target.
-   */
-  private pinnedAdventurers(_session: Session): readonly PlayerState[] {
-    return NO_ADVENTURERS;
+  /** Adventurers a view keeps whatever the radius and the cap: its party members in this room (shown and kept like the target). */
+  private pinnedAdventurers(session: Session): readonly PlayerState[] {
+    return session.pins;
   }
 
   /** One client's view brought up to date now (a join, a reconnect), from a fresh grid. */

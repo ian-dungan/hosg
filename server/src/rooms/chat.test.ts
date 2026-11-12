@@ -22,15 +22,15 @@ describe('chat', () => {
     const { alice, heard, echoed } = await aliceAndBob();
     alice.send('chat', { text: 'hello' });
     await waitFor(() => heard.length === 1 && echoed.length === 1);
-    expect(heard).toEqual([{ from: 'Alice', text: 'hello' }]);
-    expect(echoed).toEqual([{ from: 'Alice', text: 'hello' }]);
+    expect(heard).toEqual([{ from: 'Alice', text: 'hello', channel: 'zone' }]);
+    expect(echoed).toEqual([{ from: 'Alice', text: 'hello', channel: 'zone' }]);
   });
 
   it('cleans the text: control characters and extra whitespace go', async () => {
     const { alice, heard } = await aliceAndBob();
     alice.send('chat', { text: '  hi\n\u0007 there ' });
     await waitFor(() => heard.length === 1);
-    expect(heard[0]).toEqual({ from: 'Alice', text: 'hi there' });
+    expect(heard[0]).toEqual({ from: 'Alice', text: 'hi there', channel: 'zone' });
   });
 
   it('cuts a long message to 200 characters', async () => {
@@ -55,7 +55,7 @@ describe('chat', () => {
     alice.send('chat', { text: 'still here' });
     await waitFor(() => heard.length > 0);
     await sleep(100);
-    expect(heard).toEqual([{ from: 'Alice', text: 'still here' }]);
+    expect(heard).toEqual([{ from: 'Alice', text: 'still here', channel: 'zone' }]);
   });
 
   it('drops a second message within 1 s, and accepts the next one after 1 s', async () => {

@@ -8,6 +8,7 @@ import { WebSocketTransport } from '@colyseus/ws-transport';
 import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, SAVE_ZONE_IDS, jobSwitchAt, zoneDef, type SaveZoneId, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
+import { Parties } from './party/parties';
 import { Presence } from './rooms/presence';
 import { zoneRoomFor, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
 
@@ -66,6 +67,9 @@ export interface App {
 // Room messages are small; this leaves room for a full chat line (CHAT_MAX characters of any script).
 const MAX_WS_PAYLOAD = 16 * 1024;
 
+/** How often the party registry drops expired invites and long-offline members (ms). */
+const PARTY_SWEEP_MS = 5000;
+
 /** Window of /healthz's eventLoopP99Ms (ms). */
 const EVENT_LOOP_WINDOW_MS = 5000;
 
@@ -77,7 +81,15 @@ function mergedZone(id: ZoneId, over: Partial<ZoneDef> | undefined): ZoneDef {
 
 export function createApp(opts: AppOptions): App {
   const rooms = new Map<ZoneId, ZoneRoom>();
-  const presence = new Presence();
+  // One party registry for the process (memory only): it follows who is online, and each change
+  // reaches every member's session wherever it is.
+  const parties = new Parties();
+  const presence = new Presence({ onOnline: (accountId, online) => parties.setOnline(accountId, online) });
+  parties.onChange((_partyId, accountIds) => {
+    for (const accountId of accountIds) presence.get(accountId)?.room.partyChanged(accountId);
+  });
+  const partySweep = setInterval(() => parties.sweep(), PARTY_SWEEP_MS);
+  partySweep.unref();
   // One shared room per saved zone; the Lampfall's rooms are instances (Plan 4 Task 7), never made here.
   const zones = new Map<ZoneId, ZoneDef>(SAVE_ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));
 
@@ -132,7 +144,7 @@ export function createApp(opts: AppOptions): App {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
         const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
         const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-        res.json({ ok: true, ...stats(), rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms });
+        res.json({ ok: true, ...stats(), parties: parties.size, rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms });
       });
       if (opts.clientDir) app.use(express.static(opts.clientDir));
     },
@@ -154,6 +166,7 @@ export function createApp(opts: AppOptions): App {
       wallClock: opts.wallClock,
       respawnRetryMs: opts.respawnRetryMs,
       viewCap: opts.viewCap,
+      parties,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }
@@ -187,6 +200,7 @@ export function createApp(opts: AppOptions): App {
       http?.closeAllConnections(); // idle keep-alive connections would hold it open
       await closed;
       clearInterval(loopTimer);
+      clearInterval(partySweep);
       loop.disable();
     },
 
