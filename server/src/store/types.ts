@@ -145,7 +145,7 @@ export interface Store {
    */
   saveAdventurer(a: AdventurerSave, expect?: { zone: ZoneId }): Promise<boolean>;
   /**
-   * One Warden's Seal for the adventurer, atomically, only when its sealDay is not `dayUtc` ('YYYY-MM-DD'):
+   * One Warden's Seal for the adventurer, atomically, only when its sealDay is null or before `dayUtc` ('YYYY-MM-DD'):
    * awarded false (and nothing changed) when it already had that day's Seal, or for an unknown id. seals:
    * the count after. Never touched by saveAdventurer.
    */

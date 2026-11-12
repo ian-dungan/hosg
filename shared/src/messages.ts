@@ -25,8 +25,13 @@ export const REASON_GROVE_FULL = 'Shady Grove is full, try again soon';
  * where it is and joins that zone's room instead.
  */
 export const REASON_ELSEWHERE = 'Your adventurer is somewhere else';
+/** Walking into the crater mouth mid-fight (corrected, with this notice). */
+export const REASON_IN_COMBAT = 'Finish the fight before you climb down into the Lampfall';
 /** Travel through an open exit that could not be saved (the adventurer stays where it was). */
 export const REASON_TRAVEL_FAILED = 'The way is blocked for now, try again soon';
+
+/** One member's changed numbers in `partyStatus` (see there). */
+export interface PartyStatusLine { i: number; hp?: number; maxHp?: number; dead?: boolean; searing?: number; job?: JobId; level?: number }
 
 /** Client → server. */
 export type C2S = {
@@ -143,6 +148,12 @@ export type S2C = {
   respawned: { x: number; z: number; y: number; seq: number };
   /** The receiver's party (null: none), after any change, and at most PARTY_STATUS_HZ for member status. */
   party: { party: PartyView | null };
+  /**
+   * Members whose numbers changed since the receiver last heard (at most PARTY_STATUS_HZ): `i` is the
+   * member's index in the last `party` view; only the changed fields are present. A change of members,
+   * leader, online flag, zone or eid comes as a whole `party` view instead.
+   */
+  partyStatus: { m: PartyStatusLine[] };
   /** An invite to join party `partyId`, from its leader `from`; size: its members now. */
   partyInvite: { partyId: string; from: string; size: number };
   /** A party request the server refused (text: PARTY_TEXT[reason]). */

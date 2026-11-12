@@ -20,7 +20,6 @@ import {
   DEATH_MIN_S,
   DISPLACE_FUZZ_M,
   DODGE_CHARGES,
-  DODGE_DISTANCE,
   DODGE_MIN_GAP_S,
   DODGE_REFILL_S,
   INTEREST_MAX_ADVENTURERS,
@@ -73,6 +72,7 @@ import {
   type JobsView,
   type Loadout,
   type PartyRefusal,
+  type PartyStatusLine,
   type PartyView,
   type Pose,
   type Refusal,
@@ -86,9 +86,11 @@ import {
   BOSSES,
   INSTANCE_EVICT_S,
   INSTANCE_RECONNECT_S,
+  MAX_INSTANCES,
   LAMPFALL_MOUTH,
   PARTY_MAX,
   REASON_ARENA_SEALED,
+  REASON_IN_COMBAT,
   REASON_INSTANCES_FULL,
   REASON_LEFT_PARTY,
   RELEASE_MIN_S,
@@ -113,10 +115,11 @@ import {
   type InstanceView,
   type VictoryView,
 } from '@sg2/shared';
+import { killAdventurer } from '../../../shared/src/combat/adventurer'; // (a relog of the dead inside: re-added dead)
 import { verifyToken } from '../auth/tokens';
 import type { MemberStatus, Parties } from '../party/parties';
 import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../store/types';
-import { REASON_IN_COMBAT, type InstanceInfo, type Instances } from './instances';
+import type { InstanceInfo, Instances } from './instances';
 import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
 import type { Allowance, Presence } from './presence';
@@ -173,6 +176,8 @@ const BOSS_OF: Partial<Record<EnemyKindId, { encounter: ArenaEncounter; boss: 'w
 };
 /** The solo Warden title (Numbers → Rewards). */
 const SOLO_TITLE = 'Lampbreaker';
+/** Instances opened so far in this process (their steps are staggered by it). */
+let instanceSerial = 0;
 /** An enemy fighting within this long (s) before the last death makes it a wipe. */
 const WIPE_FIGHT_S = 5;
 
@@ -192,6 +197,8 @@ interface InstanceRun {
   bosses: Map<number, { encounter: ArenaEncounter; boss: 'wickhound' | 'fallen_warden'; wokeAt: number | null; sealAt: number | null; most: number }>;
   wipeAt: number | null;
   lastFightAt: number;
+  /** Enemies seen fighting (targeting someone, or winding up), and when last (combat s): a wipe resets these. */
+  fighting: Map<number, number>;
   lift: boolean;
   /** accountId -> when it is sent out (combat s): it left or was kicked from the party. */
   evictAt: Map<string, number>;
@@ -244,13 +251,6 @@ const CARRY_KEEP_MS = (Math.max(...Object.values(ABILITIES).map((a) => a.cooldow
 /** A member's status is read, and a `party` view sent to one client for status changes, at most this often (ms). */
 const PARTY_STATUS_MS = 1000 / PARTY_STATUS_HZ;
 
-/**
- * S2C `partyStatus { m: PartyStatusLine[] }` (Task 6 review): the members whose numbers changed since the
- * client last heard, at most PARTY_STATUS_HZ. `i` is the member's index in the last `party` view; only the
- * fields that changed are present (hp, maxHp, dead, searing, job, level). A change of members, leader,
- * online flag, zone or eid comes as a whole `party` view instead. (Not in shared S2C yet: Task 8 adds it.)
- */
-export interface PartyStatusLine { i: number; hp?: number; maxHp?: number; dead?: boolean; searing?: number; job?: JobId; level?: number }
 
 /** A measured time (ms) and when it was taken (wall ms). */
 interface Timing { at: number; ms: number }
@@ -526,6 +526,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private instances?: Instances;
   /** Set when this room is a Lampfall instance. */
   private inst?: InstanceRun;
+  /** An instance's delayed first step (the stagger). */
+  private startTimer?: ReturnType<typeof setTimeout>;
 
   onCreate(options: ZoneRoomOptions & { instanceKey?: string }) {
     this.instances = options.instances ?? options.instance?.registry;
@@ -586,7 +588,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       this.forgetIdleAllowances();
       void this.saveAll();
     }, options.saveSeconds * 1000);
-    this.setSimulationInterval(() => this.step(), 1000 / TICK_HZ);
+    if (this.inst) {
+      // instances' steps spread over the tick (12 of them would otherwise all land at once): the n-th
+      // opened starts n × (1/TICK_HZ)/MAX_INSTANCES s late
+      const offset = ((instanceSerial++ % MAX_INSTANCES) * (1000 / TICK_HZ)) / MAX_INSTANCES;
+      this.startTimer = setTimeout(() => { if (!this.disposed) this.setSimulationInterval(() => this.step(), 1000 / TICK_HZ); }, offset);
+    } else this.setSimulationInterval(() => this.step(), 1000 / TICK_HZ);
   }
 
   async onJoin(client: Client) {
@@ -599,7 +606,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // An older session of this account in this instance (a fresh sign-in after a drop): the new one
     // stands where it stood (alive), so a relog never moves anyone out of a fight or into a sealed one.
     const before = this.inst ? this.sessionOf(accountId) : undefined;
-    const prevSpot = before && !before.dead ? { ...before.lastGood, facing: before.facing } : undefined;
+    const prevSpot = before ? { ...before.lastGood, facing: before.facing } : undefined;
+    // (dead: it stays dead where it fell, on the same release clock)
+    const prevDeadAt = before?.dead ? before.deadAt : undefined;
     const previous = this.accounts.claim(accountId, this, sessionId);
     this.sessionByAccount.set(accountId, sessionId);
     const giveUp = () => {
@@ -710,6 +719,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     };
     this.sessions.set(sessionId, session);
     this.sessionByEid.set(eid, session);
+    if (prevDeadAt !== undefined) {
+      const w = worldOf(this.combat);
+      const a = w.adventurers.get(eid);
+      if (a) killAdventurer(w, a, now);
+      Object.assign(session, { dead: true, deadAt: prevDeadAt });
+    }
     this.mirrorPlayer(session);
     this.state.players.set(sessionId, player);
     this.state.online = this.state.players.size;
@@ -768,6 +783,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   async onDispose() {
     this.disposed = true;
+    clearTimeout(this.startTimer);
     if (this.inst) this.inst.registry.disposed(this.roomId);
     if (this.rooms.get(this.zone.id) === this) this.rooms.delete(this.zone.id);
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.removeSession(sessionId)));
@@ -784,8 +800,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (until <= now) this.arrivals.delete(id);
       else if (!this.sessionByAccount.has(id)) held++;
     }
-    // an instance admits only its allowed accounts (the party), PARTY_MAX at most
-    if (this.inst && !this.instanceInfo()?.allowed.has(accountId)) return false;
+    // An instance admits only an allowed account (the party) with a seat: its session here (in the
+    // room or away inside its window), or a traveller's held seat (the crater mouth's checks passed).
+    if (this.inst) {
+      const info = this.instanceInfo();
+      if (!info?.allowed.has(accountId)) return false;
+      return this.sessionByAccount.has(accountId) || this.arrivals.has(accountId) || (info.heldFor.get(accountId) ?? -Infinity) > now;
+    }
     if (this.sessionByAccount.has(accountId) || this.arrivals.has(accountId)) return true;
     // Someone who died (saved as respawned here) always gets up at the statue, however full it is.
     if (this.zone.id === RESPAWN_ZONE && (this.accounts.respawns.get(accountId) ?? -Infinity) > this.wallMs()) return true;
@@ -1038,17 +1059,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (gapWait > DODGE_GAP_TOLERANCE_S) return this.refuse(session, 'dodge', 'cooldown');
     if (!this.acceptPose(session, pose, this.wallMs())) return this.refuse(session, 'dodge', 'stale');
     if (session.travelling) return;
-    // a roll into a shut lamp-gate (its end): refused, corrected to the pose it was sent from, with the notice
-    if (this.inst && this.inst.gates !== 0) {
-      const l = Math.hypot(dx, dz), from = session.lastGood;
-      const end = l > 0 ? { x: from.x + (dx / l) * DODGE_DISTANCE, z: from.z + (dz / l) * DODGE_DISTANCE } : from;
-      if (shutGateOnStep(this.inst.gates, from, end)) {
-        this.refuse(session, 'dodge', 'invalid');
-        this.correct(session, this.wallMs());
-        this.notice(session, REASON_ARENA_SEALED, this.wallMs());
-        return;
-      }
-    }
+    // (a roll toward a shut lamp-gate is not refused: the instance's walled surface stops it at the wall, P4-b)
     const wait = Math.max(gapWait, chargeWait);
     if (wait > 1e-6 && wait <= DODGE_GAP_TOLERANCE_S) {
       session.pendingDodge = { dx, dz, due: now + wait + 1e-6 };
@@ -1381,7 +1392,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (m.level !== n.level) line.level = n.level;
       if (Object.keys(line).length > 1) lines.push(line);
     });
-    if (lines.length > 0) session.client.send('partyStatus', { m: lines });
+    if (lines.length > 0) this.sendTo(session.client, 'partyStatus', { m: lines });
     session.partySent = view;
   }
 
@@ -1709,7 +1720,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.inst = {
       key, registry: opt.registry, t: { ...INSTANCE_TIMINGS, ...opt.timings }, cleared,
       gates: cleared.has('wickhound') ? 0 : GATE_WICK_EXIT, sealed: null, arenas, encounterOf: new Map(), bosses: new Map(),
-      wipeAt: null, lastFightAt: -Infinity, lift: false, evictAt: new Map(), startedAt: (options.wallClock ?? Date.now)(),
+      wipeAt: null, lastFightAt: -Infinity, fighting: new Map(), lift: false, evictAt: new Map(), startedAt: (options.wallClock ?? Date.now)(),
     };
     const mask = () => this.inst?.gates ?? 0;
     this.zone = { ...base, surface: gatedSurface(base.surface, mask), ground: gatedSurface(base.ground, mask), sight: gatedSight(base.sight, mask), camps, jobSwitch: base.jobSwitch };
@@ -1750,6 +1761,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** The account has a seat here: a session (in the room or away within its window) or a traveller's held seat. */
   hasSeat(accountId: string): boolean {
     return this.sessionByAccount.has(accountId) || (this.arrivals.get(accountId) ?? -Infinity) > Date.now();
+  }
+
+  /** An instance has space for the account (allowed, and a seat already or fewer than PARTY_MAX): the crater mouth's check. */
+  hasRoomFor(accountId: string): boolean {
+    if (!this.instanceInfo()?.allowed.has(accountId)) return false;
+    if (this.hasSeat(accountId)) return true;
+    let seats = this.sessionByAccount.size;
+    const now = Date.now();
+    for (const [id, until] of this.arrivals) if (until > now && !this.sessionByAccount.has(id)) seats++;
+    return seats < this.maxPlayers;
   }
 
   /** Travellers are on their way in. */
@@ -1823,7 +1844,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         await this.save(session); // kicked or gone meanwhile: saved here as it is
         return;
       }
-      if (r === 'full' || !room || !room.canAdmit(session.accountId)) {
+      if (r === 'full' || !room || !room.hasRoomFor(session.accountId)) {
         session.travelling = undefined;
         session.lastGood = before;
         Object.assign(session.player, before, { moving: false });
@@ -1986,7 +2007,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.awaitingDisplace = false;
     const at = { x, z, y };
     this.displace(session, {
-      id: session.eid, kind: 'resync' as 'dodge', from: at, d: { vx: 0, vz: 0, vy: 0, seconds: 0 },
+      id: session.eid, kind: 'resync', from: at, d: { vx: 0, vz: 0, vy: 0, seconds: 0 },
       result: { ...at, drop: 0, drops: [], fallHp: 0, seconds: 0, grounded: true, path: [{ t: 0, ...at }] },
     });
   }
@@ -2030,15 +2051,21 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (session) this.travelOut(session);
     }
     // a fight is on while any enemy targets someone
-    for (const e of this.state.enemies.values()) if (e.target >= 0 || e.mode === 'windup') { inst.lastFightAt = now; break; }
+    for (const e of this.state.enemies.values()) {
+      if (e.target < 0 && e.mode !== 'windup') continue;
+      inst.lastFightAt = now;
+      inst.fighting.set(e.eid, now);
+    }
+    for (const [id, at] of inst.fighting) if (now - at > WIPE_FIGHT_S) inst.fighting.delete(id);
     const everyone = [...this.sessions.values()].filter((s) => !s.travelling);
     if (inst.wipeAt === null && everyone.length > 0 && everyone.every((s) => s.dead) && now - inst.lastFightAt <= WIPE_FIGHT_S) {
       inst.wipeAt = now + inst.t.wipeS;
-      for (const v of this.combat.all()) if (v.team === 'enemy' && v.alive) this.combat.resetEnemy(v.id, now);
+      // every engaged enemy goes home now, once (one that already reset itself answers false: nothing to do)
+      for (const id of inst.fighting.keys()) this.combat.resetEnemy(id, now);
+      inst.fighting.clear();
     }
     if (inst.wipeAt !== null && now >= inst.wipeAt) {
       inst.wipeAt = null;
-      for (const v of this.combat.all()) if (v.team === 'enemy' && v.alive) this.combat.resetEnemy(v.id, now);
       for (const session of this.sessions.values()) if (session.dead && !session.travelling) this.release(session);
     }
     for (const session of this.sessions.values()) this.applyParty(session);
@@ -2087,8 +2114,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     await Promise.all(credited.map(async ({ session, xp }) => {
       let seal = false, seals = 0, title: string | null = null;
       if (boss === 'fallen_warden') {
+        // (read first: a retry after a lost answer says "already today", and the count tells whether it was this kill)
+        const before = await this.retry('seals', () => this.store.getOrCreateAdventurer(session.accountId));
         const r = await this.retry('seal', () => this.store.awardSeal(session.adventurerId, day));
-        if (r) ({ awarded: seal, seals } = r);
+        if (r) seal = r.awarded || (before !== undefined && before.sealDay !== day && r.seals > before.seals);
+        if (r) seals = r.seals;
         if (solo && (await this.retry('title', () => this.store.addTitle(session.adventurerId, SOLO_TITLE))) !== undefined) title = SOLO_TITLE;
       } else {
         seals = (await this.retry('seals', () => this.store.getOrCreateAdventurer(session.accountId)))?.seals ?? 0;
@@ -2195,7 +2225,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // (kills before despawned: an add that died this tick is still in the state for its credit)
     for (const kill of out.kills) {
       const xp = new Map<Session, number>();
-      for (const session of this.creditedFor(kill)) {
+      let credited = this.creditedFor(kill);
+      // a boss: only those inside its arena (the dead lying there too), never a member waiting outside
+      const boss = this.inst?.bosses.get(kill.enemy);
+      if (boss) {
+        const arena = this.inst!.arenas[boss.encounter];
+        credited = new Set([...credited].filter((c) => arena(c.lastGood.x, c.lastGood.z)));
+      }
+      for (const session of credited) {
         this.safely('credit', () => {
           this.sendTo(session.client, 'credit', { kind: kill.kind });
           xp.set(session, this.gainXp(session, kill.kind));
@@ -2243,7 +2280,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const at = { x: v.x, z: v.z, y: v.y + 0 };
     const path = [{ t: 0, ...at }];
     this.displace(session, {
-      id: session.eid, kind: 'resync' as 'dodge', from: at, d: { vx: 0, vz: 0, vy: 0, seconds: 0 },
+      id: session.eid, kind: 'resync', from: at, d: { vx: 0, vz: 0, vy: 0, seconds: 0 },
       result: { ...at, drop: 0, drops: [], fallHp: 0, seconds: 0, grounded: true, path },
     });
   }
@@ -2253,9 +2290,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * standing there, an allowance of at most a full one plus DISPLACE_FUZZ_M, and the falls on the way
    * charged; then tells the client, and everyone else sees the body travel the path.
    */
-  private displace(session: Session, d: DisplaceOut) {
+  private displace(session: Session, d: DisplaceOut | (Omit<DisplaceOut, 'kind'> & { kind: 'resync' })) {
     if (!d.result.grounded) return; // no displacement (the engine sends none like this)
-    const kind = d.kind as 'dodge' | 'knock' | 'resync';
+    const kind = d.kind;
     const end = { x: d.result.x, z: d.result.z, y: d.result.y + 0 };
     const seq = ++session.displaceSeq;
     session.awaitingDisplace = false;

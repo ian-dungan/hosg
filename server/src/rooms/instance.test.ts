@@ -6,11 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { matchMaker } from '@colyseus/core';
 import type { Room } from '@colyseus/sdk';
 import {
-  LAMPFALL_MOUTH, MAX_HP, MAX_INSTANCES, REASON_ELSEWHERE, REASON_INSTANCE_CLOSED, REASON_INSTANCES_FULL, REASON_LEFT_PARTY,
+  LAMPFALL_MOUTH, MAX_HP, REASON_IN_COMBAT, MAX_INSTANCES, REASON_ELSEWHERE, REASON_INSTANCE_CLOSED, REASON_INSTANCES_FULL, REASON_LEFT_PARTY,
   lampfallLayout, worldOf, zoneDef,
 } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer';
-import { REASON_IN_COMBAT } from './instances';
 import {
   accountFor, collect, collectFromJoin, engineParty, intoLampfall, joinInstance, joinZone, partyUp, place, saveAs, serverRoom, sleep, startServer, waitFor, walk,
   type TestServer,
@@ -325,5 +324,87 @@ describe('Lampfall instances', () => {
     await waitFor(() => kicked.length === 1);
     expect(near(me(g.room), LAMPFALL_MOUTH.arrive, 0.05)).toBe(true);
     expect(await zoneOf(url, a.token)).toEqual({ zone: 'greenway' });
+  }, 20000);
+
+  it('review: an allowed member cannot join by id from the Greenway (only through the mouth); after the hold, no rejoin by id', async () => {
+    const { url, store } = await start();
+    const a = await accountFor(store, 'Alice'), b = await accountFor(store, 'Bob');
+    for (const x of [a, b]) await saveAs(store, x.accountId, { zone: 'greenway', ...LAMPFALL_MOUTH.arrive });
+    const ga = await joinZone(url, a.token, 'greenway'), gb = await joinZone(url, b.token, 'greenway');
+    await partyUp(ga.room, gb.room, 'Bob');
+    await ga.room.leave();
+    const ia = await intoLampfall(url, store, a, { saved: false });
+    // Bob is allowed (the party) but never walked into the mouth: refused, and still in the Greenway
+    await expect(joinInstance(url, b.token, ia.roomId)).rejects.toThrow(REASON_ELSEWHERE);
+    expect(gb.room.connection.isOpen).toBe(true);
+    // Alice drops; after the hold (2 s here) her seat is gone: no rejoin by id
+    ia.room.connection.close();
+    await sleep(2600);
+    await expect(joinInstance(url, a.token, ia.roomId)).rejects.toThrow(REASON_ELSEWHERE);
+  }, 20000);
+
+  it('review: a relog while dead inside stays dead where it fell, with the same release clock', async () => {
+    const { url, store } = await start({ instances: { emptyS: 1, sweepMs: 100, timings: { ...TIMINGS, releaseMinS: 2 } } });
+    const a = await accountFor(store, 'Alice');
+    const ia = await intoLampfall(url, store, a);
+    const spot = { x: rim.x + 4, z: rim.z + 2 };
+    place(ia.room, spot.x, spot.z);
+    await waitFor(() => near(me(ia.room), spot));
+    const w = worldOf(serverRoom(ia.room).combat);
+    killAdventurer(w, w.adventurers.get(me(ia.room).eid)!, w.now);
+    await waitFor(() => me(ia.room).dead === true);
+    ia.room.connection.close();
+    await sleep(300);
+    const again = await joinInstance(url, a.token, ia.roomId);
+    expect(me(again.room).dead).toBe(true);
+    expect(near(me(again.room), spot, 0.05)).toBe(true);
+    const refusals = collect(again.room, 'refused'), respawned = collect(again.room, 'respawned');
+    again.room.send('release', {});
+    await waitFor(() => refusals.length === 1);
+    expect(refusals[0]).toEqual({ action: 'respawn', reason: 'cooldown' });
+    await sleep(1800);
+    again.room.send('release', {});
+    await waitFor(() => respawned.length === 1);
+  }, 20000);
+
+  it('review: a wipe gets nobody up before WIPE_DELAY_S, and resets each engaged enemy once', async () => {
+    const { url, store } = await start({ instances: { emptyS: 1, sweepMs: 100, timings: { ...TIMINGS, wipeS: 1.5 } } });
+    const a = await accountFor(store, 'Alice');
+    const ia = await intoLampfall(url, store, a);
+    const room = serverRoom(ia.room), w = worldOf(room.combat);
+    const cellar = L.rooms[1];
+    const pack = [...w.enemies.values()].filter((e) => Math.hypot(e.camp.x - cellar.x, e.camp.z - cellar.z) <= cellar.r);
+    place(ia.room, cellar.x - 4, cellar.z);
+    await waitFor(() => pack.some((e) => e.targetId !== null), 4000);
+    await sleep(300);
+    const engaged = pack.filter((e) => e.threat.ids().length > 0).length;
+    const resets = vi.spyOn(room.combat, 'resetEnemy');
+    const respawned = collect(ia.room, 'respawned');
+    killAdventurer(w, w.adventurers.get(me(ia.room).eid)!, w.now);
+    await waitFor(() => ia.room.state.wipeAt > 0);
+    await sleep(1000);
+    expect(respawned).toEqual([]);
+    expect(me(ia.room).dead).toBe(true);
+    await waitFor(() => respawned.length === 1, 2000);
+    expect(resets.mock.calls.length).toBe(engaged);
+  }, 20000);
+
+  it('review: closing with saves in flight leaves nothing behind (registry, rooms, seats, claims)', async () => {
+    const { url, store, app } = await start({ instances: { maxS: 1.5, emptyS: 60, sweepMs: 100, timings: TIMINGS } });
+    const a = await accountFor(store, 'Alice'), b = await accountFor(store, 'Bob');
+    const ia = await intoLampfall(url, store, a);
+    await intoLampfall(url, store, b);
+    const slow = store.saveAdventurer.bind(store);
+    vi.spyOn(store, 'saveAdventurer').mockImplementation(async (...args) => {
+      await sleep(400);
+      return slow(...args);
+    });
+    await waitFor(() => app.instances.count === 0, 4000);
+    await waitFor(() => !matchMaker.getLocalRoomById(ia.roomId), 4000);
+    await sleep(800);
+    expect(app.instances.counts()).toEqual({ open: 0, opening: 0, early: 0, closing: 0, held: 0 });
+    expect((await matchMaker.query({ name: 'lampfall' })).length).toBe(0);
+    expect((await health(url)).instances).toEqual({ open: 0, players: 0, tickMsP95Max: 0 });
+    for (const x of [a, b]) expect(await store.getOrCreateAdventurer(x.accountId)).toMatchObject({ zone: 'greenway', ...LAMPFALL_MOUTH.arrive });
   }, 20000);
 });

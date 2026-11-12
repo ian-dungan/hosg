@@ -79,7 +79,7 @@ describe('Lampfall bosses', () => {
     expect(views.at(-1).checkpoint).toBe('rim');
   }, 20000);
 
-  it("the Wickhound's gate seals SEAL_DELAY_S after it wakes and opens when it dies; poses and dodges into it are corrected with the notice; the checkpoint moves to the landing", async () => {
+  it("the Wickhound's gate seals SEAL_DELAY_S after it wakes and opens when it dies; poses into it are corrected with the notice, a dodge stops at it; the checkpoint moves to the landing", async () => {
     const s = await start();
     const { ia, ib, partyId } = await duo(s);
     sturdy(ia.room);
@@ -99,10 +99,14 @@ describe('Lampfall bosses', () => {
     expect(corrections.length).toBeGreaterThan(0);
     const bPos = me(ib.room);
     expect(Math.hypot(bPos.x - wickGate.x, bPos.z - wickGate.z)).toBeGreaterThan(wickGate.r);
-    // a dodge into it: refused and corrected
+    // a dodge into it rolls up to the wall and stops there (ruling: no refusal; the walled surface stops it)
     const from = { x: bPos.x, z: bPos.z };
+    const rolls = collect(ib.room, 'displaced');
     ib.room.send('dodge', { ...from, y: lampfall(from.x, from.z)!, facing: 0, moving: false, ack: ackB, dx: wickGate.ux, dz: wickGate.uz });
-    await waitFor(() => refused.some((r) => r.action === 'dodge'));
+    const roll = await waitFor(() => rolls.find((d) => d.kind === 'dodge'), 3000);
+    expect(Math.hypot(roll.to.x - wickGate.x, roll.to.z - wickGate.z)).toBeGreaterThanOrEqual(wickGate.r - 1e-6);
+    expect(Math.sign((roll.to.x - wickGate.x) * wickGate.ux + (roll.to.z - wickGate.z) * wickGate.uz)).toBe(-1);
+    expect(refused.filter((r) => r.action === 'dodge')).toEqual([]);
     // the boss's arena rule is in the engine: its camp carries the arena (P4-c)
     const hound = bossOf(ia.room, 'wickhound');
     expect(hound.camp.arena?.(den.x, den.z)).toBe(true);
@@ -247,5 +251,137 @@ describe('Lampfall bosses', () => {
     expect(travels).toEqual([]);
     expect(ia.room.state.lift).toBe(false);
     expect(w.enemies.size).toBe(1);
+  }, 20000);
+
+  it('review: a boss kill credits only those inside its arena: a party member at the landing gets no xp, Seal or victory; a duo kill gives no title', async () => {
+    const s = await start('landing');
+    const { ia, ib } = await duo(s);
+    sturdy(ia.room);
+    sturdy(ib.room); // B stays at the landing (about 45 m from the Warden)
+    place(ia.room, pit.x - 8, pit.z);
+    await waitFor(() => ia.room.state.sealed === 'warden', 4000);
+    const va = collect(ia.room, 'victory'), vb = collect(ib.room, 'victory'), xb = collect(ib.room, 'jobXp'), cb = collect(ib.room, 'credit');
+    const w = worldOf(serverRoom(ia.room).combat);
+    killEnemy(w, bossOf(ia.room, 'fallen_warden'), w.now);
+    const v = await waitFor(() => va[0], 3000);
+    await sleep(500);
+    expect(vb).toEqual([]);
+    expect(xb).toEqual([]);
+    expect(cb).toEqual([]);
+    expect(v.title).toBe(null); // two adventurers in the instance during the fight: no solo title
+    expect(await s.store.getOrCreateAdventurer((await s.store.findAccountByUsername('Bob'))!.id)).toMatchObject({ seals: 0 });
+  }, 30000);
+
+  it('review: a duo kill inside gives both a Seal and no title; a partner who joined and left gives no title either', async () => {
+    const s = await start('landing');
+    const { ia, ib } = await duo(s);
+    sturdy(ia.room);
+    sturdy(ib.room);
+    place(ib.room, pit.x - 6, pit.z + 3);
+    place(ia.room, pit.x - 8, pit.z);
+    await waitFor(() => ia.room.state.sealed === 'warden', 4000);
+    const va = collect(ia.room, 'victory'), vb = collect(ib.room, 'victory');
+    const w = worldOf(serverRoom(ia.room).combat);
+    killEnemy(w, bossOf(ia.room, 'fallen_warden'), w.now);
+    const [a1, b1] = [await waitFor(() => va[0], 3000), await waitFor(() => vb[0], 3000)];
+    expect([a1.title, b1.title, a1.seal, b1.seal, a1.partySize]).toEqual([null, null, true, true, 2]);
+    // a solo run where the partner walked in and out before the kill: no title
+    const c = await accountFor(s.store, 'Carol'), d = await accountFor(s.store, 'Dave');
+    for (const x of [c, d]) await saveAs(s.store, x.accountId, { zone: 'greenway', ...LAMPFALL_MOUTH.arrive });
+    const gc = await joinZone(s.url, c.token, 'greenway'), gd = await joinZone(s.url, d.token, 'greenway');
+    await partyUp(gc.room, gd.room, 'Dave');
+    await gc.room.leave();
+    await gd.room.leave();
+    const ic = await intoLampfall(s.url, s.store, c, { saved: false });
+    sturdy(ic.room);
+    place(ic.room, pit.x - 8, pit.z);
+    await waitFor(() => ic.room.state.sealed === 'warden', 4000);
+    const id = await intoLampfall(s.url, s.store, d, { saved: false });
+    await waitFor(() => ic.room.state.players.size === 2);
+    id.room.send('leaveInstance', {});
+    await waitFor(() => ic.room.state.players.size === 1, 3000);
+    const vc = collect(ic.room, 'victory');
+    const w2 = worldOf(serverRoom(ic.room).combat);
+    killEnemy(w2, bossOf(ic.room, 'fallen_warden'), w2.now);
+    expect((await waitFor(() => vc[0], 3000)).title).toBe(null);
+  }, 40000);
+
+  it('review: a Seal whose first save answer was lost (it went through) is reported as won', async () => {
+    const s = await start('landing');
+    const a = await accountFor(s.store, 'Alice');
+    const ia = await intoLampfall(s.url, s.store, a);
+    sturdy(ia.room);
+    place(ia.room, pit.x - 8, pit.z);
+    await waitFor(() => ia.room.state.sealed === 'warden', 4000);
+    const real = s.store.awardSeal.bind(s.store);
+    vi.spyOn(s.store, 'awardSeal').mockImplementationOnce(async (...args) => {
+      await real(...args);
+      throw new Error('connection lost after the write');
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const va = collect(ia.room, 'victory');
+    const w = worldOf(serverRoom(ia.room).combat);
+    killEnemy(w, bossOf(ia.room, 'fallen_warden'), w.now);
+    expect(await waitFor(() => va[0], 4000)).toMatchObject({ seal: true, seals: 1 });
+    err.mockRestore();
+  }, 30000);
+
+  it('review: an honest dodge toward a shut gate rolls up to the wall: no refusal, no correction', async () => {
+    const s = await start();
+    const a = await accountFor(s.store, 'Alice');
+    const ia = await intoLampfall(s.url, s.store, a);
+    sturdy(ia.room);
+    const at = by(wickExit, wickExit.r + 1.2);
+    place(ia.room, den.x - 3, den.z + 3); // wake it
+    await waitFor(() => ia.room.state.sealed === 'wickhound', 4000);
+    const ack = place(ia.room, at.x, at.z);
+    await sleep(200);
+    const refused = collect(ia.room, 'refused'), corrections = collect(ia.room, 'correct'), displaced = collect(ia.room, 'displaced');
+    ia.room.send('dodge', { ...at, y: lampfall(at.x, at.z)!, facing: 0, moving: false, ack, dx: -wickExit.ux, dz: -wickExit.uz });
+    const d = await waitFor(() => displaced.find((m) => m.kind === 'dodge'), 3000);
+    expect(Math.hypot(d.to.x - wickExit.x, d.to.z - wickExit.z)).toBeGreaterThanOrEqual(wickExit.r - 1e-6);
+    expect(Math.hypot(d.to.x - at.x, d.to.z - at.z)).toBeLessThan(1.3);
+    expect(refused.filter((r) => r.action === 'dodge')).toEqual([]);
+    expect(corrections).toEqual([]);
+  }, 20000);
+
+  it('review: someone in the exit gate circle when the seal comes is put on the room side; a knock toward a shut gate stops at it', async () => {
+    const s = await start();
+    const a = await accountFor(s.store, 'Alice');
+    const ia = await intoLampfall(s.url, s.store, a);
+    sturdy(ia.room);
+    place(ia.room, den.x - 3, den.z + 3); // wake it, then step (test-only) into the exit gate's wall before the seal
+    const hound = bossOf(ia.room, 'wickhound');
+    await waitFor(() => hound.targetId !== null, 3000);
+    place(ia.room, wickExit.x, wickExit.z);
+    const displaced = collect(ia.room, 'displaced');
+    await waitFor(() => ia.room.state.sealed === 'wickhound', 4000);
+    await waitFor(() => displaced.some((d) => d.kind === 'resync' && near(d.to, by(wickExit, wickExit.r + 0.5), 0.05)));
+    // a knock from the room's side toward the gate: it ends against the wall, not across it
+    const w = worldOf(serverRoom(ia.room).combat), me0 = w.adventurers.get(me(ia.room).eid)!;
+    const { knockAdventurer } = await import('../../../shared/src/combat/adventurer');
+    knockAdventurer(w, me0, { vx: -wickExit.ux * 12, vz: -wickExit.uz * 12, vy: 5, seconds: 0.4 }, w.now);
+    const k = await waitFor(() => displaced.find((d) => d.kind === 'knock'), 3000);
+    expect(Math.hypot(k.to.x - wickExit.x, k.to.z - wickExit.z)).toBeGreaterThanOrEqual(wickExit.r - 1e-6);
+    expect(Math.sign((k.to.x - wickExit.x) * wickExit.ux + (k.to.z - wickExit.z) * wickExit.uz)).toBe(1);
+  }, 20000);
+
+  it('review: a boss wipe unseals the gate and resets the boss to phase 0', async () => {
+    const s = await start();
+    const a = await accountFor(s.store, 'Alice');
+    const ia = await intoLampfall(s.url, s.store, a);
+    sturdy(ia.room);
+    place(ia.room, den.x - 3, den.z + 3);
+    await waitFor(() => ia.room.state.sealed === 'wickhound', 4000);
+    const w = worldOf(serverRoom(ia.room).combat), hound = bossOf(ia.room, 'wickhound');
+    damageEnemy(w, me(ia.room).eid, hound, 1e6, 'auto' as never, w.now);
+    const hs = () => [...ia.room.state.enemies.values()].find((e: any) => e.kind === 'wickhound') as any;
+    await waitFor(() => hs().phase === 1, 3000);
+    const respawned = collect(ia.room, 'respawned');
+    killAdventurer(w, w.adventurers.get(me(ia.room).eid)!, w.now);
+    await waitFor(() => respawned.length === 1, 4000);
+    await waitFor(() => ia.room.state.sealed === '' && (ia.room.state.gates & GATE_WICK) === 0);
+    await waitFor(() => (hs().phase ?? 0) === 0, 3000);
+    expect(ia.room.state.gates).toBe(GATE_WICK_EXIT);
   }, 20000);
 });

@@ -9,9 +9,6 @@ import { INSTANCE_EMPTY_S, INSTANCE_MAX_S, MAX_INSTANCES, REASON_INSTANCE_CLOSED
 import type { Parties } from '../party/parties';
 import type { ZoneRoom } from './ZoneRoom';
 
-/** Walking into the crater mouth mid-fight (corrected, with this notice). */
-export const REASON_IN_COMBAT = 'Finish the fight before you climb down into the Lampfall';
-
 export interface InstanceInfo {
   key: string;
   roomId: string;

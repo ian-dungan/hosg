@@ -102,7 +102,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       if (!isUtcDay(dayUtc)) throw new TypeError(`awardSeal: not a day: ${String(dayUtc)}`);
       const adventurer = adventurersById.get(adventurerId);
       if (!adventurer) return { awarded: false, seals: 0 };
-      if (adventurer.sealDay === dayUtc) return { awarded: false, seals: adventurer.seals };
+      if (adventurer.sealDay !== null && adventurer.sealDay >= dayUtc) return { awarded: false, seals: adventurer.seals }; // ('YYYY-MM-DD' sorts as dates)
       adventurer.seals += 1;
       adventurer.sealDay = dayUtc;
       return { awarded: true, seals: adventurer.seals };

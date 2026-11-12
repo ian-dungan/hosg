@@ -342,6 +342,9 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       // a save (any zone, position, hp, jobs) leaves seals, the day and titles alone
       expect(await store.saveAdventurer(saved(a, { x: 5 }))).toBe(true);
       expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ seals: 2, sealDay: '2026-11-13', x: 5 });
+      // a clock that steps back (a skewed host, a day boundary seen late) never gives a second Seal for an older day
+      expect(await store.awardSeal(a.id, '2026-11-12')).toEqual({ awarded: false, seals: 2 });
+      expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ seals: 2, sealDay: '2026-11-13' });
       await expect(store.awardSeal(a.id, 'yesterday')).rejects.toThrow(TypeError);
       await expect(store.awardSeal(a.id, '2026-02-30')).rejects.toThrow(TypeError);
       expect(await store.awardSeal('00000000-0000-4000-8000-000000000000', '2026-11-13')).toEqual({ awarded: false, seals: 0 });
@@ -459,7 +462,7 @@ if (databaseUrl) {
       await client.connect();
       try {
         const { rows } = await client.query('SELECT name FROM schema_migrations ORDER BY name');
-        expect(rows).toEqual([{ name: '001_init.sql' }, { name: '002_adventurer_names.sql' }, { name: '003_combat.sql' }, { name: '004_jobs.sql' }]);
+        expect(rows).toEqual([{ name: '001_init.sql' }, { name: '002_adventurer_names.sql' }, { name: '003_combat.sql' }, { name: '004_jobs.sql' }, { name: '005_parties_and_warden.sql' }]);
       } finally {
         await client.end();
       }

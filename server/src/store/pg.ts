@@ -211,10 +211,10 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
     async awardSeal(adventurerId, dayUtc) {
       if (!isUtcDay(dayUtc)) throw new TypeError(`awardSeal: not a day: ${String(dayUtc)}`);
       if (!UUID_RE.test(adventurerId)) return { awarded: false, seals: 0 };
-      // One statement: only a row whose seal_day is not that day gains one (two kills, a retry, two
-      // processes: at most one Seal a UTC day).
+      // One statement: only a row whose seal_day is before that day gains one (two kills, a retry, two
+      // processes, a clock that steps back: at most one Seal a UTC day, never one for an older day).
       const { rows } = await pool.query<{ seals: number }>(
-        `UPDATE adventurers SET seals = seals + 1, seal_day = $2::date WHERE id = $1 AND seal_day IS DISTINCT FROM $2::date RETURNING seals`,
+        `UPDATE adventurers SET seals = seals + 1, seal_day = $2::date WHERE id = $1 AND (seal_day IS NULL OR seal_day < $2::date) RETURNING seals`,
         [adventurerId, dayUtc],
       );
       if (rows[0]) return { awarded: true, seals: rows[0].seals };
