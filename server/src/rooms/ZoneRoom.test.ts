@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { signToken } from '../auth/tokens';
-import { SECRET, accountFor, collect, joinGrove, saveAs, sleep, startServer, testClock, waitFor, walk, type TestServer } from './testHelpers';
+import { SECRET, accountFor, collect, joinGrove, saveAs, shown, sleep, startServer, sx, sy, testClock, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -111,9 +111,9 @@ describe('movement', () => {
 
     const sentAt = Date.now();
     a.room.send('move', { x: 0.4, z: -11, y: ground(0.4, -11), facing: 1.5, moving: true });
-    await waitFor(() => b.room.state.players.get(a.room.sessionId)?.x === 0.4, 300);
+    await waitFor(() => b.room.state.players.get(a.room.sessionId)?.x === sx(0.4), 300);
     expect(Date.now() - sentAt).toBeLessThan(300);
-    expect(b.room.state.players.get(a.room.sessionId)).toMatchObject({ x: 0.4, z: -11, y: ground(0.4, -11), facing: 1.5, moving: true });
+    expect(b.room.state.players.get(a.room.sessionId)).toMatchObject(shown({ x: 0.4, z: -11, y: ground(0.4, -11), facing: 1.5, moving: true }));
   });
 
   it('corrects a move that is too fast and leaves the state unchanged', async () => {
@@ -135,7 +135,7 @@ describe('movement', () => {
     a.room.send('move', 'hello');
     a.room.send('move', null);
     a.room.send('move', pose(0.4, -11));
-    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === 0.4);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === sx(0.4));
     expect(corrections).toEqual([]);
   });
 
@@ -148,7 +148,7 @@ describe('movement', () => {
     await sleep(100);
     const me = a.room.state.players.get(a.room.sessionId);
     expect(me.x - SPAWN.x).toBeLessThanOrEqual(6 * 1.3 + 0.5 + 0.2); // one second's worth plus slack, no more
-    expect(corrections.at(-1)).toEqual({ x: me.x, z: SPAWN.z, y: me.y });
+    expect(shown(corrections.at(-1))).toEqual({ x: me.x, z: SPAWN.z, y: me.y });
   });
 
   it('does not give a re-joining account a fresh allowance', async () => {
@@ -160,7 +160,7 @@ describe('movement', () => {
     for (let i = 1; i <= 40; i++) first.room.send('move', pose(SPAWN.x + i * 0.4, SPAWN.z));
     await waitFor(() => firstCorrections.length > 0);
     // The correction names the last accepted position; wait for the state patch to show it too.
-    await waitFor(() => first.room.state.players.get(first.room.sessionId).x === firstCorrections[0].x);
+    await waitFor(() => first.room.state.players.get(first.room.sessionId).x === sx(firstCorrections[0].x));
     const spentAt = first.room.state.players.get(first.room.sessionId).x;
     expect(spentAt - SPAWN.x).toBeGreaterThan(7);
 
@@ -186,7 +186,7 @@ describe('movement', () => {
     const me = a.room.state.players.get(a.room.sessionId);
     const next = me.x + 0.4;
     a.room.send('move', pose(next, SPAWN.z));
-    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === next);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === sx(next));
     expect(left).toBe(false);
   });
 
@@ -204,7 +204,7 @@ describe('movement', () => {
     }
     // Another adventurer's move still goes through promptly.
     b.room.send('move', pose(SPAWN.x - 0.4, SPAWN.z));
-    await waitFor(() => a.room.state.players.get(b.room.sessionId)?.x === SPAWN.x - 0.4, 500);
+    await waitFor(() => a.room.state.players.get(b.room.sessionId)?.x === sx(SPAWN.x - 0.4), 500);
     await sleep(200);
     const elapsed = (Date.now() - floodStart) / 1000;
     const travelled = a.room.state.players.get(a.room.sessionId).x - SPAWN.x;
@@ -217,14 +217,14 @@ describe('movement', () => {
     const a = await joinGrove(url, (await accountFor(store, 'Alice')).token);
     const corrections = collect(a.room, 'correct');
     await walk(a.room, SPAWN, { x: 0, z: -4.6 });
-    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.z === -4.6);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.z === sx(-4.6));
     a.room.send('move', pose(0, -4.2)); // a short step onto the plinth
     await sleep(1000); // long enough that (0, 0) is in range: only the plinth blocks it
     a.room.send('move', pose(0, 0));
     await waitFor(() => corrections.length === 2);
     const before = { x: 0, z: -4.6, y: ground(0, -4.6) };
     expect(corrections).toEqual([before, before]);
-    expect(a.room.state.players.get(a.room.sessionId)).toMatchObject({ x: 0, z: -4.6 });
+    expect(a.room.state.players.get(a.room.sessionId)).toMatchObject(shown({ x: 0, z: -4.6 }));
   });
 });
 
@@ -297,12 +297,12 @@ describe('sessions', () => {
     const { accountId, token } = await accountFor(store, 'Alice');
     const first = await joinGrove(url, token);
     await walk(first.room, SPAWN, { x: 1.2, z: -10 });
-    await waitFor(() => first.room.state.players.get(first.room.sessionId)?.x === 1.2);
+    await waitFor(() => first.room.state.players.get(first.room.sessionId)?.x === sx(1.2));
     await first.room.leave();
     await waitFor(async () => (await store.getOrCreateAdventurer(accountId)).x === 1.2);
 
     const again = await joinGrove(url, token);
-    expect(again.room.state.players.get(again.room.sessionId)).toMatchObject({ x: 1.2, z: -10 });
+    expect(again.room.state.players.get(again.room.sessionId)).toMatchObject(shown({ x: 1.2, z: -10 }));
   });
 
   it('saves online adventurers every saveSeconds', async () => {
@@ -322,7 +322,7 @@ describe('sessions', () => {
     const a = await joinGrove(url, (await accountFor(failing, 'Alice')).token);
     await waitFor(() => logged.mock.calls.length > 0);
     a.room.send('move', pose(0.4, -11));
-    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === 0.4);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId)?.x === sx(0.4));
   });
 
   it('keeps a dropped adventurer for the reconnect window, then saves and removes them', async () => {
@@ -331,7 +331,7 @@ describe('sessions', () => {
     const a = await joinGrove(url, alice.token);
     const b = await joinGrove(url, (await accountFor(store, 'Bob')).token);
     a.room.send('move', pose(0.4, -11));
-    await waitFor(() => b.room.state.players.get(a.room.sessionId)?.x === 0.4);
+    await waitFor(() => b.room.state.players.get(a.room.sessionId)?.x === sx(0.4));
 
     // Drop A's socket without consent: A stays in the world, and reconnecting resumes the same entry.
     a.room.connection.close();
@@ -341,7 +341,7 @@ describe('sessions', () => {
     resumed.reconnection.enabled = false;
     expect(resumed.sessionId).toBe(a.room.sessionId);
     resumed.send('move', pose(0.8, -11));
-    await waitFor(() => b.room.state.players.get(a.room.sessionId)?.x === 0.8);
+    await waitFor(() => b.room.state.players.get(a.room.sessionId)?.x === sx(0.8));
     expect(b.room.state.players.size).toBe(2);
 
     // Drop again and stay away: after the window the entry is gone and the position was saved.
@@ -378,9 +378,9 @@ describe('sessions', () => {
 
       // State patches flow again: B's move shows up on A, and A's move on B.
       b.room.send('move', pose(0.4, -11));
-      await waitFor(() => a.room.state.players.get(b.room.sessionId)?.x === 0.4);
+      await waitFor(() => a.room.state.players.get(b.room.sessionId)?.x === sx(0.4));
       a.room.send('move', pose(-0.4, -11));
-      await waitFor(() => b.room.state.players.get(sessionId)?.x === -0.4);
+      await waitFor(() => b.room.state.players.get(sessionId)?.x === sx(-0.4));
       expect(b.room.state.players.size).toBe(2);
       expect(left).toBe(false);
     });
@@ -517,7 +517,7 @@ describe('height', () => {
     await sleep(200);
     expect(corrections).toEqual([]);
     expect(Math.max(...seen) - ground(SPAWN.x, SPAWN.z)).toBeGreaterThan(1.2);
-    expect(b.room.state.players.get(a.room.sessionId).y).toBeCloseTo(body.y, 9);
+    expect(b.room.state.players.get(a.room.sessionId).y).toBe(sy(body.y));
   });
 
   it('corrects a pose 50 m up and leaves the state unchanged', async () => {
@@ -619,7 +619,7 @@ describe('height', () => {
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const corrections = collect(a.room, 'correct');
     await sendPoses(a.room, [...rampPoses(), { x: RAMP_END + 0.3, z: RAMP_Z, y: 9.9, facing: 0, moving: true }]);
-    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 9.9);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === sy(9.9));
 
     a.room.connection.close(); // dropped in the air
     await sleep(200);
@@ -638,11 +638,11 @@ describe('height', () => {
     await saveAs(store, accountId, { x: 0, z: RAMP_Z, facing: 0 });
     const first = await joinGrove(url, token);
     await sendPoses(first.room, [...rampPoses(), { x: RAMP_END + 0.3, z: RAMP_Z, y: 9.9, facing: 0, moving: true }]);
-    await waitFor(() => first.room.state.players.get(first.room.sessionId).y === 9.9);
+    await waitFor(() => first.room.state.players.get(first.room.sessionId).y === sy(9.9));
     collect(first.room, 'kicked');
     const again = await joinGrove(url, token); // kicks the first session
     const hurts = collect(again.room, 'hurt');
-    expect(again.room.state.players.get(again.room.sessionId)).toMatchObject({ x: RAMP_END + 0.3, y: 9.9 });
+    expect(again.room.state.players.get(again.room.sessionId)).toMatchObject(shown({ x: RAMP_END + 0.3, y: 9.9 }));
     again.room.send('move', { x: RAMP_END + 0.6, z: RAMP_Z, y: 0, facing: 0, moving: true });
     await waitFor(() => hurts.length > 0);
     expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
@@ -662,7 +662,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
     await sendPoses(a.room, [...rampPoses(), offTheTop]);
     await sleep(2500);
     await sendPoses(a.room, [below, { ...below, x: below.x + 0.4 }]);
-    await waitFor(() => a.room.state.players.get(a.room.sessionId).x === below.x + 0.4);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).x === sx(below.x + 0.4));
     expect(corrections).toEqual([]);
     expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
   });
@@ -671,7 +671,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
     const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     await sendPoses(a.room, [...rampPoses(), offTheTop]);
-    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 9.9);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === sy(9.9));
     a.room.connection.close();
     await sleep(2500);
     const resumed = await a.client.reconnect(a.room.reconnectionToken);
@@ -682,7 +682,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
     await waitFor(() => hurts.length > 0);
     expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
     resumed.send('move', { ...below, x: below.x + 0.4 });
-    await waitFor(() => resumed.state.players.get(resumed.sessionId).x === below.x + 0.4);
+    await waitFor(() => resumed.state.players.get(resumed.sessionId).x === sx(below.x + 0.4));
     expect(corrections).toEqual([]);
   });
 
@@ -692,7 +692,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
     await saveAs(store, accountId, { x: 0, z: RAMP_Z, facing: 0 });
     const first = await joinGrove(url, token);
     await sendPoses(first.room, [...rampPoses(), offTheTop]);
-    await waitFor(() => first.room.state.players.get(first.room.sessionId).y === 9.9);
+    await waitFor(() => first.room.state.players.get(first.room.sessionId).y === sy(9.9));
     collect(first.room, 'kicked');
     await sleep(2500);
     const again = await joinGrove(url, token);
@@ -710,7 +710,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
     const corrections = collect(a.room, 'correct');
     const hurts = collect(a.room, 'hurt');
     await sendPoses(a.room, [...rampPoses(), offTheTop]);
-    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 9.9);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).y === sy(9.9));
     a.room.send('move', { ...offTheTop, y: 50 });
     await waitFor(() => corrections.length > 0);
     const landed = { x: offTheTop.x, z: offTheTop.z, y: 0 };
@@ -718,10 +718,10 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
     await waitFor(() => hurts.length > 0);
     expect(hurts).toEqual([{ amount: fallDamage(10), cause: 'fall' }]);
     await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 0);
-    expect(a.room.state.players.get(a.room.sessionId)).toMatchObject(landed);
+    expect(a.room.state.players.get(a.room.sessionId)).toMatchObject(shown(landed));
     // the client takes the corrected pose and carries on from it: accepted, no loop
     a.room.send('move', { ...landed, x: landed.x + 0.4, facing: 0, moving: true });
-    await waitFor(() => a.room.state.players.get(a.room.sessionId).x === landed.x + 0.4);
+    await waitFor(() => a.room.state.players.get(a.room.sessionId).x === sx(landed.x + 0.4));
     expect(corrections).toHaveLength(1);
     expect(hurts).toHaveLength(1);
   });

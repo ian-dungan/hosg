@@ -37,16 +37,20 @@ export interface AppOptions {
   respawnRetryMs?: number;
 }
 
+/** One zone's numbers in stats() and /healthz. */
+export interface ZoneStats { players: number; tickHz: number; tickMs: number; patchMs: number; stepErrors: number }
+
 export interface App {
   listen(port: number): Promise<void>;
   close(): Promise<void>;
   /**
    * Adventurers online, and state patches sent per second over the last 5 s: in all, and per zone.
    * The overall tickHz is the lowest among zones with adventurers (the grove's when none have any).
-   * Each zone's tickMs is the p95 of its room step's time over the last 5 s; stepErrors counts the
-   * failures its steps and handlers caught (and carried on from) since it started.
+   * Each zone's tickMs is the p95 of its room step's time over the last 5 s, and patchMs that of its
+   * state patches (one encode per client's view); stepErrors counts the failures its steps and
+   * handlers caught (and carried on from) since it started.
    */
-  stats(): { players: number; tickHz: number; zones: Record<ZoneId, { players: number; tickHz: number; tickMs: number; stepErrors: number }> };
+  stats(): { players: number; tickHz: number; zones: Record<ZoneId, ZoneStats> };
   /** Whether the exits from `from` to `to` are open now. */
   isExitOpen(from: ZoneId, to: ZoneId): boolean;
   /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
@@ -75,9 +79,12 @@ export function createApp(opts: AppOptions): App {
     const perZone = Object.fromEntries(
       ZONE_IDS.map((id) => {
         const room = rooms.get(id);
-        return [id, { players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0), tickMs: Math.round((room?.tickMsP95 ?? 0) * 100) / 100, stepErrors: room?.stepErrors ?? 0 }];
+        return [id, {
+          players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0), tickMs: Math.round((room?.tickMsP95 ?? 0) * 100) / 100,
+          patchMs: Math.round((room?.patchMsP95 ?? 0) * 100) / 100, stepErrors: room?.stepErrors ?? 0,
+        }];
       }),
-    ) as Record<ZoneId, { players: number; tickHz: number; tickMs: number; stepErrors: number }>;
+    ) as Record<ZoneId, ZoneStats>;
     const busy = ZONE_IDS.filter((id) => perZone[id].players > 0).map((id) => perZone[id].tickHz);
     return {
       players: ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),

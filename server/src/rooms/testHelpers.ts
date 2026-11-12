@@ -9,6 +9,7 @@ import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
 import type { Adventurer, Store } from '../store/types';
 import type { ZoneRoom } from './ZoneRoom';
+import { PlayerState } from './state';
 
 export const SECRET = 'test-secret-that-is-at-least-32-characters';
 
@@ -125,4 +126,18 @@ export function testClock(rate = 1) {
 /** The server-side room object behind a client's room (same process). */
 export function serverRoom(room: Room<any, any>): ZoneRoom {
   return matchMaker.getLocalRoomById(room.roomId) as unknown as ZoneRoom;
+}
+
+const probe = new PlayerState();
+/** What the state shows for an x or z the server took (positions are quantised on the wire: state.ts). */
+export const sx = (v: number): number => ((probe.x = v), probe.x);
+/** What the state shows for a feet height. */
+export const sy = (v: number): number => ((probe.y = v), probe.y);
+/** What the state shows for a facing (read back in [0, 2π)). */
+export const sf = (v: number): number => ((probe.facing = v), probe.facing);
+/** `pose` as the state shows it: x, z, y and facing quantised, everything else as it is. */
+export function shown<T extends object>(pose: T): T {
+  const out = { ...pose } as Record<string, unknown>;
+  for (const [k, f] of [['x', sx], ['z', sx], ['y', sy], ['facing', sf]] as const) if (typeof out[k] === 'number') out[k] = f(out[k] as number);
+  return out as T;
 }

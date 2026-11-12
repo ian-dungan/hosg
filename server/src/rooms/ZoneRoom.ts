@@ -2,7 +2,11 @@
 // window, travel through open exits, one session per account across every room, and the zone's
 // fight: the shared combat engine run on the room's tick, fed with validated intents, and mirrored
 // to clients (state, per-client fx, `self`), with server-stamped dodges and knockbacks, death and respawn.
+// Each client's state is its own view (interest management): itself, and the adventurers, enemies and
+// telegraphs near it (INTEREST_RADIUS, with hysteresis), kept from a spatial grid rebuilt each step;
+// `online` is the zone's head count. Chat stays zone-wide, and fx follow the views.
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
+import { StateView } from '@colyseus/schema';
 import {
   ABILITIES,
   CHAT_MIN_INTERVAL_MS,
@@ -11,7 +15,6 @@ import {
   DODGE_CHARGES,
   DODGE_MIN_GAP_S,
   DODGE_REFILL_S,
-  FX_RADIUS,
   MAX_HP,
   MAX_MOVE_ALLOWANCE,
   MOMENTUM_DECAY_PER_S,
@@ -51,6 +54,7 @@ import {
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
 import type { Adventurer, AdventurerSave, Store } from '../store/types';
+import { Grid, dist2, interested, telegraphInterested, type Placed } from './interest';
 import { PatchRateMeter } from './patchRate';
 import type { Allowance, Presence } from './presence';
 import { EnemyState as EnemySchema, PlayerState, TelegraphState as TelegraphSchema, ZoneState } from './state';
@@ -90,6 +94,12 @@ const RESPAWN_ZONE: ZoneId = 'grove';
 const MAX_TICKS_PER_STEP = 16;
 /** `self` goes to each owner every this many steps at most (TICK_HZ / 3 = 5 a second). */
 const SELF_EVERY_STEPS = 3;
+/**
+ * Each client's view is checked against the interest radius every this many steps (spread over the
+ * steps by session; telegraphs and targets every step). At 2 that is 7.5 times a second: an adventurer
+ * running (or sprinting, 8.4 m/s) covers about 1 m in between, well inside the 10 m hysteresis band.
+ */
+const VIEW_FULL_EVERY_STEPS = 2;
 /** Window over which a room's step time p95 is measured (ms). */
 const TICK_WINDOW_MS = 5000;
 /** The same kind of failure (a step phase, a handler, a save) is logged at most this often (ms). */
@@ -120,6 +130,21 @@ const FRESH_CARRY: Carry = { cooldowns: {}, gcd: 0, dodgeCharges: DODGE_CHARGES,
  * ms: the longest cooldown anything has, plus a margin. After that everything would be ready anyway.
  */
 const CARRY_KEEP_MS = (Math.max(...Object.values(ABILITIES).map((a) => a.cooldown), DODGE_REFILL_S * DODGE_CHARGES) + 5) * 1000;
+
+/** A measured time (ms) and when it was taken (wall ms). */
+interface Timing { at: number; ms: number }
+/** Drops timings older than TICK_WINDOW_MS (oldest first). */
+function forgetOld(times: Timing[], now: number) {
+  let old = 0;
+  while (old < times.length && times[old].at <= now - TICK_WINDOW_MS) old++;
+  if (old > 0) times.splice(0, old);
+}
+/** p95 of the timings (0 for none). */
+function p95(times: Timing[]): number {
+  if (times.length === 0) return 0;
+  const sorted = times.map((t) => t.ms).sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)];
+}
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const round2 = (v: number) => Math.round(v * 100) / 100;
@@ -168,13 +193,21 @@ function enemyMode(v: CombatantView): string {
 /** One adventurer in the room. */
 interface Session {
   client: Client;
+  /** What this client's state holds besides its own adventurer (the room keeps it every step; see updateView). */
+  view: StateView;
+  /** The adventurers, enemies and telegraphs in `view` (not its own adventurer). */
+  seen: Set<Viewed>;
+  /** Which step (mod VIEW_FULL_EVERY_STEPS) its view's radius check falls on. */
+  viewTurn: number;
   accountId: string;
   adventurerId: string;
   player: PlayerState;
   /** The equipped weapon and free picks, saved with the adventurer (changed only out of combat, from Task 6). */
   loadout: Loadout;
-  /** Last accepted position. */
+  /** Last accepted position (exact: the state's copy is quantised). */
   lastGood: { x: number; z: number; y: number };
+  /** Last accepted facing (exact, as sent). */
+  facing: number;
   /** The account's movement allowance and air track (shared with its later sessions). */
   movement: Allowance;
   /** Its id in the combat engine. */
@@ -224,6 +257,9 @@ interface Session {
   lastNotice?: { text: string; at: number };
 }
 
+/** Something a client's view can hold. */
+type Viewed = PlayerState | EnemySchema | TelegraphSchema;
+
 /** What a successful onAuth attaches to the client (`client.auth`). */
 interface JoinAuth {
   accountId: string;
@@ -271,7 +307,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private sessionByEid = new Map<number, Session>();
   private steps = 0;
   /** Step times (ms) over the last TICK_WINDOW_MS, oldest first. */
-  private tickTimes: { at: number; ms: number }[] = [];
+  private tickTimes: Timing[] = [];
+  /** Patch times (ms) over the last TICK_WINDOW_MS, oldest first. */
+  private patchTimes: Timing[] = [];
   /** When each kind of failure was last logged (wall ms). */
   private loggedAt = new Map<string, number>();
   /** Failures caught in steps and handlers since the room started (stats). */
@@ -294,6 +332,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** Travels still being saved, by session id: they outlive the session if it is kicked or leaves meanwhile. */
   private travels = new Map<string, Promise<void>>();
   private patchMeter = new PatchRateMeter(Date.now());
+  /** Adventurers and enemies by position, rebuilt each step for the views. */
+  private grid = new Grid<PlayerState | EnemySchema>();
+  /** Engine ids of the owners of telegraphs a view holds, reused by updateView. */
+  private owners = new Set<number>();
+  /** Joins so far (spreads the views' radius checks over the steps). */
+  private joins = 0;
 
   onCreate(options: ZoneRoomOptions) {
     // Never a second room for a zone (Colyseus would open one if it ever saw this one as full).
@@ -397,11 +441,15 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     });
     const session: Session = {
       client,
+      view: new StateView(),
+      seen: new Set(),
+      viewTurn: this.joins++ % VIEW_FULL_EVERY_STEPS,
       accountId,
       adventurerId: adventurer.id,
       player,
       loadout,
       lastGood: { x: start.x, z: start.z, y },
+      facing: start.facing,
       movement,
       eid,
       displaceSeq: 0,
@@ -426,6 +474,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.sessionByEid.set(eid, session);
     this.mirrorPlayer(session);
     this.state.players.set(sessionId, player);
+    this.state.online = this.state.players.size;
+    // Its view: itself always, and at once whatever is near (so its first state already shows them).
+    session.view.add(player);
+    client.view = session.view;
+    this.refreshView(session);
   }
 
   onDrop(client: Client) {
@@ -440,7 +493,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const session = this.sessions.get(client.sessionId);
     if (!session) return;
     session.client = client;
+    client.view = session.view; // (Colyseus carries it over too)
     session.reconnection = undefined;
+    // Its view stood still while it was away: brought up to date at once.
+    this.refreshView(session);
     // It may have missed the message that set the ack its moves must carry, and its `self` is stale.
     if (session.lastSeqMessage) this.sendTo(client, session.lastSeqMessage.type, session.lastSeqMessage.message as never);
     session.lastSelf = '';
@@ -490,7 +546,21 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   broadcastPatch(): boolean {
     this.patchMeter.record(Date.now());
-    return super.broadcastPatch();
+    const started = performance.now();
+    const sent = super.broadcastPatch();
+    const now = Date.now();
+    this.patchTimes.push({ at: now, ms: performance.now() - started });
+    forgetOld(this.patchTimes, now);
+    return sent;
+  }
+
+  /**
+   * p95 of the time a state patch takes to encode and send (ms, last 5 s; 0 before any): with
+   * per-client views that is one encode per client, outside the step.
+   */
+  get patchMsP95(): number {
+    forgetOld(this.patchTimes, Date.now());
+    return p95(this.patchTimes);
   }
 
   /** Adventurers in this room, including ones inside their reconnect window. */
@@ -537,6 +607,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const before = session.lastGood;
     movement.metres -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
     session.lastGood = { x: pose.x, z: pose.z, y: pose.y };
+    session.facing = pose.facing;
     session.anim = undefined;
     Object.assign(session.player, { x: pose.x, z: pose.z, y: pose.y, facing: pose.facing, moving: pose.moving });
     this.combat.setPose(session.eid, pose.x, pose.z, pose.y, pose.facing);
@@ -709,7 +780,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         if (!respawn) {
           session.lastGood = before;
           Object.assign(session.player, before, { moving: false });
-          this.combat.setPose(session.eid, before.x, before.z, before.y, session.player.facing);
+          this.combat.setPose(session.eid, before.x, before.z, before.y, session.facing);
           this.correct(session, this.wallMs());
         }
         this.notice(session, REASON_TRAVEL_FAILED, this.wallMs());
@@ -759,7 +830,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       session.lastGood = { x, z, y: groundY };
       session.player.y = groundY;
       session.player.moving = false;
-      this.combat.setPose(session.eid, x, z, groundY, session.player.facing);
+      this.combat.setPose(session.eid, x, z, groundY, session.facing);
       if (damage > 0) this.fall(session, damage);
     }
     this.sendTo(session.client, 'correct', { ...session.lastGood });
@@ -822,6 +893,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.sessions.delete(sessionId);
     if (this.sessionByAccount.get(session.accountId) === sessionId) this.sessionByAccount.delete(session.accountId);
     this.state.players.delete(sessionId);
+    this.state.online = this.state.players.size;
+    // Everyone who saw it gets its removal with the state; their views forget it, and its own view goes.
+    for (const other of this.sessions.values()) other.seen.delete(session.player);
+    // A client still connected for a moment (travelling, kicked) gets only the unfiltered state until it goes.
+    if (session.client.view === session.view) session.client.view = undefined;
+    session.view.dispose();
     this.leaveFight(session);
     if (session.travelling) {
       // The account stays held until the travel's save settles, so a sign-in meanwhile (anywhere)
@@ -893,7 +970,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private async save(
     session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>, expectZone: ZoneId = this.zone.id,
   ): Promise<'saved' | 'refused' | 'failed'> {
-    const { x, z, facing } = session.player;
+    // Where it really is (the state's copy is quantised, and mid-displacement shows the path).
+    const { x, z } = session.lastGood, facing = session.facing;
     // Health as a whole number rounded down (at least 1): a relog never gains the fraction.
     const hp = Math.max(1, Math.floor(session.hpExact));
     // The dead are always saved as respawned: at the statue, with full health.
@@ -974,6 +1052,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     });
     this.accounts.respawns.delete(session.accountId);
     session.lastGood = { x, z, y };
+    session.facing = facing;
     session.movement.air = makeAirTrack(y);
     session.movement.zone = this.zone.id;
     Object.assign(session.player, { x, z, y, facing, moving: false });
@@ -993,16 +1072,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /** p95 of the room's step time over the last 5 s, in ms (0 before any step). */
   get tickMsP95(): number {
-    this.forgetTicks(Date.now());
-    if (this.tickTimes.length === 0) return 0;
-    const sorted = this.tickTimes.map((t) => t.ms).sort((a, b) => a - b);
-    return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)];
-  }
-
-  private forgetTicks(now: number) {
-    let old = 0;
-    while (old < this.tickTimes.length && this.tickTimes[old].at <= now - TICK_WINDOW_MS) old++;
-    if (old > 0) this.tickTimes.splice(0, old);
+    forgetOld(this.tickTimes, Date.now());
+    return p95(this.tickTimes);
   }
 
   /** One room step, timed: every part of it runs, whatever another part throws (see safely). */
@@ -1011,7 +1082,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.advance();
     const now = Date.now();
     this.tickTimes.push({ at: now, ms: performance.now() - started });
-    this.forgetTicks(now);
+    forgetOld(this.tickTimes, now);
   }
 
   /**
@@ -1050,6 +1121,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       });
     }
     this.safely('mirror', () => this.mirrorAll());
+    this.safely('views', () => this.updateViews());
     if (fx.length > 0) this.safely('fx', () => this.sendFx(fx));
     if (this.steps % SELF_EVERY_STEPS === 0) {
       for (const session of this.sessions.values()) this.safely('self', () => this.sendSelf(session));
@@ -1132,19 +1204,91 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
   }
 
-  /** Each client gets the events that involve its adventurer, or happen within FX_RADIUS of it. */
+  /**
+   * Each client gets the events that involve its adventurer, or whose focus (target, else source) is in
+   * its view: what it can draw (FX_RADIUS is the interest radius).
+   */
   private sendFx(events: FxEvent[]) {
-    const focus = events.map((e) => this.combat.get(fxFocus(e)) ?? null);
-    const r2 = FX_RADIUS * FX_RADIUS;
+    const focus = events.map((e) => this.viewedOf(fxFocus(e)));
     for (const session of this.sessions.values()) {
       if (session.reconnection) continue;
-      const { x, z } = session.player;
       const mine = events.filter((e, i) => {
         if (fxInvolves(e, session.eid)) return true;
         const at = focus[i];
-        return at !== null && (at.x - x) * (at.x - x) + (at.z - z) * (at.z - z) <= r2;
+        return at !== undefined && session.seen.has(at);
       });
       if (mine.length > 0) this.sendTo(session.client, 'fx', { events: mine });
+    }
+  }
+
+  /** The state entry of an engine id: an adventurer's PlayerState or an enemy's EnemyState. */
+  private viewedOf(eid: number): Viewed | undefined {
+    return this.sessionByEid.get(eid)?.player ?? this.state.enemies.get(this.keyOf(eid));
+  }
+
+  // ───────── interest (per-client views) ─────────
+
+  /** Every connected client's view, from a grid of everyone's position rebuilt for the step. */
+  private updateViews() {
+    this.fillGrid();
+    for (const session of this.sessions.values()) {
+      const full = (session.viewTurn + this.steps) % VIEW_FULL_EVERY_STEPS === 0;
+      if (!session.reconnection) this.safely('view', () => this.updateView(session, full));
+    }
+  }
+
+  /** The grid holds every adventurer and enemy in the state, where it is now. */
+  private fillGrid() {
+    const grid = this.grid;
+    grid.clear();
+    for (const session of this.sessions.values()) grid.insert(session.player);
+    for (const e of this.state.enemies.values()) grid.insert(e);
+  }
+
+  /** One client's view brought up to date now (a join, a reconnect), from a fresh grid. */
+  private refreshView(session: Session) {
+    this.safely('views', () => {
+      this.fillGrid();
+      this.updateView(session);
+    });
+  }
+
+  /**
+   * One client's view, by the interest rule (interested): adventurers and enemies within the radius
+   * come in, and go out only beyond the hysteresis band. Its own adventurer is always in it. Kept in
+   * whatever the radius: the enemy it targets, enemies targeting it, and the owner of any telegraph it
+   * sees; a telegraph is seen when any part of it reaches within the radius (telegraphInterested) or
+   * its owner is seen, and stays until it resolves. Telegraphs and the target are checked every step;
+   * the radius (`full`) every VIEW_FULL_EVERY_STEPS steps. Cost: the grid cells around it plus what it sees.
+   * (Parties, from Plan 4, belong with the target: kept in whatever the radius.)
+   */
+  private updateView(session: Session, full = true) {
+    const me = session.player, seen = session.seen, view = session.view;
+    const owners = this.owners;
+    owners.clear();
+    const show = (item: Viewed) => {
+      if (seen.has(item)) return;
+      seen.add(item);
+      view.add(item);
+    };
+    for (const t of this.state.telegraphs.values()) {
+      const owner = this.state.enemies.get(this.keyOf(t.owner));
+      if (!seen.has(t) && !telegraphInterested(me, t) && !(owner && seen.has(owner))) continue;
+      show(t);
+      owners.add(t.owner);
+      if (owner) show(owner);
+    }
+    const target = me.target >= 0 ? this.state.enemies.get(this.keyOf(me.target)) : undefined;
+    if (target) show(target);
+    if (!full) return;
+    this.grid.near(me.x, me.z, (item) => {
+      if (interested(dist2(me, item), false) && item !== me && !seen.has(item)) show(item);
+    });
+    for (const item of seen) {
+      if (item instanceof TelegraphSchema || interested(dist2(me, item as Placed), true)) continue;
+      if (item instanceof EnemySchema && (item === target || item.target === me.eid || owners.has(item.eid))) continue;
+      seen.delete(item);
+      view.remove(item);
     }
   }
 
@@ -1248,7 +1392,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         width: s.kind === 'line' ? s.width : 0, angle: s.kind === 'cone' ? s.angle : 0, total: t.total,
       }));
     }
-    for (const key of [...this.state.telegraphs.keys()]) if (!live.has(key)) this.state.telegraphs.delete(key);
+    for (const [key, t] of [...this.state.telegraphs.entries()]) {
+      if (live.has(key)) continue;
+      this.state.telegraphs.delete(key);
+      for (const session of this.sessions.values()) session.seen.delete(t); // gone from every view with the state
+    }
   }
 
   private keyOf(id: number): string {

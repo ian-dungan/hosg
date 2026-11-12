@@ -8,7 +8,7 @@ import { killAdventurer } from '../../../shared/src/combat/adventurer';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import { ageCarry } from './ZoneRoom';
-import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, testClock, waitFor, walk, type TestServer } from './testHelpers';
+import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, sx, testClock, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -181,7 +181,7 @@ describe('intent spam and nonsense', () => {
     ]));
     expect(corrections).toEqual([]);
     a.room.send('move', { ...pose(SPAWN.x + 0.3, SPAWN.z), moving: true });
-    await waitFor(() => me(a.room).x === SPAWN.x + 0.3);
+    await waitFor(() => me(a.room).x === sx(SPAWN.x + 0.3));
   });
 
   it('a move whose ack is not the latest displacement is ignored, without a correction', async () => {
@@ -192,7 +192,7 @@ describe('intent spam and nonsense', () => {
     await sleep(200);
     expect(me(a.room).x).toBe(SPAWN.x);
     a.room.send('move', pose(SPAWN.x + 0.3, SPAWN.z, 0));
-    await waitFor(() => me(a.room).x === SPAWN.x + 0.3);
+    await waitFor(() => me(a.room).x === sx(SPAWN.x + 0.3));
     expect(corrections).toEqual([]);
   });
 
@@ -207,7 +207,7 @@ describe('intent spam and nonsense', () => {
     vi.mocked(combat.tick).mockImplementation(tick);
     expect(errors).toHaveBeenCalledTimes(1);
     a.room.send('move', { ...pose(SPAWN.x + 0.3, SPAWN.z), moving: true });
-    await waitFor(() => me(a.room).x === SPAWN.x + 0.3);
+    await waitFor(() => me(a.room).x === sx(SPAWN.x + 0.3));
     const dummy = enemyOf(a.room, 'dummy');
     a.room.send('target', { id: dummy.eid });
     await waitFor(() => me(a.room).target === dummy.eid);
@@ -266,7 +266,7 @@ describe('death and respawn', () => {
     expect(me(a.room)).toMatchObject({ x: SPAWN.x, z: SPAWN.z, hp: 100, act: '' });
     // the respawn starts a new ack: moves from the statue with it are accepted
     a.room.send('move', { ...pose(SPAWN.x + 0.3, SPAWN.z, 1), moving: true });
-    await waitFor(() => me(a.room).x === SPAWN.x + 0.3);
+    await waitFor(() => me(a.room).x === sx(SPAWN.x + 0.3));
   });
 
   it('respawns by itself after autoRespawnSeconds', async () => {
@@ -313,7 +313,7 @@ describe('dodge', () => {
     // moves still carrying the old ack are ignored; from the end with the new one, accepted
     a.room.send('move', pose(SPAWN.x, SPAWN.z, 0));
     a.room.send('move', { ...pose(d.to.x + 0.4, d.to.z, 1), moving: true });
-    await waitFor(() => me(a.room).x === d.to.x + 0.4);
+    await waitFor(() => me(a.room).x === sx(d.to.x + 0.4));
     expect(corrections).toEqual([]);
     await sleep(450); // past the minimum gap (an earlier one is refused 'cooldown' before its pose is looked at)
     a.room.send('dodge', { ...pose(d.to.x + 20, d.to.z, 1), dx: 1, dz: 0 });
@@ -354,10 +354,10 @@ describe('knockback', () => {
       const between = seen.filter((p) => Math.hypot(p.x - d.to.x, p.z - d.to.z) > 0.05 && Math.hypot(p.x - d.from.x, p.z - d.from.z) > 0.05);
       expect(between.length).toBeGreaterThan(0);
       const last = seen[seen.length - 1];
-      expect(last.x).toBeCloseTo(d.to.x, 6);
-      expect(last.z).toBeCloseTo(d.to.z, 6);
+      expect(last.x).toBe(sx(d.to.x));
+      expect(last.z).toBe(sx(d.to.z));
       a.room.send('move', { ...pose(d.to.x + 0.3, d.to.z, d.seq), moving: true });
-      await waitFor(() => me(a.room).x === d.to.x + 0.3);
+      await waitFor(() => me(a.room).x === sx(d.to.x + 0.3));
       expect(corrections).toEqual([]);
     } finally {
       stop();
@@ -579,7 +579,7 @@ describe('dodges at higher latency (fix round 1)', () => {
     expect(displaced[0]).toMatchObject({ seq: session.displaceSeq >= 1 ? displaced[0].seq : -1, kind: 'knock' });
     expect(displaced[0].seq).toBeGreaterThanOrEqual(1);
     resumed.send('move', { ...pose(displaced[0].to.x, displaced[0].to.z + 0.3, displaced[0].seq), y: displaced[0].to.y, moving: true });
-    await waitFor(() => resumed.state.players.get(resumed.sessionId).z === displaced[0].to.z + 0.3 || session.displaceSeq > displaced[0].seq);
+    await waitFor(() => resumed.state.players.get(resumed.sessionId).z === sx(displaced[0].to.z + 0.3) || session.displaceSeq > displaced[0].seq);
   });
 
   it('knocked in mid-air: the fall it was in is charged as well', async () => {
@@ -629,7 +629,7 @@ describe('robust steps (fix round 1)', () => {
     expect(r).toMatchObject({ seq: 1, kind: 'resync' });
     expect(r.from).toEqual(r.to);
     a.room.send('move', { ...pose(r.to.x + 0.3, r.to.z, 1), moving: true });
-    await waitFor(() => me(a.room).x === r.to.x + 0.3);
+    await waitFor(() => me(a.room).x === sx(r.to.x + 0.3));
   });
 
   it('a death the step lost is reconciled from the engine on the next step', async () => {
@@ -809,7 +809,7 @@ describe('intent budget (fix round 1)', () => {
     const refused = collect(a.room, 'refused');
     for (let i = 0; i < 60; i++) a.room.send('ability', { slot: 3, phase: 'press' });
     a.room.send('move', { ...pose(SPAWN.x + 0.3, SPAWN.z), moving: true });
-    await waitFor(() => me(a.room).x === SPAWN.x + 0.3);
+    await waitFor(() => me(a.room).x === sx(SPAWN.x + 0.3));
     await sleep(100);
     expect(refused.filter((r) => r.reason === 'rate')).toEqual([{ action: 'ability', reason: 'rate' }]); // once, not 30 times
   });

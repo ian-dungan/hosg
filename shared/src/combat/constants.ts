@@ -93,8 +93,15 @@ export const ENEMY_PATH_NODES = 1500;
 export const ENEMY_REPLAN_S = 1.0;
 export const PATHS_PER_TICK = 4;
 export const UNREACHABLE_S = 3;
-/** Combat events are sent to clients within this distance. */
-export const FX_RADIUS = 60;
+/**
+ * Interest radius (m): each client's state holds the adventurers, enemies and telegraphs within this
+ * distance of it (the server's per-client views), and something in view leaves it only beyond
+ * INTEREST_RADIUS + INTEREST_HYSTERESIS, so nothing flickers at the edge.
+ */
+export const INTEREST_RADIUS = 60;
+export const INTEREST_HYSTERESIS = 10;
+/** Combat events are sent to clients that have their focus in view: the interest radius. */
+export const FX_RADIUS = INTEREST_RADIUS;
 export const CHARGE_SLOW_GRACE_S = 0.25;
 export const SPEED_GRACE_S = 0.5;
 /** Client only: telegraph decals fill this much early. */

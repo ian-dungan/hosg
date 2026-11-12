@@ -18,7 +18,7 @@ import {
 } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
-import { accountFor, collect, joinGrove, joinZone, saveAs, sleep, startServer, waitFor, walk, type TestServer } from './testHelpers';
+import { accountFor, collect, joinGrove, joinZone, saveAs, shown, sleep, startServer, sx, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -82,7 +82,7 @@ describe('travel through an open exit', () => {
     expect(await refusal(url, alice.token, 'grove')).toBe(REASON_ELSEWHERE);
 
     const b = await joinZone(url, alice.token, 'greenway');
-    expect(me(b.room)).toMatchObject({ name: 'Alice', x: ENTRY.x, z: ENTRY.z, y: GREENWAY.surface(ENTRY.x, ENTRY.z), facing: ENTRY.facing, hp: 100 });
+    expect(me(b.room)).toMatchObject(shown({ name: 'Alice', x: ENTRY.x, z: ENTRY.z, y: GREENWAY.surface(ENTRY.x, ENTRY.z)!, facing: ENTRY.facing, hp: 100 }));
     const report = await health(url);
     expect(report.zones.greenway.players).toBe(1);
     expect(report.zones.grove.players).toBe(0);
@@ -90,7 +90,7 @@ describe('travel through an open exit', () => {
     // The greenway room moves it over the greenway's ground.
     const next = { x: ENTRY.x + 0.4, z: ENTRY.z };
     b.room.send('move', { ...next, y: GREENWAY.surface(next.x, next.z), facing: 0, moving: true });
-    await waitFor(() => me(b.room).x === next.x);
+    await waitFor(() => me(b.room).x === sx(next.x));
   });
 
   it('a closed exit does nothing', async () => {
@@ -144,7 +144,7 @@ describe('travel through an open exit', () => {
     expect(travels).toEqual([{ zone: 'grove' }]);
 
     const b = await joinGrove(url, alice.token);
-    expect(me(b.room)).toMatchObject({ x: gate.arrive.x, z: gate.arrive.z, facing: gate.arrive.facing, y: groveTownSurface(gate.arrive.x, gate.arrive.z)! + 0 });
+    expect(me(b.room)).toMatchObject(shown({ x: gate.arrive.x, z: gate.arrive.z, facing: gate.arrive.facing, y: groveTownSurface(gate.arrive.x, gate.arrive.z)! + 0 }));
   });
 
   it('refuses the move and says why when the next zone is full; the adventurer stays', async () => {
@@ -165,7 +165,7 @@ describe('travel through an open exit', () => {
     expect(corrections[0].z).toBeGreaterThan(INTO_EXIT.z); // back to the last step outside
     await sleep(100);
     expect(travels).toEqual([]);
-    expect(me(a.room).z).toBe(corrections[0].z);
+    expect(me(a.room).z).toBe(sx(corrections[0].z));
     expect((await store.getOrCreateAdventurer(alice.accountId)).zone).toBe('grove');
   });
 
@@ -206,7 +206,7 @@ describe('travel through an open exit', () => {
     // Still here and moving.
     const back = { x: 0.4, z: corrections[0].z };
     a.room.send('move', { ...back, y: groveTownSurface(back.x, back.z)! + 0, facing: 0, moving: true });
-    await waitFor(() => me(a.room).x === 0.4);
+    await waitFor(() => me(a.room).x === sx(0.4));
   });
 
   it('a second sign-in while the travel is being saved waits for it, then is sent to the right zone', async () => {
@@ -237,7 +237,7 @@ describe('travel through an open exit', () => {
     expect(travels).toEqual([]);
     expect(await slow.getOrCreateAdventurer(alice.accountId)).toMatchObject({ zone: 'greenway', x: ENTRY.x, z: ENTRY.z });
     const b = await joinZone(url, alice.token, 'greenway');
-    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+    expect(me(b.room)).toMatchObject(shown({ x: ENTRY.x, z: ENTRY.z }));
   });
 });
 
@@ -254,7 +254,7 @@ describe('one adventurer, one room', () => {
     expect(kicked).toEqual([{ reason: 'Signed in somewhere else' }]);
     await waitFor(() => app.stats().zones.grove.players === 0);
     expect(app.stats()).toMatchObject({ players: 1, zones: { grove: { players: 0 }, greenway: { players: 1 } } });
-    expect(me(second.room)).toMatchObject({ name: 'Alice', x: ENTRY.x, z: ENTRY.z });
+    expect(me(second.room)).toMatchObject(shown({ name: 'Alice', x: ENTRY.x, z: ENTRY.z }));
     // The kicked grove session did not write its zone back over the greenway.
     await sleep(50);
     expect((await store.getOrCreateAdventurer(alice.accountId)).zone).toBe('greenway');
@@ -326,7 +326,7 @@ describe('saved with the adventurer', () => {
     const alice = await accountFor(store, 'Alice');
     await saveAs(store, alice.accountId, { zone: 'greenway', x: -50, z: 0 }); // outside the greenway
     const a = await joinZone(url, alice.token, 'greenway');
-    expect(me(a.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z, facing: ENTRY.facing });
+    expect(me(a.room)).toMatchObject(shown({ x: ENTRY.x, z: ENTRY.z, facing: ENTRY.facing }));
   });
 });
 
@@ -392,7 +392,7 @@ describe('travel edge cases', () => {
     expect(notices.at(-1)).toEqual({ text: REASON_ELSEWHERE });
     expect(await zoneOf(url, alice.token)).toEqual({ status: 200, body: { zone: 'greenway' } });
     const b = await joinZone(url, alice.token, 'greenway');
-    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+    expect(me(b.room)).toMatchObject(shown({ x: ENTRY.x, z: ENTRY.z }));
   });
 
   it('leaving while the travel is saved keeps the account held until the save settles', async () => {
@@ -414,7 +414,7 @@ describe('travel edge cases', () => {
     release();
     await expect(again).rejects.toThrow(REASON_ELSEWHERE);
     const b = await joinZone(url, alice.token, 'greenway');
-    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+    expect(me(b.room)).toMatchObject(shown({ x: ENTRY.x, z: ENTRY.z }));
   });
 
   it('a travel saved while the client is in its reconnect window ends the window; the client then finds the next zone', async () => {
@@ -435,7 +435,7 @@ describe('travel edge cases', () => {
     expect(server!.app.stats().zones.grove.players).toBe(0);
     expect(await zoneOf(url, alice.token)).toEqual({ status: 200, body: { zone: 'greenway' } });
     const b = await joinZone(url, alice.token, 'greenway');
-    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+    expect(me(b.room)).toMatchObject(shown({ x: ENTRY.x, z: ENTRY.z }));
   });
 
   it('the seat kept for a traveller lasts the reconnect window, then is freed; the traveller can still join while there is room', async () => {
@@ -454,6 +454,6 @@ describe('travel edge cases', () => {
     await b.room.leave();
     await waitFor(() => server!.app.stats().zones.greenway.players === 0);
     const late = await joinZone(url, alice.token, 'greenway');
-    expect(me(late.room)).toMatchObject({ name: 'Alice', x: ENTRY.x, z: ENTRY.z });
+    expect(me(late.room)).toMatchObject(shown({ name: 'Alice', x: ENTRY.x, z: ENTRY.z }));
   });
 });

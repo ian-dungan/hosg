@@ -8,12 +8,17 @@
 // was stuck for a second or more. The first few corrections are printed in full, with the pose the
 // bot had sent (with --stand the patch rate is not checked: an unchanged state sends none). Bots do not fight; a knockback or a respawn only moves them (they adopt its ack), and
 // one that dies stands still until it gets up.
-//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand]
+// --warmup <s> waits that long after the last join before measuring (default 2), so walking bots
+// have spread out over the zone; --cluster <m> keeps every bot within that many metres of where it
+// joined (all join at the spawn: the worst case for interest management, everyone sees everyone).
+// It also prints how many adventurers each bot had in its state (its view) and the online count field.
+//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30]
 // The server's auth limiter allows 10 logins per IP a minute by default: start it with a higher
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
+  INTEREST_RADIUS,
   RUN_SPEED,
   TICK_HZ,
   checkPose,
@@ -34,8 +39,6 @@ const CHAT_EVERY_MS = 20_000;
 const JOINS_AT_ONCE = 10;
 /** Still time after joining, so the server's movement allowance (0.5 m for a new session) fills up first. */
 const SETTLE_MS = 1200;
-/** Time between the last join and the start of measuring. */
-const WARMUP_MS = 2000;
 /** Chance a grounded bot jumps on a given tick (about once every 4 s). */
 const JUMP_CHANCE = 1 / 60;
 
@@ -46,6 +49,8 @@ const { values } = parseArgs({
     seconds: { type: 'string', default: '60' },
     stand: { type: 'boolean', default: false },
     zone: { type: 'string', default: 'grove' },
+    warmup: { type: 'string', default: '2' },
+    cluster: { type: 'string' },
   },
 });
 if (!isZoneId(values.zone)) {
@@ -57,8 +62,10 @@ const stand = values.stand;
 const url = values.url.replace(/\/$/, '');
 const count = Number(values.count);
 const seconds = Number(values.seconds);
-if (!Number.isInteger(count) || count < 1 || !(seconds > 0)) {
-  console.error('Usage: npm run bots -w server -- --url <server> --count <n> --seconds <s>');
+const warmupMs = Number(values.warmup) * 1000;
+const cluster = values.cluster === undefined ? Infinity : Number(values.cluster);
+if (!Number.isInteger(count) || count < 1 || !(seconds > 0) || !(warmupMs >= 0) || !(cluster > 0)) {
+  console.error('Usage: npm run bots -w server -- --url <server> --count <n> --seconds <s> [--warmup <s>] [--cluster <m>]');
   process.exit(2);
 }
 
@@ -69,7 +76,7 @@ interface Health {
   tickHz: number;
   rssMb: number;
   peakRssMb: number;
-  zones?: Record<string, { players: number; tickHz: number; tickMs?: number }>;
+  zones?: Record<string, { players: number; tickHz: number; tickMs?: number; patchMs?: number }>;
 }
 
 async function health(): Promise<Health> {
@@ -114,9 +121,16 @@ class Bot {
   /** The last displacement the server numbered: every pose carries it. */
   private ack = 0;
   private body: Body = makeBody(0, 0, this.surface);
+  get position(): { x: number; z: number } { return this.body; }
   /** The server's view of this bot's height, so it only sends poses the server accepts. */
   private air: AirTrack = makeAirTrack(0);
   private heading = Math.random() * 2 * Math.PI;
+  /** Where it joined: with --cluster it stays within that many metres of here. */
+  private home = { x: 0, z: 0 };
+  /** Sum and count of samples of how many adventurers its state held (its view), and of the online count. */
+  viewSum = 0;
+  onlineSum = 0;
+  viewSamples = 0;
   private timers: NodeJS.Timeout[] = [];
 
   constructor(readonly index: number) {}
@@ -180,6 +194,15 @@ class Bot {
     }
     this.body = makeBody(me.x, me.z, this.surface);
     this.air = makeAirTrack(this.body.y);
+    this.home = { x: me.x, z: me.z };
+  }
+
+  /** Samples how many adventurers its state holds (itself included) and the zone's online count. */
+  sampleView() {
+    const state = this.room.state;
+    this.viewSum += state.players?.size ?? 0;
+    this.onlineSum += typeof state.online === 'number' ? state.online : state.players?.size ?? 0;
+    this.viewSamples++;
   }
 
   private get dead(): boolean {
@@ -214,7 +237,11 @@ class Bot {
     const refusals: string[] = [];
     let first: { body: Body; next: { x: number; z: number; y: number; facing: number; moving: boolean; ack: number }; heading: number } | null = null;
     for (let attempt = 0; attempt < 12; attempt++) {
-      const heading = attempt === 0 ? this.heading + (Math.random() - 0.5) * 0.4 : Math.random() * 2 * Math.PI;
+      // With --cluster, past 80% of the radius it heads back toward home (with the same wander).
+      const fromHome = Math.hypot(this.body.x - this.home.x, this.body.z - this.home.z);
+      const homeward = Math.atan2(this.home.x - this.body.x, this.home.z - this.body.z);
+      const wander = fromHome > cluster * 0.8 ? homeward : this.heading;
+      const heading = attempt === 0 ? wander + (Math.random() - 0.5) * 0.4 : Math.random() * 2 * Math.PI;
       const body = { ...this.body };
       const jump = attempt === 0 && Math.random() < JUMP_CHANCE;
       const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, dt, this.surface);
@@ -223,6 +250,8 @@ class Bot {
       if (body.grounded && moved < RUN_SPEED * Math.min(dt, 0.25) * 0.5) continue;
       // bots stay in their zone: they turn away from its exits as from walls
       if (zoneDef(this.zone).exits.some((e) => Math.hypot(body.x - e.x, body.z - e.z) < e.r + 1.5)) continue;
+      // and with --cluster, from the edge of their circle
+      if (Math.hypot(body.x - this.home.x, body.z - this.home.z) > cluster && Math.hypot(body.x - this.home.x, body.z - this.home.z) > fromHome) continue;
       const next = { x: body.x, z: body.z, y: body.y, facing: heading, moving: true, ack: this.ack };
       first ??= { body, next, heading };
       const air = { ...this.air };
@@ -282,10 +311,19 @@ try {
 bots.forEach((bot) => bot.start());
 const zones = [...new Set(bots.map((bot) => bot.zone))].join(', ');
 console.log(`All ${count} joined (${zones}); ${stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
-await sleep(WARMUP_MS);
+await sleep(warmupMs);
 
 const healthSamples: Health[] = [];
-const sampler = setInterval(() => void health().then((h) => healthSamples.push(h), () => {}), 1000);
+let nearSum = 0, nearSamples = 0;
+const sampler = setInterval(() => {
+  void health().then((h) => healthSamples.push(h), () => {});
+  const live = bots.filter((bot) => !bot.disconnected && !bot.travelled);
+  for (const bot of live) bot.sampleView();
+  // How many other bots really are within INTEREST_RADIUS (by their own positions): what a view should hold.
+  let pairs = 0;
+  for (const a of live) for (const b of live) if (a !== b && Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) <= INTEREST_RADIUS) pairs++;
+  if (live.length) { nearSum += pairs / live.length; nearSamples++; }
+}, 1000);
 for (const bot of bots) bot.patches = 0;
 const measureStart = performance.now();
 await sleep(seconds * 1000);
@@ -309,6 +347,8 @@ const deaths = bots.reduce((n, bot) => n + bot.deaths, 0);
 const travelled = bots.filter((bot) => bot.travelled).length;
 const tickMs = (h: Health) => Math.max(0, ...Object.values(h.zones ?? {}).map((z) => z.tickMs ?? 0));
 const tickSamples = healthSamples.map(tickMs);
+const patchMs = (h: Health) => Math.max(0, ...Object.values(h.zones ?? {}).map((z) => z.patchMs ?? 0));
+const patchSamples = healthSamples.map(patchMs);
 await Promise.all(bots.map((bot) => bot.stop()));
 
 const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
@@ -321,8 +361,13 @@ console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFi
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
 if (tickSamples.length) console.log(`server step time p95 (/healthz tickMs, 5 s window): max ${Math.max(...tickSamples)} ms, last ${tickMs(final)} ms`);
+if (patchSamples.length) console.log(`server patch time p95 (/healthz patchMs, 5 s window): max ${Math.max(...patchSamples)} ms, last ${patchMs(final)} ms`);
 const sortedBytes = [...byteRates].sort((a, b) => a - b);
 console.log(`received per bot: mean ${(byteRates.reduce((a, b) => a + b, 0) / byteRates.length / 1024).toFixed(1)} KiB/s, p95 ${(sortedBytes[Math.floor(sortedBytes.length * 0.95)] / 1024).toFixed(1)} KiB/s, max ${(sortedBytes[sortedBytes.length - 1] / 1024).toFixed(1)} KiB/s`);
+const sampled = bots.filter((bot) => bot.viewSamples > 0);
+const viewMean = sampled.reduce((n, bot) => n + bot.viewSum / bot.viewSamples, 0) / Math.max(1, sampled.length);
+const onlineMean = sampled.reduce((n, bot) => n + bot.onlineSum / bot.viewSamples, 0) / Math.max(1, sampled.length);
+console.log(`adventurers in each bot's view (itself included): mean ${viewMean.toFixed(1)}; other bots really within ${INTEREST_RADIUS} m: mean ${(nearSum / Math.max(1, nearSamples)).toFixed(1)}; online count it read: mean ${onlineMean.toFixed(1)}`);
 console.log(`displacements: ${displacements}; deaths: ${deaths}; sent on to another zone: ${travelled}`);
 console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}; jumps: ${jumps}`);
 console.log(`falls that hurt: ${hurts} (${hurtHp} hp in all)`);

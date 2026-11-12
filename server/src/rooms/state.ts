@@ -1,16 +1,34 @@
-// Synchronised zone state: every adventurer in the room (keyed by Colyseus sessionId), and the
-// zone's enemies and live telegraphs (keyed by their engine id), mirrored from the combat engine.
+// Synchronised zone state: the adventurers in the room (keyed by Colyseus sessionId), and the zone's
+// enemies and live telegraphs (keyed by their engine id), mirrored from the combat engine. Each
+// client sees only those within its interest radius, and the zone's head count as `online`.
 import { schema, t, type SchemaType } from '@colyseus/schema';
+
+/**
+ * Positions and facings are quantised on the wire (the client's decoder turns them back into plain
+ * numbers, via the schema reflection: no client code knows). The state is what others are drawn
+ * from; the positions the server checks moves against stay exact on the server (Session.lastGood) and
+ * in its messages (correct, displaced, respawned).
+ * - x, z: 16 bits over [-512, 512) m, a step of 1/64 m (1.6 cm); zones fit well inside (the
+ *   Greenway is 260 × 180 m).
+ * - y (feet height): 16 bits over [-64, 192) m, a step of 1/256 m (0.4 cm).
+ * - facing: 8 bits around the circle, a step of 1.4° (read back in [0, 2π)).
+ * The ranges are powers of two read as wrapping, so every multiple of a step (whole metres, a flat
+ * floor at 0) comes back exactly. A change smaller than a step sends nothing: the quantisation is the
+ * dead band.
+ */
+export const POS_LIMIT_M = 512;
+const pos = () => t.quantized({ min: -POS_LIMIT_M, max: POS_LIMIT_M, mode: 'wrap' });
+const height = () => t.quantized({ min: -64, max: 192, mode: 'wrap' });
+const facing = () => t.angle({ bits: 8 });
 
 export const PlayerState = schema(
   {
     name: t.string(),
-    // float64, so clients see exactly the position the server checks moves against (t.number() is float32).
-    x: t.float64(),
-    z: t.float64(),
+    x: pos(),
+    z: pos(),
     /** Height of the feet. */
-    y: t.float64(),
-    facing: t.float64(),
+    y: height(),
+    facing: facing(),
     moving: t.boolean(),
     /** Health, 1..maxHp while alive (Math.ceil of the engine's), 0 when dead. */
     hp: t.number(),
@@ -35,10 +53,10 @@ export const EnemyState = schema(
   {
     eid: t.int32(),
     kind: t.string(),
-    x: t.float32(),
-    z: t.float32(),
-    y: t.float32(),
-    facing: t.float32(),
+    x: pos(),
+    z: pos(),
+    y: height(),
+    facing: facing(),
     hp: t.uint16(),
     /** Scaled with the adventurers it fights (elites): it can change. */
     maxHp: t.uint16(),
@@ -88,11 +106,17 @@ export const TelegraphState = schema(
 );
 export type TelegraphState = SchemaType<typeof TelegraphState>;
 
+/**
+ * The three maps are filtered per client (`.view()`): each client's StateView holds itself and what is
+ * within its interest radius (see interest.ts), so its `players` is NOT everyone in the zone; `online`
+ * is the zone's true head count (everyone in `players` on the server, reconnect windows included).
+ */
 export const ZoneState = schema(
   {
-    players: t.map(PlayerState),
-    enemies: t.map(EnemyState),
-    telegraphs: t.map(TelegraphState),
+    players: t.map(PlayerState).view(),
+    enemies: t.map(EnemyState).view(),
+    telegraphs: t.map(TelegraphState).view(),
+    online: t.uint16(),
   },
   'ZoneState',
 );
