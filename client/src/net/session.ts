@@ -10,8 +10,13 @@ export interface PlayerView {
   readonly name: string;
   readonly x: number;
   readonly z: number;
+  /** Height of the feet. */
+  readonly y: number;
   readonly facing: number;
   readonly moving: boolean;
+  /** Health, 1..maxHp. */
+  readonly hp: number;
+  readonly maxHp: number;
 }
 
 /** The grove room's synchronised state (the server's ZoneState), keyed by sessionId; `players` is missing until the first state arrives. */
@@ -24,6 +29,19 @@ export interface ZoneState {
 }
 
 export type GroveRoom = Room<ZoneState>;
+
+/** Smallest pose change worth sending (m or rad); the rig's slow-down never quite reaches zero. */
+const POSE_EPSILON = 1e-3;
+
+/** The pose the client sends each tick: where the feet are, which way the adventurer faces, whether they are moving. */
+export interface SentPose { x: number; z: number; y: number; facing: number; moving: boolean }
+
+/** True if `pose` differs from the last one sent; a change of height alone counts (a standing jump, the landing). */
+export function poseWorthSending(pose: SentPose, sent: SentPose): boolean {
+  const same = (a: number, b: number) => Math.abs(a - b) < POSE_EPSILON; // false against NaN: nothing sent yet
+  return !(same(pose.x, sent.x) && same(pose.z, sent.z) && same(pose.y, sent.y) && same(pose.facing, sent.facing)
+    && pose.moving === sent.moving);
+}
 
 const TOKEN_KEY = 'sg2.token';
 /** The saved token's adventurer name, once known, for the login screen's "Continue as". */

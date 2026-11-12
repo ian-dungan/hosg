@@ -113,6 +113,9 @@ export interface PlayerRig {
   /** True while the player is providing movement input. */
   readonly moving: boolean;
   teleport(pos: Vector3, facing: number): void;
+  /** Moves the feet to `pos` (a server correction): stands on the surface there, or falls from `pos.y` if that is
+   *  above it. Keeps the facing and the camera angle, and stops any jump in progress. */
+  place(pos: Vector3): void;
   /** 0 = rooted, 1 = normal. Used for stuns, dialogue and cutscenes. */
   setMoveScale(s: number): void;
   /** Turn the character to face a world point (used when attacking). */

@@ -1,6 +1,6 @@
 // Shady Grove 2 — online: sign in, then walk the grove with everyone else who is here.
 // The server owns positions; this page sends the adventurer's pose and draws the others.
-import { Vector3 } from '@babylonjs/core';
+import { Matrix, Vector3 } from '@babylonjs/core';
 import {
   CLIENT_RECONNECTION,
   REASON_GROVE_FULL,
@@ -22,10 +22,13 @@ import {
   connect,
   forgetToken,
   nameAdventurer,
+  poseWorthSending,
   rememberName,
   savedAccount,
   savedToken,
   type GroveRoom,
+  type PlayerView,
+  type SentPose,
 } from './net/session';
 
 const CONNECTION_LOST = 'Connection lost';
@@ -35,8 +38,6 @@ const RECONNECTING = 'Reconnecting…';
 const KEEP_TOKEN_ON = new Set([UNREACHABLE, REASON_GROVE_FULL]);
 /** Longest wait after joining for the room to show this adventurer. */
 const ENTER_TIMEOUT_MS = 15_000;
-/** Smallest pose change worth sending (m or rad); the rig's slow-down never quite reaches zero. */
-const POSE_EPSILON = 1e-3;
 
 const CSS = /* css */ `
 .sg-online{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
@@ -44,9 +45,11 @@ const CSS = /* css */ `
 .sg-online.away{color:#ffd9a0}
 .sg-online:empty{display:none}
 .sg-net-off{display:none}
+.sg-hurt-edge{position:absolute;inset:0;opacity:0;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(214,40,32,.55))}
 `;
 
-interface NetDebug { remotes: { name: string; x: number; z: number }[] }
+interface NetDebug { remotes: { name: string; x: number; z: number; y: number }[] }
 
 function boot(): void {
   let room: GroveRoom | null = null;
@@ -64,9 +67,12 @@ function boot(): void {
   // Outside netUi, so "Connecting…" shows before the room does.
   const status = h('div', 'sg-online', h('div', 'sg-hud', hudRoot));
   const chat = createChat(netUi, (text) => room && send(room, 'chat', { text }));
+  const hurtEdge = h('div', 'sg-hurt-edge', hudRoot);
 
   const net: NetDebug = { remotes: [] };
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
+  // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
+  (window as unknown as Record<string, unknown>).__sg2 = { rig, world, hud, scene, engine: game.engine };
 
   const state: HudState = {
     player: { name: 'Adventurer', hp: 100, maxHp: 100, statuses: [], level: 1, weapon: 'blade', cast: null },
@@ -93,6 +99,22 @@ function boot(): void {
     hud.render(state);
   });
 
+  /** A fall cost health: "−n" floats up from the adventurer, and the screen edge flashes red. */
+  const showHurt = (amount: number) => {
+    const canvas = scene.getEngine().getRenderingCanvas();
+    const w = canvas?.clientWidth ?? window.innerWidth, ht = canvas?.clientHeight ?? window.innerHeight;
+    const camera = scene.activeCamera;
+    let x = w / 2, y = ht / 2;
+    if (camera) {
+      const p = rig.position;
+      const at = Vector3.Project(new Vector3(p.x, p.y + rig.view.height * 0.8, p.z), Matrix.IdentityReadOnly,
+        scene.getTransformMatrix(), camera.viewport.toGlobal(w, ht));
+      if (at.z > 0 && at.z < 1) { x = at.x; y = at.y; }
+    }
+    hud.floatText(x, y, `−${amount}`, 'hurt');
+    hurtEdge.animate([{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 0 }], { duration: 600, easing: 'ease-out' });
+  };
+
   /** Plays one connection until it ends; resolves with what the login screen should say. */
   function play(r: GroveRoom): Promise<string> {
     return new Promise((resolve) => {
@@ -100,7 +122,7 @@ function boot(): void {
       let lostTimer = 0;
       let sendTimer = 0;
       let entered = false;
-      const sent = { x: NaN, z: NaN, facing: NaN, moving: false };
+      const sent: SentPose = { x: NaN, z: NaN, y: NaN, facing: NaN, moving: false };
 
       // Reconnect for up to RECONNECT_SECONDS, however long the room has been up, then give up.
       Object.assign(r.reconnection, CLIENT_RECONNECTION);
@@ -119,24 +141,27 @@ function boot(): void {
       r.onMessage('chat', (m: S2C['chat']) => chat.add(m.from, m.text));
       r.onMessage('correct', (m: S2C['correct']) => {
         game.walkTo(null);
-        rig.teleport(new Vector3(m.x, 0, m.z), rig.facing);
-        Object.assign(sent, { x: m.x, z: m.z });
+        rig.place(new Vector3(m.x, m.y, m.z)); // keeps the facing and the camera angle
+        Object.assign(sent, { x: m.x, z: m.z, y: m.y });
       });
+      r.onMessage('hurt', (m: S2C['hurt']) => { if (m.amount > 0) showHurt(m.amount); });
 
       const onState = () => {
         const list: NetDebug['remotes'] = [];
-        r.state.players?.forEach((p, id) => { if (id !== r.sessionId) list.push({ name: p.name, x: p.x, z: p.z }); });
+        r.state.players?.forEach((p, id) => { if (id !== r.sessionId) list.push({ name: p.name, x: p.x, z: p.z, y: p.y }); });
         net.remotes = list;
         const me = r.state.players?.get(r.sessionId);
         if (me && !entered) enter(me);
+        if (me) { state.player.hp = me.hp; state.player.maxHp = me.maxHp; }
       };
-      const enter = (me: { name: string; x: number; z: number; facing: number }) => {
+      const enter = (me: PlayerView) => {
         entered = true;
         connecting = false;
         state.player.name = me.name;
         rememberName(me.name);
-        rig.teleport(new Vector3(me.x, 0, me.z), me.facing);
-        Object.assign(sent, { x: me.x, z: me.z, facing: me.facing, moving: false });
+        rig.teleport(new Vector3(me.x, me.y, me.z), me.facing);
+        rig.place(new Vector3(me.x, me.y, me.z)); // a re-join in mid-air carries on falling from there
+        Object.assign(sent, { x: me.x, z: me.z, y: me.y, facing: me.facing, moving: false });
         room = r;
         remotes = createRemotes(scene, world, r, r.sessionId);
         rig.setMoveScale(1);
@@ -149,8 +174,7 @@ function boot(): void {
         if (r.reconnection.isReconnecting) return;
         const p = rig.position;
         const pose: C2S['move'] = { x: p.x, z: p.z, y: p.y, facing: rig.facing, moving: rig.moving };
-        if (Math.abs(pose.x - sent.x) < POSE_EPSILON && Math.abs(pose.z - sent.z) < POSE_EPSILON
-          && Math.abs(pose.facing - sent.facing) < POSE_EPSILON && pose.moving === sent.moving) return;
+        if (!poseWorthSending(pose, sent)) return;
         send(r, 'move', pose);
         Object.assign(sent, pose);
       };

@@ -1,8 +1,9 @@
 // Browser smoke test of a running Shady Grove 2 server (Playwright, headless Chromium).
 //   node server/scripts/smoke.mjs <url> [--kill "<command that kills the server>"]
 // Two desktop guests and one iPhone 13 guest see "Adventurers online: 3"; A walks and B sees A move
-// more than 2 m; A's markup-laden chat line reaches B as plain text; signing in to A's account from
-// a new browser shows "Signed in somewhere else" on A; killing the server shows "Connection lost".
+// more than 2 m; A jumps (Space) and B sees A more than 0.5 m up; A's markup-laden chat line reaches B
+// as plain text; signing in to A's account from a new browser shows "Signed in somewhere else" on A;
+// killing the server shows "Connection lost".
 // Any page error fails the test. Browser console errors are not counted: Chrome logs refused
 // reconnect attempts and failed requests there, which are expected.
 // The server is killed at the end. Only for a URL on this machine (localhost, 127.0.0.1 or ::1)
@@ -114,6 +115,19 @@ try {
     } finally {
       await a.page.keyboard.up('KeyW');
     }
+  });
+
+  await check('A jumps and B sees A more than 0.5 m up within 20 s', async () => {
+    // Heights are measured from where A stands (the plaza is not at height 0).
+    const remoteY = (name) => window.__sg2net?.remotes.find((r) => r.name === name)?.y ?? null;
+    const before = await b.page.evaluate(remoteY, aName);
+    if (typeof before !== 'number') throw new Error('B does not see A');
+    await a.page.keyboard.press('Space');
+    await b.page.waitForFunction(
+      ([name, y0]) => (window.__sg2net?.remotes.find((r) => r.name === name)?.y ?? y0) > y0 + 0.5,
+      [aName, before],
+      { timeout: 20_000, polling: 100 },
+    );
   });
 
   await check('A\'s chat line reaches B as plain text', async () => {

@@ -1,5 +1,5 @@
 // The other adventurers in the room: one character each, a name label above the head, and
-// movement smoothed between server updates.
+// movement (and height: jumps, falls, platforms) smoothed between server updates.
 import { Matrix, Vector3, type Scene } from '@babylonjs/core';
 import type { CharacterView, WorldApi } from '../core/contracts';
 import { makeCharacter } from '../player/character';
@@ -97,7 +97,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: GroveRoom, my
       if (sessionId === mySessionId) return;
       seen.add(sessionId);
       const r = remotes.get(sessionId) ?? add(sessionId);
-      r.buf.push(now, p.x, p.z, p.facing);
+      r.buf.push(now, p.x, p.z, p.facing, p.y);
       if (p.name !== r.name) { r.name = p.name; r.label.textContent = p.name; }
     });
     for (const sessionId of [...remotes.keys()]) if (!seen.has(sessionId)) remove(sessionId);
@@ -117,7 +117,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: GroveRoom, my
         const s = r.buf.sample(now);
         if (!s) continue;
         const root = r.view.root;
-        const y = world.groundAt(s.x, s.z) ?? root.position.y;
+        const y = s.y; // the server's feet height: on a bench, up the Lookout, mid-jump
         const speed = r.placed && dt > 0 ? Math.hypot(s.x - root.position.x, s.z - root.position.z) / dt : 0;
         root.position.set(s.x, y, s.z);
         root.rotation.y = s.facing;

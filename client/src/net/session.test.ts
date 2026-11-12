@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { forgetToken, login, nameResult, rememberName, savedAccount, savedToken, serverUrl } from './session';
+import { forgetToken, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl } from './session';
 
 const page = (search: string) => ({ origin: 'http://game.example:2570', search });
 
@@ -107,5 +107,24 @@ describe('the saved account ("Continue as")', () => {
   it('is simply absent when storage is blocked', () => {
     vi.stubGlobal('sessionStorage', { getItem: () => { throw new Error('blocked'); } });
     expect(savedAccount()).toBeNull();
+  });
+});
+
+describe('poseWorthSending', () => {
+  const last = { x: 3, z: -4, y: 0.2, facing: 1, moving: false };
+  it('skips a pose that has not changed (the rig\'s slow-down never quite reaches zero)', () => {
+    expect(poseWorthSending({ ...last, x: 3.0004 }, last)).toBe(false);
+  });
+  it('sends a standing jump, a fall and the landing: a change of height alone', () => {
+    expect(poseWorthSending({ ...last, y: 0.9 }, last)).toBe(true); // rising in place
+    expect(poseWorthSending({ ...last, y: 0.2 }, { ...last, y: 0.25 })).toBe(true); // the landing pose
+  });
+  it('sends a change of position, facing or moving', () => {
+    expect(poseWorthSending({ ...last, z: -4.01 }, last)).toBe(true);
+    expect(poseWorthSending({ ...last, facing: 1.01 }, last)).toBe(true);
+    expect(poseWorthSending({ ...last, moving: true }, last)).toBe(true);
+  });
+  it('always sends when nothing has been sent yet (NaN)', () => {
+    expect(poseWorthSending(last, { x: NaN, z: NaN, y: NaN, facing: NaN, moving: false })).toBe(true);
   });
 });

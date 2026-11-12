@@ -196,6 +196,18 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
         alphaGoal = camera.alpha = alphaBehind(f);
       }
     },
+    place(pos: Vector3) {
+      // Where the server says the adventurer is: on the surface if the height is on (or under) it, else in the
+      // air there, falling from rest. Facing and camera angle stay; the camera target follows as usual.
+      body = makeBody(pos.x, pos.z, surface);
+      const ground = surface(pos.x, pos.z);
+      if (ground === null || pos.y > ground + 0.05) Object.assign(body, { y: pos.y, peakY: pos.y, grounded: ground === null });
+      position.set(body.x, body.y, body.z);
+      showY = body.y;
+      jumpWanted = false;
+      vel.x = vel.z = 0;
+      view.root.position.copyFrom(position);
+    },
     setMoveScale(s: number) { moveScale = clamp(s, 0, 1); },
     faceTowards(x: number, z: number) {
       const dx = x - position.x, dz = z - position.z;
