@@ -1230,3 +1230,34 @@ These are recorded so that reviewers can check the tasks against them.
 **Network and persistence**
 - Combat events are filtered per client by distance (60 m), and private numbers (cooldowns, dodge charges) go only to their owner, in `self`.
 - Health regeneration moves from the room into the engine and runs only out of combat.
+
+## Outcome
+
+Built by subagent-driven development: 9 planned tasks plus Task 10 (bandwidth), each reviewed, then a whole-phase review (server/rules and client) and one fix wave. Final commit of the phase: `0162089`.
+
+**Verified by the coordinator at `0162089` in a clean checkout:** root `npm test` 731 passed, 1 skipped; `npm run typecheck` clean; both client builds pass; 100-bot fight run (60 s, Greenway) PASS with 0 corrections, 176 kills, 36 dodges, 11 knockbacks; 100-bot grove walking run (30 s) PASS with 0 corrections, 9.1 KiB/s per bot, server 15 Hz, peak memory 145 MB, event-loop p99 11.9 ms. The 120 s death-and-return cycle run and the browser smoke test were run by workers (3 of 3 and PASS), not re-run by the coordinator.
+
+**Rulings made during the phase**
+- P3-a Tasks 1 and 4 ran in parallel.
+- P3-b Weapon swap and loadout changes only out of combat (`in-combat` refusal).
+- P3-c Engine review fixes were applied by the next engine worker; relog carries cooldowns (`carry`/`carryOf`).
+- P3-d Displacement: height gained by legal walking during a push is allowed; flight never exceeds start ground + 2.0 m; an airborne start lands at most 1.65 m up.
+- P3-e Chase surge 1.3× run speed after 3 s unable to attack; elites scale health and stagger ×(1 + 0.7(n−1)) by engaged adventurers (cap 4); stagger immunity 6 s after a break, 3 s after a parry stun; Thorn Hail aims at the farthest engaged adventurer.
+- P3-f Residual ring-kiting with the Bow is accepted as slow, safe play. Next lever if needed: a surging enemy starts no telegraphs.
+- P3-g Clustered bandwidth 10.5 KiB/s per client accepted (typical 9.1).
+- P3-h The server sends the room clock and each telegraph's start, so a wind-up first seen midway is drawn at the right point.
+- P3-i / P3-j Fight-run gates: 0 corrections, ≥ 15 Hz, kills ≥ 50, knockbacks ≥ 1, dodges ≥ 20 in 60 s; the 120 s cycle run must show a death and the walk back.
+
+**Deferred**
+- Elite and duo tuning beyond the simulation bands waits for live play-testing.
+- Draw calls on medium quality rose to about 132 (terrain tiles; enemies cost 2 each).
+- The join position read by the client is quantised (at most 0.8 cm off); the server sends no exact start.
+- In portrait the Mend button reaches 15 px into the central third of the screen.
+- The bot jump-arc flake fix rests on a likely cause, not a proven one.
+- Never tested on a real phone; nothing is installed on the Hetzner server yet; the committed Dockerfile has not been built as committed; HTTPS is not set up.
+- `/api/zone` is limited per account (60 a minute) with a loose per-address ceiling.
+
+**Notes for Plan 3b**
+- `Loadout` is already `{ job, picks }` (Plan 3b Task 1); the server and client run on deprecated Plan 3 shims until Plan 3b Tasks 5, 6 and 7 remove them.
+- `pinnedAdventurers()` in the zone room is the hook for party members (Plan 4).
+- Zones must fit ±500 m and −52..180 m (`shared/src/world/limits.ts`).
