@@ -17,6 +17,8 @@ import type { FxEvent } from './fx';
 import { gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
 import { JOBS, type TraitId } from './jobs';
+import { inArena } from './enemyAi';
+import { bossAiStateOf } from './bossAi';
 
 const fx = (w: CombatWorld, ev: FxEvent) => { w.out.fx.push(ev); };
 const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -78,6 +80,24 @@ export function takenMult(w: CombatWorld, a: AdventurerState, e: EnemyState | nu
 
 // ───────── allies and afflictions ─────────
 /** a and b are allies: the same adventurer, or both in the same (non-null) party. */
+/** Ruling P4-c: `a` is outside the arena of enemy `e` (a boss or its add), so it may not touch it. */
+export function outsideArenaOf(e: EnemyState, a: { x: number; z: number }): boolean {
+  return e.camp.arena !== undefined && !inArena(e, a);
+}
+/**
+ * Ruling P4-c: exactly one of `a` and `b` is inside the arena of an awake arena boss, so no effect of one
+ * reaches the other (heals, shields, buffs, revives, Momentum, Shelter, steam and bedrock).
+ */
+export function acrossArena(w: CombatWorld, a: { x: number; z: number }, b: { x: number; z: number }): boolean {
+  if (a === b) return false;
+  for (const e of w.enemies.values()) {
+    if (!e.alive || e.camp.arena === undefined || !e.data.boss) continue;
+    if (bossAiStateOf(e)?.wokeAt == null) continue;
+    if (inArena(e, a) !== inArena(e, b)) return true;
+  }
+  return false;
+}
+
 export function allied(a: AdventurerState, b: AdventurerState): boolean {
   return a === b || (a.party !== null && a.party === b.party);
 }
@@ -152,7 +172,7 @@ export type Subject = { enemy: EnemyState; ally?: undefined } | { enemy?: undefi
 /** The current target if it is a live, hittable enemy within range (+RANGE_FUZZ +slack) and in sight. */
 export function targetFor(w: CombatWorld, a: AdventurerState, targetId: number | null, range: number, slack = 0): EnemyState | Refusal {
   const e = targetId === null ? undefined : w.enemies.get(targetId);
-  if (!e || !e.alive || enemyInvulnerable(e)) return 'no-target';
+  if (!e || !e.alive || enemyInvulnerable(e) || outsideArenaOf(e, a)) return 'no-target';
   if (reach(a, e) > range + RANGE_FUZZ + slack) return 'range';
   if (!lineOfSight(w.zone.sight, a.x, a.z, e.x, e.z)) return 'sight';
   return e;
@@ -164,7 +184,7 @@ export function targetFor(w: CombatWorld, a: AdventurerState, targetId: number |
  * then the lower id). null when none qualifies.
  */
 function pickAlly(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: number, withSelf: boolean): AdventurerState | null {
-  const near = (b: AdventurerState) => b.alive && (withSelf || b !== a) && (b === a || dist(a, b) <= limit);
+  const near = (b: AdventurerState) => b.alive && (withSelf || b !== a) && (b === a || (dist(a, b) <= limit && !acrossArena(w, a, b)));
   const seen = (b: AdventurerState) => b === a || lineOfSight(w.zone.sight, a.x, a.z, b.x, b.z);
   const want = typeof wanted === 'number' ? w.adventurers.get(wanted) : undefined;
   if (want && near(want) && seen(want)) return want;
@@ -181,7 +201,7 @@ function pickAlly(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: nu
 
 /** A dead adventurer within `limit` and in sight: `wanted` if it qualifies (allied or not), else the nearest allied one (ties: the lower id). */
 function pickDead(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: number): AdventurerState | null {
-  const ok = (b: AdventurerState) => !b.alive && b !== a && dist(a, b) <= limit;
+  const ok = (b: AdventurerState) => !b.alive && b !== a && dist(a, b) <= limit && !acrossArena(w, a, b);
   const seen = (b: AdventurerState) => lineOfSight(w.zone.sight, a.x, a.z, b.x, b.z);
   const want = typeof wanted === 'number' ? w.adventurers.get(wanted) : undefined;
   if (want && ok(want) && seen(want)) return want;
@@ -216,7 +236,7 @@ export function resolveAim(w: CombatWorld, a: AdventurerState, ab: AbilityData, 
 // ───────── shields, buffs, debuffs ─────────
 /** The one shield: a new one replaces the live one when its amount is ≥ the live amount left (else it is ignored). */
 export function applyShield(w: CombatWorld, src: AdventurerState, dst: AdventurerState, amount: number, s: number, nowS: number): boolean {
-  if (!dst.alive) return false;
+  if (!dst.alive || acrossArena(w, src, dst)) return false;
   const live = dst.shield > 0 && nowS < dst.shieldUntil ? dst.shield : 0;
   if (amount < live) return false;
   dst.shield = amount; dst.shieldUntil = nowS + s;
@@ -228,7 +248,7 @@ export function applyShield(w: CombatWorld, src: AdventurerState, dst: Adventure
 export interface BuffState { until: number; src: number; startedAt: number; lastHealAt?: number; orphan?: boolean }
 /** A buff on an adventurer: a new application refreshes it (the later expiry, the newer src); `buff` fx when it starts. */
 export function applyBuff(w: CombatWorld, src: AdventurerState, dst: AdventurerState, buff: BuffId, s: number, nowS: number): void {
-  if (!dst.alive) return;
+  if (!dst.alive || acrossArena(w, src, dst)) return;
   const cur = dst.buffs[buff];
   if (cur && cur.until > nowS) { cur.until = Math.max(cur.until, nowS + s); cur.src = src.id; delete cur.orphan; return; }
   dst.buffs[buff] = { until: nowS + s, src: src.id, startedAt: nowS };
@@ -287,7 +307,7 @@ export function tickDebuffs(w: CombatWorld, e: EnemyState, nowS: number): void {
 // ───────── revive, hp cost ─────────
 /** A dead adventurer back where it lies: round(frac × maxHp) hp, Momentum 0, act '', REVIVE_IFRAMES_S of revive safety (plain misses), cooldowns kept; `revive` fx and out.revived. */
 export function reviveAdventurer(w: CombatWorld, by: AdventurerState, a: AdventurerState, frac: number, nowS: number): void {
-  if (a.alive) return;
+  if (a.alive || acrossArena(w, by, a)) return;
   const hp = Math.max(1, Math.round(frac * a.stats.maxHp));
   a.alive = true; a.hp = hp; a.momentum = 0; a.act = ''; a.actUntil = -Infinity;
   a.lastHurtAt = nowS; a.nextAutoAt = -Infinity; a.autoWaiting = false;
@@ -305,11 +325,11 @@ export function payHp(a: AdventurerState, amount: number): number {
 // ───────── applying an ability ─────────
 /** Live allies of `a` within r of it (the caster included), no sight needed. */
 function adventurersNear(w: CombatWorld, a: AdventurerState, r: number): AdventurerState[] {
-  return [...w.adventurers.values()].filter((b) => b.alive && allied(a, b) && (b === a || dist(a, b) <= r));
+  return [...w.adventurers.values()].filter((b) => b.alive && allied(a, b) && (b === a || (dist(a, b) <= r && !acrossArena(w, a, b))));
 }
-/** Live, hittable enemies whose edge is within r of `p`. */
-function enemiesNear(w: CombatWorld, p: { x: number; z: number }, r: number, except?: EnemyState): EnemyState[] {
-  return [...w.enemies.values()].filter((e) => e !== except && e.alive && !enemyInvulnerable(e) && reach(p, e) <= r);
+/** Live, hittable enemies whose edge is within r of `p` (none whose arena `by` stands outside of). */
+function enemiesNear(w: CombatWorld, p: { x: number; z: number }, r: number, by: AdventurerState, except?: EnemyState): EnemyState[] {
+  return [...w.enemies.values()].filter((e) => e !== except && e.alive && !enemyInvulnerable(e) && reach(p, e) <= r && !outsideArenaOf(e, by));
 }
 
 /**
@@ -340,7 +360,7 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
         coef: ef.coef, by: ab.id, momentum: ab.momentum, mark: ab.mark, primer: ab.primer, finisher: ab.role === 'finisher',
         stagger: ab.stagger, interrupts: ab.interrupts, ...tag,
       };
-      const near = ef.splash ? enemiesNear(w, e, ef.splash.r, e) : [];
+      const near = ef.splash ? enemiesNear(w, e, ef.splash.r, a, e) : [];
       const { plain, total } = strikeFull(w, a, e, s, nowS);
       let dealt = total;
       if (ef.splash && plain > 0) {
@@ -368,7 +388,7 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
       return;
     }
     case 'debuff': {
-      const dsts = ef.on === 'area' ? enemiesNear(w, a, ef.r) : subject.enemy ? [subject.enemy] : [];
+      const dsts = ef.on === 'area' ? enemiesNear(w, a, ef.r, a) : subject.enemy ? [subject.enemy] : [];
       for (const e of dsts) applyDebuff(w, a, e, ef.debuff, ef.s, nowS);
       return;
     }
@@ -380,14 +400,14 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
       return;
     }
     case 'taunt': {
-      const dsts = ef.on === 'area' ? enemiesNear(w, a, ef.r) : subject.enemy ? [subject.enemy] : [];
+      const dsts = ef.on === 'area' ? enemiesNear(w, a, ef.r, a) : subject.enemy ? [subject.enemy] : [];
       // Plan 3's taunt formula, then × the taunter's threat multiplier (Steadfast)
       const tm = threatMult(w, a.id);
       for (const e of dsts) { e.threat.taunt(a.id, nowS); if (tm !== 1) e.threat.set(a.id, e.threat.get(a.id)! * tm); }
       return;
     }
     case 'threat-drop':
-      for (const e of enemiesNear(w, a, ef.r)) if (e.threat.has(a.id)) e.threat.set(a.id, 0);
+      for (const e of enemiesNear(w, a, ef.r, a)) if (e.threat.has(a.id)) e.threat.set(a.id, 0);
       return;
     case 'revive': if (subject.ally && subject.ally !== a) reviveAdventurer(w, a, subject.ally, ef.frac, nowS); return;
     case 'hp-cost': payHp(a, ef.amount); return;

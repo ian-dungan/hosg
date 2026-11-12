@@ -24,7 +24,7 @@ import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
 import type { AdventurerState, CombatWorld, CombatZone, EnemyState, TelegraphState } from './engine';
 import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
-import { applyAffliction, hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
+import { acrossArena, applyAffliction, hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
 import { breakCast } from './casting';
 import { gainMomentum } from './momentum';
 import { inShape, type Shape } from './shapes';
@@ -294,6 +294,8 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
 
   if (e.act === 'return') { walkHome(w, e, ai, now, dt); return; }
   const boss = d.boss !== undefined;
+  // an arena's enemy (a boss and its adds) neither sees nor keeps anyone outside its arena, even mid-attack
+  if (e.camp.arena) dropOutsiders(w, e);
   if (boss) {
     // the boss script: its clock, transition, Break stun and telegraphs in flight
     if (bossBusy(w, e, now)) { holdProgress(ai, now); return; }
@@ -305,9 +307,6 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
       return; // rooted, facing locked
     }
   }
-  // an arena's enemy (a boss and its adds) neither sees nor keeps anyone outside its arena
-  if (e.camp.arena) dropOutsiders(w, e);
-
   // aggro: an enemy with no target notices adventurers within `aggro` and in sight (y ignored)
   if (e.targetId === null && d.aggro > 0) {
     for (const a of w.adventurers.values()) {
@@ -341,10 +340,11 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   }
   ai.noTargetSince = null;
 
-  // leash (a stationary enemy, such as a Lens Shard, has none: it never walks)
-  if (d.speed > 0 && hyp(e.x - e.camp.x, e.z - e.camp.z) > d.leash) { startReturn(w, e, ai, now); return; }
+  // leash (a stationary enemy, such as a Lens Shard, has none: it never walks); an arena's enemy's
+  // leash is the arena itself (Task 4 review: a lunge near the wall must not reset the fight)
+  if (d.speed > 0 && (e.camp.arena ? !inArena(e, e) : hyp(e.x - e.camp.x, e.z - e.camp.z) > d.leash)) { startReturn(w, e, ai, now); return; }
   // a boss's rotation starts its telegraphs (rooted while they are in flight)
-  if (boss && stepBoss(w, e, now, dt) === 'handled') { ai.chanceAt = now; holdProgress(ai, now); return; }
+  if (boss && stepBoss(w, e, now) === 'handled') { ai.chanceAt = now; holdProgress(ai, now); return; }
   if (boss && bossAnchored(e)) { anchoredStep(w, e, ai, t, now, dt); return; }
 
   const dist = hyp(t.x - e.x, t.z - e.z);
@@ -682,15 +682,20 @@ function dodgedFrom(a: AdventurerState, shape: Shape, now: number): boolean {
   return a.lastDodgeFrom !== null && now - a.lastDodgeAt <= PERFECT_DODGE_WINDOW_S + TIME_EPS && inShape(shape, a.lastDodgeFrom.x, a.lastDodgeFrom.z);
 }
 
-/** Along the line to its end, in DASH_STEP steps on passable ground, stopping early where it ends. */
+/**
+ * Along the line to its end, in DASH_STEP steps on passable ground, stopping early where it ends (and,
+ * for an arena's enemy, before its body would leave the arena).
+ */
 function dash(w: CombatWorld, e: EnemyState, s: Extract<Shape, { kind: 'line' }>): void {
   const pass = enemyPassable(w.zone, e.data.radius);
   const ux = Math.sin(s.dir), uz = Math.cos(s.dir);
   const steps = Math.floor(s.length / DASH_STEP + 1e-9);
+  const rad = e.data.radius;
   let x = e.x, z = e.z;
   for (let k = 1; k <= steps; k++) {
     const nx = s.x + ux * DASH_STEP * k, nz = s.z + uz * DASH_STEP * k;
     if (!pass(nx, nz)) break;
+    if (e.camp.arena && !inArena(e, { x: nx + ux * rad, z: nz + uz * rad })) break;
     x = nx; z = nz;
   }
   e.x = x; e.z = z; e.y = w.zone.ground(x, z) ?? e.y;
@@ -742,7 +747,7 @@ export function resolveHit(
   // through its i-frames and without breaking its cast
   const sh = a.buffs.sheltered;
   const pal = sh && sh.until > now ? w.adventurers.get(sh.src) : undefined;
-  const sheltered = pal !== undefined && pal !== a && pal.alive && pal.job === 'paladin';
+  const sheltered = pal !== undefined && pal !== a && pal.alive && pal.job === 'paladin' && !acrossArena(w, a, pal);
   const moved = sheltered ? Math.floor(final * SHELTER_SHARE) : 0;
   const got = hurtAdventurer(w, a, final - moved, e.id, by, now);
   if (sheltered && moved > 0) hurtAdventurer(w, pal, Math.round(moved * takenMult(w, pal, e, now)), e.id, by, now, true);

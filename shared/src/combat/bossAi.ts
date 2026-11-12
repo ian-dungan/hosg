@@ -286,8 +286,7 @@ function engagedWithin(w: CombatWorld, e: EnemyState, range: number): Adventurer
  * enrage attack) when it is due and can start. 'handled' when it started one (the boss is rooted);
  * 'chase' to run Plan 3's chase and auto this tick.
  */
-export function stepBoss(w: CombatWorld, e: EnemyState, nowS: number, dt: number): 'handled' | 'chase' {
-  void dt;
+export function stepBoss(w: CombatWorld, e: EnemyState, nowS: number): 'handled' | 'chase' {
   const s = stateOf(e);
   const t = e.targetId === null ? undefined : w.adventurers.get(e.targetId);
   if (s.wokeAt === null || s.busy !== null || !t || !t.alive || nowS < s.nextAt - TIME_EPS) return 'chase';

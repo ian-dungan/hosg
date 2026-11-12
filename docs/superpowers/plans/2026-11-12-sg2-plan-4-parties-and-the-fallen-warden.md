@@ -257,7 +257,7 @@ export interface BossData {
 - A rotation entry that cannot start (no target within its useRange, or no line of sight) waits; after 4 s waiting (`ROTATION_SKIP_S = 4`) it is skipped.
 - **No phase skipping:** while a phase is not the last, damage cannot take hp below `untilFrac × maxHp`. At that point the transition starts (invulnerable, `act: 'phase'`); the next phase begins after `transitionS`.
 - **Ward:** while any add spawned by `onEnter.adds` with a `wardMult` lives, the boss takes × `wardMult` damage (`CombatantView.warded`).
-- **Enrage:** `enrage.s` seconds after the boss woke, the rotation is replaced by `enrage.attack` every `enrage.every` s, its raw rising by `ramp` each use. `CombatantView.enrageIn` counts down (null without enrage).
+- **Enrage:** `enrage.s` seconds after the boss woke, the rotation is replaced by `enrage.attack` every `enrage.every` s, its raw rising by `ramp` each use. `CombatantView.enrageIn` counts down (null without enrage). A phase transition that comes during the enrage pauses Last Light while it lasts (at most twice, `transitionS` each); a boss arena's enemy leashes to its arena (it goes home only when outside it), and its dashes stop at the arena's edge.
 - **Reset:** when the boss goes home (no live target, leash, or a wipe), it resets to phase 1, its adds are despawned (no credit), its fields are removed, the enrage clock stops and its scale returns to base.
 - **Wake:** a boss notices adventurers within its `aggro` (in sight), or anyone who damages it (Plan 3 rules).
 

@@ -16,7 +16,7 @@ import {
 } from './constants';
 import { breakCast, castView, startCast, tickCast } from './casting';
 import {
-  allied, applyEffects, applyShield, clearAfflictions, healMult, onDamageTaken, onHealDone, outgoingMult, resolveAim, strikesFromBehind, targetFor, threatMult,
+  acrossArena, allied, applyEffects, applyShield, clearAfflictions, healMult, onDamageTaken, onHealDone, outgoingMult, resolveAim, outsideArenaOf, strikesFromBehind, targetFor, threatMult,
   tickAfflictions, tickBuffs, tickDebuffs, traitOf,
 } from './effects';
 import { AGGRO_THREAT } from './constants';
@@ -456,13 +456,14 @@ function consumeMark(w: CombatWorld, e: EnemyState, m: MarkId): void {
 /** Live adventurers allied with `a` within r of point p (no sight needed). */
 function alliesAround(w: CombatWorld, a: AdventurerState, p: { x: number; z: number }, r: number): AdventurerState[] {
   const out: AdventurerState[] = [];
-  for (const b of w.adventurers.values()) if (b.alive && allied(a, b) && Math.hypot(b.x - p.x, b.z - p.z) <= r) out.push(b);
+  for (const b of w.adventurers.values()) if (b.alive && allied(a, b) && Math.hypot(b.x - p.x, b.z - p.z) <= r && !acrossArena(w, a, b)) out.push(b);
   return out;
 }
 
 /** strike, returning the plain hit's amount (without detonations or reactions) and everything it dealt. */
 export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Strike, nowS: number): { plain: number; total: number } {
-  if (!e.alive || enemyInvulnerable(e)) return { plain: 0, total: 0 };
+  // ruling P4-c: from outside its arena nothing lands (no marks, stagger, Momentum or interrupt)
+  if (!e.alive || enemyInvulnerable(e) || outsideArenaOf(e, a)) return { plain: 0, total: 0 };
   const power = a.stats.power, def = e.data.defence;
   const behind = strikesFromBehind(a, e, s);
   const mult = (isBroken(e.stagger, nowS) ? BREAK_DAMAGE_MULT : 1) * outgoingMult(w, a, e, s, nowS);
@@ -614,6 +615,8 @@ export function knockAdventurer(w: CombatWorld, a: AdventurerState, d: Displacem
  */
 export function healAdventurer(w: CombatWorld, a: AdventurerState, amount: number, src: number, nowS: number, credit = true): number {
   if (!a.alive) return 0;
+  const by = w.adventurers.get(src);
+  if (by && acrossArena(w, by, a)) return 0;
   const healed = Math.max(0, Math.min(amount, a.stats.maxHp - a.hp));
   if (!(healed > 0)) return 0;
   a.hp += healed;
