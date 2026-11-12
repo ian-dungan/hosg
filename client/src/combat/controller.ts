@@ -47,18 +47,24 @@ export function tapAction(
   return { target: undefined, walk: settings.tapToWalk && tap.point ? 'ground' : null };
 }
 
-/** The five ability slots as the HUD shows them, timers counted down from when `self` arrived. */
-export function slotView(self: SelfSnap | null, nowMs: number, dead = false): HudState['slots'] {
-  if (!self) return [];
+/**
+ * The five ability slots as the HUD shows them, timers counted down from when `self` arrived. Written into
+ * `out` (its entries reused, so nothing is allocated per frame) and returned.
+ */
+export function slotView(self: SelfSnap | null, nowMs: number, dead = false, out: HudState['slots'] = []): HudState['slots'] {
+  if (!self) { out.length = 0; return out; }
   const el = Math.max(0, (nowMs - self.at) / 1000);
   const gcd = Math.max(0, self.gcd - el); // shown only while the slot also cools
-  return self.slots.map((id, i) => {
-    const a = ABILITIES[id];
+  out.length = Math.min(out.length, self.slots.length);
+  for (let i = 0; i < self.slots.length; i++) {
+    const id = self.slots[i], a = ABILITIES[id];
     const cd = Math.max(0, (self.cd[i] ?? 0) - el);
     const usable = !dead && !(a.cost !== undefined && self.momentum < a.cost);
     // the global cooldown only shows on a slot whose own cooldown is shorter, as the sweep's last part
-    return { ability: ABILITY_DEFS[id], cdRemaining: cd > 0 ? Math.max(cd, gcd) : 0, usable };
-  });
+    const s = (out[i] ??= { ability: ABILITY_DEFS[id], cdRemaining: 0, usable: true });
+    s.ability = ABILITY_DEFS[id]; s.cdRemaining = cd > 0 ? Math.max(cd, gcd) : 0; s.usable = usable;
+  }
+  return out;
 }
 
 /** How full a telegraph's decal is (0..1): it fills from first sight and is full TELEGRAPH_LEAD_S before it lands. */
@@ -84,10 +90,12 @@ export function screenToWorld(dir: { x: number; y: number } | null, alpha: numbe
   return { x: wx / l, z: wz / l };
 }
 
-/** The marks set in `bits` as HUD status ids. */
-export function markStatuses(bits: number): StatusId[] {
-  const out: StatusId[] = [];
-  for (const m of ['marked', 'burning', 'soaked'] as MarkId[]) if (bits & MARK_BITS[m]) out.push(m);
+const GUARDED: StatusId[] = ['guard'], UNGUARDED: StatusId[] = [];
+const MARK_IDS: readonly MarkId[] = ['marked', 'burning', 'soaked'];
+/** The marks set in `bits` as HUD status ids, written into `out` (emptied first) and returned. */
+export function markStatuses(bits: number, out: StatusId[] = []): StatusId[] {
+  out.length = 0;
+  for (const m of MARK_IDS) if (bits & MARK_BITS[m]) out.push(m);
   return out;
 }
 
@@ -105,15 +113,53 @@ export function keepFollowing(started: boolean, followSince: number, walkOverrid
   return started && !(walkOverriddenAt > followSince);
 }
 
-/** A `self` must arrive this long after a press (a round trip) before its `charge: null` means the charge is over, in ms. */
-export const CHARGE_SELF_LAG_MS = 300;
+/** A press no `self` has shown charging within this is taken as over (lost or refused), in ms. */
+export const CHARGE_CONFIRM_MS = 1000;
 /**
- * Whether a Charged Shot this client pressed at `pressedAt` is still held as the server sees it: a `self`
- * that arrived a round trip after the press and shows no charge says it is over (released, auto-released at
- * 2.5 s, cancelled by a knock or a swap), whatever happened to the key or button.
+ * Whether a Charged Shot this client pressed at `pressedAt` is still held as the server sees it. Once a `self`
+ * showing the charge has arrived (at `chargeSeenAt`), a later one showing none says it is over (released,
+ * auto-released at 2.5 s, cancelled by a knock or a swap), whatever happened to the key or button. Before
+ * that, a `self` without the charge may simply predate the press reaching the server (any round trip), so
+ * only CHARGE_CONFIRM_MS without the charge ever showing ends it.
  */
-export function chargeStillHeld(pressedAt: number, self: { at: number; charge: number | null } | null): boolean {
-  return !(self && self.at > pressedAt + CHARGE_SELF_LAG_MS && self.charge === null);
+export function chargeStillHeld(
+  pressedAt: number, chargeSeenAt: number | null, self: { at: number; charge: number | null } | null, nowMs: number,
+): boolean {
+  if (chargeSeenAt !== null) return !(self && self.at > chargeSeenAt && self.charge === null);
+  return !(nowMs - pressedAt > CHARGE_CONFIRM_MS && (!self || self.charge === null));
+}
+
+/**
+ * A held Charged Shot as this client sees it. `pressedAt` (null when not held) slows the adventurer and
+ * fills the cast bar; `up` says whether a key-up sends the release, which it always does for the slot the
+ * charge was pressed on, even when the charge is already over here (the server ignores a stray release).
+ */
+export function createChargeHold() {
+  let pressedAt: number | null = null, slot: number | null = null, seenAt: number | null = null;
+  return {
+    get pressedAt() { return pressedAt; },
+    get slot() { return slot; },
+    /** A press; false while one is held (key auto-repeat). */
+    press(s: number, now: number): boolean {
+      if (pressedAt !== null) return false;
+      pressedAt = now; slot = s; seenAt = null;
+      return true;
+    },
+    /** A `self` arrived at `at` showing `charge`. */
+    onSelf(charge: number | null, at: number) { if (pressedAt !== null && charge !== null && seenAt === null) seenAt = at; },
+    /** Per frame: drops a charge the server says is over. */
+    update(self: { at: number; charge: number | null } | null, now: number) {
+      if (pressedAt !== null && !chargeStillHeld(pressedAt, seenAt, self, now)) pressedAt = null;
+    },
+    /** A key-up on `s`: true when it sends the release (once per press). */
+    up(s: number): boolean {
+      if (slot === null || s !== slot) return false;
+      slot = null; pressedAt = null;
+      return true;
+    },
+    /** Death or a refused press: not held any more (the key-up still sends its release). */
+    cancel() { pressedAt = null; },
+  };
 }
 
 /**
@@ -216,15 +262,17 @@ export function createCombat(o: CombatOpts): CombatController {
   let followEid: number | null = null;
   /** When the current walk toward followEid began (a later walkOverriddenAt means the player steered away). */
   let followSince = -Infinity;
+  /** A walk toward followEid is under way (one that stops without arriving, stuck or overridden, ends the follow). */
+  let followWalk = false;
   /** Tap-to-walk keeps the adventurer in range of this enemy (a tapped target) until the player moves themselves. */
   let chase: { eid: number; since: number } | null = null;
   let pending: { from: { x: number; z: number; y: number }; end: { x: number; z: number; y: number }; at: number } | null = null;
   let lastDodgeAt = -Infinity;
   /** Charges as this client counts them (the server's, less the dodges sent since). */
   let charges = DODGE_CHARGES, chargesSetAt = -Infinity;
-  let chargePressedAt: number | null = null, releasedAt = -Infinity;
-  /** The slot the held Charged Shot was pressed on (its release goes to that slot, whatever the bar shows now). */
-  let chargeSlot: number | null = null;
+  let releasedAt = -Infinity;
+  /** The held Charged Shot (its release goes to the slot it was pressed on, whatever the bar shows now). */
+  const charge = createChargeHold();
   let lastPress: { slot: number; at: number } | null = null;
   /** A dodge pressed while another waited for its answer (rolled once that one is done, within DODGE_QUEUE_MS). */
   let queuedDodge: { dir: { x: number; y: number } | null; at: number } | null = null;
@@ -235,6 +283,10 @@ export function createCombat(o: CombatOpts): CombatController {
   const windupSince = new Map<number, { attack: string; at: number }>();
   const hurtAt = new Map<number, number>();
   const lastHp = new Map<number, number>();
+  const enemyMaps = [windupSince, hurtAt, lastHp] as Map<number, unknown>[];
+  const slotsOut: HudState['slots'] = [];
+  const targetStatuses: StatusId[] = [];
+  const tapIds = new Set<number>();
   let disposed = false;
   const myCast = { name: 'Charged Shot', frac: 0, mark: CHARGE_INTERRUPT_FRAC };
 
@@ -275,7 +327,7 @@ export function createCombat(o: CombatOpts): CombatController {
     const since = performance.now();
     const started = game.walkTo(new Vector3(d.x, d.y, d.z), {
       within,
-      then: () => { followEid = null; },
+      then: () => { followEid = null; followWalk = false; },
       follow: () => {
         const v = o.enemies.get(eid), ev = enemyView(eid);
         if (!v || !ev || ev.mode === 'dead' || target !== eid) { followEid = null; return null; }
@@ -283,14 +335,14 @@ export function createCombat(o: CombatOpts): CombatController {
       },
     });
     // no way there: stop following (and chasing), or it would search again (and toast) every frame
-    if (!keepFollowing(started, since, game.walkOverriddenAt)) { followEid = null; chase = null; }
-    else followSince = since;
+    if (!keepFollowing(started, since, game.walkOverriddenAt)) { followEid = null; chase = null; followWalk = false; }
+    else { followSince = since; followWalk = true; }
   };
 
   // ── dodge ──
   const dodge = (dir: { x: number; y: number } | null) => {
     const r = rig();
-    if (isDead()) return;
+    if (isDead() || travelling || room.reconnection.isReconnecting) return;
     if (pending || r.displacing) { queuedDodge = { dir, at: performance.now() }; return; }
     if (!r.body.grounded) { toast(refusalText('air')); return; }
     const now = performance.now();
@@ -300,7 +352,7 @@ export function createCombat(o: CombatOpts): CombatController {
     const from = { x: r.body.x, z: r.body.z, y: r.body.y };
     const d = dodgeDisplacement(w.x, w.z);
     const end = simulateDisplacement(from, d, (x, z) => game.world.surfaceAt(x, z));
-    game.walkTo(null);
+    game.walkTo(null); followWalk = false; // the follow carries on after the roll
     o.send('dodge', { x: from.x, z: from.z, y: from.y, facing: Math.atan2(w.x, w.z), moving: true, ack, dx: w.x, dz: w.z });
     r.faceTowards(from.x + w.x, from.z + w.z);
     r.displace(from, d);
@@ -322,17 +374,16 @@ export function createCombat(o: CombatOpts): CombatController {
         if (isDead()) return;
         const id = self?.slots[e.slot];
         const now = performance.now();
-        if (id === 'charged_shot') { if (chargePressedAt !== null) return; chargePressedAt = now; chargeSlot = e.slot; }
+        if (id === 'charged_shot' && !charge.press(e.slot, now)) return;
         lastPress = { slot: e.slot, at: now };
         o.send('ability', { slot: e.slot, phase: 'press' });
         break;
       }
       case 'abilityUp': {
         // the slot it was pressed on, even if a swap or a loadout change has put something else there since
-        if (chargePressedAt !== null && e.slot === chargeSlot) {
-          chargePressedAt = null; releasedAt = performance.now();
+        if (charge.up(e.slot)) {
+          releasedAt = performance.now();
           o.send('ability', { slot: e.slot, phase: 'release' });
-          chargeSlot = null;
         }
         break;
       }
@@ -367,14 +418,15 @@ export function createCombat(o: CombatOpts): CombatController {
     self = { ...m, at: now };
     // the server's count, unless it predates a dodge this client has just sent
     if (now - chargesSetAt > 500 || m.dodgeCharges < charges) charges = m.dodgeCharges;
-    if (m.charge === null && chargePressedAt === null) releasedAt = -Infinity;
+    charge.onSelf(m.charge, now);
+    if (m.charge === null && charge.pressedAt === null) releasedAt = -Infinity;
   };
   const onDisplaced = (m: S2C['displaced']) => {
     if (!isNewSeq(ack, m.seq)) return; // sent again after a reconnect: already applied
     debug.displaced++;
     note({ t: 'displaced', kind: m.kind, seq: m.seq });
     const wasFollowing = followEid;
-    game.walkTo(null);
+    game.walkTo(null); followWalk = false; // the follow carries on once the displacement has played
     followEid = wasFollowing;
     const r = rig();
     if (m.kind === 'dodge' && pending) {
@@ -406,7 +458,7 @@ export function createCombat(o: CombatOpts): CombatController {
       if (pending) { rollBack(pending.from); pending = null; }
       if (m.reason === 'charges') charges = 0;
     }
-    if (m.action === 'ability' && chargePressedAt !== null && refusalIsForCharge(lastPress, chargeSlot, performance.now())) { chargePressedAt = null; chargeSlot = null; }
+    if (m.action === 'ability' && charge.pressedAt !== null && refusalIsForCharge(lastPress, charge.slot, performance.now())) charge.cancel();
     // a refused respawn (too early): the death screen comes back with its button
     if (m.action === 'respawn' && deathScreen) { hud.dismissEndScreen(); deathScreen = false; }
     if (m.action === 'target' && target !== null) setTarget(null, false);
@@ -438,7 +490,7 @@ export function createCombat(o: CombatOpts): CombatController {
     // a dodge pressed meanwhile rolls now (or is dropped when it waited too long)
     if (queuedDodge && !pending && !r.displacing) { const q = queuedDodge; queuedDodge = null; if (now - q.at <= DODGE_QUEUE_MS) dodge(q.dir); }
     // a charge the server says is over (released, auto-released, cancelled) is not held here either, whatever the key did
-    if (chargePressedAt !== null && !chargeStillHeld(chargePressedAt, self)) { chargePressedAt = null; chargeSlot = null; }
+    charge.update(self, now);
 
     // charges refill on the client's own clock between `self`s
     if (self && charges < DODGE_CHARGES && self.dodgeNextIn > 0 && now - self.at > self.dodgeNextIn * 1000 && charges === self.dodgeCharges) charges++;
@@ -449,7 +501,7 @@ export function createCombat(o: CombatOpts): CombatController {
     else if (serverTarget >= 0 && serverTarget !== target && now - lastTargetSent > 600) setTarget(serverTarget, false);
 
     // speed: what the server allows now
-    const charging = chargePressedAt !== null || (self?.charge !== null && self?.charge !== undefined) || now - releasedAt < RELEASE_SLOW_MS;
+    const charging = charge.pressedAt !== null || (self?.charge !== null && self?.charge !== undefined) || now - releasedAt < RELEASE_SLOW_MS;
     let scale = 1;
     if (dead) scale = 0;
     else if (charging) scale = CHARGE_SCALE;
@@ -462,7 +514,7 @@ export function createCombat(o: CombatOpts): CombatController {
       deadSince = now;
       pending = null;
       game.walkTo(null); followEid = null;
-      if (chargePressedAt !== null) { chargePressedAt = null; chargeSlot = null; }
+      charge.cancel();
     }
     if (!dead && deadSince !== null) { deadSince = null; if (deathScreen) { hud.dismissEndScreen(); deathScreen = false; } }
     if (dead && !deathScreen && deadSince !== null) {
@@ -481,6 +533,8 @@ export function createCombat(o: CombatOpts): CombatController {
     if (chase && (chase.eid !== target || game.walkOverriddenAt > chase.since || dead)) chase = null;
     // the player steered themselves (keys, joystick) since the walk toward the target began: stop following
     if (followEid !== null && game.walkOverriddenAt > followSince) followEid = null;
+    // the walk toward it stopped without arriving (stuck against something): give up, or it would walk into it again and again
+    if (followWalk && !game.walking) { followWalk = false; if (followEid !== null) { followEid = null; chase = null; } }
     if (followEid !== null && !r.displacing && !pending && target === followEid && !game.walking) followTarget(followEid);
     else if (chase && followEid === null && !r.displacing && !pending && !game.walking && hud.settings.tapToWalk) {
       const e = enemyView(chase.eid);
@@ -499,7 +553,7 @@ export function createCombat(o: CombatOpts): CombatController {
     });
     if (target !== null) o.enemies.get(target)?.view.setTargeted(true);
     // forget enemies that left the view
-    for (const m of [windupSince, hurtAt, lastHp] as Map<number, unknown>[]) {
+    for (const m of enemyMaps) {
       if (m.size > 0) for (const eid of m.keys()) if (!room.state.enemies?.get(String(eid))) m.delete(eid);
     }
 
@@ -516,16 +570,16 @@ export function createCombat(o: CombatOpts): CombatController {
     p.weapon = weapon();
     p.momentum = self ? self.momentum : 0;
     p.swapLocked = !!self?.inCombat;
-    p.statuses = (me?.shield ?? 0) > 0 ? ['guard'] : [];
+    p.statuses = (me?.shield ?? 0) > 0 ? GUARDED : UNGUARDED;
     if (self) {
       const el = (now - self.at) / 1000;
       const refill = charges >= DODGE_CHARGES ? 1 : Math.max(0, Math.min(1, 1 - (self.dodgeNextIn - el) / DODGE_REFILL_S));
       const pd = (p.dodge ??= { charges: 0, max: DODGE_CHARGES, refill: 1 }); // reused: no per-frame objects
       pd.charges = Math.max(0, charges); pd.max = DODGE_CHARGES; pd.refill = refill;
-      const held = chargePressedAt !== null ? (now - chargePressedAt) / 1000 : self.charge !== null ? self.charge + el : null;
+      const held = charge.pressedAt !== null ? (now - charge.pressedAt) / 1000 : self.charge !== null ? self.charge + el : null;
       if (held !== null && !dead) { myCast.frac = Math.min(1, held / CHARGE_FULL_S); p.cast = myCast; } else p.cast = null;
     }
-    state.slots = slotView(self, now, dead);
+    state.slots = slotView(self, now, dead, slotsOut);
     state.inCombat = !!self?.inCombat;
 
     // HUD: the target (kept from its last sight while briefly out of view)
@@ -537,7 +591,7 @@ export function createCombat(o: CombatOpts): CombatController {
     if (t && isKind(t.kind)) {
       const k = ENEMY_KINDS[t.kind];
       const w = windupSince.get(t.eid);
-      const statuses = markStatuses(t.marks ?? 0);
+      const statuses = markStatuses(t.marks ?? 0, targetStatuses);
       if (t.mode === 'stunned') statuses.push('stunned');
       state.target = {
         name: k.name, hp: t.hp, maxHp: t.maxHp, statuses,
@@ -568,13 +622,14 @@ export function createCombat(o: CombatOpts): CombatController {
         case 'respawned': onRespawned(m as S2C['respawned']); break;
         case 'refused': onRefused(m as S2C['refused']); break;
         case 'fx': onFx(m as S2C['fx']); break;
-        default: break; // credit: a kill is shown by the enemy's death
+        case 'credit': note({ t: 'credit', ...(m as S2C['credit']) }); break; // a kill is shown by the enemy's death; logged for playtests
+        default: break;
       }
     },
     canSendPose: () => !pending && !rig().displacing && !isDead(),
     onTap(tap) {
       if (isDead()) return true;
-      const ids = new Set<number>();
+      const ids = tapIds; ids.clear();
       room.state.enemies?.forEach((e) => { if (e.mode !== 'dead') ids.add(e.eid); });
       let reach = Infinity;
       if (tap.entityId !== null && ids.has(tap.entityId)) {

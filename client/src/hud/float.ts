@@ -6,6 +6,9 @@ type Kind = Parameters<HudApi['floatText']>[3];
 const POOL = 40;
 /** How far to the side of the point a damage number starts, in px. */
 const SIDE_PX = 38;
+/** How far each kind of number rises over its life, in px (it starts at least this far below the top HUD). */
+const RISE: Partial<Record<Kind, number>> = { crit: 70, combo: 56, heal: 64, info: 36, hurt: 0 };
+const RISE_DAMAGE = 46;
 
 export class FloatText {
   readonly el: HTMLElement;
@@ -14,7 +17,8 @@ export class FloatText {
   /** The side the last damage number went (1 right, -1 left). */
   private side = 1;
   private vignette: HTMLElement;
-  constructor(parent: HTMLElement) {
+  /** `keepOut`: the top HUD's panels (frames): a number under one starts below it, so it never covers them. */
+  constructor(parent: HTMLElement, private keepOut: () => readonly HTMLElement[] = () => []) {
     this.el = h('div', 'sg-floats', parent);
     for (let i = 0; i < POOL; i++) this.pool.push(h('div', 'sg-ft', this.el));
     this.vignette = h('div', 'sg-vignette', parent);
@@ -25,6 +29,7 @@ export class FloatText {
     el.getAnimations().forEach((a) => a.cancel());
     el.className = 'sg-ft ' + kind;
     el.textContent = text;
+    y = this.belowPanels(x, y, (RISE[kind] ?? RISE_DAMAGE) + 14);
     const jx = (Math.random() - 0.5) * 36;
     const at = (dx: number, dy: number, s: number) => `translate(${(x + dx).toFixed(1)}px,${(y + dy).toFixed(1)}px) translate(-50%,-50%) scale(${s})`;
     let frames: Keyframe[]; let dur = 1000;
@@ -57,5 +62,18 @@ export class FloatText {
       }
     }
     el.animate(frames, { duration: dur, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' });
+  }
+  /** `y`, moved down so a number rising `rise` px from (x, y) stays clear of the panels it would cross. */
+  private belowPanels(x: number, y: number, rise: number): number {
+    const panels = this.keepOut();
+    if (panels.length === 0) return y;
+    const base = this.el.getBoundingClientRect();
+    for (const p of panels) {
+      const r = p.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue; // hidden
+      if (x < r.left - base.left - SIDE_PX * 2 || x > r.right - base.left + SIDE_PX * 2) continue;
+      y = Math.max(y, r.bottom - base.top + rise);
+    }
+    return y;
   }
 }

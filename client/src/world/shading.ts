@@ -86,12 +86,23 @@ if (wfxTarget.w > 0.0) {
     float wt = dot(vPositionW - wCam, wD) / wL2;
     float wDist = length(vPositionW - (wCam + wD * wt));
     // anything on the line from the lens to the adventurer (the target is 1.8 m above its feet): a trunk or a
-    // bough between them fades however low it is, down to knee height, so the adventurer is never hidden
-    float wA = (1.0 - smoothstep(wfxTarget.w * 0.5, wfxTarget.w, wDist)) * (1.0 - smoothstep(0.8, 0.93, wt)) * step(0.0, wt)
-             * smoothstep(wfxTarget.y - 1.6, wfxTarget.y - 1.2, vPositionW.y);
+    // bough between them fades however low it is, down to knee height, so the adventurer is never hidden. It
+    // fades right up to the adventurer (to 0.6 m in front of the target, in metres, whatever the zoom). Off the
+    // line (from half the radius out) only what stands above the head fades: a fence or a post beside the
+    // adventurer hides nothing, so it stays solid.
+    float wBefore = (1.0 - wt) * sqrt(wL2);
+    float wOff = smoothstep(wfxTarget.w * 0.35, wfxTarget.w * 0.5, wDist);
+    float wFloor = wfxTarget.y + mix(-1.6, 0.6, wOff);
+    float wA = (1.0 - smoothstep(wfxTarget.w * 0.5, wfxTarget.w, wDist)) * smoothstep(0.35, 0.6, wBefore) * step(0.0, wt)
+             * smoothstep(wFloor, wFloor + 0.4, vPositionW.y);
     // and whatever stands right in front of the lens (a pine beside the camera filling half the view)
     float wNear = 1.0 - smoothstep(5.0, 10.0, length(vPositionW - wCam));
-    wA = max(wA, wNear * 0.85);
+    // and a canopy between the lens and the adventurer below the line of sight: it fills the lower screen,
+    // under the controls (trunks, fences and the ground below head height stay)
+    float wBelow = wCam.y + wD.y * wt - vPositionW.y;
+    float wLow = step(0.0, wt) * (1.0 - smoothstep(0.9, 1.0, wt)) * smoothstep(-0.5, 0.5, wBelow)
+               * smoothstep(wfxTarget.y - 0.4, wfxTarget.y + 0.2, vPositionW.y) * (1.0 - smoothstep(4.0, 7.0, wDist));
+    wA = max(wA, max(wNear, wLow) * 0.85);
     if (wA * 0.9 > wfxBayer(gl_FragCoord.xy)) discard;
   }
 }

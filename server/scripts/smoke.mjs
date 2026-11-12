@@ -1,15 +1,16 @@
 // Browser smoke test of a running Shady Grove 2 server (Playwright, headless Chromium).
-//   node server/scripts/smoke.mjs <url> [--kill "<command that kills the server>"]
+//   node server/scripts/smoke.mjs <url> [--kill "<command that kills the server>"] [--no-combat]
 // Two desktop guests and one iPhone 13 guest see "Adventurers online: 3"; A walks and B sees A move
 // more than 2 m; A jumps (Space) and B sees A more than 0.5 m up; A's markup-laden chat line reaches B
 // as plain text; signing in to A's account from a new browser shows "Signed in somewhere else" on A;
 // killing the server shows "Connection lost".
 // Combat (start the server with SG2_START_ZONE=greenway, so every step runs in the Greenway): after the
 // chat step A targets the nearest Thornling with Tab, walks into reach by tap-to-walk (a click on it) and
-// kills it within 90 s (it shows dead in __sg2net.enemies), having taken damage on the way; then clears
+// kills it within 90 s (it shows dead in __sg2net.enemies, or the kill's credit is in the combat log; an
+// enemy that merely left the view does not count), having taken damage on the way; then clears
 // its target, walks to the next camp and stands there until "Defeated" shows (within 150 s), clicks
-// "Return to the statue" and is in the grove at full health. A server whose adventurers start in the
-// grove skips the combat steps (with a note).
+// "Return to the statue" and is in the grove at full health. A server whose adventurers start anywhere
+// else fails, unless --no-combat is passed (then the combat steps are skipped, with a note).
 // Any page error fails the test. Browser console errors are not counted: Chrome logs refused
 // reconnect attempts and failed requests there, which are expected.
 // The server is killed at the end. Only for a URL on this machine (localhost, 127.0.0.1 or ::1)
@@ -20,9 +21,9 @@ import { execSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { chromium, devices } from 'playwright';
 
-const { values, positionals } = parseArgs({ allowPositionals: true, options: { kill: { type: 'string' } } });
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { kill: { type: 'string' }, 'no-combat': { type: 'boolean' } } });
 if (positionals.length !== 1) {
-  console.error('Usage: node server/scripts/smoke.mjs <url> [--kill "<command>"]');
+  console.error('Usage: node server/scripts/smoke.mjs <url> [--kill "<command>"] [--no-combat]');
   process.exit(2);
 }
 const url = new URL(positionals[0]);
@@ -176,8 +177,12 @@ try {
   await c.context.close();
 
   const zone = await a.page.evaluate(() => window.__sg2net?.zone);
-  if (zone !== 'greenway') {
-    console.log(`skip the combat steps: A is in "${zone}" (start the server with SG2_START_ZONE=greenway to run them)`);
+  if (values['no-combat']) {
+    console.log(`skip the combat steps (--no-combat): A is in "${zone}"`);
+  } else if (zone !== 'greenway') {
+    await check('A starts in the Greenway, for the combat steps', async () => {
+      throw new Error(`A is in "${zone}": start the server with SG2_START_ZONE=greenway, or pass --no-combat to skip the combat steps`);
+    });
   } else {
     let thornling;
     await check('A targets the nearest Thornling with Tab, walks into reach by tap-to-walk and kills it within 90 s', async () => {
@@ -201,16 +206,19 @@ try {
         const pt = e && window.__sg2.screenOf(e.x, (window.__sg2.world.groundAt(e.x, e.z) ?? 0) + 0.6, e.z);
         return pt && pt.x > 0 && pt.y > 0 && pt.x < innerWidth && pt.y < innerHeight ? pt : null;
       }, thornling.eid, { timeout: WAIT_MS, polling: 500 }).then((h) => h.jsonValue());
+      // kills credited before the fight, so one credited during it counts (the enemy may leave the view as it dies)
+      const credits = () => a.page.evaluate(() => (window.__sg2.combat?.debug.log ?? []).filter((l) => l.e?.t === 'credit' && l.e.kind === 'thornling').length);
+      const creditsBefore = await credits();
       await a.page.mouse.click(at.x, at.y);
       const started = Date.now();
       // fight: autos run by themselves; Slash and Sunder now and then
       for (;;) {
         const s = await a.page.evaluate((eid) => {
           const e = window.__sg2net.enemies.find((v) => v.eid === eid);
-          return { dead: !e || e.mode === 'dead', hp: window.__sg2net.self?.hp ?? 100 };
+          return { dead: e?.mode === 'dead', hp: window.__sg2net.self?.hp ?? 100 };
         }, thornling.eid);
         minHp = Math.min(minHp, s.hp);
-        if (s.dead) break;
+        if (s.dead || (await credits()) > creditsBefore) break;
         if (Date.now() - started > KILL_MS) {
           const seen = await a.page.evaluate((eid) => {
             const e = window.__sg2net.enemies.find((v) => v.eid === eid), p = window.__sg2.rig.position;

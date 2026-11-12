@@ -1,5 +1,6 @@
-// Bars over enemies' heads: name and health while engaged, targeted or hurt in the last 5 s (always for elites,
-// which also get a stagger bar, greyed while it cannot fill), the marks on them as icons, and a chevron while
+// Bars over enemies' heads: name and health while engaged or hurt in the last 5 s (for the current target only its
+// marks: its frame shows the rest), always for elites, which also get a stagger bar, greyed while it cannot fill;
+// the marks on them as icons, and a chevron while
 // they surge. DOM, projected each frame; elements are kept per enemy and hidden when not needed.
 import { Matrix, Vector3, type Scene } from '@babylonjs/core';
 import { ENEMY_KINDS, MARK_BITS, type EnemyKindId, type MarkId } from '@sg2/shared';
@@ -15,7 +16,7 @@ const CSS = /* css */ `
 .sg-oh{position:absolute;left:0;top:0;display:none;flex-direction:column;align-items:center;gap:2px;will-change:transform;pointer-events:none}
 .sg-oh.on{display:flex}
 .sg-oh-name{font:700 12px/1.1 var(--sans);color:#fff2e6;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.85),0 0 4px rgba(0,0,0,.5)}
-.sg-oh.tgt .sg-oh-name{display:none} /* the target frame names it already */
+.sg-oh.tgt .sg-oh-name,.sg-oh.tgt:not(.elite) .sg-oh-hp{display:none} /* the target frame names it and shows its health: only its marks stay, clear of the adventurer's head in melee */
 .sg-oh-row{display:flex;align-items:center;gap:3px}
 .sg-oh-hp,.sg-oh-st{position:relative;width:64px;height:7px;border-radius:4px;overflow:hidden;background:rgba(14,12,30,.7);box-shadow:0 0 0 1px rgba(0,0,0,.45)}
 .sg-oh.elite .sg-oh-hp{width:96px;height:9px}

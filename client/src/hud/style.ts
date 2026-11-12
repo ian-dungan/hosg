@@ -157,6 +157,8 @@ const CSS = /* css */ `
   background:conic-gradient(rgba(8,10,26,.72) calc(var(--cd,0) * 360deg),transparent 0)}
 .sg-ab-sec{position:absolute;inset:0;display:grid;place-items:center;font:800 22px var(--sans);color:#fff;text-shadow:0 1px 4px #000;font-variant-numeric:tabular-nums}
 .sg-ab.unusable{filter:grayscale(.85) brightness(.7)}
+.sg-ab.cooling .sg-ab-name{visibility:hidden} /* the cooldown number shows instead: never over the label */
+.sg-ab.cooling .sg-ab-glyph{opacity:.35}
 .sg-key{position:absolute;top:3px;left:5px;font-size:10px;font-weight:800;color:var(--goldl);opacity:.85}
 .sg-ab-swap,.sg-ab-loadout{width:56px;height:56px;border-radius:14px;--kc:rgba(255,226,160,.55)}
 .sg-ab-swapmark{position:absolute;right:3px;bottom:3px;width:13px;height:13px;color:var(--goldl);opacity:.7}

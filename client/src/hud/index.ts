@@ -76,7 +76,8 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   });
 
   // ── fx layer: floats, banner, toasts ──
-  const floats = new FloatText(fx);
+  // numbers start below the frames at the top (a heal on the adventurer never covers the target's bar)
+  const floats = new FloatText(fx, () => [player.el, target.el, bossSlot]);
   // the red screen edge sits under the controls (they stay readable while it pulses)
   const danger = h('div', 'sg-danger', null);
   const hurtFlash = h('div', 'sg-danger', null);

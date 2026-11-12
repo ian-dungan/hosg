@@ -51,14 +51,14 @@ export function createEffects(o: EffectsOpts): Effects {
   };
 
   // ── floating numbers ──
-  const proj = new Vector3();
+  const proj = new Vector3(), floatAt = new Vector3();
   const float = (w: Who | null, text: string, kind: Parameters<HudApi['floatText']>[3], lift = 0.9) => {
     if (!w) return;
     const camera = scene.activeCamera;
     const canvas = scene.getEngine().getRenderingCanvas();
     if (!camera || !canvas) return;
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    Vector3.ProjectToRef(new Vector3(w.x, w.y + w.h * lift, w.z), Matrix.IdentityReadOnly, scene.getTransformMatrix(), camera.viewport.toGlobal(cw, ch), proj);
+    Vector3.ProjectToRef(floatAt.set(w.x, w.y + w.h * lift, w.z), Matrix.IdentityReadOnly, scene.getTransformMatrix(), camera.viewport.toGlobal(cw, ch), proj);
     if (proj.z <= 0 || proj.z >= 1 || proj.x < -50 || proj.x > cw + 50 || proj.y < -50 || proj.y > ch + 50) return;
     hud.floatText(proj.x, proj.y, text, kind);
   };

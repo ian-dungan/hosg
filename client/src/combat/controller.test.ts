@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ABILITIES, FINISHER_COST, TELEGRAPH_LEAD_S, type SelfView } from '@sg2/shared';
 import { ABILITY_DEFS } from './abilityDefs';
-import { CHARGE_SELF_LAG_MS, chargeStillHeld, cycleTarget, isNewSeq, keepFollowing, refusalIsForCharge, screenToWorld, slotView, tapAction, telegraphFill, type SelfSnap } from './controller';
+import { CHARGE_CONFIRM_MS, chargeStillHeld, createChargeHold, cycleTarget, isNewSeq, keepFollowing, markStatuses, refusalIsForCharge, screenToWorld, slotView, tapAction, telegraphFill, type SelfSnap } from './controller';
 
 const P = { x: 1, y: 0, z: 2 };
 
@@ -110,17 +110,54 @@ describe('Task 8 review round 1', () => {
     expect(keepFollowing(true, 100, 50)).toBe(true);
     expect(keepFollowing(true, 100, 150)).toBe(false); // keys or joystick since it began
   });
-  it('a held Charged Shot ends when a self a round trip after the press shows no charge (blur, swap, auto-release)', () => {
+  it('a held Charged Shot ends when a self after one showing the charge shows none, or ~1 s after the press with none seen', () => {
     const press = 1000;
-    expect(chargeStillHeld(press, null)).toBe(true);
-    expect(chargeStillHeld(press, { at: press + 50, charge: null })).toBe(true); // sent before the press reached the server
-    expect(chargeStillHeld(press, { at: press + CHARGE_SELF_LAG_MS + 1, charge: 0.4 })).toBe(true);
-    expect(chargeStillHeld(press, { at: press + CHARGE_SELF_LAG_MS + 1, charge: null })).toBe(false);
+    expect(chargeStillHeld(press, null, null, press + 500)).toBe(true);
+    // 400 ms latency: a self built before the press reached the server arrives 400 ms later, still with no charge
+    expect(chargeStillHeld(press, null, { at: press + 400, charge: null }, press + 400)).toBe(true);
+    expect(chargeStillHeld(press, press + 600, { at: press + 600, charge: 0.2 }, press + 700)).toBe(true);
+    expect(chargeStillHeld(press, press + 600, { at: press + 900, charge: null }, press + 900)).toBe(false); // released, auto-released, cancelled
+    // nothing ever showed the charge (a lost or refused press): over after the timeout
+    expect(chargeStillHeld(press, null, { at: press + 400, charge: null }, press + CHARGE_CONFIRM_MS - 1)).toBe(true);
+    expect(chargeStillHeld(press, null, { at: press + 400, charge: null }, press + CHARGE_CONFIRM_MS + 1)).toBe(false);
+  });
+  it('with 400 ms latency a held Charged Shot is released on key-up (the stale self does not drop it)', () => {
+    const h = createChargeHold();
+    expect(h.press(2, 0)).toBe(true);
+    expect(h.press(2, 50)).toBe(false); // key auto-repeat
+    h.onSelf(null, 400); h.update({ at: 400, charge: null }, 400); // built before the server got the press
+    expect(h.pressedAt).toBe(0);
+    h.onSelf(0.2, 650); h.update({ at: 650, charge: 0.2 }, 650);
+    expect(h.up(3)).toBe(false); // another slot
+    expect(h.up(2)).toBe(true); // the release goes out
+    expect(h.pressedAt).toBeNull();
+  });
+  it('the release is sent on key-up even when the charge already ended here (the server ignores a stray one)', () => {
+    const h = createChargeHold();
+    h.press(2, 0);
+    h.onSelf(0.3, 500); h.onSelf(null, 2600); h.update({ at: 2600, charge: null }, 2600); // auto-released at 2.5 s
+    expect(h.pressedAt).toBeNull();
+    expect(h.up(2)).toBe(true);
+    expect(h.up(2)).toBe(false); // once
+    h.press(2, 3000); h.cancel(); // death, a refused press
+    expect(h.pressedAt).toBeNull();
+    expect(h.up(2)).toBe(true);
   });
   it('an ability refusal ends the pending charge only when the last press was the charge slot', () => {
     expect(refusalIsForCharge({ slot: 2, at: 1000 }, 2, 1200)).toBe(true);
     expect(refusalIsForCharge({ slot: 3, at: 1100 }, 2, 1200)).toBe(false); // a Mend pressed since
     expect(refusalIsForCharge({ slot: 2, at: 1000 }, 2, 1700)).toBe(false);
     expect(refusalIsForCharge(null, 2, 1000)).toBe(false);
+  });
+  it('the per-frame views reuse what they are given (no allocation per frame)', () => {
+    const out: ReturnType<typeof slotView> = [];
+    const a = slotView(self({ cd: [4, 0, 0, 0, 0] }, 1000), 1000, false, out);
+    const first = a[0];
+    const b = slotView(self({ cd: [0, 0, 0, 0, 0] }, 1000), 1000, false, out);
+    expect(b).toBe(out); expect(b[0]).toBe(first); expect(b[0].cdRemaining).toBe(0);
+    expect(slotView(null, 0, false, out)).toEqual([]);
+    const marks = ['stunned'] as ReturnType<typeof markStatuses>;
+    expect(markStatuses(0, marks)).toBe(marks);
+    expect(marks).toEqual([]);
   });
 });
