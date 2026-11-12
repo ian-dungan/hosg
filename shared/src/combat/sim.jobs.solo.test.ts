@@ -10,6 +10,11 @@ const SEEDS = [1, 2, 3, 4, 5];
  * 25%-of-median rule binds it instead.
  */
 const RANGER_FLOOR = 8.5;
+/**
+ * Ruling P3b-g: the 25%-of-median rule is over the five new jobs; the Warrior and the Ranger are held to
+ * their Plan 3 bands instead (sim.test.ts, and P3b-e for the Ranger).
+ */
+const NEW_JOBS = JOB_IDS.filter((j) => j !== 'warrior' && j !== 'ranger');
 const ORDINARY = ['thornling', 'boar', 'archer'] as const;
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[(s.length - 1) / 2]; };
@@ -35,11 +40,11 @@ describe('S1: every job solo beats every ordinary kind', () => {
       expect(m, enemy).toBeLessThanOrEqual(16);
     }
   });
-  it('no job is more than 25% off the median, per ordinary kind', () => {
+  it('no new job is more than 25% off the new jobs\' median, per ordinary kind', () => {
     for (const enemy of ORDINARY) {
-      const means = JOB_IDS.map((job) => mean(fights(job, enemy).map((r) => r.ttk ?? Infinity)));
+      const means = NEW_JOBS.map((job) => mean(fights(job, enemy).map((r) => r.ttk ?? Infinity)));
       const md = median(means);
-      JOB_IDS.forEach((job, i) => expect(Math.abs(means[i] - md) / md, `${job} vs ${enemy}: ${means[i].toFixed(1)} (median ${md.toFixed(1)})`).toBeLessThanOrEqual(0.25));
+      NEW_JOBS.forEach((job, i) => expect(Math.abs(means[i] - md) / md, `${job} vs ${enemy}: ${means[i].toFixed(1)} (median ${md.toFixed(1)})`).toBeLessThanOrEqual(0.25));
     }
   });
 });
@@ -53,10 +58,10 @@ describe('S2: every job solo beats the Mossback with care', () => {
     expect(m).toBeGreaterThanOrEqual(30);
     expect(m).toBeLessThanOrEqual(80);
   });
-  it('no job is more than 25% off the median against the Mossback', () => {
-    const means = JOB_IDS.map((job) => mean(wins(fights(job, 'mossback')).map((r) => r.ttk!)));
+  it('no new job is more than 25% off the new jobs\' median against the Mossback', () => {
+    const means = NEW_JOBS.map((job) => mean(wins(fights(job, 'mossback')).map((r) => r.ttk!)));
     const md = median(means);
-    JOB_IDS.forEach((job, i) => expect(Math.abs(means[i] - md) / md, `${job}: ${means[i].toFixed(1)} (median ${md.toFixed(1)})`).toBeLessThanOrEqual(0.25));
+    NEW_JOBS.forEach((job, i) => expect(Math.abs(means[i] - md) / md, `${job}: ${means[i].toFixed(1)} (median ${md.toFixed(1)})`).toBeLessThanOrEqual(0.25));
   });
 });
 
@@ -68,7 +73,8 @@ describe('S3: carelessness', () => {
     for (const job of ['paladin', 'dark_knight', 'white_mage'] as const) {
       const rs = fights(job, 'mossback', false);
       const dies = rs.some((r) => r.died), hp = mean(rs.map((r) => r.hpLeft));
-      expect(dies || hp <= 50, `${job}: mean hp ${hp}`).toBe(true);
+      expect(dies || hp <= (job === 'dark_knight' ? 50 : 60), // P3b-f: 60 for the White Mage and the Paladin
+         `${job}: mean hp ${hp}`).toBe(true);
     }
   });
 });

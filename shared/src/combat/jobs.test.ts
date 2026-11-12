@@ -23,7 +23,12 @@ describe('job data', () => {
     for (const v of ['monk', 'toString', 'constructor', '', null, 3, {}]) expect(isJobId(v)).toBe(false);
     expect(JOBS.paladin.bar).toEqual(['shield_rap', 'bright_verdict', 'aegis']);
     expect(JOBS.white_mage.pool).toEqual(['second_dawn', 'soft_rain', 'mistveil', 'sun_mote']);
-    expect(JOBS.black_mage.picks).toEqual({ solo: ['bastion_stone', 'rootbreak'], duo: ['kindred_spark', 'rootbreak'] });
+    // ruling P3b-h: duo = one team pick + one sustain pick (a job's only primer kept); Ninja and Black Mage equal their solo picks
+    expect(JOBS.black_mage.picks).toEqual({ solo: ['bastion_stone', 'rootbreak'], duo: ['bastion_stone', 'rootbreak'] });
+    expect(jobs().map((j) => j.picks.duo)).toEqual([
+      ['skullringer', 'mend'], ['pinning_shot', 'field_dressing'], ['shelter', 'kindle'], ['bloodbond', 'umbral_brand'],
+      ['ashcloud', 'mist_form'], ['second_dawn', 'soft_rain'], ['bastion_stone', 'rootbreak'],
+    ]);
   });
   it('every ability belongs to exactly one job, in its bar or its pool', () => {
     const all = jobs().flatMap((j) => [...j.bar, ...j.pool]);
@@ -59,6 +64,14 @@ describe('job data', () => {
     }
     for (const a of Object.values(ABILITIES)) {
       if (a.primer) { expect(a.mark).toBeDefined(); expect(a.role).not.toBe('finisher'); expect(a.cost).toBeUndefined(); }
+    }
+  });
+  it('every pair, mirrors included, can combo on duo picks: a mark one side leaves (primer or finisher) that the other side\'s finisher detonates', () => {
+    const left = (j: (typeof JOBS)[keyof typeof JOBS]) => [...j.bar, ...j.picks.duo].map((id) => ABILITIES[id]).filter((a) => a.primer === true || a.role === 'finisher').map((a) => a.mark);
+    const finisher = (j: (typeof JOBS)[keyof typeof JOBS]) => ABILITIES[j.bar[1]].mark;
+    for (const a of jobs()) for (const b of jobs()) {
+      const ok = left(a).some((m) => m !== finisher(b)) || left(b).some((m) => m !== finisher(a));
+      expect(ok, `${a.id} + ${b.id}`).toBe(true);
     }
   });
   it('solo and duo picks are two distinct pool ids', () => {
@@ -144,20 +157,20 @@ describe('job data', () => {
     expect(ABILITIES.skyfall_arc.effects).toEqual([{ k: 'damage', coef: 4.0 }]);
     expect(ABILITIES.hearthfall.effects).toEqual([{ k: 'damage', coef: 4.9, splash: { r: 4, frac: 0.5 } }]);
     expect(ABILITIES.barbed_rain.effects).toEqual([{ k: 'damage', coef: 1.4, splash: { r: 3, frac: 1 } }]);
-    expect(ABILITIES.kindle.effects).toEqual([{ k: 'heal', amount: 20, on: 'aim' }, { k: 'heal', amount: 10, on: 'self' }]);
-    expect(ABILITIES.kindle.cooldown).toBe(17);
-    expect(ABILITIES.aegis.effects).toEqual([{ k: 'buff', buff: 'aegis', s: 3, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 3, on: 'others', r: 8 }]);
+    expect(ABILITIES.kindle.effects).toEqual([{ k: 'heal', amount: 25, on: 'aim' }, { k: 'heal', amount: 8, on: 'self' }]);
+    expect(ABILITIES.kindle.cooldown).toBe(14);
+    expect(ABILITIES.aegis.effects).toEqual([{ k: 'buff', buff: 'aegis', s: 3, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 4, on: 'others', r: 8 }]);
     expect(ABILITIES.ashcloud.effects).toEqual([{ k: 'threat-drop', r: 6 }, { k: 'debuff', debuff: 'blinded', s: 3, on: 'area', r: 6 }]);
     expect(ABILITIES.grave_ward.effects).toEqual([{ k: 'hp-cost', amount: 10 }, { k: 'shield', amount: 30, s: 6, on: 'self' }]);
     expect(ABILITIES.ghost_edge.effects).toEqual([{ k: 'damage', coef: 1.8, behind: true }]);
     expect(ABILITIES.ghost_edge.cooldown).toBe(10);
-    expect(ABILITIES.second_dawn).toMatchObject({ aim: 'dead-ally', cast: 3.0, cooldown: 60, range: 12, school: 'light', support: true, ai: 'revive' });
+    expect(ABILITIES.second_dawn).toMatchObject({ aim: 'dead-ally', cast: 3.0, cooldown: 45, range: 12, school: 'light', support: true, ai: 'revive' });
     expect(ABILITIES.second_dawn.effects).toEqual([{ k: 'revive', frac: 0.4 }]);
-    expect(ABILITIES.wellspring.effects).toEqual([{ k: 'heal', amount: 36, on: 'aim' }, { k: 'cleanse' }]);
+    expect(ABILITIES.wellspring.effects).toEqual([{ k: 'heal', amount: 45, on: 'aim' }, { k: 'cleanse' }]);
     expect(ABILITIES.wellspring.cooldown).toBe(10);
-    expect(ABILITIES.lantern_flare.effects).toEqual([{ k: 'damage', coef: 3.6 }, { k: 'heal', amount: 15, on: 'lowest' }]);
+    expect(ABILITIES.lantern_flare.effects).toEqual([{ k: 'damage', coef: 3.0 }, { k: 'heal', amount: 20, on: 'lowest' }]);
     expect(ABILITIES.kindred_spark).toMatchObject({ aim: 'other-ally', range: 15, cooldown: 20 });
-    expect(ABILITIES.kindred_spark.effects).toEqual([{ k: 'momentum', amount: 30, on: 'aim' }, { k: 'momentum', amount: 10, on: 'self' }]);
+    expect(ABILITIES.kindred_spark.effects).toEqual([{ k: 'momentum', amount: 37, on: 'aim' }, { k: 'momentum', amount: 10, on: 'self' }]);
     expect(ABILITIES.shelter).toMatchObject({ aim: 'other-ally', range: 12, ai: 'shelter' });
     expect(ABILITIES.crossed_fangs).toMatchObject({ cooldown: 3.5, momentum: 20, mark: 'marked', primer: true });
     expect(ABILITIES.sunder.effects).toEqual([{ k: 'damage', coef: 4.0 }]);

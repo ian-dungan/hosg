@@ -3,22 +3,26 @@
 // It never swaps weapons or changes job (only out of combat, in a town), and it never parries.
 import { ABILITIES, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, WEAPONS, type AbilityData, type AbilityId } from './abilities';
 import { ENEMY_ATTACKS, ENEMY_KINDS } from './enemies';
-import type { CombatantView, Intent, SelfView, TelegraphView } from './engine';
-import { FINISHER_COST } from './constants';
-import { JOBS } from './jobs';
+import type { CastView, CombatantView, Intent, SelfView, TelegraphView } from './engine';
+import { FINISHER_COST, MOMENTUM_MAX } from './constants';
+import { JOBS, type JobId } from './jobs';
 import { MARK_BITS } from './marks';
 import { escapeDir, inShape } from './shapes';
 
+/** The brain's own view: SelfView with the job fields the engine always fills made required. */
+export type BrainSelf = CombatantView & SelfView & { job: JobId; dodgeMax: number; cast: CastView };
 /**
- * allies: the other adventurers within ALLY_VIEW_R (dead ones included), as the caller sees them.
- * Optional only for callers built before jobs (absent = none): the load-test bots until Task 9.
+ * allies: the other adventurers within ALLY_VIEW_R (dead ones included), as the caller sees them
+ * (required: a caller that forgets them must not compile, rather than play solo). home: the target's
+ * camp and leash, when the caller knows them (the formation step stays inside it).
  */
 export interface BrainInput {
   nowS: number; careful: boolean;
-  self: CombatantView & SelfView;
+  self: BrainSelf;
   target: CombatantView | null;
-  allies?: CombatantView[];
+  allies: CombatantView[];
   telegraphs: TelegraphView[];
+  home?: { x: number; z: number; leash: number };
 }
 export interface BrainAction { moveTo: { x: number; z: number } | null; intents: Intent[] }
 /**
@@ -26,10 +30,26 @@ export interface BrainAction { moveTo: { x: number; z: number } | null; intents:
  * holdSince: when a careful brain started holding a ready finisher for an interruptible wind-up;
  * reactionS: how long a telegraph must have been up before a careful brain dodges it (0.4 s).
  */
-/** solo: plays as if alone (the synergy check): never presses a `support` ability, lays no primer for its finisher, keeps no formation. */
-export interface BrainMemory { dodged: Set<number>; chargingSince: number | null; holdSince: number | null; reactionS: number; solo?: boolean }
-export function newBrainMemory(reactionS = REACTION_S, solo = false): BrainMemory {
-  return solo ? { dodged: new Set(), chargingSince: null, holdSince: null, reactionS, solo } : { dodged: new Set(), chargingSince: null, holdSince: null, reactionS };
+/**
+ * slip: a "sloppy" careful brain (the synergy scenario) misses this share of the telegraphs it would
+ * dodge, drawn from its own seeded state (absent = never).
+ */
+export interface BrainMemory {
+  dodged: Set<number>; chargingSince: number | null; holdSince: number | null; reactionS: number;
+  slip?: { rate: number; state: number };
+}
+export function newBrainMemory(reactionS = REACTION_S, slip?: { rate: number; seed: number }): BrainMemory {
+  const m: BrainMemory = { dodged: new Set(), chargingSince: null, holdSince: null, reactionS };
+  if (slip) m.slip = { rate: slip.rate, state: slip.seed >>> 0 };
+  return m;
+}
+/** The next draw in [0, 1) of a slip's state (mulberry32). */
+function slipDraw(s: { state: number }): number {
+  s.state = (s.state + 0x6d2b79f5) >>> 0;
+  let t = s.state;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
 /** Reaction time before a careful brain dodges a telegraph that contains it, in s. */
@@ -46,10 +66,14 @@ const STAND_INSIDE = 0.6;
 const STEP_LOOK = 0.8;
 /** A flanker this close to its spot behind the target stays put, in m. */
 const FLANK_SLACK = 0.5;
+/** healParty (Soft Rain) goes out when anyone within PARTY_R is below this hp fraction (review round 1: was 0.8). */
+const HEAL_PARTY_FRAC = 0.9;
 /** Soft Rain's reach (healParty looks for someone hurt within it), in m. */
 const PARTY_R = 10;
 /** An area supporter keeps its nearest ally within its radius minus this (and walks to its radius minus twice this), in m. */
 const COHESION_SLACK = 2;
+/** The formation spot stays this far inside the target's leash, in m. */
+const LEASH_MARGIN = 3;
 /** "In reach" of the target's attacks: its auto reach plus this, in m. */
 const REACH_SLACK = 1;
 
@@ -78,8 +102,7 @@ const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.
  *    dodge refill, the finisher, damage — quick first, Charged Shot). The first that applies, is
  *    ready and in range wins. A careful brain never starts a cast inside a telegraph. A ready finisher
  *    with nothing to detonate lays a ready primer of another mark first (the finisher follows after the GCD).
- * memory.solo (the synergy check's control) plays as if alone: no support ability, no primer laid for the
- * finisher, no formation and no revive.
+ * memory.slip (a sloppy brain) misses a seeded share of the telegraphs it would dodge.
  */
 export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction {
   const { self, target, nowS } = b;
@@ -108,6 +131,7 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
       if (tg.total - tg.left < memory.reactionS - EPS) continue;
       memory.dodged.add(tg.id);
       if (self.dodgeCharges <= 0) continue; // nothing to dodge with: take it
+      if (memory.slip && slipDraw(memory.slip) < memory.slip.rate) continue; // sloppy: missed it
       if (charging && chargeSlot >= 0 && held / CHARGE_FULL_S >= CHARGE_INTERRUPT_FRAC - 1e-9) intents.push({ t: 'ability', slot: chargeSlot, phase: 'release' });
       const d = escapeDir(tg.shape, self.x, self.z);
       intents.push({ t: 'dodge', dx: d.x, dz: d.z, from: { x: self.x, z: self.z, y: self.y }, grounded: true });
@@ -116,11 +140,11 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
     }
   }
 
-  const allies = b.allies ?? [];
+  const allies = b.allies;
   const liveAllies = allies.filter((a) => a.alive && a.id !== self.id);
   // a revive needs no target: a dead partner comes first even once the fight is over
   if (!live) {
-    if (!displaced && !charging && !casting && self.gcd <= EPS && !memory.solo) {
+    if (!displaced && !charging && !casting && self.gcd <= EPS) {
       const act = tryRevive(b, allies, { moveTo: null, intents });
       if (act) return act;
     }
@@ -133,7 +157,7 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
   const dx = live.x - self.x, dz = live.z - self.z, dist0 = Math.hypot(dx, dz);
   const reach = dist0 - radius;
   let moveTo: { x: number; z: number } | null = null;
-  const flanking = JOBS[self.job ?? 'warrior']?.brain.flank === true && live.targetId !== null && live.targetId !== self.id
+  const flanking = JOBS[self.job].brain.flank && live.targetId !== null && live.targetId !== self.id
     && liveAllies.some((a) => a.id === live.targetId);
   if (!displaced && flanking) {
     const back = Math.max(0, radius + range - STAND_INSIDE);
@@ -143,21 +167,33 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
     const standAt = Math.max(0, radius + range - STAND_INSIDE);
     moveTo = { x: live.x - (dx / dist0) * standAt, z: live.z - (dz / dist0) * standAt };
   }
+  // near the edge of its leash: fight from the camp side, so the enemy is drawn back rather than out to a reset
+  if (!displaced && b.home && dist(live, b.home) > b.home.leash - 2 * LEASH_MARGIN) {
+    const hd = dist(live, b.home), standAt = Math.max(0, radius + range - STAND_INSIDE);
+    moveTo = { x: live.x + ((b.home.x - live.x) / hd) * Math.min(standAt, hd), z: live.z + ((b.home.z - live.z) / hd) * Math.min(standAt, hd) };
+  }
   // a job with an area support (Soft Rain, Roar, Dawn Ward, Aegis) keeps the nearest live ally inside it, while in range of the target
   const area = areaSupportR(self.slots);
-  if (!displaced && !memory.solo && area !== null && liveAllies.length > 0) {
+  // (the spot is on the camp side of the ally when the camp is known, and never past the leash, so the
+  // formation does not drag the fight out until the enemy resets)
+  if (!displaced && area !== null && liveAllies.length > 0) {
     let near = liveAllies[0];
     for (const a of liveAllies) if (dist(a, self) < dist(near, self)) near = a;
     const d = dist(near, self);
     if (d > area - COHESION_SLACK && d > 0) {
       const keep = area - 2 * COHESION_SLACK;
-      const p = { x: near.x + ((self.x - near.x) / d) * keep, z: near.z + ((self.z - near.z) / d) * keep };
-      if (Math.hypot(live.x - p.x, live.z - p.z) - radius <= range - RANGE_SLACK) moveTo = p;
+      const from = b.home ?? self, fd = dist(from, near);
+      const p = fd > EPS
+        ? { x: near.x + ((from.x - near.x) / fd) * Math.min(keep, fd), z: near.z + ((from.z - near.z) / fd) * Math.min(keep, fd) }
+        : { x: near.x, z: near.z };
+      const inRange = Math.hypot(live.x - p.x, live.z - p.z) - radius <= range - RANGE_SLACK;
+      const inLeash = !b.home || dist(p, b.home) <= b.home.leash - LEASH_MARGIN;
+      if (inRange && inLeash) moveTo = p;
     }
   }
   // a ready revive walks toward a dead ally out of its range
   const revive = self.slots.findIndex((id, s) => ABILITIES[id].ai === 'revive' && self.cd[s] <= EPS);
-  if (!displaced && !memory.solo && revive >= 0) {
+  if (!displaced && revive >= 0) {
     const r = ABILITIES[self.slots[revive]].range;
     let dead: CombatantView | null = null;
     for (const a of allies) if (!a.alive && a.id !== self.id && (!dead || dist(a, self) < dist(dead, self))) dead = a;
@@ -189,7 +225,7 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
   if (casting || self.gcd > EPS) return { moveTo, intents };
 
   const inTelegraph = b.telegraphs.some((t) => inShape(t.shape, self.x, self.z));
-  const ready = (slot: number) => slot >= 0 && slot < self.slots.length && self.cd[slot] <= EPS && !(memory.solo && ABILITIES[self.slots[slot]].support);
+  const ready = (slot: number) => slot >= 0 && slot < self.slots.length && self.cd[slot] <= EPS;
   const castOk = (ab: AbilityData) => !(ab.cast && b.careful && inTelegraph);
   const enemyInRange = (ab: AbilityData) => reach <= ab.range;
   const action = (slot: number, ally?: number): BrainAction => {
@@ -238,15 +274,15 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
 
   const steps: (() => BrainAction | null)[] = [
     // 1. revive
-    () => (memory.solo ? null : tryRevive(b, allies, { moveTo, intents })),
+    () => tryRevive(b, allies, { moveTo, intents }),
     // 2. allyBigHeal: the lowest (self included) below 50%
     () => first('allyBigHeal', (ab, s) => { const l = lowestWithin(ab.range); return frac(l) < 0.5 ? action(s, allyArg(l)) : null; }),
     // 3. selfHeal
     () => first('selfHeal', (_ab, s) => (frac(self) < 0.5 ? action(s) : null)),
     // 4. allyHeal: the lowest below 65%
     () => first('allyHeal', (ab, s) => { const l = lowestWithin(ab.range); return frac(l) < 0.65 ? action(s, allyArg(l)) : null; }),
-    // 5. healParty: in combat, anyone within 10 m below 80%
-    () => first('healParty', (_ab, s) => (inCombat && frac(lowestWithin(PARTY_R)) < 0.8 ? action(s) : null)),
+    // 5. healParty: in combat, anyone within 10 m below HEAL_PARTY_FRAC (a heal over time goes out early)
+    () => first('healParty', (_ab, s) => (inCombat && frac(lowestWithin(PARTY_R)) < HEAL_PARTY_FRAC ? action(s) : null)),
     // 6. shieldSelf
     () => first('shieldSelf', (_ab, s) => (inCombat ? action(s) : null)),
     // 7. shieldAlly: the lowest below 85%
@@ -259,10 +295,11 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
     () => first('interrupt', (ab, s) => (interruptibleWindup && enemyInRange(ab) ? action(s) : null)),
     // 11. tauntIfNotMe: with an ally, the target attacking someone else
     () => first('tauntIfNotMe', (ab, s) => (liveAllies.length > 0 && live.targetId !== null && !targetsSelf && selfOrEnemyInRange(ab) ? action(s) : null)),
-    // 12. shelter: in combat, an ally the target is attacking
+    // 12. shelter: in combat, an ally the target is attacking, while self is the healthier one and above half
+    //     (taking half of a partner's hits when low only trades one death for another)
     () => first('shelter', (ab, s) => {
       const a = liveAllies.find((v) => v.id === live.targetId && dist(v, self) <= ab.range);
-      return inCombat && a ? action(s, a.id) : null;
+      return inCombat && a && frac(self) >= Math.max(0.5, frac(a)) ? action(s, a.id) : null;
     }),
     // 13. threatDrop: the target attacking self, with an ally or below 60%
     () => first('threatDrop', (ab, s) => (targetsSelf && (liveAllies.length > 0 || frac(self) < 0.6) && selfOrEnemyInRange(ab) ? action(s) : null)),
@@ -280,7 +317,7 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
     // 17. debuff
     () => first('debuff', (ab, s) => (inCombat && selfOrEnemyInRange(ab) ? action(s) : null)),
     // 18. dodgeRefill
-    () => first('dodgeRefill', (_ab, s) => (self.dodgeCharges < (self.dodgeMax ?? 2) ? action(s) : null)),
+    () => first('dodgeRefill', (_ab, s) => (self.dodgeCharges < self.dodgeMax ? action(s) : null)),
     // 19. the finisher (Plan 3's rules, the careful hold included)
     () => {
       if (!(self.momentum >= FINISHER_COST && ready(FINISHER) && enemyInRange(ABILITIES[self.slots[FINISHER]]) && castOk(ABILITIES[self.slots[FINISHER]]))) {
@@ -289,9 +326,11 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
       }
       const fin = ABILITIES[self.slots[FINISHER]];
       // nothing to detonate: lay a ready primer of another mark first (the finisher follows after the GCD)
-      if (!memory.solo && (live.marks & ~MARK_BITS[fin.mark ?? 'marked']) === 0) {
+      if ((live.marks & ~MARK_BITS[fin.mark ?? 'marked']) === 0) {
         for (let s = 0; s < self.slots.length; s++) {
           const ab = ABILITIES[self.slots[s]];
+          // not when its Momentum would spill past the cap
+          if (self.momentum + (ab.momentum ?? 0) > MOMENTUM_MAX) continue;
           if (s !== FINISHER && ab.primer && ab.mark !== fin.mark && ab.ai !== 'never' && ready(s) && castOk(ab) && enemyInRange(ab)) return action(s);
         }
       }

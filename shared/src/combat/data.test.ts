@@ -34,7 +34,7 @@ describe('weapons and abilities', () => {
     expect(ABILITIES.charged_shot).toMatchObject({ cooldown: 7, range: 22, needsTarget: true });
     expect(ABILITIES.mend).toMatchObject({ cooldown: 20, kind: 'heal', range: 0 });
     expect(ABILITIES.mend.effects).toEqual([{ k: 'heal', amount: MEND_HEAL, on: 'self' }]);
-    expect(ABILITIES.taunt).toMatchObject({ cooldown: 12, range: 15, needsTarget: true });
+    expect(ABILITIES.taunt).toMatchObject({ cooldown: 10, range: 15, needsTarget: true }); // ruling P3b-f: 12 → 10
     expect(ABILITIES.bulwark).toMatchObject({ cooldown: 18, kind: 'defence' });
     expect(ABILITIES.bulwark.effects).toEqual([{ k: 'shield', amount: BULWARK_ABSORB, s: BULWARK_S, on: 'self' }]);
     expect(ABILITIES.sprint).toMatchObject({ cooldown: 20, kind: 'utility' });
@@ -134,5 +134,48 @@ describe('enemies', () => {
   });
   it('the Greenway budget fits', () => {
     expect(MAX_ENEMIES_PER_ZONE).toBe(40);
+  });
+});
+
+// Task 4 review round 1: the player-facing text never drifts from the numbers.
+import { AEGIS_ALLY_TAKEN, AEGIS_TAKEN, BLOODBOND_R, PACT_MULT, PARRY_MOMENTUM, ROAR_MULT, TAUNT_S, WEAKPOINT_MULT } from './constants';
+import { CHARGE_FULL_S } from './abilities';
+import { RAIN_HEAL } from './effects';
+describe('ability descriptions', () => {
+  const pct = (m: number) => Math.round(Math.abs(m - 1) * 100);
+  /** Every number an ability's own data can put in its text. */
+  const numbersOf = (id: AbilityId): Set<number> => {
+    const ab = ABILITIES[id];
+    const out = new Set<number>([ab.cast ?? NaN, ab.momentum ?? NaN, ab.cost ?? NaN]);
+    for (const e of ab.effects) {
+      for (const v of Object.values(e)) if (typeof v === 'number') out.add(v);
+      if (e.k === 'revive') out.add(Math.round(e.frac * 100));
+      if (e.k === 'sprint') out.add(pct(e.scale));
+      if (e.k === 'damage' && e.splash) out.add(e.splash.r);
+      if (e.k === 'parry') out.add(PARRY_MOMENTUM);
+      if (e.k === 'taunt') out.add(TAUNT_S);
+      if (e.k === 'charge') out.add(CHARGE_FULL_S);
+      if (e.k === 'debuff' && e.debuff === 'weakpoint') out.add(pct(WEAKPOINT_MULT));
+      if (e.k === 'buff') {
+        if (e.buff === 'roar') out.add(pct(ROAR_MULT));
+        if (e.buff === 'pact') out.add(pct(PACT_MULT));
+        if (e.buff === 'aegis') out.add(pct(AEGIS_TAKEN));
+        if (e.buff === 'aegis_ally') out.add(pct(AEGIS_ALLY_TAKEN));
+        if (e.buff === 'rain') out.add(RAIN_HEAL);
+        if (e.buff === 'bloodbond') out.add(BLOODBOND_R);
+      }
+    }
+    return out;
+  };
+  it('every number in a desc is one of the ability\'s own numbers', () => {
+    for (const id of Object.keys(ABILITIES) as AbilityId[]) {
+      const nums = (ABILITIES[id].desc.match(/\d+(\.\d+)?/g) ?? []).map(Number);
+      const own = numbersOf(id);
+      for (const n of nums) expect(own.has(n), `${id}: ${n} in "${ABILITIES[id].desc}"`).toBe(true);
+    }
+  });
+  it('a changed number is caught (the check is not vacuous)', () => {
+    expect(numbersOf('kindle').has(10)).toBe(false);
+    expect(numbersOf('mistveil').has(30)).toBe(true);
   });
 });

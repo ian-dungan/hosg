@@ -188,37 +188,37 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   shield_rap: {
     id: 'shield_rap', name: 'Shield Rap', glyph: '◐', desc: 'A quick shield strike that builds 20 Momentum and leaves the target Marked.', job: 'paladin',
     role: 'quick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 5, range: M, momentum: 20, mark: 'marked', primer: true, stagger: 10,
-    effects: [{ k: 'damage', coef: 1.3 }], ai: 'damage',
+    effects: [{ k: 'damage', coef: 1.1 }], ai: 'damage',
   },
   bright_verdict: {
     id: 'bright_verdict', name: 'Bright Verdict', glyph: '☼', desc: 'Spends 50 Momentum on a shining blow that leaves the target Dazed and interrupts.', job: 'paladin',
     role: 'finisher', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 6, range: M, cost: 50, mark: 'dazed', stagger: 10, interrupts: true,
-    effects: [{ k: 'damage', coef: 3.4 }], ai: 'finisher',
+    effects: [{ k: 'damage', coef: 3.0 }], ai: 'finisher',
   },
   aegis: {
-    id: 'aegis', name: 'Aegis', glyph: '⬡', desc: 'For 4 s you take 60% less damage, and adventurers within 8 m take 30% less.', job: 'paladin',
+    id: 'aegis', name: 'Aegis', glyph: '⬡', desc: 'For 3 s you take 60% less damage, and adventurers within 8 m take 30% less for 4 s.', job: 'paladin',
     role: 'signature', kind: 'defence', aim: 'self', needsTarget: false, cooldown: 16, range: 0,
-    effects: [{ k: 'buff', buff: 'aegis', s: 3, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 3, on: 'others', r: 8 }], ai: 'aegis',
+    effects: [{ k: 'buff', buff: 'aegis', s: 3, on: 'self' }, { k: 'buff', buff: 'aegis_ally', s: 4, on: 'others', r: 8 }], ai: 'aegis',
   },
   taunt: {
     id: 'taunt', name: 'Taunt', glyph: '!', desc: 'Makes the target attack you for 4 s.', job: 'paladin',
-    role: 'pick', kind: 'utility', aim: 'enemy', needsTarget: true, cooldown: 12, range: TAUNT_RANGE,
+    role: 'pick', kind: 'utility', aim: 'enemy', needsTarget: true, cooldown: 10, range: TAUNT_RANGE,
     effects: [{ k: 'taunt', on: 'target' }], support: true, ai: 'tauntIfNotMe',
   },
   shelter: {
-    id: 'shelter', name: 'Shelter', glyph: '⌂', desc: 'For 8 s you take half of the damage your focused ally takes.', job: 'paladin',
+    id: 'shelter', name: 'Shelter', glyph: '⌂', desc: 'For 10 s you take half of the damage your focused ally takes.', job: 'paladin',
     role: 'pick', kind: 'defence', aim: 'other-ally', needsTarget: false, cooldown: 20, range: 12,
-    effects: [{ k: 'buff', buff: 'sheltered', s: 8, on: 'aim' }], support: true, ai: 'shelter',
+    effects: [{ k: 'buff', buff: 'sheltered', s: 10, on: 'aim' }], support: true, ai: 'shelter',
   },
   kindle: {
-    id: 'kindle', name: 'Kindle', glyph: '✧', desc: 'Heals 25 health on your focused ally, or the most hurt one nearby, then 10 on you.', job: 'paladin',
-    role: 'pick', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 17, range: 18,
-    effects: [{ k: 'heal', amount: 20, on: 'aim' }, { k: 'heal', amount: 10, on: 'self' }], support: true, ai: 'allyHeal',
+    id: 'kindle', name: 'Kindle', glyph: '✧', desc: 'Heals 25 health on your focused ally, or the most hurt one nearby, then 8 on you.', job: 'paladin',
+    role: 'pick', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 14, range: 18,
+    effects: [{ k: 'heal', amount: 25, on: 'aim' }, { k: 'heal', amount: 8, on: 'self' }], support: true, ai: 'allyHeal',
   },
   dawn_ward: {
     id: 'dawn_ward', name: 'Dawn Ward', glyph: '◎', desc: 'You and adventurers within 8 m gain a shield of 20 for 6 s.', job: 'paladin',
     role: 'pick', kind: 'defence', aim: 'self', needsTarget: false, cooldown: 22, range: 0,
-    effects: [{ k: 'shield', amount: 16, s: 6, on: 'area', r: 8 }], support: true, ai: 'shieldParty',
+    effects: [{ k: 'shield', amount: 20, s: 6, on: 'area', r: 8 }], support: true, ai: 'shieldParty',
   },
   // ───────── Dark Knight ─────────
   grim_rend: {
@@ -278,9 +278,9 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
     effects: [{ k: 'threat-drop', r: 6 }, { k: 'debuff', debuff: 'blinded', s: 3, on: 'area', r: 6 }], support: true, ai: 'threatDrop',
   },
   weak_point: {
-    id: 'weak_point', name: 'Weak Point', glyph: '⊙', desc: 'Everyone deals 15% more damage to the target for 8 s.', job: 'ninja',
+    id: 'weak_point', name: 'Weak Point', glyph: '⊙', desc: 'Everyone deals 15% more damage to the target for 10 s.', job: 'ninja',
     role: 'pick', kind: 'utility', aim: 'enemy', needsTarget: true, cooldown: 20, range: 12,
-    effects: [{ k: 'debuff', debuff: 'weakpoint', s: 8, on: 'target' }], support: true, ai: 'debuff',
+    effects: [{ k: 'debuff', debuff: 'weakpoint', s: 10, on: 'target' }], support: true, ai: 'debuff',
   },
   quickstep: {
     id: 'quickstep', name: 'Quickstep', glyph: '⇥', desc: 'Refills one dodge charge.', job: 'ninja',
@@ -310,9 +310,9 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
     effects: [{ k: 'damage', coef: 4.9, splash: { r: 4, frac: 0.5 } }], ai: 'damage',
   },
   kindred_spark: {
-    id: 'kindred_spark', name: 'Kindred Spark', glyph: '✶', desc: 'Gives your focused ally 30 Momentum, and you 10.', job: 'black_mage',
+    id: 'kindred_spark', name: 'Kindred Spark', glyph: '✶', desc: 'Gives your focused ally 37 Momentum, and you 10.', job: 'black_mage',
     role: 'pick', kind: 'utility', aim: 'other-ally', needsTarget: false, cooldown: 20, range: 15,
-    effects: [{ k: 'momentum', amount: 30, on: 'aim' }, { k: 'momentum', amount: 10, on: 'self' }], support: true, ai: 'momentumGift',
+    effects: [{ k: 'momentum', amount: 37, on: 'aim' }, { k: 'momentum', amount: 10, on: 'self' }], support: true, ai: 'momentumGift',
   },
   bastion_stone: {
     id: 'bastion_stone', name: 'Bastion Stone', glyph: '▲', desc: 'Cast 1 s: a stone shield of 30 for 8 s on your focused ally, or the most hurt one nearby.', job: 'black_mage',
@@ -338,31 +338,31 @@ export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   lantern_flare: {
     id: 'lantern_flare', name: 'Lantern Flare', glyph: '✺', desc: 'Cast 1 s, spends 50 Momentum: light that leaves the target Marked, then heals the most hurt adventurer 20.', job: 'white_mage',
     role: 'finisher', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 6, range: 18, cast: 1.0, school: 'light', cost: 50, mark: 'marked',
-    effects: [{ k: 'damage', coef: 3.6 }, { k: 'heal', amount: 15, on: 'lowest' }], ai: 'finisher',
+    effects: [{ k: 'damage', coef: 3.0 }, { k: 'heal', amount: 20, on: 'lowest' }], ai: 'finisher',
   },
   wellspring: {
     id: 'wellspring', name: 'Wellspring', glyph: '❂', desc: 'Cast 1.5 s: heals your focused ally, or the most hurt one nearby, 45 and cleanses them.', job: 'white_mage',
     role: 'signature', kind: 'heal', aim: 'ally', needsTarget: false, cooldown: 10, range: 18, cast: 1.5, element: 'water',
-    effects: [{ k: 'heal', amount: 36, on: 'aim' }, { k: 'cleanse' }], ai: 'allyBigHeal',
+    effects: [{ k: 'heal', amount: 45, on: 'aim' }, { k: 'cleanse' }], ai: 'allyBigHeal',
   },
   second_dawn: {
     id: 'second_dawn', name: 'Second Dawn', glyph: '☥', desc: 'Cast 3 s: brings a fallen adventurer back with 40% health.', job: 'white_mage',
-    role: 'pick', kind: 'heal', aim: 'dead-ally', needsTarget: false, cooldown: 60, range: 12, cast: 3.0, school: 'light',
+    role: 'pick', kind: 'heal', aim: 'dead-ally', needsTarget: false, cooldown: 45, range: 12, cast: 3.0, school: 'light',
     effects: [{ k: 'revive', frac: 0.4 }], support: true, ai: 'revive',
   },
   soft_rain: {
-    id: 'soft_rain', name: 'Soft Rain', glyph: '⁘', desc: 'You and adventurers within 10 m heal 4 each second for 6 s.', job: 'white_mage',
+    id: 'soft_rain', name: 'Soft Rain', glyph: '⁘', desc: 'You and adventurers within 10 m heal 5 each second for 6 s.', job: 'white_mage',
     role: 'pick', kind: 'heal', aim: 'self', needsTarget: false, cooldown: 20, range: 0, element: 'water',
     effects: [{ k: 'buff', buff: 'rain', s: 6, on: 'area', r: 10 }], support: true, ai: 'healParty',
   },
   mistveil: {
-    id: 'mistveil', name: 'Mistveil', glyph: '◌', desc: 'A shield of 25 for 6 s on your focused ally, or the most hurt one nearby.', job: 'white_mage',
+    id: 'mistveil', name: 'Mistveil', glyph: '◌', desc: 'A shield of 30 for 6 s on your focused ally, or the most hurt one nearby.', job: 'white_mage',
     role: 'pick', kind: 'defence', aim: 'ally', needsTarget: false, cooldown: 15, range: 18, element: 'water',
-    effects: [{ k: 'shield', amount: 25, s: 6, on: 'aim' }], support: true, ai: 'shieldAlly',
+    effects: [{ k: 'shield', amount: 30, s: 6, on: 'aim' }], support: true, ai: 'shieldAlly',
   },
   sun_mote: {
     id: 'sun_mote', name: 'Sun Mote', glyph: '✹', desc: 'Cast 0.8 s: a mote of light that builds 15 Momentum.', job: 'white_mage',
-    role: 'pick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 8, range: 18, cast: 0.8, school: 'light', momentum: 15,
+    role: 'pick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 10, range: 18, cast: 0.8, school: 'light', momentum: 15,
     effects: [{ k: 'damage', coef: 1.8 }], ai: 'damage',
   },
 });

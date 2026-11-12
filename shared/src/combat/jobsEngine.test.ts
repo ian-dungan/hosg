@@ -3,6 +3,7 @@ import { hurtAdventurer } from './adventurer';
 import type { Loadout } from './abilities';
 import { ABILITIES, BUFF_BITS, DEBUFF_BITS, damageCoef } from './abilities';
 import { hitDamage } from './stats';
+import { RAIN_HEAL } from './effects';
 import { DODGE_REFILL_S, REVIVE_IFRAMES_S } from './constants';
 import type { Intent } from './engine';
 import { Rig, camp } from './testRig';
@@ -209,7 +210,7 @@ describe('effects', () => {
     expect(r.c.get(b)!.shield).toBe(0); // the new 6 s, not the old 20
   });
 
-  it('Soft Rain heals 4 a second, 6 times, from its source', () => {
+  it('Soft Rain heals RAIN_HEAL a second, 6 times, from its source', () => {
     const r = new Rig([camp('dummy', 30, 0)]);
     const d = r.enemy('dummy');
     const a = r.add(0, 0, { job: 'white_mage', picks: ['soft_rain', 'sun_mote'] }, 50), b = r.add(6, 0, WARRIOR, 50);
@@ -217,9 +218,9 @@ describe('effects', () => {
     expect(r.press(a, 3)).toBeNull();
     r.at(10);
     const heals = r.fx('heal');
-    expect(heals.filter((h) => h.dst === a).map((h) => [h.at, h.src, h.amount])).toEqual([1, 2, 3, 4, 5, 6].map((t) => [t, a, 4]));
+    expect(heals.filter((h) => h.dst === a).map((h) => [h.at, h.src, h.amount])).toEqual([1, 2, 3, 4, 5, 6].map((t) => [t, a, RAIN_HEAL]));
     expect(heals.filter((h) => h.dst === b).length).toBe(6);
-    expect(r.c.get(b)!.hp).toBeCloseTo(50 + 6 * 4 * 1.2, 9); // Font: ×1.2 on others
+    expect(r.c.get(b)!.hp).toBeCloseTo(50 + 6 * RAIN_HEAL * 1.2, 9); // Font: ×1.2 on others
     expect(r.c.get(a)!.buffs).toBe(0);
   });
 
@@ -270,12 +271,12 @@ describe('effects', () => {
     expect(r.fx('buff').map((f) => [f.dst, f.buff, f.on])).toEqual([[t, 'blinded', true], [t, 'blinded', false]]);
   });
 
-  it('Kindred Spark gives +30 to the partner, +10 to self, with gift fx', () => {
+  it('Kindred Spark gives +37 to the partner, +10 to self, with gift fx', () => {
     const r = new Rig([]);
     const m = r.add(0, 0, { job: 'black_mage', picks: ['kindred_spark', 'rootbreak'] }), p = r.add(10, 0);
     expect(r.press(m, 3)).toBeNull();
-    expect([r.c.self(p)!.momentum, r.c.self(m)!.momentum]).toEqual([30, 10]);
-    expect(r.fx('gift').map((g) => [g.src, g.dst, g.amount])).toEqual([[m, p, 30], [m, m, 10]]);
+    expect([r.c.self(p)!.momentum, r.c.self(m)!.momentum]).toEqual([37, 10]);
+    expect(r.fx('gift').map((g) => [g.src, g.dst, g.amount])).toEqual([[m, p, 37], [m, m, 10]]);
   });
 
   it('revive: hp 40, act cleared, cooldowns kept, revived in TickOut', () => {
@@ -367,7 +368,7 @@ describe('Task 2 review round 1', () => {
     r.engage(b, d);
     expect(r.press(wm, 4)).toBeNull(); // Soft Rain
     r.at(1.1);
-    expect(r.w.enemies.get(d)!.threat.get(wm)).toBeCloseTo(4 * 1.2 * 0.5 * 0.5, 9); // heal threat while alive (Font: ×1.2 heal, ×0.5 threat)
+    expect(r.w.enemies.get(d)!.threat.get(wm)).toBeCloseTo(RAIN_HEAL * 1.2 * 0.5 * 0.5, 9); // heal threat while alive (Font: ×1.2 heal, ×0.5 threat)
     kill(r, wm);
     expect(onTables(r, wm)).toBe(false);
     r.at(2.1);

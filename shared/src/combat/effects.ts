@@ -212,7 +212,7 @@ export function hasDebuff(e: EnemyState, debuff: DebuffId, nowS: number): boolea
   return d !== undefined && d.until > nowS;
 }
 /** Soft Rain heals this much at each whole second after it starts. */
-export const RAIN_HEAL = 4;
+export const RAIN_HEAL = 5;
 
 /** Per adventurer, each tick: Soft Rain heals (from its src), then expired buffs end (`buff … on: false`). */
 export function tickBuffs(w: CombatWorld, a: AdventurerState, nowS: number): void {

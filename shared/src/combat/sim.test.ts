@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { simulateFight, simulateParty } from './sim';
-import { adventurerBrain, newBrainMemory, type BrainInput } from './brain';
+import { adventurerBrain, newBrainMemory, type BrainInput, type BrainSelf } from './brain';
 import type { CombatantView, SelfView, TelegraphView } from './engine';
 
 const SEEDS = [1, 2, 3, 4, 5];
@@ -86,18 +86,18 @@ describe('seeded fight simulation: the bands', () => {
 
 
 describe('adventurerBrain', () => {
-  const self = (o: Partial<CombatantView & SelfView> = {}): CombatantView & SelfView => ({
+  const self = (o: Partial<BrainSelf> = {}): BrainSelf => ({
     id: 2, team: 'adventurer', kind: 'adventurer', x: 0, z: -3, y: 0, facing: 0, hp: 100, maxHp: 100, alive: true, shield: 0,
     marks: 0, stagger: 0, maxStagger: 0, targetId: 1, act: '', windup: null,
     momentum: 0, weapon: 'blade', slots: ['slash', 'sunder', 'parry', 'mend', 'bulwark'], cd: [9, 9, 9, 9, 9], gcd: 0, swapCd: 0, swapLock: 0,
-    dodgeCharges: 2, dodgeNextIn: 0, charge: null, inCombat: true, ...o,
+    dodgeCharges: 2, dodgeNextIn: 0, charge: null, inCombat: true, job: 'warrior', dodgeMax: 2, cast: null, ...o,
   });
   const enemy: CombatantView = {
     id: 1, team: 'enemy', kind: 'mossback', x: 0, z: 0, y: 0, facing: Math.PI, hp: 750, maxHp: 750, alive: true, shield: 0,
     marks: 0, stagger: 0, maxStagger: 100, targetId: 2, act: '', windup: null,
   };
   const slam = (elapsed: number): TelegraphView => ({ id: 5, owner: 1, attack: 'ground_slam', shape: { kind: 'circle', x: 0, z: 0, r: 4.5 }, total: 1.6, left: 1.6 - elapsed });
-  const input = (o: Partial<BrainInput>): BrainInput => ({ nowS: 10, careful: true, self: self(), target: enemy, telegraphs: [], ...o });
+  const input = (o: Partial<BrainInput>): BrainInput => ({ nowS: 10, careful: true, self: self(), target: enemy, allies: [], telegraphs: [], ...o });
 
   it('a careful brain dodges a telegraph containing it once 0.4 s have passed, along escapeDir, once', () => {
     const m = newBrainMemory();
@@ -122,7 +122,7 @@ describe('adventurerBrain', () => {
 
   it('abilities in order: Mend below half, Bulwark, the finisher, the quick skill', () => {
     const ready = { cd: [0, 0, 0, 0, 0], momentum: 60 };
-    const slot = (o: Partial<CombatantView & SelfView>, careful = false) =>
+    const slot = (o: Partial<BrainSelf>, careful = false) =>
       adventurerBrain(input({ careful, self: self(o) }), newBrainMemory()).intents.find((i) => i.t === 'ability');
     expect(slot({ ...ready, hp: 40 })).toMatchObject({ slot: 3 });
     expect(slot({ ...ready })).toMatchObject({ slot: 4 });
@@ -144,11 +144,11 @@ describe('adventurerBrain', () => {
 });
 
 describe('adventurerBrain (fix round 1)', () => {
-  const base = (o: Partial<CombatantView & SelfView> = {}): CombatantView & SelfView => ({
+  const base = (o: Partial<BrainSelf> = {}): BrainSelf => ({
     id: 2, team: 'adventurer', kind: 'adventurer', x: 0, z: -7, y: 0, facing: 0, hp: 100, maxHp: 100, alive: true, shield: 0,
     marks: 0, stagger: 0, maxStagger: 0, targetId: 1, act: '', windup: null,
     momentum: 0, weapon: 'blade', slots: ['slash', 'sunder', 'parry', 'mend', 'bulwark'], cd: [9, 9, 9, 9, 9], gcd: 0, swapCd: 0, swapLock: 0,
-    dodgeCharges: 2, dodgeNextIn: 0, charge: null, inCombat: true, ...o,
+    dodgeCharges: 2, dodgeNextIn: 0, charge: null, inCombat: true, job: 'warrior', dodgeMax: 2, cast: null, ...o,
   });
   const boss: CombatantView = {
     id: 1, team: 'enemy', kind: 'mossback', x: 0, z: 0, y: 0, facing: Math.PI, hp: 750, maxHp: 750, alive: true, shield: 0,
@@ -157,19 +157,19 @@ describe('adventurerBrain (fix round 1)', () => {
   const slam: TelegraphView = { id: 5, owner: 1, attack: 'ground_slam', shape: { kind: 'circle', x: 0, z: 0, r: 4.5 }, total: 1.6, left: 1 };
 
   it('a careful brain outside a telegraph does not walk back into it; a careless one does', () => {
-    const careful = adventurerBrain({ nowS: 10, careful: true, self: base(), target: boss, telegraphs: [slam] }, newBrainMemory());
+    const careful = adventurerBrain({ nowS: 10, careful: true, self: base(), target: boss, allies: [], telegraphs: [slam] }, newBrainMemory());
     expect(careful.moveTo).toBeNull();
-    const careless = adventurerBrain({ nowS: 10, careful: false, self: base(), target: boss, telegraphs: [slam] }, newBrainMemory());
+    const careless = adventurerBrain({ nowS: 10, careful: false, self: base(), target: boss, allies: [], telegraphs: [slam] }, newBrainMemory());
     expect(careless.moveTo).not.toBeNull();
-    const clear = adventurerBrain({ nowS: 10, careful: true, self: base(), target: boss, telegraphs: [] }, newBrainMemory());
+    const clear = adventurerBrain({ nowS: 10, careful: true, self: base(), target: boss, allies: [], telegraphs: [] }, newBrainMemory());
     expect(clear.moveTo).not.toBeNull();
   });
 
   it('a held Charged Shot of frac ≥ 0.8 is released before the dodge; a weaker one is not', () => {
     const bow = (charge: number) => base({ weapon: 'bow', slots: ['snap_shot', 'pitch_arrow', 'charged_shot', 'mend', 'bulwark'], z: -3, charge, act: 'charge' });
-    const strong = adventurerBrain({ nowS: 10, careful: true, self: bow(1.3), target: boss, telegraphs: [{ ...slam, left: 1.1 }] }, newBrainMemory());
+    const strong = adventurerBrain({ nowS: 10, careful: true, self: bow(1.3), target: boss, allies: [], telegraphs: [{ ...slam, left: 1.1 }] }, newBrainMemory());
     expect(strong.intents.map((i) => i.t === 'ability' ? `${i.slot}:${i.phase}` : i.t)).toEqual(['2:release', 'dodge']);
-    const weak = adventurerBrain({ nowS: 10, careful: true, self: bow(0.6), target: boss, telegraphs: [{ ...slam, left: 1.1 }] }, newBrainMemory());
+    const weak = adventurerBrain({ nowS: 10, careful: true, self: bow(0.6), target: boss, allies: [], telegraphs: [{ ...slam, left: 1.1 }] }, newBrainMemory());
     expect(weak.intents.map((i) => i.t)).toEqual(['dodge']);
   });
 });

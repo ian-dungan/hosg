@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Loadout } from './abilities';
+import { ABILITIES, type Loadout } from './abilities';
 import { hurtAdventurer, killEnemy, knockAdventurer } from './adventurer';
 import { CAST_BREAK_LOCK_S, SPEED_GRACE_S } from './constants';
 import type { Intent } from './engine';
@@ -171,7 +171,7 @@ describe('casting', () => {
     r.at(3.1);
     expect(r.c.get(b)).toMatchObject({ alive: true, hp: 40 });
     expect(castEnds(r)).toEqual([['second_dawn', true, undefined]]);
-    expect(r.c.self(wm)!.cd[3]).toBeGreaterThan(59);
+    expect(r.c.self(wm)!.cd[3]).toBeGreaterThan(ABILITIES.second_dawn.cooldown - 1);
     // already up (or gone): the next one fizzles at completion
     const r2 = new Rig([]);
     const wm2 = r2.add(0, 0, WHITE), c = r2.add(0, 8);

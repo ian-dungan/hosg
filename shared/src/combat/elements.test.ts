@@ -171,7 +171,7 @@ describe('primers and reactions', () => {
     const by = (id: string) => r.hits().find((h) => h.by === id)!;
     expect(by('cinder_dart').amount).toBe(th(c('cinder_dart'), ELEMENT_WEAK_MULT * OVERFLOW_MULT));
     expect(by('tidelash').amount).toBe(th(c('tidelash'), ELEMENT_RESIST_MULT));
-    expect(by('lantern_flare').amount).toBe(th(3.6));
+    expect(by('lantern_flare').amount).toBe(th(c('lantern_flare')));
     expect(by('lantern_flare').element).toBeUndefined();
   });
 
