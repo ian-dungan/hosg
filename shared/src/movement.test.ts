@@ -242,15 +242,15 @@ describe('checkPose', () => {
     expect(checkPose({ x: 0, z: 0 }, makeAirTrack(0), at(0.2, 0, 3), 1000, 5, flat).result).toBe('floating');
   });
 
-  it('rejects hovering at y = 1 for 2 s as floating', () => {
-    const track = makeAirTrack(0);
-    const results: string[] = [];
+  it('accepts holding 1 m up (within one jump of the ground, see the ruling above checkPose) but never 2.1 m', () => {
+    const low = makeAirTrack(0), high = makeAirTrack(0);
+    const lowResults: string[] = [], highResults: string[] = [];
     for (let i = 1; i <= 30; i++) {
-      const r = checkPose({ x: 0, z: 0 }, track, at(0, 0, 1), 1000 + (i * 1000) / TICK_HZ, 5, flat);
-      results.push(r.result);
+      lowResults.push(checkPose({ x: 0, z: 0 }, low, at(0, 0, 1), 1000 + (i * 1000) / TICK_HZ, 5, flat).result);
+      highResults.push(checkPose({ x: 0, z: 0 }, high, at(0, 0, 2.1), 1000 + (i * 1000) / TICK_HZ, 5, flat).result);
     }
-    expect(results).toContain('floating');
-    expect(results.at(-1)).toBe('floating');
+    expect(lowResults.every((r) => r === 'ok')).toBe(true);
+    expect(highResults.every((r) => r === 'floating')).toBe(true);
   });
 
   it('cannot gain height step by step: airborne poses each 1 m above the last are rejected', () => {
@@ -318,7 +318,7 @@ describe('checkPose', () => {
 
 describe('checkPose once the arc is surely over (lag, reconnect, re-join)', () => {
   /** A track that left flat ground at 1000 ms and was last accepted at y (peak `peak`) in the air. */
-  const airborne = (y: number, peak = y): AirTrack => ({ grounded: false, airStartMs: 1000, airStartY: 0, peakY: peak, y, atMs: 1400 });
+  const airborne = (y: number, peak = y): AirTrack => ({ grounded: false, airStartMs: 1000, airStartY: 0, peakY: peak, y });
 
   it('accepts a landing whose poses arrive 400 ms late, and is not locked out afterwards', () => {
     const c = new SimClient(flat, 0, 0, 1 / 15);
@@ -342,22 +342,18 @@ describe('checkPose once the arc is surely over (lag, reconnect, re-join)', () =
 
   it('charges the whole fall when it lands long after (a reconnect on the ground)', () => {
     const ledge: Surface = (x) => (x < 1 ? 10 : 0);
-    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 10, peakY: 10, y: 9.9, atMs: 1067 };
+    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 10, peakY: 10, y: 9.9 };
     const r = checkPose({ x: 1.1, z: 0 }, track, at(1.4, 0, 0), 4000, 5, ledge);
     expect(r).toEqual({ result: 'ok', landedDrop: 10 });
   });
 
-  it('never lets an expired track rise or hover', () => {
-    // in the air, at the same height or higher
-    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 1), 3000, 5, flat).result).toBe('floating');
-    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 0.5), 3000, 5, flat).result).toBe('floating');
+  it('an expired track stays within one jump of the ground, and cannot stand on something higher than it was', () => {
+    // in the air: within one jump of the ground below is a jump again (see the ruling above checkPose)
+    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 1), 3000, 5, flat).result).toBe('ok');
+    expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 2.1), 3000, 5, flat).result).toBe('floating');
     // "landing" on something higher than its last height
     const crate: Surface = (x) => (x > 0.1 ? 1.5 : 0);
     expect(checkPose({ x: 0, z: 0 }, airborne(1), at(0.2, 0, 1.5), 3000, 5, crate).result).toBe('floating');
-    // hovering: the same airborne pose over and over is refused
-    const track = airborne(1);
-    const results = Array.from({ length: 10 }, (_, i) => checkPose({ x: 0, z: 0 }, track, at(0, 0, 1), 3000 + i * 67, 5, flat).result);
-    expect(results.every((r) => r === 'floating')).toBe(true);
   });
 });
 
@@ -399,7 +395,7 @@ describe('checkPose with jump held (landing and jumping again between two poses)
     expect(Math.max(...results.map((r) => r.landedDrop))).toBeGreaterThan(4.4);
   });
 
-  it('cannot use a pretend landing to climb in the air or to hover high up', () => {
+  it('cannot use a pretend landing to climb in the air above one jump', () => {
     // a jump, then poses claiming to be ever higher each tick
     const track = makeAirTrack(0);
     let best = 0;
@@ -408,56 +404,197 @@ describe('checkPose with jump held (landing and jumping again between two poses)
       best = Math.max(best, track.y);
     }
     expect(best).toBeLessThanOrEqual(2);
-    // a jump off the ground, then holding 1.5 m up for 3 s: refused soon, and never accepted again
-    const hover = makeAirTrack(0);
-    const results = Array.from({ length: 45 }, (_, i) => checkPose({ x: 0, z: 0 }, hover, at(0, 0, 1.5), 1000 + ((i + 1) * 1000) / TICK_HZ, 5, flat).result);
-    expect(results.slice(15)).not.toContain('ok');
   });
 });
 
-describe('checkPose: no hovering by pretending to land and jump again', () => {
-  /** Takes off from flat ground, then sends y every 1/15 s while moving 0.4 m a pose (the reviewer's scenario). */
-  function hover(y: number, seconds = 10) {
-    const track = makeAirTrack(0);
-    let x = 0, now = 1000;
-    const results: string[] = [];
-    for (let i = 0; i < seconds * TICK_HZ; i++) {
-      now += 1000 / TICK_HZ;
-      let r = checkPose({ x, z: 0 }, track, at(x + 0.4, 0, y), now, 8, flat).result;
-      if (r !== 'ok') r = checkPose({ x, z: 0 }, track, at(x + 0.4, 0, y + 0.001), now, 8, flat).result; // nudged
-      if (r === 'ok') x += 0.4;
-      results.push(r);
+// ───────── the ruling above checkPose: height and reach bounds hold against cheaters (G1–G3) ─────────
+
+describe('checkPose bounds against cheaters (G1 height and ledges, G2 walls, G3 falls)', () => {
+  let seed = 4242;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const inWorld = (x: number, z: number) => Math.hypot(x, z) < 40;
+  const flatWorld: Surface = (x, z) => (inWorld(x, z) ? 0 : null);
+  const hills: Surface = (x, z) => (inWorld(x, z) ? 0.6 * Math.sin(x * 0.4) + 0.5 * Math.cos(z * 0.3) : null);
+  /** Worst height above the highest ground of the last 3 s of path seen over all runs (for the report). */
+  let worstAbove = -Infinity;
+
+  interface Scene { surface: Surface; start: Pt; target: Pt; ledge?: number; wallX?: number; cliff?: boolean }
+
+  /** One cheater: any send rate 5–45/s with jitter, a height strategy, and corrections obeyed or ignored. */
+  function cheat(scene: Scene, seconds = 8) {
+    const { surface, start, target } = scene;
+    const violations: string[] = [];
+    const rate = 5 + rand() * 40;
+    const strategy = (['constant', 'saw-tooth', 'random', 'highest', 'ground'] as const)[Math.floor(rand() * 5)];
+    const c = rand() * 3, lo = rand() * 2, hi = lo + rand() * 1.5;
+    const ignoreCorrections = rand() < 0.5;
+    const speed = MAX_MOVE_SPEED * (0.3 + rand());
+    const startY = surface(start.x, start.z)!;
+    const track = makeAirTrack(startY);
+    let lastGood = { ...start }, pos = { ...start }, allowance = MAX_MOVE_ALLOWANCE, now = 1000, lastMs = 1000, i = 0;
+    const grounds: { ms: number; h: number }[] = [{ ms: now, h: startY }];
+    const drops: number[] = [];
+    let leftCliff = false;
+    while (now < 1000 + seconds * 1000) {
+      const dtMs = (1000 / rate) * (0.4 + rand() * 1.2);
+      now += dtMs;
+      i++;
+      allowance = refillAllowance(allowance, (now - lastMs) / 1000);
+      lastMs = now;
+      const heading = Math.atan2(target.z - pos.z, target.x - pos.x) + (rand() - 0.5) * 2;
+      const step = speed * (dtMs / 1000) * rand() * 1.5;
+      const nx = pos.x + Math.cos(heading) * step, nz = pos.z + Math.sin(heading) * step;
+      const g = surface(nx, nz) ?? 0;
+      const tryY = (y: number) => checkPose(lastGood, { ...track }, at(nx, nz, y), now, allowance, surface).result === 'ok';
+      let y: number;
+      if (strategy === 'constant') y = c;
+      else if (strategy === 'saw-tooth') y = g + (i % 2 ? hi : lo);
+      else if (strategy === 'random') y = g + rand() * 3;
+      else if (strategy === 'ground') y = g;
+      else {
+        let a = g - 0.05, b = g + 4; // the highest height it will accept here
+        for (let k = 0; k < 16; k++) { const m = (a + b) / 2; if (tryY(m)) a = m; else b = m; }
+        y = a;
+      }
+      const r = checkPose(lastGood, track, at(nx, nz, y), now, allowance, surface);
+      if (r.result === 'ok') {
+        allowance -= Math.hypot(nx - lastGood.x, nz - lastGood.z);
+        let h = -Infinity; // highest ground along this step
+        for (let k = 0; k <= 20; k++) {
+          const s = surface(lastGood.x + ((nx - lastGood.x) * k) / 20, lastGood.z + ((nz - lastGood.z) * k) / 20);
+          if (s !== null) h = Math.max(h, s);
+        }
+        grounds.push({ ms: now, h });
+        lastGood = { x: nx, z: nz };
+        pos = { x: nx, z: nz };
+        drops.push(r.landedDrop);
+        // G1: never more than one jump above the highest real ground of its recent path
+        const recent = Math.max(...grounds.filter((e) => e.ms >= now - 3000).map((e) => e.h));
+        worstAbove = Math.max(worstAbove, y - recent);
+        if (y > recent + 2.05) violations.push(`G1 ${strategy}@${rate.toFixed(0)}/s: y ${y.toFixed(2)} with ground ${recent.toFixed(2)}`);
+        // G1: never stands on, or jumps from, a ledge 2.1 m or more above its surroundings
+        if (scene.ledge !== undefined && ((track.grounded && track.y >= scene.ledge - 0.05) || track.airStartY >= scene.ledge - 0.05)) {
+          violations.push(`G1 ledge ${scene.ledge} reached by ${strategy}@${rate.toFixed(0)}/s`);
+        }
+        // G2: never across the wall
+        if (scene.wallX !== undefined && nx > scene.wallX) violations.push(`G2 crossed the wall by ${strategy}`);
+      } else {
+        // the server lands an airborne adventurer under its last good pose and corrects it there
+        if (!track.grounded) drops.push(landAirTrack(track, surface(lastGood.x, lastGood.z)!));
+        if (!ignoreCorrections) pos = { ...lastGood };
+      }
+      // G3: coming down from the 4.5 m cliff onto the low ground always charges the fall
+      if (scene.cliff && !leftCliff && track.grounded && track.y < 1) {
+        leftCliff = true;
+        if (!(Math.max(0, ...drops) >= 4.4)) violations.push(`G3 came down 4.5 m charged only ${Math.max(0, ...drops).toFixed(2)} by ${strategy}`);
+      }
     }
-    return { results, track };
+    return violations;
   }
 
-  for (const y of [0.15, 0.3, 0.45, 0.5, 0.8, 1.2, 1.6]) {
-    it(`refuses hovering at ${y} m: nothing is accepted after the first jump's arc runs out (about 1 s)`, () => {
-      const { results } = hover(y);
-      expect(results.slice(16).filter((r) => r === 'ok')).toEqual([]);
+  const scenes: [string, Scene][] = [
+    ['flat ground', { surface: flatWorld, start: { x: 0, z: 0 }, target: { x: 30, z: 5 } }],
+    ['hills', { surface: hills, start: { x: 0, z: 0 }, target: { x: 25, z: -15 } }],
+    ['beside platforms of 0.5 to 1.8 m', {
+      surface: (x, z) => (!inWorld(x, z) ? null : Math.abs(z) < 1 && x > 3 && x < 15 ? 0.5 + 1.3 * Math.floor((x - 3) / 3) / 3 : 0),
+      start: { x: 0, z: 0 }, target: { x: 15, z: 0 },
+    }],
+    ...[2.1, 2.3, 2.6, 3].map((L): [string, Scene] => [`a ${L} m ledge`, {
+      surface: (x, z) => (!inWorld(x, z) ? null : x > 4 && x < 8 && Math.abs(z) < 2 ? L : 0), start: { x: 0, z: 0 }, target: { x: 6, z: 0 }, ledge: L,
+    }]),
+    ['a 0.4 m wall across the world', { surface: (x, z) => (!inWorld(x, z) || Math.abs(x - 3.2) < 0.2 ? null : 0), start: { x: 0, z: 0 }, target: { x: 10, z: 0 }, wallX: 3.4 }],
+    ['the edge of a 4.5 m cliff', { surface: (x, z) => (!inWorld(x, z) ? null : x < 0 ? 4.5 : 0), start: { x: -3, z: 0 }, target: { x: 10, z: 0 }, cliff: true }],
+    ['the Old Lookout', { surface: groveTownSurface, start: { x: 26, z: -22 }, target: { x: 35.7, z: -29 } }],
+  ];
+  for (const [name, scene] of scenes) {
+    it(`holds the bounds for 40 random cheaters at ${name}`, () => {
+      expect(scene.surface(scene.start.x, scene.start.z)).not.toBeNull();
+      const violations: string[] = [];
+      for (let run = 0; run < 40; run++) violations.push(...cheat(scene));
+      expect(violations.slice(0, 5)).toEqual([]);
     });
   }
 
-  it('cannot pretend to land on a ledge higher than one jump reaches', () => {
-    for (const h of [2.05, 2.2, 2.35, 2.6]) {
-      const ledge: Surface = (x) => (x > 2 ? h : 0);
-      // ride the ceiling up to the ledge, then claim to stand on it or to jump again from it
-      for (const claim of ['land', 'rejump'] as const) {
-        const track = makeAirTrack(0);
-        let x = 0, now = 1000, onTop = false;
-        for (let i = 1; i <= 30 && !onTop; i++) {
-          now += 1000 / TICK_HZ;
-          const nx = Math.min(x + 0.4, 2.2);
-          const best = jumpCeiling(track.grounded ? track.y : track.airStartY, (now - (track.grounded ? now - 1000 / TICK_HZ : track.airStartMs)) / 1000);
-          const y = nx > 2 ? (claim === 'land' ? h : h + 0.3) : Math.min(best, h + 0.35);
-          const r = checkPose({ x, z: 0 }, track, at(nx, 0, y), now, 8, ledge);
-          if (r.result === 'ok') x = nx;
-          if (r.result === 'ok' && nx > 2) onTop = true;
+  it('the worst height reached is about one jump (2 m) above recent ground', () => {
+    expect(worstAbove).toBeGreaterThan(1.9); // the cheaters did probe the limit
+    expect(worstAbove).toBeLessThanOrEqual(2.05);
+  });
+});
+
+// ───────── honest clients are never refused (G4) ─────────
+
+describe('checkPose never refuses an honest client (G4)', () => {
+  let seed = 99;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const hills: Surface = (x, z) => 0.6 * Math.sin(x * 0.4) + 0.5 * Math.cos(z * 0.3);
+
+  /**
+   * A browser-like client (frames at `fps`, one `hitchMs` frame every 2 s, poses at 15 Hz) whose poses
+   * arrive 40 ms later plus up to `jitterMs`, held back during `spikeMs` every 3 s, in order and to
+   * the whole millisecond (so several can share one). Returns how many the server refused.
+   */
+  function honest(o: { fps: number; hitchMs: number; jitterMs: number; spikeMs: number; surface: Surface; jump: boolean }) {
+    const body = makeBody(0, 0, o.surface);
+    const track = makeAirTrack(body.y);
+    let lastGood = { x: 0, z: 0 }, allowance = MAX_MOVE_ALLOWANCE, lastMs = 0, lastArrival = 0, t = 0, since = 0, nextHitch = 1, refused = 0;
+    const inFlight: { ms: number; pose: Pose }[] = [];
+    let correction: { ms: number; x: number; z: number; y: number } | null = null;
+    while (t < 20) {
+      let dt = 1 / o.fps;
+      if (o.hitchMs && t >= nextHitch) { dt = o.hitchMs / 1000; nextHitch += 2; }
+      if (correction && t * 1000 >= correction.ms) {
+        Object.assign(body, { x: correction.x, z: correction.z, y: correction.y, vy: 0, grounded: true, peakY: correction.y });
+        correction = null;
+      }
+      stepBody(body, { vx: RUN_SPEED * Math.cos(t * 0.3), vz: RUN_SPEED * Math.sin(t * 0.3), jump: o.jump }, dt, o.surface);
+      t += dt;
+      since += dt;
+      if (since >= 1 / TICK_HZ - 1e-9) {
+        since = 0;
+        let ms = t * 1000 + 40 + rand() * o.jitterMs;
+        const phase = (t * 1000) % 3000;
+        if (o.spikeMs && phase < o.spikeMs) ms = Math.max(ms, t * 1000 - phase + o.spikeMs + 40);
+        lastArrival = Math.floor(Math.max(ms, lastArrival));
+        inFlight.push({ ms: lastArrival, pose: at(body.x, body.z, body.y) });
+      }
+      while (inFlight.length && inFlight[0].ms <= t * 1000) {
+        const { ms, pose } = inFlight.shift()!;
+        allowance = refillAllowance(allowance, (ms - lastMs) / 1000);
+        lastMs = ms;
+        const r = checkPose(lastGood, track, pose, ms, allowance, o.surface);
+        if (r.result === 'ok') {
+          allowance -= Math.hypot(pose.x - lastGood.x, pose.z - lastGood.z);
+          lastGood = { x: pose.x, z: pose.z };
+        } else {
+          refused++;
+          if (!track.grounded) landAirTrack(track, o.surface(lastGood.x, lastGood.z)!);
+          correction = { ms: ms + 40, ...lastGood, y: track.y };
         }
-        expect(onTop, `${claim} on a ${h} m ledge`).toBe(false);
       }
     }
-  });
+    return refused;
+  }
+
+  for (const [name, surface] of [['flat ground', flat], ['hills', hills]] as const) {
+    for (const jump of [true, false]) {
+      it(`${jump ? 'holding jump' : 'running'} on ${name}: 10–144 fps, frame hitches up to 400 ms, jitter up to 100 ms`, () => {
+        const failures: string[] = [];
+        for (const fps of [10, 30, 60, 144]) for (const hitchMs of [0, 200, 400]) for (const jitterMs of [0, 100]) {
+          const n = honest({ fps, hitchMs, jitterMs, spikeMs: 0, surface, jump });
+          if (n) failures.push(`${fps} fps, hitch ${hitchMs}, jitter ${jitterMs}: ${n}`);
+        }
+        expect(failures).toEqual([]);
+      });
+    }
+    it(`holding jump on ${name} through network lag spikes of 200 and 400 ms every 3 s`, () => {
+      const failures: string[] = [];
+      for (const fps of [30, 60]) for (const spikeMs of [200, 400]) {
+        const n = honest({ fps, hitchMs: 0, jitterMs: 10, spikeMs, surface, jump: true });
+        if (n) failures.push(`${fps} fps, spike ${spikeMs}: ${n}`);
+      }
+      expect(failures).toEqual([]);
+    });
+  }
 });
 
 describe('checkPose when a body slides round an obstacle', () => {
@@ -539,11 +676,11 @@ describe('checkPose against honest clients wandering the grove', () => {
 
 describe('landAirTrack', () => {
   it('puts a track on the ground and returns how far it fell from its highest point', () => {
-    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 4.5, peakY: 5, y: 3, atMs: 1500 };
+    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 4.5, peakY: 5, y: 3 };
     expect(landAirTrack(track, 0)).toBe(5);
-    expect(track).toEqual(makeAirTrack(0, 1500)); // keeps when it was last accepted
+    expect(track).toEqual(makeAirTrack(0));
     expect(landAirTrack(makeAirTrack(2), 2)).toBe(0);
-    expect(landAirTrack({ grounded: false, airStartMs: 0, airStartY: 0, peakY: 0.5, y: 0.4, atMs: 0 }, 0.9)).toBe(0); // never negative
+    expect(landAirTrack({ grounded: false, airStartMs: 0, airStartY: 0, peakY: 0.5, y: 0.4 }, 0.9)).toBe(0); // never negative
   });
 });
 
