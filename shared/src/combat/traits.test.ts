@@ -64,6 +64,7 @@ describe('job traits', () => {
 
   it('Paladin takes ×0.85; Aegis ×0.4 on self, ×0.7 on an ally 7 m away; they never stack below 0.4', () => {
     const { r, st, hit } = setup();
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const pal = r.add(0, -5, PALADIN, 100), ally = r.add(7, -5, WARRIOR), far = r.add(-9, -5, WARRIOR);
     const lost = (id: number, raw: number) => { const hp = st(id).hp; hit(id, raw); return hp - st(id).hp; };
     expect(lost(pal, 40)).toBe(taken(40, STEADFAST_TAKEN));
@@ -106,6 +107,7 @@ describe('job traits', () => {
 
   it('Shelter: the ally takes final − floor(final/2); the Paladin takes the rest ×0.85; stops at once when the Paladin dies', () => {
     const { r, st, hit } = setup();
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const pal = r.add(0, -5, PALADIN), ally = r.add(5, -5, WARRIOR);
     expect(r.press(pal, 3, pal)).toBeNull(); // Shelter is other-ally: the ally given is ignored for the caster
     expect(st(ally).buffs.sheltered?.src).toBe(pal);
@@ -124,6 +126,7 @@ describe('job traits', () => {
 
   it('Dark Knight heals 20% of ability damage, not autos; pact doubles it; Bloodbond copies it to the lowest other ally within 15 m', () => {
     const { r, st, aim } = setup();
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const dk = r.add(0, -1.5, DARK, 50), low = r.add(5, -5, WARRIOR, 40), lower = r.add(0, -20, WARRIOR, 10), high = r.add(-5, -5, WARRIOR, 80);
     aim(dk);
     const heals = () => r.fx('heal').filter((h) => h.src === dk);

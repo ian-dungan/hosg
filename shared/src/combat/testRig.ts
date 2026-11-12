@@ -20,6 +20,8 @@ export class Rig {
   k = 0;
   readonly log: { t: number; ev: FxEvent }[] = [];
   readonly outs: TickOut[] = [];
+  /** When set, every adventurer `add` creates joins this party (tests of ally effects). */
+  partyAll: string | null = null;
   constructor(camps: CampSpawn[], o: { walls?: Wall[]; seed?: number; jobSwitch?: CombatZone['jobSwitch'] | null; liveEnemies?: boolean } = {}) {
     this.c = createCombat(flatZone(camps, o.walls, o.jobSwitch === null ? undefined : o.jobSwitch ?? (() => true)), { seed: o.seed ?? 1, nowS: 0 });
     if (!o.liveEnemies) for (const e of worldOf(this.c).enemies.values()) { e.act = 'stun'; e.actUntil = Infinity; }
@@ -31,7 +33,9 @@ export class Rig {
     throw new Error(`no ${kind}`);
   }
   add(x: number, z: number, loadout: Loadout | Plan3Loadout = { job: 'warrior', picks: ['mend', 'bulwark'] }, hp = 100, facing = 0): number {
-    return this.c.addAdventurer({ x, z, y: 0, facing, hp, loadout }, this.now);
+    const id = this.c.addAdventurer({ x, z, y: 0, facing, hp, loadout }, this.now);
+    if (this.partyAll !== null) this.c.setParty(id, this.partyAll);
+    return id;
   }
   tick(): TickOut {
     const out = this.c.tick(this.now);
@@ -77,6 +81,8 @@ export class Rig {
     }
     return this;
   }
+  /** Puts every adventurer in `ids` in party `name` (as the server would). */
+  party(name: string, ...ids: number[]) { for (const id of ids) this.c.setParty(id, name); }
   /** Puts adventurer `id` in combat with enemy `e` (on its threat table). */
   engage(id: number, e: number) { this.w.enemies.get(e)!.threat.add(id, 1); }
 }

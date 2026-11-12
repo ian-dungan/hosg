@@ -16,20 +16,24 @@ import {
 } from './constants';
 import { breakCast, castView, startCast, tickCast } from './casting';
 import {
-  applyEffects, applyShield, healMult, onDamageTaken, onHealDone, outgoingMult, resolveAim, strikesFromBehind, targetFor, threatMult, tickBuffs, tickDebuffs, traitOf,
+  allied, applyEffects, applyShield, clearAfflictions, healMult, onDamageTaken, onHealDone, outgoingMult, resolveAim, strikesFromBehind, targetFor, threatMult,
+  tickAfflictions, tickBuffs, tickDebuffs, traitOf,
 } from './effects';
+import { AGGRO_THREAT } from './constants';
+import { removeFieldsOf } from './fields';
+import { ThreatTable } from './threat';
 import { REACTIONS, reactionFor, type ElementId } from './elements';
 import { stunEnemy } from './enemyAi';
 import { JOBS, isJobId, type JobId } from './jobs';
 import { dodgeDisplacement, simulateDisplacement, type Displacement } from './displace';
-import { ENEMY_ATTACKS, type EnemyAttackId } from './enemies';
+import { ENEMY_ATTACKS, ENEMY_KINDS, type EnemyAttackId } from './enemies';
 import type { FxEvent } from './fx';
 import { applyFinisherMark, applyPrimerMark, liveMarks, MARK_BITS, type MarkId } from './marks';
 import { decayMomentum, gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
 import { addStagger, isBroken, tickStagger } from './stagger';
-import { STARTER_STATS, hitDamage } from './stats';
-import type { Act, AdventurerState, Carry, CombatWorld, DisplaceOut, EnemyState, Intent, Refusal, SelfView } from './engine';
+import { STARTER_STATS, hitDamage, type Stats } from './stats';
+import type { Act, AdventurerState, CampSpawn, Carry, CombatWorld, DisplaceOut, EnemyState, Intent, Refusal, SelfView } from './engine';
 
 /** What a `hit` fx may be `by`. */
 export type HitBy = Extract<FxEvent, { t: 'hit' }>['by'];
@@ -72,6 +76,11 @@ export function buffBits(a: AdventurerState, nowS: number): number {
   let bits = 0;
   for (const [id, b] of Object.entries(a.buffs) as [BuffId, { until: number }][]) if (b.until > nowS) bits |= BUFF_BITS[id];
   return bits;
+}
+/** Live Searing stacks (0 when none or expired). */
+export function searingStacks(a: AdventurerState, nowS: number): number {
+  const s = a.afflictions.get('searing');
+  return s && s.until > nowS ? s.stacks : 0;
 }
 /** The enemy's live debuffs as DEBUFF_BITS flags. */
 export function debuffBits(e: EnemyState, nowS: number): number {
@@ -136,18 +145,28 @@ export function plan3LoadoutState(a: AdventurerState): Plan3Loadout {
   return a.plan3 ? { weapon: a.plan3.weapon, free: [a.plan3.free[0], a.plan3.free[1]] } : plan3LoadoutOf(a.loadout);
 }
 
-export function newAdventurer(id: number, s: { x: number; z: number; y: number; facing: number; hp: number; loadout: unknown }, nowS: number): AdventurerState {
+/** Stats for addAdventurer (simulation and tests): each field finite and in range, else the starter's. */
+export function parseStats(v: unknown): Stats {
+  const o = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
+  const pick = (k: keyof Stats, ok: (n: number) => boolean) => (finite(o[k]) && ok(o[k] as number) ? (o[k] as number) : STARTER_STATS[k]);
+  return { power: pick('power', (n) => n > 0), defence: pick('defence', (n) => n >= 0), maxHp: pick('maxHp', (n) => n >= 1) };
+}
+
+export function newAdventurer(
+  id: number, s: { x: number; z: number; y: number; facing: number; hp: number; loadout: unknown; stats?: unknown; party?: string | null }, nowS: number,
+): AdventurerState {
   const { loadout, slots, plan3 } = runLoadout(s.loadout);
-  const stats = { ...STARTER_STATS };
+  const stats = s.stats === undefined ? { ...STARTER_STATS } : parseStats(s.stats);
   const a: AdventurerState = {
     id, team: 'adventurer', x: finite(s.x) ? s.x : 0, z: finite(s.z) ? s.z : 0, y: finite(s.y) ? s.y : 0, facing: finite(s.facing) ? s.facing : 0,
     stats, hp: finite(s.hp) ? Math.min(stats.maxHp, Math.max(1, s.hp)) : stats.maxHp, alive: true, diedAt: -Infinity,
+    party: typeof s.party === 'string' ? s.party : null,
     act: '', actUntil: -Infinity, job: loadout.job, loadout, slots, plan3, momentum: 0,
     lastDealtAt: -Infinity, lastCombatAt: -Infinity, lastHurtAt: -Infinity,
     readyAt: {}, gcdUntil: -Infinity, swapReadyAt: -Infinity, targetId: null, nextAutoAt: -Infinity,
     shield: 0, shieldUntil: -Infinity, sprintUntil: -Infinity, parryUntil: -Infinity, iframeUntil: -Infinity, reviveSafeUntil: -Infinity,
     dodgeCharges: JOBS[loadout.job].dodgeCharges, dodgeRefillAt: null, lastDodgeAt: -Infinity, lastDodgeFrom: null, charge: null,
-    cast: null, buffs: {}, afflictions: new Set(), autoWaiting: false,
+    cast: null, buffs: {}, afflictions: new Map(), autoWaiting: false,
   };
   void nowS;
   return a;
@@ -218,10 +237,10 @@ export function applyCarry(a: AdventurerState, c: Carry, nowS: number): void {
 /** "since" values in a Carry are capped here (an absent timer is "long ago", not Infinity, so it survives JSON). */
 const SINCE_CAP = 1e6;
 
-/** revive: full hp at `at`, Momentum 0, cooldowns, charges and timers reset, out of combat. */
+/** revive: full hp at `at`, Momentum 0, cooldowns, charges, timers and afflictions reset, out of combat; stats and party kept. */
 export function resetAdventurer(w: CombatWorld, a: AdventurerState, at: { x: number; z: number; y: number }, nowS: number): void {
   removeFromThreat(w, a.id);
-  Object.assign(a, newAdventurer(a.id, { ...at, facing: a.facing, hp: a.stats.maxHp, loadout: a.plan3 ?? a.loadout }, nowS));
+  Object.assign(a, newAdventurer(a.id, { ...at, facing: a.facing, hp: a.stats.maxHp, loadout: a.plan3 ?? a.loadout, stats: a.stats, party: a.party }, nowS));
 }
 
 /**
@@ -256,6 +275,55 @@ function setLoadout(a: AdventurerState, l: Loadout): void {
 }
 
 // ───────── enemies: spawning and hits ─────────
+/** A new enemy (the next id) fresh at camp `c`; not yet in w.enemies. */
+export function newEnemyState(w: CombatWorld, c: CampSpawn): EnemyState {
+  const data = ENEMY_KINDS[c.kind];
+  const e: EnemyState = {
+    id: w.nextId++, team: 'enemy', kind: c.kind, data, camp: { ...c },
+    x: 0, z: 0, y: 0, facing: 0, hp: data.hp, maxHp: data.hp, alive: true, act: '', actUntil: -Infinity, targetId: null,
+    threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {}, markBy: {},
+    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false, debuffs: {}, rootImmuneUntil: -Infinity,
+    spawned: false, baseScale: 1,
+  };
+  spawnEnemyState(w, e);
+  return e;
+}
+
+/**
+ * An add (a boss's, Task 4): a new enemy at `c` with max hp and the stagger bar × `scale` (a bad scale
+ * counts as 1), full hp, AGGRO_THREAT on each live adventurer of `engageWith` present here, never
+ * respawning (pruned after its death). `spawn` fx (with `src`, the spawner, when given).
+ */
+export function spawnEnemy(
+  w: CombatWorld, c: CampSpawn, opts: { engageWith: readonly number[]; scale: number; nowS: number; src?: number },
+): EnemyState {
+  const e = newEnemyState(w, c);
+  const f = finite(opts.scale) && opts.scale > 0 ? opts.scale : 1;
+  e.spawned = true; e.baseScale = f;
+  e.maxHp = e.data.hp * f; e.hp = e.maxHp; e.stagger.max = e.data.stagger * f;
+  for (const id of opts.engageWith) if (w.adventurers.get(id)?.alive === true && !e.threat.has(id)) e.threat.add(id, AGGRO_THREAT);
+  w.enemies.set(e.id, e);
+  fx(w, opts.src === undefined ? { t: 'spawn', dst: e.id } : { t: 'spawn', dst: e.id, src: opts.src });
+  void opts.nowS;
+  return e;
+}
+
+/**
+ * Removes an enemy from the engine at once: its wind-up, every telegraph it owns and its fields go; no
+ * death fx, no kill, no credit; adventurers targeting it drop the target; its id goes to out.despawned.
+ * Idempotent. Any reference still held reads as dead.
+ */
+export function despawnEnemy(w: CombatWorld, e: EnemyState): void {
+  if (w.enemies.get(e.id) !== e) return;
+  cancelWindup(w, e);
+  for (const t of w.telegraphs.values()) if (t.owner === e.id) w.telegraphs.delete(t.id);
+  removeFieldsOf(w, e.id);
+  w.enemies.delete(e.id);
+  e.alive = false; e.hp = 0; e.act = 'dead'; e.actUntil = -Infinity; e.targetId = null; e.threat.clear(); e.burning = null;
+  for (const a of w.adventurers.values()) if (a.targetId === e.id) a.targetId = null;
+  w.out.despawned.push(e.id);
+}
+
 /** The enemy fresh at its camp spot: full hp, no threat, marks, stagger, wind-up or cooldowns (no fx). */
 export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
   const c = e.camp;
@@ -330,9 +398,10 @@ export function killEnemy(w: CombatWorld, e: EnemyState, nowS: number): void {
   const credit = e.threat.ids().filter((id) => w.adventurers.get(id)?.alive === true);
   cancelWindup(w, e);
   e.alive = false; e.hp = 0; e.act = 'dead'; e.actUntil = -Infinity; e.targetId = null;
-  e.diedAt = nowS; e.respawnAt = nowS + e.data.respawn;
+  e.diedAt = nowS; e.respawnAt = e.spawned ? Infinity : nowS + e.data.respawn;
   e.threat.clear(); e.marks = {}; e.markBy = {}; e.burning = null; e.debuffs = {};
   e.stagger = { value: 0, max: e.stagger.max, brokenUntil: -Infinity, lastGainAt: -Infinity };
+  removeFieldsOf(w, e.id);
   for (const a of w.adventurers.values()) if (a.targetId === e.id) a.targetId = null;
   fx(w, { t: 'death', dst: e.id });
   w.out.kills.push({ enemy: e.id, kind: e.kind, credit });
@@ -366,10 +435,10 @@ function consumeMark(w: CombatWorld, e: EnemyState, m: MarkId): void {
   fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
 }
 
-/** Live adventurers within r of point p (no sight needed). */
-function adventurersAround(w: CombatWorld, p: { x: number; z: number }, r: number): AdventurerState[] {
+/** Live adventurers allied with `a` within r of point p (no sight needed). */
+function alliesAround(w: CombatWorld, a: AdventurerState, p: { x: number; z: number }, r: number): AdventurerState[] {
   const out: AdventurerState[] = [];
-  for (const b of w.adventurers.values()) if (b.alive && Math.hypot(b.x - p.x, b.z - p.z) <= r) out.push(b);
+  for (const b of w.adventurers.values()) if (b.alive && allied(a, b) && Math.hypot(b.x - p.x, b.z - p.z) <= r) out.push(b);
   return out;
 }
 
@@ -434,9 +503,9 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
     }
   } else if (reaction === 'steam') {
     // the hitter's heal: Font applies
-    for (const b of adventurersAround(w, e, STEAM_R)) onHealDone(w, a, b, healAdventurer(w, b, STEAM_HEAL * healMult(a, b), a.id, nowS), nowS);
+    for (const b of alliesAround(w, a, e, STEAM_R)) onHealDone(w, a, b, healAdventurer(w, b, STEAM_HEAL * healMult(a, b), a.id, nowS), nowS);
   } else if (reaction === 'bedrock') {
-    for (const b of adventurersAround(w, e, BEDROCK_R)) applyShield(w, a, b, BEDROCK_SHIELD, BEDROCK_S, nowS);
+    for (const b of alliesAround(w, a, e, BEDROCK_R)) applyShield(w, a, b, BEDROCK_SHIELD, BEDROCK_S, nowS);
   }
   if (!e.alive) return { plain, total };
   if (reaction === 'conduct') {
@@ -470,7 +539,7 @@ export function strike(w: CombatWorld, a: AdventurerState, e: EnemyState, s: Str
  * adventurer never shows 0.
  */
 export function hurtAdventurer(
-  w: CombatWorld, a: AdventurerState, amount: number, src: number, by: EnemyAttackId | 'auto', nowS: number, redirected = false,
+  w: CombatWorld, a: AdventurerState, amount: number, src: number, by: EnemyAttackId | 'auto' | 'field', nowS: number, redirected = false,
 ): { taken: number; absorbed: number } {
   if (!a.alive || !finite(amount) || amount <= 0) return { taken: 0, absorbed: 0 };
   const shield = liveShield(a, nowS);
@@ -482,15 +551,17 @@ export function hurtAdventurer(
   a.lastCombatAt = nowS;
   fx(w, { t: 'hit', src, dst: a.id, amount: amount - absorbed, absorbed, by });
   if (a.hp <= 0) killAdventurer(w, a, nowS);
-  else onDamageTaken(w, a, taken, absorbed, src, nowS, redirected);
+  // a field tick is no hit to block or bleed from: no Momentum
+  else if (by !== 'field') onDamageTaken(w, a, taken, absorbed, src, nowS, redirected);
   return { taken, absorbed };
 }
 
-/** Death from combat damage: a cast cancelled, `died`, `death` fx, act 'dead', buffs gone, dropped from every threat table. */
+/** Death from combat damage: a cast cancelled, `died`, `death` fx, act 'dead', buffs and afflictions gone, dropped from every threat table. */
 export function killAdventurer(w: CombatWorld, a: AdventurerState, nowS: number): void {
   if (!a.alive) return;
   breakCast(w, a, 'cancel', nowS);
   a.buffs = {};
+  clearAfflictions(w, a, a.id);
   a.alive = false; a.hp = 0; a.act = 'dead'; a.actUntil = -Infinity; a.diedAt = nowS;
   a.targetId = null; a.shield = 0; a.parryUntil = -Infinity; a.sprintUntil = -Infinity;
   cancelCharge(a);
@@ -698,6 +769,7 @@ export function dodgeIntent(w: CombatWorld, a: AdventurerState, i: Extract<Inten
 /** Timers, buffs, Momentum decay, regen, the Charged Shot's self-release, a cast's completion, target drop, then the auto. */
 export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number, dt: number): void {
   if (!a.alive) return;
+  if (a.afflictions.size) tickAfflictions(w, a, nowS);
   tickBuffs(w, a, nowS);
   if (!a.alive) return;
   if ((a.act === 'dodge' || a.act === 'knock') && nowS >= a.actUntil - TIME_EPS) a.act = '';
@@ -734,6 +806,8 @@ export function tickAdventurer(w: CombatWorld, a: AdventurerState, nowS: number,
 /** Per enemy, after the enemy AI: Burning ticks, mark expiry, stagger decay, the end of a stun, respawns. */
 export function tickEnemyStatus(w: CombatWorld, e: EnemyState, nowS: number, dt: number): void {
   if (!e.alive) {
+    // a dead add never comes back: it leaves the engine (its kill was already credited)
+    if (e.spawned) { w.enemies.delete(e.id); w.out.despawned.push(e.id); return; }
     if (nowS < e.respawnAt - TIME_EPS) return;
     for (const a of w.adventurers.values()) {
       if (Math.hypot(a.x - e.camp.x, a.z - e.camp.z) <= RESPAWN_CLEAR_RADIUS) { e.respawnAt = nowS + 1; return; }

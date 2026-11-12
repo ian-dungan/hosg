@@ -22,7 +22,7 @@ import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
 import type { AdventurerState, CombatWorld, CombatZone, EnemyState } from './engine';
 import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
-import { hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
+import { applyAffliction, hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
 import { breakCast } from './casting';
 import { gainMomentum } from './momentum';
 import { inShape, type Shape } from './shapes';
@@ -331,8 +331,8 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   }
   ai.noTargetSince = null;
 
-  // leash
-  if (hyp(e.x - e.camp.x, e.z - e.camp.z) > d.leash) { startReturn(w, e, ai, now); return; }
+  // leash (a stationary enemy, such as a Lens Shard, has none: it never walks)
+  if (d.speed > 0 && hyp(e.x - e.camp.x, e.z - e.camp.z) > d.leash) { startReturn(w, e, ai, now); return; }
 
   const dist = hyp(t.x - e.x, t.z - e.z);
   const sees = lineOfSight(w.zone.sight, e.x, e.z, t.x, t.z);
@@ -394,8 +394,9 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
 
   // the unreachable rule: out of reach with no progress for UNREACHABLE_S → home. Progress is what is
   // left to go: along the path while one is followed (a detour that first leads away still counts),
-  // else the straight distance. No path at all means no progress.
-  if (!inReach2) {
+  // else the straight distance. No path at all means no progress. A stationary enemy (a Lens Shard)
+  // never closes in, so the rule does not apply to it.
+  if (!inReach2 && d.speed > 0) {
     if (ai.progTarget !== t.id) { ai.progTarget = t.id; ai.progBest = Infinity; ai.progAt = now; }
     const left = toGo(e, ai, t);
     if (left < ai.progBest - PROGRESS_M) { ai.progBest = left; ai.progAt = now; }
@@ -550,8 +551,8 @@ function walkHome(w: CombatWorld, e: EnemyState, ai: EnemyAi, now: number, dt: n
   }
   // home (or put back): base and full hp, threat clear, ready to notice adventurers again
   e.x = c.x; e.z = c.z; e.y = w.zone.ground(c.x, c.z) ?? e.y; e.facing = c.facing;
-  e.maxHp = e.data.hp; e.hp = e.maxHp; e.act = ''; e.actUntil = -Infinity; e.targetId = null;
-  e.stagger = { value: 0, max: e.data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity };
+  e.maxHp = e.data.hp * e.baseScale; e.hp = e.maxHp; e.act = ''; e.actUntil = -Infinity; e.targetId = null;
+  e.stagger = { value: 0, max: e.data.stagger * e.baseScale, brokenUntil: -Infinity, lastGainAt: -Infinity };
   e.threat.clear(); e.attackReadyAt = {};
   ai.scaleN = 1; ai.parryImmuneUntil = -Infinity;
   resetMovement(ai);
@@ -665,6 +666,8 @@ export function resolveHit(
   const got = hurtAdventurer(w, a, final - moved, e.id, by, now);
   if (sheltered && moved > 0) hurtAdventurer(w, pal, Math.round(moved * takenMult(w, pal, e, now)), e.id, by, now, true);
   const landed = got.taken + got.absorbed > 0;
+  // an afflicting auto that lands (hp or shield) adds a stack to the one it hit (a Shelter share adds none)
+  if (by === 'auto' && landed && e.data.auto?.afflict) applyAffliction(w, a, e.data.auto.afflict, e.id, now);
   // the chase surge ends only when a hit lands on its target (taken or absorbed)
   if (e.surging && a.id === e.targetId && landed) { e.surging = false; aiOf(e, now).chanceAt = now; }
   // a telegraph that lands (hp or shield) breaks a cast; autos never do

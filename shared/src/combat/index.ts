@@ -17,8 +17,9 @@ export * from './afflictions';
 export * from './encounters';
 export * from './fx';
 export * from './engine';
-export { isInCombat, adventurerInCombat, onAnyThreatTable } from './adventurer';
-export { RAIN_HEAL } from './effects';
+export { isInCombat, adventurerInCombat, onAnyThreatTable, spawnEnemy, despawnEnemy } from './adventurer';
+export { RAIN_HEAL, allied, applyAffliction } from './effects';
+export { addField, removeFieldsOf, tickFields } from './fields';
 export type { CastBreak } from './casting';
 export {
   enemyAiStats, enemyPassable, enemyPathPassable, enemyAiStateOf, resolveHit, type EnemyAi,

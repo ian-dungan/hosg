@@ -55,6 +55,7 @@ describe('Task 3 review round 1', () => {
 
   it("steam is the White Mage's heal: Font ×1.2 on others", () => {
     const r = new Rig([camp('thornling', 0, 0)]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const e = r.enemy('thornling');
     const wm = r.add(0, -10, WM, 50), close = r.add(0, -3, undefined, 50);
     const en = r.w.enemies.get(e)!;

@@ -6,22 +6,24 @@ import type { AbilityId, BuffId, DebuffId, Loadout, Plan3Loadout, WeaponId } fro
 import type { JobId } from './jobs';
 import type { BuffState } from './effects';
 import type { CastState } from './casting';
+import type { AfflictionId } from './afflictions';
+import type { FieldId } from './bosses';
 import type { EnemyAttackId, EnemyKindData, EnemyKindId } from './enemies';
-import { ENEMY_KINDS } from './enemies';
 import type { FxEvent } from './fx';
 import type { MarkId, Marks } from './marks';
 import { markBits } from './marks';
 import type { Shape } from './shapes';
 import { staggerImmuneLeft, type StaggerBar } from './stagger';
 import type { Stats } from './stats';
-import { ThreatTable } from './threat';
+import type { ThreatTable } from './threat';
 import { stepEnemies } from './enemyAi';
 import type { Displacement, DisplaceResult } from './displace';
 import {
   abilityIntent, applyCarry, buffBits, carryOfState, currentAct, debuffBits, dodgeIntent, fallDamageTaken, jobIntent, liveShield, loadoutIntent,
-  newAdventurer, plan3LoadoutState, removeFromThreat, resetAdventurer, selfView, spawnEnemyState, speedScaleOf, swapIntent, targetIntent,
+  newAdventurer, newEnemyState, plan3LoadoutState, removeFromThreat, resetAdventurer, searingStacks, selfView, speedScaleOf, swapIntent, targetIntent,
   tickAdventurer, tickEnemyStatus,
 } from './adventurer';
+import { tickFields } from './fields';
 import { castView } from './casting';
 
 // ───────── public API ─────────
@@ -51,6 +53,8 @@ export interface CombatantView {
    * are optional only until the server and client build views of their own on them (Tasks 6 and 7).
    */
   job?: JobId; buffs?: number; debuffs?: number; cast?: CastView;
+  /** Adventurers: Searing stacks (0 when none). Always filled for adventurers; optional only until the server's views carry it. */
+  searing?: number;
 }
 /**
  * cd: seconds left per slot; gcd, dodgeNextIn: seconds left (0 = ready / full); charge: seconds
@@ -65,11 +69,18 @@ export interface SelfView {
   job?: JobId; dodgeMax?: number; cast?: CastView;
 }
 export interface TelegraphView { id: number; owner: number; attack: EnemyAttackId; shape: Shape; total: number; left: number }
+/** A standing hazard on the ground (world coordinates): it ticks at startedAt + 1, + 2, … while its owner lives. */
+export interface FieldView { id: number; owner: number; field: FieldId; shape: Shape; raw: number; startedAt: number }
 export interface DisplaceOut { id: number; kind: 'dodge' | 'knock'; from: { x: number; z: number; y: number }; d: Displacement; result: DisplaceResult }
 /** revived: always filled by the engine (optional only until the server's own TickOut literals carry it). */
 export interface TickOut {
   fx: FxEvent[]; displaced: DisplaceOut[]; died: number[]; kills: { enemy: number; kind: EnemyKindId; credit: number[] }[];
   revived?: { id: number; by: number; hp: number }[];
+  /**
+   * Enemies that left the engine this tick: despawnEnemy (no death, no credit), or a spawned add pruned
+   * after its death (its kill was credited as usual in `kills`). Their ids are never reused.
+   */
+  despawned: number[];
 }
 /**
  * ally: the adventurer an ally-aimed ability should land on (else the aim rule picks one).
@@ -113,7 +124,15 @@ export interface Combat {
    * loadout: a job Loadout; anything else reads as DEFAULT_LOADOUT, except (deprecated, until Tasks
    * 5–7) a Plan 3 loadout, which runs as its job (Blade → Warrior, Bow → Ranger) with its Plan 3 slots.
    */
-  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Plan3Loadout | Loadout; carry?: Carry }, nowS: number): number;
+  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Plan3Loadout | Loadout; carry?: Carry; stats?: Stats }, nowS: number): number;
+  /**
+   * Party membership, set only by the room (the engine never takes it from an intent): adventurers with
+   * the same non-null party are allies; anything but a string is no party. Live buffs (Shelter included)
+   * stay as they are; only later picks change. Kept through revives.
+   */
+  setParty(id: number, party: string | null): void;
+  /** Standing hazards (ground fields). */
+  fields(): Iterable<FieldView>;
   /** The relog snapshot of a present adventurer (take it before removeAdventurer), else undefined. */
   carryOf(id: number): Carry | undefined;
   /** Also drops it from every threat table. */
@@ -147,6 +166,8 @@ export interface AdventurerState {
   id: number; team: 'adventurer';
   x: number; z: number; y: number; facing: number;
   stats: Stats; hp: number; alive: boolean; diedAt: number;
+  /** The party the room put it in (null: none, its only ally is itself). */
+  party: string | null;
   /** '' | 'dodge' | 'knock' | 'dead' ('charge' and 'cast' are derived from `charge` and `cast`); dodge and knock last until actUntil. */
   act: Act; actUntil: number;
   /**
@@ -167,8 +188,8 @@ export interface AdventurerState {
   charge: { startedAt: number } | null;
   cast: CastState | null;
   buffs: Partial<Record<BuffId, BuffState>>;
-  /** Player debuffs from enemies: always empty in 3b (Wellspring's cleanse clears it). */
-  afflictions: Set<string>;
+  /** Afflictions from enemies (Searing): stacks, expiry and who last added one. Wellspring's cleanse clears them; death too. */
+  afflictions: Map<AfflictionId, { stacks: number; until: number; src: number }>;
   /** A swing came due on a tick that could not swing: the next one counts from when it lands. */
   autoWaiting: boolean;
 }
@@ -195,8 +216,14 @@ export interface EnemyState {
   debuffs: Partial<Record<DebuffId, BuffState>>;
   /** Rooted cannot be set again before this (ROOT_IMMUNE_S after it last ended). */
   rootImmuneUntil: number;
+  /** Spawned by spawnEnemy (an add): never respawns, pruned after its death. */
+  spawned: boolean;
+  /** Its base factor on max hp and the stagger bar (1 for a camp; an add's spawn scale), restored when it walks home. */
+  baseScale: number;
 }
 export interface TelegraphState { id: number; owner: number; attack: EnemyAttackId; shape: Shape; startedAt: number; endsAt: number }
+/** A ground field: shape in world coordinates; nextAt: its next tick (startedAt + 1, + 2, …). */
+export interface FieldState { id: number; owner: number; field: FieldId; shape: Shape; raw: number; startedAt: number; nextAt: number }
 export interface CombatWorld {
   zone: CombatZone;
   /** The seeded generator (mulberry32): the only randomness the engine may use. */
@@ -205,12 +232,14 @@ export interface CombatWorld {
   now: number; lastTick: number;
   nextId: number; nextTelegraphId: number;
   adventurers: Map<number, AdventurerState>; enemies: Map<number, EnemyState>; telegraphs: Map<number, TelegraphState>;
+  /** Ground fields by id (removed with their owner: despawn, death, removeFieldsOf). */
+  fields: Map<number, FieldState>; nextFieldId: number;
   /** What the next tick returns: events from intents land here too. */
   out: TickOut;
 }
 
 // Per-tick enemy behaviour (enemyAi.ts) runs after the adventurers and before enemy status (marks,
-// burning, stagger decay, stun end, respawns).
+// burning, stagger decay, stun end, respawns); ground fields tick last.
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -223,20 +252,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [], revived: [] });
-
-function newEnemy(w: CombatWorld, c: CampSpawn, nowS: number): EnemyState {
-  const data = ENEMY_KINDS[c.kind];
-  const e: EnemyState = {
-    id: w.nextId++, team: 'enemy', kind: c.kind, data, camp: { ...c },
-    x: 0, z: 0, y: 0, facing: 0, hp: data.hp, maxHp: data.hp, alive: true, act: '', actUntil: -Infinity, targetId: null,
-    threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {}, markBy: {},
-    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false, debuffs: {}, rootImmuneUntil: -Infinity,
-  };
-  spawnEnemyState(w, e);
-  void nowS;
-  return e;
-}
+const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [], revived: [], despawned: [] });
 
 const worlds = new WeakMap<Combat, CombatWorld>();
 /** The engine's internal state, for the enemy AI and tests. Throws for anything createCombat did not make. */
@@ -253,9 +269,9 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
   const start = finite(opts.nowS) ? opts.nowS : 0;
   const w: CombatWorld = {
     zone, rng: mulberry32(opts.seed), now: start, lastTick: start, nextId: 1, nextTelegraphId: 1,
-    adventurers: new Map(), enemies: new Map(), telegraphs: new Map(), out: emptyOut(),
+    adventurers: new Map(), enemies: new Map(), telegraphs: new Map(), fields: new Map(), nextFieldId: 1, out: emptyOut(),
   };
-  for (const c of zone.camps) { const e = newEnemy(w, c, start); w.enemies.set(e.id, e); }
+  for (const c of zone.camps) { const e = newEnemyState(w, c); w.enemies.set(e.id, e); }
   // the clock never runs backwards: a stale or non-finite nowS is the latest time seen
   const at = (nowS: number) => { if (finite(nowS) && nowS > w.now) w.now = nowS; return w.now; };
 
@@ -271,7 +287,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     id: a.id, team: 'adventurer', kind: 'adventurer', x: a.x, z: a.z, y: a.y, facing: a.facing,
     hp: a.hp, maxHp: a.stats.maxHp, alive: a.alive, shield: liveShield(a, w.now), marks: 0, stagger: 0, maxStagger: 0,
     targetId: a.targetId, act: currentAct(a, w.now), windup: null,
-    job: a.job, buffs: buffBits(a, w.now), debuffs: 0, cast: castView(a, w.now),
+    job: a.job, buffs: buffBits(a, w.now), debuffs: 0, cast: castView(a, w.now), searing: searingStacks(a, w.now),
   });
 
   const combat: Combat = {
@@ -281,6 +297,13 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       if (a.carry) applyCarry(s, a.carry, t);
       w.adventurers.set(s.id, s);
       return s.id;
+    },
+    setParty(id, party) {
+      const a = w.adventurers.get(id);
+      if (a) a.party = typeof party === 'string' ? party : null;
+    },
+    *fields() {
+      for (const f of w.fields.values()) yield { id: f.id, owner: f.owner, field: f.field, shape: f.shape, raw: f.raw, startedAt: f.startedAt };
     },
     carryOf(id) {
       const a = w.adventurers.get(id);
@@ -327,6 +350,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       for (const a of w.adventurers.values()) tickAdventurer(w, a, now, dt);
       stepEnemies(w, now, dt);
       for (const e of w.enemies.values()) tickEnemyStatus(w, e, now, dt);
+      tickFields(w, now);
       const out = w.out;
       w.out = emptyOut();
       return out;

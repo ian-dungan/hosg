@@ -163,6 +163,7 @@ describe('casting', () => {
 
   it('Second Dawn (3 s) on a dead ally revives at 40%', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const wm = r.add(0, 0, WHITE), b = r.add(0, 8);
     hurtAdventurer(r.w, r.w.adventurers.get(b)!, 1000, 0, 'auto', r.now);
     expect(r.press(wm, 3)).toBeNull();
@@ -174,6 +175,7 @@ describe('casting', () => {
     expect(r.c.self(wm)!.cd[3]).toBeGreaterThan(ABILITIES.second_dawn.cooldown - 1);
     // already up (or gone): the next one fizzles at completion
     const r2 = new Rig([]);
+    r2.partyAll = 'p';
     const wm2 = r2.add(0, 0, WHITE), c = r2.add(0, 8);
     hurtAdventurer(r2.w, r2.w.adventurers.get(c)!, 1000, 0, 'auto', r2.now);
     expect(r2.press(wm2, 3)).toBeNull();

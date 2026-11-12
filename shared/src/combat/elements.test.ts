@@ -111,6 +111,7 @@ describe('primers and reactions', () => {
 
   it('Tidelash on Burning: steam heals adventurers within 6 m by 12 (× Font on others), ends the Burning DoT', () => {
     const { r, e, en } = setup();
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const wm = r.add(0, -10, WHITE, 50), close = r.add(0, -3, undefined, 50), away = r.add(0, -8, undefined, 50);
     aim(r, wm, e);
     en().marks.burning = r.now + 8;
@@ -127,6 +128,7 @@ describe('primers and reactions', () => {
 
   it('Rootbreak on Dazed: bedrock shields 15 for 6 s', () => {
     const { r, e, en } = setup();
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const bm = r.add(0, -10, BLACK), close = r.add(0, -3);
     aim(r, bm, e);
     en().marks.dazed = r.now + 8;

@@ -12,42 +12,44 @@ export type EnemyAttackId =
 /** ordinary (adds included), elite (Plan 3's Mossback), boss, mega (a dungeon's last boss). */
 export type EnemyTier = 'ordinary' | 'elite' | 'boss' | 'mega';
 /** A knockback: `speed` m/s away for `seconds`, starting upward at vy. */
-export interface Knock { speed: number; seconds: number; vy: number }
+export interface Knock { readonly speed: number; readonly seconds: number; readonly vy: number }
 export interface EnemyAttackData {
-  id: EnemyAttackId; name: string;
+  readonly id: EnemyAttackId; readonly name: string;
   /**
    * circle-self: centred on the enemy; circle-target: on the target where the wind-up starts; cone and line:
    * from the enemy toward the target; ring-self: a ring centred on the enemy (inner ≤ d ≤ r).
    */
-  shape: 'circle-self' | 'circle-target' | 'cone' | 'line' | 'ring-self';
+  readonly shape: 'circle-self' | 'circle-target' | 'cone' | 'line' | 'ring-self';
   /** r: circle, cone or ring radius; inner: a ring's hole; angle: cone full width (rad); length, width: line. */
-  r?: number; inner?: number; angle?: number; length?: number; width?: number;
+  readonly r?: number; readonly inner?: number; readonly angle?: number; readonly length?: number; readonly width?: number;
   /**
    * useRange: the attack starts only with its target within this (horizontal distance between positions).
    * A boss's rotation attacks run on its rotation, not on cooldown and firstAt (0 for them).
    */
-  windup: number; raw: number; cooldown: number; firstAt: number; useRange: number;
-  parryable: boolean; interruptible: boolean; knock?: Knock; dashToEnd?: boolean;
+  readonly windup: number; readonly raw: number; readonly cooldown: number; readonly firstAt: number; readonly useRange: number;
+  readonly parryable: boolean; readonly interruptible: boolean; readonly knock?: Knock; readonly dashToEnd?: boolean;
   /** 'each': one telegraph per live adventurer on the threat table, each a circle-target on that adventurer. */
-  targets?: 'each';
+  readonly targets?: 'each';
   /** Who it is aimed at: the threat target (the default), or the farthest engaged adventurer within useRange. */
-  aimAt?: 'target' | 'farthest';
+  readonly aimAt?: 'target' | 'farthest';
   /** count telegraphs, the k-th starting k × every s after the first, rotated by k × rotate rad from the first's direction. */
-  repeat?: { readonly count: number; readonly every: number; readonly rotate: number };
+  readonly repeat?: { readonly count: number; readonly every: number; readonly rotate: number };
   /** Raw added per use while enraged. */
-  ramp?: number;
+  readonly ramp?: number;
 }
 export interface EnemyKindData {
-  id: EnemyKindId; name: string; elite: boolean; tier: EnemyTier; hp: number; defence: number; radius: number; speed: number;
+  readonly id: EnemyKindId; readonly name: string; readonly elite: boolean; readonly tier: EnemyTier; readonly hp: number; readonly defence: number;
+  readonly radius: number; readonly speed: number;
   /** stagger: the stagger bar's max (0 = no bar). respawn: Infinity = never. */
-  aggro: number; leash: number; respawn: number; stagger: number;
+  readonly aggro: number; readonly leash: number; readonly respawn: number; readonly stagger: number;
   /** keepRange: a ranged enemy stops closing in at this distance. afflict: each auto that lands adds a stack. */
-  auto: { reach: number; every: number; raw: number; ranged: boolean; afflict?: AfflictionId } | null; keepRange?: number;
-  attacks: EnemyAttackId[];
+  readonly auto: { readonly reach: number; readonly every: number; readonly raw: number; readonly ranged: boolean; readonly afflict?: AfflictionId } | null;
+  readonly keepRange?: number;
+  readonly attacks: readonly EnemyAttackId[];
   /** Elemental damage of `weak` deals ELEMENT_WEAK_MULT, of `resist` ELEMENT_RESIST_MULT. */
-  weak?: ElementId; resist?: ElementId;
+  readonly weak?: ElementId; readonly resist?: ElementId;
   /** A boss's script (tiers boss and mega). */
-  boss?: BossData;
+  readonly boss?: BossData;
 }
 
 const DEG = Math.PI / 180;

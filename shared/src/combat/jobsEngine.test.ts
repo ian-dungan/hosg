@@ -114,16 +114,19 @@ describe('aims', () => {
   const RANGER: Loadout = { job: 'ranger', picks: ['field_dressing', 'pinning_shot'] };
   it('Field Dressing heals the lowest-hp adventurer in range, self on a tie', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const a = r.add(0, 0, RANGER, 80), b = r.add(10, 0, WARRIOR, 50), far = r.add(30, 0, WARRIOR, 10);
     expect(r.press(a, 3)).toBeNull();
     expect(r.fx('heal').map((h) => [h.src, h.dst, h.amount])).toEqual([[a, b, 25]]);
     expect(r.c.get(far)!.hp).toBe(10);
     const r2 = new Rig([]);
+    r2.partyAll = 'p';
     const s = r2.add(0, 0, RANGER, 50), o = r2.add(5, 0, WARRIOR, 50);
     void o;
     r2.press(s, 3);
     expect(r2.fx('heal').map((h) => h.dst)).toEqual([s]);
     const r3 = new Rig([]);
+    r3.partyAll = 'p';
     const c = r3.add(0, 0, RANGER, 90), lo = r3.add(5, 0, WARRIOR, 40), hi = r3.add(6, 0, WARRIOR, 40);
     void hi;
     r3.press(c, 3);
@@ -132,6 +135,7 @@ describe('aims', () => {
 
   it('an explicit ally id wins when valid, and is ignored when out of range or dead', () => {
     const r = new Rig([camp('dummy', 40, 40)]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const a = r.add(0, 0, RANGER), b = r.add(5, 0, WARRIOR, 90), c = r.add(-5, 0, WARRIOR, 10), far = r.add(0, 25, WARRIOR, 5);
     for (const id of [a, b, c, far]) r.engage(id, r.enemy('dummy')); // in combat: no regen
     const dead = r.add(3, 3, WARRIOR);
@@ -149,6 +153,7 @@ describe('aims', () => {
 
   it('Shelter and Kindred Spark refuse no-ally alone', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const pal = r.add(0, 0, { job: 'paladin', picks: ['shelter', 'taunt'] });
     const mage = r.add(30, 30, { job: 'black_mage', picks: ['kindred_spark', 'rootbreak'] });
     expect(r.press(pal, 3)).toBe('no-ally');
@@ -164,6 +169,7 @@ describe('aims', () => {
 
   it('Second Dawn needs a dead adventurer within 12 m', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const wm = r.add(0, 0, { job: 'white_mage', picks: ['second_dawn', 'soft_rain'] });
     expect(r.press(wm, 3)).toBe('no-ally');
     const alive = r.add(3, 0, WARRIOR);
@@ -182,6 +188,7 @@ describe('aims', () => {
 describe('effects', () => {
   it('Rallying Roar buffs self and an adventurer 9 m away, not one 11 m away, for 8 s', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const a = r.add(0, 0, { job: 'warrior', picks: ['rallying_roar', 'skullringer'] }), b = r.add(9, 0), c = r.add(0, 11);
     expect(r.press(a, 3)).toBeNull();
     r.tick();
@@ -196,6 +203,7 @@ describe('effects', () => {
 
   it('Dawn Ward replaces a smaller shield and not a larger one', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const a = r.add(0, 0, { job: 'paladin', picks: ['dawn_ward', 'kindle'] }), b = r.add(5, 0), c = r.add(0, 5);
     const w = r.w;
     Object.assign(w.adventurers.get(b)!, { shield: 15, shieldUntil: 20 });
@@ -212,6 +220,7 @@ describe('effects', () => {
 
   it('Soft Rain heals RAIN_HEAL a second, 6 times, from its source', () => {
     const r = new Rig([camp('dummy', 30, 0)]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const d = r.enemy('dummy');
     const a = r.add(0, 0, { job: 'white_mage', picks: ['soft_rain', 'sun_mote'] }, 50), b = r.add(6, 0, WARRIOR, 50);
     r.engage(a, d); r.engage(b, d); // in combat: no regen
@@ -273,6 +282,7 @@ describe('effects', () => {
 
   it('Kindred Spark gives +37 to the partner, +10 to self, with gift fx', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const m = r.add(0, 0, { job: 'black_mage', picks: ['kindred_spark', 'rootbreak'] }), p = r.add(10, 0);
     expect(r.press(m, 3)).toBeNull();
     expect([r.c.self(p)!.momentum, r.c.self(m)!.momentum]).toEqual([37, 10]);
@@ -281,6 +291,7 @@ describe('effects', () => {
 
   it('revive: hp 40, act cleared, cooldowns kept, revived in TickOut', () => {
     const r = new Rig([]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const wm = r.add(0, 0, { job: 'white_mage', picks: ['second_dawn', 'soft_rain'] }), b = r.add(5, 0);
     r.press(b, 3); // Mend: 20 s
     r.w.adventurers.get(b)!.momentum = 70;
@@ -363,6 +374,7 @@ describe('Task 2 review round 1', () => {
 
   it('a dead healer is on no threat table while its Soft Rain keeps ticking; a revive does not put it back', () => {
     const r = new Rig([camp('dummy', 30, 0)]);
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const d = r.enemy('dummy');
     const wm = r.add(0, 0, WM, 50), b = r.add(6, 0, WARRIOR, 50), wm2 = r.add(-3, 0, WM);
     r.engage(b, d);
@@ -399,6 +411,7 @@ describe('Task 2 review round 1', () => {
 
   it('Second Dawn needs sight of the dead ally', () => {
     const r = new Rig([], { walls: [{ x: 0, z: 4, r: 1 }] });
+    r.partyAll = 'p'; // Plan 4: ally effects reach party members only
     const wm = r.add(0, 0, WM), b = r.add(0, 8), c = r.add(8, 0);
     kill(r, b); kill(r, c);
     expect(r.press(wm, 3, b)).toBeNull(); // b is behind the wall: the nearest dead one in sight, c

@@ -1,12 +1,15 @@
 // Data-driven ability effects: how an ability's subject is found (resolveAim), what each Effect does
-// (applyEffects), and the shields, buffs, debuffs, heals, revives and hp costs behind them. Every
-// adventurer in the zone counts as an ally (no parties before Plan 4); aims never pick enemies.
+// (applyEffects), and the shields, buffs, debuffs, heals, revives and hp costs behind them. The ally
+// rule (Plan 4): an adventurer's allies are itself and its party (`allied`); automatic picks and area
+// effects reach allies only, while an explicit `ally` id may name anyone (help a stranger on purpose).
+// Aims never pick enemies. Afflictions (Searing) live here too.
 import { ABILITIES, type AbilityData, type AbilityId, type BuffId, type DebuffId, type Effect } from './abilities';
 import {
   AEGIS_ALLY_TAKEN, AEGIS_TAKEN, ALLY_RANGE, BEHIND_COS, BEHIND_MULT, BLOCK_MOMENTUM, BLOODBOND_R, BLOOD_LIFESTEAL, BLOOD_MOMENTUM_PER_HP,
   FONT_HEAL_MULT, FONT_MOMENTUM_CAP, FONT_MOMENTUM_PER_HP, FONT_THREAT_MULT, OVERFLOW_MULT, PACT_LIFESTEAL_MULT, PACT_MULT, PINPOINT_MULT,
   RANGE_FUZZ, REVIVE_IFRAMES_S, ROAR_MULT, STEADFAST_TAKEN, STEADFAST_THREAT, WEAKPOINT_MULT,
 } from './constants';
+import { AFFLICTIONS, type AfflictionId } from './afflictions';
 import { elementMult, type ElementId } from './elements';
 import type { AdventurerState, CombatWorld, EnemyState, Refusal } from './engine';
 import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, splashDamage, strikeFull, TIME_EPS, type Strike } from './adventurer';
@@ -57,13 +60,48 @@ export function outgoingMult(w: CombatWorld, a: AdventurerState, e: EnemyState, 
   }
   return m;
 }
-/** Damage-taken multiplier for an enemy hit on an adventurer: Steadfast × the lowest of aegis and aegis_ally (never both). */
+/**
+ * Damage-taken multiplier for an enemy hit (or a field tick) on an adventurer: Steadfast × the lowest of
+ * aegis and aegis_ally (never both), then × (1 + takenPerStack × stacks) for live Searing.
+ */
 export function takenMult(w: CombatWorld, a: AdventurerState, e: EnemyState | null, nowS: number): number {
   void w; void e;
   let m = traitOf(a) === 'steadfast' ? STEADFAST_TAKEN : 1;
   if (hasBuff(a, 'aegis', nowS)) m *= AEGIS_TAKEN;
   else if (hasBuff(a, 'aegis_ally', nowS)) m *= AEGIS_ALLY_TAKEN;
+  if (a.afflictions.size) {
+    const s = a.afflictions.get('searing');
+    if (s && s.until > nowS) m *= 1 + AFFLICTIONS.searing.takenPerStack * s.stacks;
+  }
   return m;
+}
+
+// ───────── allies and afflictions ─────────
+/** a and b are allies: the same adventurer, or both in the same (non-null) party. */
+export function allied(a: AdventurerState, b: AdventurerState): boolean {
+  return a === b || (a.party !== null && a.party === b.party);
+}
+/** One more stack of `id` on a live adventurer (capped at maxStacks), expiry refreshed to now + s; `afflict` fx when the count changes. */
+export function applyAffliction(w: CombatWorld, a: AdventurerState, id: AfflictionId, src: number, nowS: number): void {
+  if (!a.alive) return;
+  const d = AFFLICTIONS[id];
+  const cur = a.afflictions.get(id);
+  const was = cur && cur.until > nowS ? cur.stacks : 0;
+  const stacks = Math.min(d.maxStacks, was + 1);
+  a.afflictions.set(id, { stacks, until: nowS + d.s, src });
+  if (stacks !== was) fx(w, { t: 'afflict', src, dst: a.id, id, stacks });
+}
+/** Every affliction gone (death, cleanse): `afflict … stacks: 0` fx for each, from `src`. */
+export function clearAfflictions(w: CombatWorld, a: AdventurerState, src: number): void {
+  if (!a.afflictions.size) return;
+  for (const id of a.afflictions.keys()) fx(w, { t: 'afflict', src, dst: a.id, id, stacks: 0 });
+  a.afflictions.clear();
+}
+/** Each tick: afflictions past their expiry end (`afflict … stacks: 0`, from their last src). */
+export function tickAfflictions(w: CombatWorld, a: AdventurerState, nowS: number): void {
+  for (const [id, s] of a.afflictions) {
+    if (s.until <= nowS + TIME_EPS) { a.afflictions.delete(id); fx(w, { t: 'afflict', src: s.src, dst: a.id, id, stacks: 0 }); }
+  }
 }
 /** Heal multiplier for `src` healing `dst`: Font on others. */
 export function healMult(src: AdventurerState, dst: AdventurerState): number {
@@ -96,7 +134,7 @@ export function onDamageTaken(w: CombatWorld, a: AdventurerState, taken: number,
 }
 /**
  * Crimson Tithe: BLOOD_LIFESTEAL of an ability's damage dealt heals the Dark Knight (× PACT_LIFESTEAL_MULT
- * with pact); with bloodbond the lowest-hp other adventurer within BLOODBOND_R (in sight) heals the same.
+ * with pact); with bloodbond the lowest-hp other allied adventurer within BLOODBOND_R (in sight) heals the same.
  */
 export function lifesteal(w: CombatWorld, a: AdventurerState, dealt: number, nowS: number): void {
   if (!a.alive || !(dealt > 0) || traitOf(a) !== 'crimson_tithe') return;
@@ -121,8 +159,9 @@ export function targetFor(w: CombatWorld, a: AdventurerState, targetId: number |
 }
 
 /**
- * A live adventurer within `limit` of the caster and in sight: `wanted` if it qualifies, else the one
- * with the lowest hp/maxHp (ties: the caster, then the lower id). null when none qualifies.
+ * A live adventurer within `limit` of the caster and in sight: `wanted` if it qualifies (allied or not:
+ * an explicit tap may help a stranger), else the allied one with the lowest hp/maxHp (ties: the caster,
+ * then the lower id). null when none qualifies.
  */
 function pickAlly(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: number, withSelf: boolean): AdventurerState | null {
   const near = (b: AdventurerState) => b.alive && (withSelf || b !== a) && (b === a || dist(a, b) <= limit);
@@ -131,7 +170,7 @@ function pickAlly(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: nu
   if (want && near(want) && seen(want)) return want;
   let best: AdventurerState | null = null, bestF = Infinity;
   for (const b of w.adventurers.values()) {
-    if (!near(b)) continue;
+    if (!allied(a, b) || !near(b)) continue;
     const f = b.hp / b.stats.maxHp;
     // priority first; the line-of-sight trace only for a candidate that would win
     const wins = f < bestF - 1e-12 || (Math.abs(f - bestF) <= 1e-12 && best !== a && (b === a || b.id < best!.id));
@@ -140,7 +179,7 @@ function pickAlly(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: nu
   return best;
 }
 
-/** A dead adventurer within `limit` and in sight: `wanted` if it qualifies, else the nearest (ties: the lower id). */
+/** A dead adventurer within `limit` and in sight: `wanted` if it qualifies (allied or not), else the nearest allied one (ties: the lower id). */
 function pickDead(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: number): AdventurerState | null {
   const ok = (b: AdventurerState) => !b.alive && b !== a && dist(a, b) <= limit;
   const seen = (b: AdventurerState) => lineOfSight(w.zone.sight, a.x, a.z, b.x, b.z);
@@ -148,7 +187,7 @@ function pickDead(w: CombatWorld, a: AdventurerState, wanted: unknown, limit: nu
   if (want && ok(want) && seen(want)) return want;
   let best: AdventurerState | null = null, bestD = Infinity;
   for (const b of w.adventurers.values()) {
-    if (!ok(b)) continue;
+    if (!allied(a, b) || !ok(b)) continue;
     const d = dist(a, b);
     if ((d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && b.id < best!.id)) && seen(b)) { best = b; bestD = d; }
   }
@@ -258,9 +297,9 @@ export function payHp(a: AdventurerState, amount: number): number {
 }
 
 // ───────── applying an ability ─────────
-/** Live adventurers within r of `a` (the caster included), no sight needed. */
+/** Live allies of `a` within r of it (the caster included), no sight needed. */
 function adventurersNear(w: CombatWorld, a: AdventurerState, r: number): AdventurerState[] {
-  return [...w.adventurers.values()].filter((b) => b.alive && (b === a || dist(a, b) <= r));
+  return [...w.adventurers.values()].filter((b) => b.alive && allied(a, b) && (b === a || dist(a, b) <= r));
 }
 /** Live, hittable enemies whose edge is within r of `p`. */
 function enemiesNear(w: CombatWorld, p: { x: number; z: number }, r: number, except?: EnemyState): EnemyState[] {
@@ -356,7 +395,7 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
     case 'parry': a.parryUntil = nowS + ef.s; return;
     case 'sprint': a.sprintUntil = nowS + ef.s; return;
     case 'charge': return; // pressed and released through the charge (adventurer.ts)
-    case 'cleanse': aim.afflictions.clear(); return;
+    case 'cleanse': clearAfflictions(w, aim, a.id); return;
   }
 }
 

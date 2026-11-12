@@ -127,6 +127,7 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
       ? { weapon: m.weapon, free: [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]] }
       : { job: m.job, picks: m.picks ? [m.picks[0], m.picks[1]] : [...(n === 1 ? JOBS[m.job].picks.solo : JOBS[m.job].picks.duo)] as [AbilityId, AbilityId] };
     const id = c.addAdventurer({ x, z, y: 0, facing: angle, hp: 100, loadout }, 0);
+    c.setParty(id, 'sim'); // one party: every member is every other's ally
     // the slip's own seed: it draws nothing from the shared generator
     const memory: BrainMemory = newBrainMemory(REACTION_S + rng() * 0.2, m.sloppy ? { rate: SLOPPY_MISS, seed: o.seed * 7919 + i * 104729 + 1 } : undefined);
     return {
