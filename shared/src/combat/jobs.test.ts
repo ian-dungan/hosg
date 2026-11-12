@@ -389,8 +389,15 @@ describe('jobs save', () => {
     const v2 = { current: 'warrior', curve: 2, jobs: { warrior: { level: 4, xp: 450, picks: ['mend', 'bulwark'], talents: [], outfit: null } } };
     expect(isJobsSave(v2)).toBe(true);
     expect(parseJobsSave(v2)).toEqual(v2);
-    // Any other curve value reads as the stub; xp above the cap on curve 2 is capped.
-    expect(parseJobsSave({ ...v2, curve: 7 }).jobs.warrior).toMatchObject({ level: 5, xp: 840 });
+    // Only an absent curve is the stub. A present but unknown curve (7, "2", null) is not converted again:
+    // its xp is read on the current curve (repaired), so a write-back cannot convert a save twice.
+    for (const curve of [7, 3, '2', null, 1]) {
+      expect(parseJobsSave({ ...v2, curve }).jobs.warrior, String(curve)).toEqual(v2.jobs.warrior);
+      expect(parseJobsSave({ ...v2, curve }).curve).toBe(2);
+      expect(isJobsSave({ ...v2, curve })).toBe(false);
+    }
+    const { curve: _c, ...noCurve } = v2;
+    expect(parseJobsSave(noCurve).jobs.warrior).toMatchObject({ level: 5, xp: 840 });
     expect(parseJobsSave({ ...v2, jobs: { warrior: { ...v2.jobs.warrior, xp: 99999 } } }).jobs.warrior).toMatchObject({ level: 10, xp: 3180 });
     // A Plan 3 loadout and garbage are new saves on the curve.
     expect(parseJobsSave(undefined, { weapon: 'bow', free: ['taunt', 'sprint'] }).curve).toBe(2);

@@ -78,10 +78,13 @@ export function baseStats(level: number): Stats {
   };
 }
 
-/** CATCH_UP_MULT when `job`'s level is below the highest level of any job in the save, else 1. Levels come from xp. */
+/** The starting jobs (JOB_IDS, restated: jobs.ts imports this module, so it cannot be read here at the top level). */
+const JOB_IDS_LOCAL: readonly JobId[] = Object.freeze(['warrior', 'ranger', 'paladin', 'dark_knight', 'ninja', 'white_mage', 'black_mage']);
+
+/** CATCH_UP_MULT when `job`'s level is below the highest level of any starting job in the save (future-job records are ignored), else 1. Levels come from xp. */
 export function catchUp(s: JobsSave, job: JobId): number {
   let highest = 1;
-  for (const r of Object.values(s.jobs)) if (r) highest = Math.max(highest, levelForXp(r.xp));
+  for (const id of JOB_IDS_LOCAL) { const r = s.jobs[id]; if (r) highest = Math.max(highest, levelForXp(r.xp)); }
   const own = s.jobs[job];
   return (own ? levelForXp(own.xp) : 1) < highest ? CATCH_UP_MULT : 1;
 }

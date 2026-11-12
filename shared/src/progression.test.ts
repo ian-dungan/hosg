@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ABILITIES, CATCH_UP_MULT, CLEAR_XP, JOB_LEVEL_CAP, MIN_CREDIT_FRAC, STARTER_STATS, TALENT_LEVELS, XP_CURVE_VERSION, XP_PER_LEVEL, XP_TO_NEXT,
-  baseStats, catchUp, levelForXp, migrateStubXp, newJobsSave, parseMods, totalTo, xpToNext, type JobsSave,
+  baseStats, catchUp, levelForXp, migrateStubXp, newJobsSave, parseMods, MAX_MODS, totalTo, xpToNext, type JobsSave,
 } from './index';
 
 describe('the level curve', () => {
@@ -77,6 +77,10 @@ describe('the level curve', () => {
     expect(catchUp(s, 'paladin')).toBe(1.5);   // no record yet: level 1
     expect(catchUp(newJobsSave(), 'warrior')).toBe(1);
     expect(catchUp(newJobsSave(), 'ranger')).toBe(1);   // everyone at level 1
+    // a future job's record (kept in the save, never current) does not count towards the highest level
+    const withMonk = { ...s, jobs: { ...s.jobs, monk: rec(totalTo(9)) } } as unknown as JobsSave;
+    expect(catchUp(withMonk, 'warrior')).toBe(1);
+    expect(catchUp(withMonk, 'ranger')).toBe(1.5);
   });
 });
 
@@ -132,5 +136,28 @@ describe('mods', () => {
     expect(parseMods([bad[5], good[0], bad[7]])).toEqual([good[0]]);
     for (const v of [null, undefined, 'x', {}, 5]) expect(parseMods(v)).toEqual([]);
     expect(Object.keys(ABILITIES)).toContain('slash');
+  });
+
+  it('parseMods refuses numbers out of range and reads at most MAX_MODS entries', () => {
+    const outOfRange: unknown[] = [
+      { k: 'cd', ability: 'slash', add: -1e9 }, { k: 'cd', ability: 'slash', add: 31 },
+      { k: 'dodge', charges: 99 }, { k: 'dodge', charges: 0.5 }, { k: 'dodge', charges: -1 }, { k: 'dodge', refillMult: 0 },
+      { k: 'coef', ability: 'slash', mult: -1 }, { k: 'coef', ability: 'slash', mult: 0 }, { k: 'amount', ability: 'mend', mult: 50 },
+      { k: 'cast', ability: 'all', mult: -0.5 }, { k: 'hpCost', ability: 'grim_rend', mult: -1 },
+      { k: 'finisherCost', add: -500 }, { k: 'finisherCost', add: 500 },
+      { k: 'momentumOn', on: 'parry', amount: -20 }, { k: 'momentumOn', on: 'parry', amount: 1000 }, { k: 'momentumOn', on: 'hitTaken', amount: 2, everyS: -1 },
+      { k: 'healShield', frac: 2, cap: 15 }, { k: 'healShield', frac: 0.2, cap: -1 },
+      { k: 'staggerMult', mult: 0 }, { k: 'lowHpShield', frac: 0.15, below: 1.5, everyS: 30 }, { k: 'lowHpShield', frac: 0.15, below: 0.35, everyS: 0 },
+      { k: 'auraTaken', mult: 0, r: 8 }, { k: 'auraTaken', mult: 0.95, r: 1e6 },
+      { k: 'lastStand', everyS: 0, iframesS: 2 }, { k: 'lastStand', everyS: 90, iframesS: 60 },
+      { k: 'shieldOn', on: 'taunt', amount: 1e7, s: 6 }, { k: 'afterDodge', mult: 1e3, s: 2 }, { k: 'cdOnCast', s: 1e3 },
+    ];
+    for (const b of outOfRange) expect(parseMods([b]), JSON.stringify(b)).toEqual([]);
+    // the edges of the good table still pass
+    for (const g of [{ k: 'hpCost', ability: 'crimson_pact', mult: 0 }, { k: 'dodge', charges: 1 }, { k: 'finisherCost', add: -20 }, { k: 'cd', ability: 'skullringer', add: -5 }])
+      expect(parseMods([g])).toEqual([g]);
+    const many = Array.from({ length: MAX_MODS + 10 }, () => ({ k: 'staggerMult', mult: 1.1 }));
+    expect(parseMods(many)).toHaveLength(MAX_MODS);
+    expect(MAX_MODS).toBe(64);
   });
 });

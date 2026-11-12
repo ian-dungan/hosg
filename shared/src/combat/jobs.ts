@@ -179,8 +179,9 @@ function parseRecord(job: JobId | FutureJobId, v: unknown, stub: boolean): JobRe
  * readable record is kept and its bad parts fixed (xp → 0 unless a non-negative integer, capped at
  * totalTo(10), level = levelForXp(xp), picks invalid for the job → its solo picks, talents → the
  * valid ones (validTalents at the record's level), outfit → null unless a clean JobOutfit); unknown
- * keys are dropped, future-job keys kept. When `v.curve` is not 2 the xp is Plan 3b's stub xp and
- * every record is converted once with migrateStubXp (no job loses a level). An invalid `current` reads
+ * keys are dropped, future-job keys kept. When `v` has no `curve` key the xp is Plan 3b's stub xp and
+ * every record is converted once with migrateStubXp (no job loses a level); any other curve value than 2 is
+ * read as the current curve (no second conversion). An invalid `current` reads
  * as the Warrior. When `v` is not an object or has no valid current, and `legacy` (a Plan 3 loadout)
  * passes legacyLoadout, its job becomes current with its picks. Otherwise a new save. The current job
  * always has a stored record.
@@ -188,7 +189,8 @@ function parseRecord(job: JobId | FutureJobId, v: unknown, stub: boolean): JobRe
 export function parseJobsSave(v: unknown, legacy?: unknown): JobsSave {
   const jobs: JobsSave['jobs'] = {};
   if (plainObject(v) && plainObject(v.jobs)) {
-    const stub = v.curve !== 2;
+    // Only a save with no curve at all is Plan 3b's: a present but unknown curve is read as the current one (repaired), never converted again.
+    const stub = !('curve' in v);
     for (const k of Object.keys(v.jobs)) {
       if (!isJobId(k) && !isFutureJobId(k)) continue;
       const r = parseRecord(k, v.jobs[k], stub);

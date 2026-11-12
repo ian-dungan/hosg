@@ -77,6 +77,30 @@ const SHAPES: Readonly<Record<ModKind, { readonly req: Readonly<Record<string, F
   shieldOn: { req: { on: 'taunt', amount: 'num', s: 'num' } },
 });
 
+/** parseMods reads at most this many entries (the rest are dropped). */
+export const MAX_MODS = 64;
+/**
+ * The sane range of each numeric field, `kind.field` → [lo, hi] inclusive (a number outside it refuses the
+ * mod). Wide enough for every tuning range (±30%), narrow enough that no stored or forged mod can make a
+ * cooldown or cost absurd. `dodge.charges` must also be an integer.
+ */
+const RANGES: Readonly<Record<string, readonly [number, number]>> = Object.freeze({
+  'coef.mult': [0.1, 3], 'amount.mult': [0.1, 3], 'cd.add': [-30, 30], 'cast.mult': [0.1, 2], 'buffS.add': [-30, 30],
+  'hpCost.mult': [0, 3], 'stagger.add': [-50, 100], 'finisherCost.add': [-30, 30],
+  'momentumOn.amount': [0, 100], 'momentumOn.everyS': [0, 600],
+  'dodge.charges': [0, 1], 'dodge.refillMult': [0.1, 2],
+  'healShield.frac': [0, 1], 'healShield.cap': [0, 1000], 'cdOnCast.s': [0, 10],
+  'afterDodge.mult': [0.1, 3], 'afterDodge.s': [0, 10], 'staggerMult.mult': [0.1, 3],
+  'lowHpShield.frac': [0, 1], 'lowHpShield.below': [0, 1], 'lowHpShield.everyS': [1, 3600],
+  'auraTaken.mult': [0.1, 2], 'auraTaken.r': [0, 50], 'lastStand.everyS': [1, 3600], 'lastStand.iframesS': [0, 10],
+  'shieldOn.amount': [0, 1000], 'shieldOn.s': [0, 60],
+});
+const inRange = (kind: string, key: string, v: number) => {
+  const r = RANGES[`${kind}.${key}`];
+  if (!r || v < r[0] || v > r[1]) return false;
+  return !(kind === 'dodge' && key === 'charges' && !Number.isInteger(v));
+};
+
 const own = (o: object, k: unknown): k is string => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 
 function fieldOk(f: Field, v: unknown): boolean {
@@ -103,6 +127,7 @@ export function parseMod(v: unknown): Mod | null {
     if (key === 'k') continue;
     const f = shape.req[key] ?? shape.opt?.[key];
     if (!f || !fieldOk(f, o[key])) return null;
+    if (f === 'num' && !inRange(o.k as string, key, o[key] as number)) return null;
     out[key] = o[key];
   }
   for (const key of Object.keys(shape.req)) if (!(key in out)) return null;
@@ -110,11 +135,14 @@ export function parseMod(v: unknown): Mod | null {
   return out as Mod;
 }
 
-/** Strict: the readable mods of `v` (an array), as fresh objects; unknown kinds, bad ids, extra fields and non-finite numbers are dropped. */
+/**
+ * Strict: the readable mods of `v` (an array), as fresh objects; unknown kinds, bad ids, extra fields,
+ * non-finite numbers and numbers outside their field's range are dropped. At most MAX_MODS entries are read.
+ */
 export function parseMods(v: unknown): Mod[] {
   if (!Array.isArray(v)) return [];
   const out: Mod[] = [];
-  for (const m of v) {
+  for (const m of v.slice(0, MAX_MODS)) {
     const p = parseMod(m);
     if (p) out.push(p);
   }

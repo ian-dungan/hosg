@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
-import { MAX_HP, SPAWN, isJobsSave, levelForXp, newJobsSave, type JobsSave } from '@sg2/shared';
+import { MAX_HP, SPAWN, isJobsSave, levelForXp, newJobsSave, parseJobsSave, type JobsSave } from '@sg2/shared';
 import { NameTakenError, checkedSave, type Adventurer, type Store } from './types';
 import { createMemoryStore, type LegacyRow } from './memory';
 import { createPgStore, createPool } from './pg';
@@ -651,12 +651,18 @@ if (databaseUrl) {
           const raw = async () => (await db.query(`SELECT jobs, loadout FROM adventurers ORDER BY name`)).rows;
           const first = await raw();
           // What 004 wrote: the Warrior keeps the stored picks as they were; the old column is kept for rollback.
-          expect(first[0].jobs).toEqual(warrior(['mend', 'bulwark']));
-          expect(first[2].jobs).toEqual(warrior(['taunt', 'sprint']));
-          expect(first[3].jobs).toEqual(ranger);
+          // (004 predates the xp curve: its rows have no `curve` key.)
+          const no = <T extends { curve: number }>({ curve: _c, ...rest }: T) => rest;
+          expect(first[0].jobs).toEqual(no(warrior(['mend', 'bulwark'])));
+          expect(first[2].jobs).toEqual(no(warrior(['taunt', 'sprint'])));
+          expect(first[3].jobs).toEqual(no(ranger));
           expect(first[0].loadout).toEqual(PLAN3_DEFAULT);
           expect(first[3].loadout).toEqual({ weapon: 'bow', free: ['taunt', 'sprint'] });
-          for (const i of [0, 1, 3, 4]) expect(isJobsSave(first[i].jobs), `row ${i}`).toBe(true);
+          // 004's rows carry no `curve` (Plan 3b's stub curve): they read as the same records on curve 2, and are not saves as stored.
+          for (const i of [0, 1, 3, 4]) {
+            expect(parseJobsSave(first[i].jobs), `row ${i}`).toEqual({ ...first[i].jobs, curve: 2 });
+            expect(isJobsSave(first[i].jobs), `row ${i}`).toBe(false);
+          }
           // Running 003 and 004 again by hand changes nothing and does not fail.
           await db.query(await sql('003_combat.sql'));
           await db.query(await sql('004_jobs.sql'));
@@ -670,7 +676,8 @@ if (databaseUrl) {
             `INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold) VALUES ($1, 'New', 0, 0, 0, 'grove', 1, 0, 0) RETURNING jobs`,
             [acc[0].id],
           );
-          expect(made[0].jobs).toEqual(newJobsSave());
+          const { curve: _curve, ...fresh } = newJobsSave();
+          expect(made[0].jobs).toEqual(fresh); // the 004 default has no `curve` (migration 006 may add it)
           await expect(db.query(`UPDATE adventurers SET jobs = NULL WHERE name = 'New'`)).rejects.toThrow();
         } finally {
           await db.end();
