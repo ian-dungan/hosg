@@ -5,10 +5,14 @@ import {
   LOOK_LIMITS, PEOPLE_IDS, PEOPLES, STANCES, TAILS, WALKS, barberCost, decodeGearLook, decodeLook, defaultLook, encodeGearLook,
   encodeLook, parseLook, randomLook, resolveGearLook, type GearLook, type Look,
 } from './look';
+import { seededRng } from './rng';
 import { prng } from './world/recipe';
 
 const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+/** encodeLook(defaultLook('account-1')) before the generator moved out of world/recipe: defaults are unchanged. */
+const DEFAULT_LOOK_1 = 'Ar8yr9nUliHwoAAAAC8cE7dPJyAYFIiUnCUiKw';
 
 /** Reads or writes a dotted path ('face.eyes') of a look. */
 function setPath(l: Look, path: string, value: unknown): Look {
@@ -233,6 +237,39 @@ describe('gear codes', () => {
   });
 });
 
+describe('resolveGearLook with bad models', () => {
+  const plain = (model: number, d1 = 0, d2 = 0) => ({ model, dye: [d1, d2] as [number, number] });
+  const worn = {
+    head: plain(10), chest: plain(11), legs: plain(12), hands: plain(13), feet: plain(14), back: plain(15), weapon: plain(40), offhand: plain(60),
+  };
+
+  it('drops a worn piece with a costume-range or invalid model, ignores a costume with an item-range model, and never throws', () => {
+    const g = resolveGearLook({ ...worn, legs: plain(200), weapon: plain(256), feet: plain(-1), hands: plain(13, 32, 0) }, {}, false);
+    expect([g.legs, g.weapon, g.feet, g.hands]).toEqual([null, null, null, null]);
+    expect(g.chest).toEqual(worn.chest);
+    const c = resolveGearLook(worn, { body: plain(150), head: plain(12), back: plain(256) }, false);
+    expect(c).toEqual({ ...worn, hideHead: false });
+    expect(() => encodeGearLook(c)).not.toThrow();
+    // Junk of every kind still gives a gear look that encodes and decodes.
+    const rng = prng(5);
+    const junk = (): unknown => {
+      const r = rng();
+      if (r < 0.1) return null;
+      if (r < 0.2) return 'x';
+      if (r < 0.3) return { model: Number.NaN, dye: [0, 0] };
+      if (r < 0.4) return { model: 3, dye: [1] };
+      return plain(Math.floor(rng() * 300) - 20, Math.floor(rng() * 40) - 4, Math.floor(rng() * 40) - 4);
+    };
+    for (let i = 0; i < 500; i++) {
+      const w = Object.fromEntries(GEAR_LOOK_SLOTS.map((s) => [s, junk()])) as Parameters<typeof resolveGearLook>[0];
+      const cs = { body: junk(), head: junk(), back: junk() } as Parameters<typeof resolveGearLook>[1];
+      const out = resolveGearLook(w, cs, rng() < 0.3);
+      expect(decodeGearLook(encodeGearLook(out))).toEqual(out);
+    }
+    expect(() => resolveGearLook(null as never, null as never, 'yes' as never)).not.toThrow();
+  });
+});
+
 describe('defaultLook and randomLook', () => {
   it('defaultLook spreads peoples and features: 1000 seeds, each people ≥ 150, at most one identical pair', () => {
     const looks = Array.from({ length: 1000 }, (_, i) => defaultLook(`account-${i}`));
@@ -266,6 +303,20 @@ describe('defaultLook and randomLook', () => {
       expect(randomLook(b)).toEqual(l);
       expect(parseLook(l)).toEqual(l);
     }
+  });
+});
+
+describe('imports', () => {
+  it('look.ts uses its own small generator (no world generation), with the same numbers as prng', async () => {
+    const fs: { readFileSync(p: string, enc: 'utf8'): string } = await import('node:fs' as string);
+    const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
+    const src = fs.readFileSync(here + 'look.ts', 'utf8');
+    expect([...src.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1])).toEqual(['./hash', './rng']);
+    for (const seed of [0, 1, 0x100c, 0xffffffff, 123456789]) {
+      const [a, b] = [seededRng(seed), prng(seed)];
+      for (let i = 0; i < 50; i++) expect(a()).toBe(b());
+    }
+    expect(encodeLook(defaultLook('account-1'))).toBe(DEFAULT_LOOK_1);
   });
 });
 

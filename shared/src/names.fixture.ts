@@ -6,7 +6,7 @@
 export const rot13 = (s: string): string =>
   s.replace(/[a-z]/g, (c) => String.fromCharCode(((c.charCodeAt(0) - 97 + 13) % 26) + 97));
 
-/** The long entries, normalised (lower-case, repeats written once), ROT13-encoded. */
+/** The long entries exactly as the source list writes them (lower-case letters), ROT13-encoded; the hashes are of their repeat-collapsed form. */
 export const LONG_FIXTURE: readonly string[] = [
   'shpx', 'shpxre', 'shpxvat', 'shpxurnq', 'shpxsnpr', 'zbgureshpxre', 'cuhpx', 'sipx',
   'shx', 'shxva', 'shxre', 'fuvg', 'fuvgr', 'ohyfuvg', 'qvcfuvg', 'fuvgurnq',

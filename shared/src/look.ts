@@ -3,7 +3,7 @@
 // the Barber's price. Peoples differ in looks only: proportions and features, never stats.
 // Pure and deterministic: integer maths, seeded generators, frozen tables.
 import { cyrb53 } from './hash';
-import { prng } from './world/recipe';
+import { seededRng } from './rng';
 
 // ───────── peoples ─────────
 
@@ -187,6 +187,8 @@ export function parseLook(v: unknown): Look | null {
 // peoples without fur. Decoding is strict: it refuses any code that is not exactly what encodeLook
 // writes for a valid look (wrong length or characters, a number past the last look, a version other
 // than 1, ears past the people's, fur digits on a people without fur, or stray padding bits).
+// Versions: the code has no room to grow, so a later look shape (v2) gets its own byte count and so its
+// own code length; decoders tell versions apart by length first, and a 38-character code is always v1.
 
 const LOOK_BYTES = 28;
 const VERSION_RADIX = 16;
@@ -307,12 +309,23 @@ export interface GearLookCostumes { body?: GearLookSlot | null; head?: GearLookS
 /** Slots a body costume covers (it shows on `chest`). */
 const BODY_COVERS: readonly GearLookSlotName[] = Object.freeze(['legs', 'hands', 'feet']);
 
-const copySlot = (s: GearLookSlot | null | undefined): GearLookSlot | null => (s ? { model: s.model, dye: [s.dye[0], s.dye[1]] } : null);
+const isIntIn = (x: unknown, lo: number, hi: number): x is number => typeof x === 'number' && Number.isInteger(x) && x >= lo && x <= hi;
+
+/** A copy of the slot when its model lies in [lo, hi] and both dyes are valid, else null (dropped, never thrown). */
+function checkedSlot(s: unknown, lo: number, hi: number): GearLookSlot | null {
+  if (!isRecord(s) || !Array.isArray(s.dye) || s.dye.length !== 2) return null;
+  const [d1, d2] = s.dye as unknown[];
+  if (!isIntIn(s.model, lo, hi) || !isIntIn(d1, 0, DYE_MAX) || !isIntIn(d2, 0, DYE_MAX)) return null;
+  return { model: s.model, dye: [d1, d2] };
+}
 
 /**
  * The gear look from the worn items' models and dyes and the outfit's costumes: a body costume shows on
  * `chest` and hides legs, hands and feet; a head costume replaces the head piece; a back costume the back
  * piece; `hideHead` hides the head piece and the head costume. The weapon and off-hand always show.
+ * Never throws, and its result always encodes: a worn piece whose model is outside the item range
+ * (0..199) or whose dyes are out of range is dropped (shown as nothing), and a costume whose model is
+ * outside the costume range (200..255) is ignored (the pieces under it show).
  * (gearLookOf(inv, job, outfit) is this, fed from ITEMS[*].model, COSTUMES[*].model and the inventory.)
  */
 export function resolveGearLook(
@@ -320,15 +333,19 @@ export function resolveGearLook(
   costumes: GearLookCostumes,
   hideHead: boolean,
 ): GearLook {
-  const out = Object.fromEntries(GEAR_LOOK_SLOTS.map((s) => [s, copySlot(worn[s])])) as unknown as GearLook;
-  out.hideHead = hideHead;
-  if (costumes.body) {
-    out.chest = copySlot(costumes.body);
+  const w = (isRecord(worn) ? worn : {}) as Record<string, unknown>;
+  const c = (isRecord(costumes) ? costumes : {}) as Record<string, unknown>;
+  const out = Object.fromEntries(GEAR_LOOK_SLOTS.map((s) => [s, checkedSlot(w[s], 0, COSTUME_MODEL_MIN - 1)])) as unknown as GearLook;
+  out.hideHead = hideHead === true;
+  const costume = (k: 'body' | 'head' | 'back') => checkedSlot(c[k], COSTUME_MODEL_MIN, MODEL_MAX);
+  const body = costume('body');
+  if (body) {
+    out.chest = body;
     for (const s of BODY_COVERS) out[s] = null;
   }
-  if (costumes.head) out.head = copySlot(costumes.head);
-  if (costumes.back) out.back = copySlot(costumes.back);
-  if (hideHead) out.head = null;
+  out.head = costume('head') ?? out.head;
+  out.back = costume('back') ?? out.back;
+  if (out.hideHead) out.head = null;
   return out;
 }
 
@@ -475,7 +492,7 @@ const DEFAULT_LOOK_SEED = 0x100c;
 
 /** A varied, valid look for an account that has not used the creator yet: the same for the same seed. */
 export function defaultLook(seed: string): Look {
-  return randomLook(prng(cyrb53(seed, DEFAULT_LOOK_SEED)));
+  return randomLook(seededRng(cyrb53(seed, DEFAULT_LOOK_SEED)));
 }
 
 // ───────── the Barber ─────────

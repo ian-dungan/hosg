@@ -1595,6 +1595,7 @@ export interface HudApi { /* … */
   1. Root `npm test`: the pass and skip counts, pristine.
   2. `npm run typecheck`: clean.
   3. `npm run build` and `npm run build:online` in `client/`: both succeed. The offline demo has no creator, stalls or bag.
+     Then build the server bundle (`npm run build` in `server/`) and run `SG2_REQUIRE_BUNDLE_SCAN=1 npx vitest run shared/src/names.test.ts`: the bundle scan must scan all three bundles (`client/dist`, `client/dist-online`, `server/dist`), none stale, and find no blocklist entry.
   4. Task 5's band tables (final numbers, headroom on both seed sets) and every tuning change.
   5. The load runs (port 2579, after fresh starts): the grove and clustered KiB/s with `--looks`; the 240 s `--gear --dungeon 13` run: Hz, corrections, purchases, drops, writes per second, step p95 and RSS.
   6. `smoke-gear.mjs`, `smoke-party.mjs` and `smoke.mjs` against fresh servers on port 2579: PASS.

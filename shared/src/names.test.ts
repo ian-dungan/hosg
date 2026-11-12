@@ -1,6 +1,10 @@
 // Adventurer names and the bad-word filter. Failures name a list entry by its index, never by the
 // word itself, so the blocklist is not printed into test output. The words come from the ROT13 fixture.
 import { describe, expect, it } from 'vitest';
+import { PLACES, SURNAMES } from './names.corpus';
+import { BAD_WORD_HASHES, BAD_WORD_LENGTHS, SHORT_BAD_HASHES } from './badwords';
+import { blockHash } from './hash';
+import { explain } from './names.explain';
 import { LONG_FIXTURE, SHORT_FIXTURE, rot13 } from './names.fixture';
 import { ALLOWED_WORDS, isOffensive, validateAdventurerName } from './names';
 import { validateUsername } from './validate';
@@ -177,7 +181,7 @@ describe('entries across word boundaries', () => {
       'Les', 'Gus', 'Ross', 'Pip', 'Marc', 'Rose', 'Jane', 'Drew', 'Tom', 'Sam', 'Ed', 'Ted', 'Seth', 'Beth', 'Rob',
       'Bob', 'Ida', 'Ana', 'Ann', 'Wren', 'Kit', 'Pat', 'Eve', 'Xander', 'Xia', 'Ned', 'Nell', 'Ada', 'Sue', 'Kay',
       'Otto', 'Oak', 'Ode', 'Lee', 'Liz', 'Ivy', 'Ira', 'Ty', 'Max', 'Mia', 'Cal', 'Dot', 'Hal', 'Wil', 'Ben', 'Nan',
-      'Tess', 'Abe', 'Will', 'Zed',
+      'Tess', 'Abe', 'Will', 'Zed', 'Yves', 'Greg', 'Olaf', 'Yuki', 'Meg', 'Leif',
     ];
     const blocked = BAD_WORDS.map(collapse);
     const count = (text: string, entry: string) => {
@@ -300,7 +304,12 @@ describe('the hashed blocklist', () => {
     expect(found).toEqual([]);
   });
 
-  it('built bundles (client/dist, client/dist-online, server/dist, when built since badwords.ts) hold no entry as a string', async () => {
+  // Without SG2_REQUIRE_BUNDLE_SCAN=1 this checks whichever bundles are built and fresh (possibly none); with it
+  // (the plan's final verification, after building all three), each must exist and be built since badwords.ts.
+  const requireScan = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.SG2_REQUIRE_BUNDLE_SCAN === '1';
+  it(requireScan
+    ? 'built bundles (client/dist, client/dist-online, server/dist): all fresh, no entry as a string'
+    : 'any fresh built bundle holds no entry as a string (none need be built; SG2_REQUIRE_BUNDLE_SCAN=1 requires all)', async () => {
     // shared/ has no Node typings: a string-typed specifier keeps tsc out of node:fs
     const fs: {
       readFileSync(p: string, enc: 'utf8'): string;
@@ -315,17 +324,45 @@ describe('the hashed blocklist', () => {
     // Entries (and, by chance, ROT13 forms) can sit inside innocent words or minified names, so only a quoted
     // string counts: a shipped list, plain or the fixture, would be a run of quoted entries.
     const quoted = (t: string, w: string) => [`'${w}'`, `"${w}"`, `\`${w}\``].some((q) => t.includes(q));
-    let scanned = 0;
+    const problems: string[] = [];
     for (const dir of ['../../client/dist', '../../client/dist-online', '../../server/dist']) {
-      if (!fs.existsSync(here + dir)) continue;
-      const list = files(here + dir);
-      if (list.length === 0 || list.some((f) => fs.statSync(f).mtimeMs < since)) continue; // not built, or built before the blocklist changed
+      const list = fs.existsSync(here + dir) ? files(here + dir) : [];
+      const stale = list.some((f) => fs.statSync(f).mtimeMs < since); // built before the blocklist last changed
+      if (list.length === 0 || stale) {
+        if (requireScan) problems.push(`${dir}: ${list.length === 0 ? 'not built' : 'stale'}`);
+        continue;
+      }
       const text = list.map((f) => fs.readFileSync(f, 'utf8')).join('\n').toLowerCase();
-      scanned++;
       expect([...BAD_WORDS, ...SHORT_BAD_WORDS].flatMap((w, i) => (quoted(text, w) ? [i] : [])), dir).toEqual([]);
       expect([...LONG_FIXTURE, ...SHORT_FIXTURE].flatMap((w, i) => (quoted(text, w) ? [i] : [])), dir).toEqual([]);
     }
-    expect(scanned).toBeGreaterThanOrEqual(0); // none when nothing is built
+    expect(problems).toEqual([]);
+  });
+
+  it('the hashes are exactly the fixture, both ways: long hashes, lengths and short entries', () => {
+    const collapse = (w: string) => w.replace(/(.)\1+/g, '$1');
+    const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
+    expect(sorted(BAD_WORD_HASHES)).toEqual(sorted(BAD_WORDS.map((w) => blockHash(collapse(w)))));
+    expect(new Set(BAD_WORD_HASHES).size).toBe(BAD_WORD_HASHES.length);
+    expect([...BAD_WORD_LENGTHS]).toEqual([...new Set(BAD_WORDS.map((w) => collapse(w).length))].sort((a, b) => a - b));
+    const runsOf = (w: string) => w.match(/(.)\1*/g)!.map((r) => r.length).join('');
+    expect(sorted(SHORT_BAD_HASHES.map((e) => `${e.h}:${e.runs}`))).toEqual(sorted(SHORT_BAD_WORDS.map((w) => `${blockHash(collapse(w))}:${runsOf(w)}`)));
+    expect(SHORT_BAD_HASHES.length).toBe(new Set(SHORT_BAD_HASHES.map((e) => `${e.h}:${e.runs}`)).size);
+  });
+
+  it('explain names the matching entry by fixture index and shows the window in ROT13 only', () => {
+    expect(explain('Rowan')).toEqual([]);
+    const failures: string[] = [];
+    BAD_WORDS.forEach((w, i) => {
+      const lines = explain(`Sir ${capitalise(w)}`);
+      if (!lines.some((l) => l.startsWith('long #') && l.split(' ')[1]!.split(',').includes(`#${i}`) && l.endsWith(` ${rot13(w)}`))) failures.push(`#${i}`);
+      if (lines.some((l) => l.includes(w) && !rot13(w).includes(w))) failures.push(`#${i} printed plain`);
+    });
+    SHORT_BAD_WORDS.forEach((w, i) => {
+      const lines = explain(capitalise(w));
+      if (!lines.some((l) => l.startsWith('short #') && l.split(' ')[1]!.split(',').includes(`#${i}`))) failures.push(`short #${i}`);
+    });
+    expect(failures).toEqual([]);
   });
 
   it('the hashed filter refuses exactly what the plain filter refused', () => {
@@ -357,6 +394,18 @@ describe('the hashed blocklist', () => {
     // Both outcomes are exercised.
     expect(names.filter((n) => isOffensive(n)).length).toBeGreaterThan(3000);
     expect(names.filter((n) => !isOffensive(n)).length).toBeGreaterThan(1000);
+  });
+
+  it('lets hundreds of common surnames and place names of several languages through', () => {
+    const corpus = [...new Set([...SURNAMES, ...PLACES])];
+    expect(corpus.length).toBeGreaterThan(600);
+    const collapse = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '').replace(/(.)\1+/g, '$1');
+    // The corpus never holds a blocked entry itself: those stay refused, whatever they name.
+    const entries = new Set([...BAD_WORDS.map(collapse), ...SHORT_BAD_WORDS.map(collapse)]);
+    expect(corpus.flatMap((n, i) => (entries.has(collapse(n)) ? [i] : []))).toEqual([]);
+    expect(corpus.filter((n) => validateAdventurerName(n) !== null)).toEqual([]);
+    // Allowed words are lower-case letters, each listed once.
+    expect(ALLOWED_WORDS.filter((w, i) => !/^[a-z]+$/.test(w) || ALLOWED_WORDS.indexOf(w) !== i)).toEqual([]);
   });
 
   it('lets a wider list of ordinary names through, the Scunthorpe kind included', () => {
