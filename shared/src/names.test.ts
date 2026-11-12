@@ -300,6 +300,34 @@ describe('the hashed blocklist', () => {
     expect(found).toEqual([]);
   });
 
+  it('built bundles (client/dist, client/dist-online, server/dist, when built since badwords.ts) hold no entry as a string', async () => {
+    // shared/ has no Node typings: a string-typed specifier keeps tsc out of node:fs
+    const fs: {
+      readFileSync(p: string, enc: 'utf8'): string;
+      existsSync(p: string): boolean;
+      readdirSync(p: string): string[];
+      statSync(p: string): { isDirectory(): boolean; mtimeMs: number };
+    } = await import('node:fs' as string);
+    const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
+    const since = fs.statSync(here + 'badwords.ts').mtimeMs;
+    const files = (d: string): string[] =>
+      fs.readdirSync(d).flatMap((f) => (fs.statSync(d + '/' + f).isDirectory() ? files(d + '/' + f) : /\.(m?js|html)$/.test(f) ? [d + '/' + f] : []));
+    // Entries (and, by chance, ROT13 forms) can sit inside innocent words or minified names, so only a quoted
+    // string counts: a shipped list, plain or the fixture, would be a run of quoted entries.
+    const quoted = (t: string, w: string) => [`'${w}'`, `"${w}"`, `\`${w}\``].some((q) => t.includes(q));
+    let scanned = 0;
+    for (const dir of ['../../client/dist', '../../client/dist-online', '../../server/dist']) {
+      if (!fs.existsSync(here + dir)) continue;
+      const list = files(here + dir);
+      if (list.length === 0 || list.some((f) => fs.statSync(f).mtimeMs < since)) continue; // not built, or built before the blocklist changed
+      const text = list.map((f) => fs.readFileSync(f, 'utf8')).join('\n').toLowerCase();
+      scanned++;
+      expect([...BAD_WORDS, ...SHORT_BAD_WORDS].flatMap((w, i) => (quoted(text, w) ? [i] : [])), dir).toEqual([]);
+      expect([...LONG_FIXTURE, ...SHORT_FIXTURE].flatMap((w, i) => (quoted(text, w) ? [i] : [])), dir).toEqual([]);
+    }
+    expect(scanned).toBeGreaterThanOrEqual(0); // none when nothing is built
+  });
+
   it('the hashed filter refuses exactly what the plain filter refused', () => {
     const plain = plainIsOffensive(BAD_WORDS, SHORT_BAD_WORDS);
     const LEET: Record<string, string> = { o: '0', i: '1', e: '3', a: '4', s: '5', t: '7' };
