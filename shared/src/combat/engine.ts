@@ -17,6 +17,7 @@ import { staggerImmuneLeft, type StaggerBar } from './stagger';
 import type { Stats } from './stats';
 import type { ThreatTable } from './threat';
 import { sendHome, stepEnemies } from './enemyAi';
+import { ENEMY_ATTACKS } from './enemies';
 import { bossEnrageIn, bossPhase, bossWarded } from './bossAi';
 import type { Displacement, DisplaceResult } from './displace';
 import {
@@ -49,7 +50,7 @@ export interface CombatantView {
   id: number; team: 'adventurer' | 'enemy'; kind: 'adventurer' | EnemyKindId;
   x: number; z: number; y: number; facing: number; hp: number; maxHp: number; alive: boolean; shield: number;
   marks: number; stagger: number; maxStagger: number; targetId: number | null; act: Act;
-  windup: { attack: EnemyAttackId; total: number; left: number; interruptible: boolean } | null;
+  windup: { attack: EnemyAttackId; total: number; left: number; interruptible: boolean; unavoidable?: true } | null;
   /** Enemies: the chase surge is on (moving at SURGE_SCALE × RUN_SPEED). */
   surging?: boolean;
   /** Enemies with a stagger bar: seconds until it can gain stagger again (a break, then STAGGER_IMMUNE_S); 0 = it can. */
@@ -84,7 +85,8 @@ export interface SelfView {
   dodgeCharges: number; dodgeNextIn: number; charge: number | null; inCombat: boolean;
   job?: JobId; dodgeMax?: number; cast?: CastView;
 }
-export interface TelegraphView { id: number; owner: number; attack: EnemyAttackId; shape: Shape; total: number; left: number }
+/** unavoidable: dodge i-frames do not avoid it (ruling P4-f; clients draw it as "cannot be dodged"). */
+export interface TelegraphView { id: number; owner: number; attack: EnemyAttackId; shape: Shape; total: number; left: number; unavoidable?: true }
 /** A standing hazard on the ground (world coordinates): it ticks at startedAt + 1, + 2, … while its owner lives. */
 export interface FieldView { id: number; owner: number; field: FieldId; shape: Shape; raw: number; startedAt: number }
 export interface DisplaceOut { id: number; kind: 'dodge' | 'knock'; from: { x: number; z: number; y: number }; d: Displacement; result: DisplaceResult }
@@ -276,6 +278,12 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+function windupView(wu: EnemyWindup, now: number): NonNullable<CombatantView['windup']> {
+  const v: NonNullable<CombatantView['windup']> = { attack: wu.attack, total: wu.endsAt - wu.startedAt, left: Math.max(0, wu.endsAt - now), interruptible: wu.interruptible };
+  if (ENEMY_ATTACKS[wu.attack].unavoidable) v.unavoidable = true;
+  return v;
+}
+
 const emptyOut = (): TickOut => ({ fx: [], displaced: [], died: [], kills: [], revived: [], despawned: [], boss: [] });
 
 const worlds = new WeakMap<Combat, CombatWorld>();
@@ -303,7 +311,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     id: e.id, team: 'enemy', kind: e.kind, x: e.x, z: e.z, y: e.y, facing: e.facing,
     hp: e.hp, maxHp: e.maxHp, alive: e.alive, shield: 0, marks: markBits(e.marks, w.now),
     stagger: e.stagger.value, maxStagger: e.stagger.max, targetId: e.targetId, act: e.act,
-    windup: e.windup ? { attack: e.windup.attack, total: e.windup.endsAt - e.windup.startedAt, left: Math.max(0, e.windup.endsAt - w.now), interruptible: e.windup.interruptible } : null,
+    windup: e.windup ? windupView(e.windup, w.now) : null,
     surging: e.surging, staggerImmune: e.stagger.max > 0 ? staggerImmuneLeft(e.stagger, w.now) : 0,
     buffs: 0, debuffs: debuffBits(e, w.now), cast: null,
     tier: e.data.tier, phase: bossPhase(e), warded: bossWarded(w, e), enrageIn: bossEnrageIn(e, w.now),
@@ -403,7 +411,9 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     },
     *telegraphs() {
       for (const t of w.telegraphs.values()) {
-        yield { id: t.id, owner: t.owner, attack: t.attack, shape: t.shape, total: t.endsAt - t.startedAt, left: Math.max(0, t.endsAt - w.now) };
+        const v: TelegraphView = { id: t.id, owner: t.owner, attack: t.attack, shape: t.shape, total: t.endsAt - t.startedAt, left: Math.max(0, t.endsAt - w.now) };
+        if (ENEMY_ATTACKS[t.attack].unavoidable) v.unavoidable = true;
+        yield v;
       }
     },
     speedScale(id, nowS) {

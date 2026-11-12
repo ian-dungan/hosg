@@ -271,9 +271,9 @@ Every reaction adds `COMBO_STAGGER` (it replaces the plain combo for its mark). 
 |---|---|---|---|---|---|---|---|---|---|
 | `warrior` | Warrior | damage | blade | slash, sunder, parry | rallying_roar, skullringer, mend, bulwark | mend, bulwark | skullringer, mend (P3b-h; was rallying_roar, skullringer) | 2 | ⚔ |
 | `ranger` | Ranger | damage | bow | snap_shot, pitch_arrow, charged_shot | pinning_shot, field_dressing, sprint, barbed_rain | field_dressing, pinning_shot | pinning_shot, field_dressing | 2 | ➶ |
-| `paladin` | Paladin | tank | sword | shield_rap, bright_verdict, aegis | taunt, shelter, kindle, dawn_ward | kindle, dawn_ward | shelter, kindle (P3b-h; was taunt, shelter) | 2 | ⛨ |
+| `paladin` | Paladin | tank | sword | shield_rap, bright_verdict, aegis | taunt, shelter, kindle, dawn_ward | kindle, dawn_ward | dawn_ward, kindle (Plan 4 ruling P4-g; was shelter, kindle after P3b-h, taunt, shelter before) | 2 | ⛨ |
 | `dark_knight` | Dark Knight | hybrid | greatsword | grim_rend, nightfall, crimson_pact | bloodbond, dread_howl, umbral_brand, grave_ward | grave_ward, umbral_brand | bloodbond, umbral_brand | 2 | ♆ |
-| `ninja` | Ninja | damage | daggers | crossed_fangs, hamstring, ghost_edge | ashcloud, weak_point, quickstep, mist_form | mist_form, ashcloud | ashcloud, mist_form (P3b-h; was weak_point, ashcloud) | 3 | ✕ |
+| `ninja` | Ninja | damage | daggers | crossed_fangs, hamstring, ghost_edge | ashcloud, weak_point, quickstep, mist_form | mist_form, ashcloud | weak_point, ashcloud (Plan 4 ruling P4-g, Ninja part as amended by Task 5: Mist Form failed D5; was ashcloud, mist_form after P3b-h) | 3 | ✕ |
 | `white_mage` | White Mage | healer | staff | tidelash, lantern_flare, wellspring | second_dawn, soft_rain, mistveil, sun_mote | soft_rain, sun_mote | second_dawn, soft_rain | 2 | ✙ |
 | `black_mage` | Black Mage | damage | staff | cinder_dart, skyfall_arc, hearthfall | kindred_spark, bastion_stone, rootbreak, stormcage | bastion_stone, rootbreak | bastion_stone, rootbreak (P3b-h; was kindred_spark, rootbreak) | 2 | ✺ |
 

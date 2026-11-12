@@ -43,7 +43,7 @@ export const JOBS: Readonly<Record<JobId, JobData>> = deepFreeze({
   paladin: {
     id: 'paladin', name: 'Paladin', glyph: '⛨', role: 'tank', weapon: 'sword',
     bar: ['shield_rap', 'bright_verdict', 'aegis'], pool: ['taunt', 'shelter', 'kindle', 'dawn_ward'],
-    picks: { solo: ['kindle', 'dawn_ward'], duo: ['shelter', 'kindle'] },
+    picks: { solo: ['kindle', 'dawn_ward'], duo: ['dawn_ward', 'kindle'] },
     trait: { id: 'steadfast', name: 'Steadfast', desc: 'Takes 15% less damage, draws 50% more attention, and gains 5 Momentum from each hit it takes.' },
     dodgeCharges: 2, brain: { flank: false }, unlock: { kind: 'start' },
   },
@@ -57,7 +57,7 @@ export const JOBS: Readonly<Record<JobId, JobData>> = deepFreeze({
   ninja: {
     id: 'ninja', name: 'Ninja', glyph: '✕', role: 'damage', weapon: 'daggers',
     bar: ['crossed_fangs', 'hamstring', 'ghost_edge'], pool: ['ashcloud', 'weak_point', 'quickstep', 'mist_form'],
-    picks: { solo: ['mist_form', 'ashcloud'], duo: ['ashcloud', 'mist_form'] },
+    picks: { solo: ['mist_form', 'ashcloud'], duo: ['weak_point', 'ashcloud'] },
     trait: { id: 'dusk_slip', name: 'Dusk Slip', desc: 'A third dodge, 25% more damage from behind, and 25 Momentum per perfect dodge.' },
     dodgeCharges: 3, brain: { flank: true }, unlock: { kind: 'start' },
   },

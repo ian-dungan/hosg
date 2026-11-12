@@ -52,6 +52,8 @@ export interface PartyResult {
 
 /** The share of telegraphs a sloppy brain misses. */
 export const SLOPPY_MISS = 0.3;
+/** The share of telegraphs a skilled brain misses (ruling P4-h). */
+export const SKILLED_MISS = 0.1;
 /** Half-width of the flat field, in m (80 × 80). */
 const FIELD = 40;
 /** Where adds stand, beside the main camp at (0, 0) (the party comes from −z). */
@@ -332,10 +334,11 @@ class Tally {
 
 // ───────── dungeon encounters (Plan 4) ─────────
 /**
- * careful: Plan 3b's careful brain with the dungeon rules; sloppy: the same, missing a seeded
- * SLOPPY_MISS of the telegraphs it would answer; careless: never dodges, stands in fields.
+ * careful: Plan 3b's careful brain with the dungeon rules; skilled: the same, missing a seeded
+ * SKILLED_MISS of the telegraphs it would answer (ruling P4-h); sloppy: missing SLOPPY_MISS; careless:
+ * never dodges, stands in fields.
  */
-export type Skill = 'careful' | 'sloppy' | 'careless';
+export type Skill = 'careful' | 'skilled' | 'sloppy' | 'careless';
 /** picks: default the duo picks in a party, the solo picks alone; stats: default STARTER_STATS (a gear stand-in). */
 export interface EncounterMember { job: JobId; skill: Skill; picks?: [AbilityId, AbilityId]; stats?: Stats }
 /**
@@ -353,7 +356,7 @@ export interface EncounterResult {
   interruptedBy: Partial<Record<EnemyAttackId, number>>;
   breaks: number; reactions: Record<ReactionId, number>; crossCombos: number;
 }
-/** How long a Warden fight may run in the simulation (the enrage is at 330 s). */
+/** How long a Warden fight may run in the simulation (well past its enrage, `BOSSES.fallen_warden.enrage.s`). */
 export const SIM_WARDEN_MAX_S = 480;
 /** How long any other encounter may run. */
 export const SIM_ENCOUNTER_MAX_S = 240;
@@ -406,7 +409,8 @@ export function simulateEncounter(o: {
     const picks: [AbilityId, AbilityId] = m.picks ? [m.picks[0], m.picks[1]] : [...(n === 1 ? JOBS[m.job].picks.solo : JOBS[m.job].picks.duo)] as [AbilityId, AbilityId];
     const id = c.addAdventurer({ x, z, y: 0, facing: 0, hp: m.stats?.maxHp ?? 100, loadout: { job: m.job, picks }, ...(m.stats ? { stats: m.stats } : {}) }, 0);
     c.setParty(id, 'sim');
-    const memory = newBrainMemory(REACTION_S + rng() * 0.2, m.skill === 'sloppy' ? { rate: SLOPPY_MISS, seed: o.seed * 7919 + i * 104729 + 1 } : undefined);
+    const memory = newBrainMemory(REACTION_S + rng() * 0.2, m.skill === 'sloppy' || m.skill === 'skilled'
+      ? { rate: m.skill === 'sloppy' ? SLOPPY_MISS : SKILLED_MISS, seed: o.seed * 7919 + i * 104729 + 1 } : undefined);
     return {
       careful: m.skill !== 'careless', id, memory, body: makeBody(x, z, zone.surface) as Body, startAt: rng() * 0.5, facing: 0,
       r: { died: false, deaths: 0, revived: 0, hpLeft: 0, hpLost: 0, dodges: 0, damage: 0, healedOthers: 0, shieldedOthers: 0, assists: 0, casts: 0, castBreaks: 0 } as MemberResult,
@@ -436,8 +440,8 @@ export function simulateEncounter(o: {
       }
     }
     // the views every member reads this tick (the enemies, telegraphs and fields as the last tick left them)
-    const enemies: CombatantView[] = [], all: CombatantView[] = [];
-    for (const v of c.all()) { all.push(v); if (v.team === 'enemy' && v.alive) enemies.push(v); }
+    const enemies: CombatantView[] = [], advs: CombatantView[] = [];
+    for (const v of c.all()) { if (v.team === 'adventurer') advs.push(v); else if (v.alive) enemies.push(v); }
     const telegraphs = [...c.telegraphs()], fields = [...c.fields()];
     let targetId: number | null = null;
     if (bossId !== null && c.get(bossId)!.alive) targetId = bossId;
@@ -452,7 +456,7 @@ export function simulateEncounter(o: {
     for (const m of order) {
       if (t < m.startAt || c.get(m.id)?.alive !== true) continue;
       const v = c.get(m.id)!, s = c.self(m.id)!;
-      const allies = all.filter((a) => a.team === 'adventurer' && a.id !== m.id && Math.hypot(a.x - v.x, a.z - v.z) <= ALLY_VIEW_R).map((a) => c.get(a.id)!);
+      const allies = advs.filter((a) => a.id !== m.id && Math.hypot(a.x - v.x, a.z - v.z) <= ALLY_VIEW_R);
       const input: DungeonBrainInput = {
         nowS: t, careful: m.careful, self: { ...v, ...s, job: s.job!, dodgeMax: s.dodgeMax!, cast: s.cast ?? null },
         target, allies, telegraphs, fields, arena, enemies,

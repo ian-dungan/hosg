@@ -69,7 +69,7 @@ const near = (a: number, b: number, tol = DT + 1e-6) => Math.abs(a - b) <= tol;
 const ang = (a: number) => { const t = ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI); return t > Math.PI ? t - 2 * Math.PI : t; };
 
 describe('the boss script', () => {
-  it('the Wickhound wakes within 10 m, runs its rotation with 3.5 s gaps, and switches at 50% to phase 2 with Cinder Ring and 1.8 s autos', () => {
+  it('the Wickhound wakes within 10 m, runs its rotation with its phase gaps, and switches at 50% to phase 2 with Cinder Ring and 1.8 s autos', () => {
     const r = new BRig([camp('wickhound', 0, 0)]);
     const e = r.boss('wickhound');
     const a = r.adv(0, 12, { hold: false });
@@ -87,8 +87,9 @@ describe('the boss script', () => {
     r.at(woke + 20);
     const p1 = r.attacks(e.id);
     expect(p1.map((t) => t.attack).slice(0, 4)).toEqual(['wick_lunge', 'ember_breath', 'wick_lunge', 'ember_breath']);
-    expect(near(p1[0].startedAt, woke + 3.5)).toBe(true);
-    for (let k = 1; k < 4; k++) expect(near(p1[k].startedAt, p1[k - 1].endsAt + 3.5)).toBe(true);
+    const gap1 = BOSSES.wickhound.phases[0].gap;
+    expect(near(p1[0].startedAt, woke + gap1)).toBe(true);
+    for (let k = 1; k < 4; k++) expect(near(p1[k].startedAt, p1[k - 1].endsAt + gap1)).toBe(true);
     expect(p1.some((t) => t.attack === 'cinder_ring')).toBe(false);
     const autos1 = r.hits(e.id).filter((h) => h.by === 'auto').map((h) => h.at);
     for (let k = 1; k < autos1.length; k++) expect(autos1[k] - autos1[k - 1]).toBeGreaterThan(2.2 - 1e-3);
@@ -107,8 +108,9 @@ describe('the boss script', () => {
     r.at(t0 + 30);
     const p2 = r.attacks(e.id).slice(n0);
     expect(p2.map((t) => t.attack).slice(0, 4)).toEqual(['wick_lunge', 'cinder_ring', 'ember_breath', 'wick_lunge']);
-    expect(near(p2[0].startedAt, t0 + 2 + 3.0, 2 * DT)).toBe(true);
-    for (let k = 1; k < 4; k++) expect(near(p2[k].startedAt, p2[k - 1].endsAt + 3.0)).toBe(true);
+    const gap2 = BOSSES.wickhound.phases[1].gap;
+    expect(near(p2[0].startedAt, t0 + 2 + gap2, 2 * DT)).toBe(true);
+    for (let k = 1; k < 4; k++) expect(near(p2[k].startedAt, p2[k - 1].endsAt + gap2)).toBe(true);
     const ring = p2.find((t) => t.attack === 'cinder_ring')!.shape;
     expect(ring).toMatchObject({ kind: 'ring', inner: 3.5, r: 9 });
     // standing close (3 m, inside the hole), Cinder Ring misses
@@ -516,7 +518,7 @@ describe('the boss script', () => {
     expect(r.bossEvents().at(-1)!.event).toBe('reset');
   });
 
-  it('telegraphs are readable: every boss and add wind-up leaves at least 0.6 s to react at 150 ms latency, and every one can be escaped', () => {
+  it('telegraphs are readable: every boss and add wind-up leaves at least 0.6 s to react at 150 ms latency, and every avoidable one can be escaped', () => {
     const latency = 0.15, tick = 1 / TICK_HZ;
     let minWindow = Infinity;
     for (const kind of ['wickhound', 'fallen_warden', 'lens_shard'] as const) {
@@ -526,8 +528,10 @@ describe('the boss script', () => {
         // seen one tick and one latency after it is placed; the reply takes one more latency
         const window = atk.windup - tick - 2 * latency;
         minWindow = Math.min(minWindow, window);
-        // worst-case distance to the edge, by shape; whole-arena attacks are answered by a dodge's i-frames
+        // worst-case distance to the edge, by shape; the unavoidable whole-arena attacks (ruling P4-f) are
+        // answered by shields, heals, an interrupt or a Break instead
         const r = atk.r ?? 0;
+        if (atk.unavoidable) { expect(r).toBeGreaterThanOrEqual(40); continue; }
         const escape = atk.shape === 'line' ? (atk.width ?? 0) / 2
           : atk.shape === 'ring-self' ? (r - (atk.inner ?? 0)) / 2
             : atk.shape === 'cone' ? r * Math.sin((atk.angle ?? 0) / 2)
@@ -536,7 +540,8 @@ describe('the boss script', () => {
       }
     }
     expect(minWindow).toBeGreaterThanOrEqual(0.63 - 1e-9);
-    // live: a dodge landing 0.25 s before the end beats the whole-arena Toll and Last Light
+    expect(Object.values(ENEMY_ATTACKS).filter((a) => a.unavoidable).map((a) => a.id).sort()).toEqual(['keepers_toll', 'last_light']);
+    // live (ruling P4-f): a dodge landing 0.25 s before the end does NOT beat the Toll or Last Light, and earns no perfect dodge
     for (const idx of ['toll', 'last'] as const) {
       const r = new BRig([camp('fallen_warden', 0, 0)]);
       const e = r.boss();
@@ -547,11 +552,14 @@ describe('the boss script', () => {
       for (let n = 0; n < 100 && !e.windup; n++) r.tick();
       const end = e.windup!.endsAt;
       r.at(end - 0.25);
+      // the views carry the flag (clients draw "cannot be dodged")
+      expect([...r.c.telegraphs()].map((t) => t.unavoidable)).toEqual([true]);
+      expect(r.c.get(e.id)!.windup!.unavoidable).toBe(true);
       expect(r.i(a, { t: 'dodge', dx: 1, dz: 0, from: { x: 0, z: 3, y: 0 }, grounded: true })).toBeNull();
       r.at(end + 0.1);
       const atk = idx === 'toll' ? 'keepers_toll' : 'last_light';
-      expect(r.hits(e.id).filter((h) => h.by === atk)).toEqual([]);
-      expect(r.fx('miss').filter((m) => m.src === e.id && m.dst === a && m.perfect).length).toBeGreaterThan(0);
+      expect(r.hits(e.id).filter((h) => h.by === atk && h.dst === a).length).toBe(1);
+      expect(r.fx('miss').filter((m) => m.src === e.id && m.dst === a && m.perfect).length).toBe(0);
     }
   });
 

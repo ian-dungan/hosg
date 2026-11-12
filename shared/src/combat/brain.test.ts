@@ -134,12 +134,16 @@ describe('the dungeon brain (Plan 4)', () => {
     if (d?.t === 'dodge') expect(d.dz).toBeGreaterThan(0.9); // inward, toward the hound at (0, 0)
   });
 
-  it('a whole-arena Keeper\'s Toll it cannot escape is dodged for the i-frames just before it lands', () => {
-    const toll = (left: number): TelegraphView => ({ id: 9, owner: 1, attack: 'keepers_toll', shape: { kind: 'circle', x: 0, z: 0, r: 40 }, total: 3, left });
-    const w = self('ranger', JOBS.ranger.picks.duo, { x: 0, z: -10, cd: [9, 9, 9, 9, 9] });
-    const m = newBrainMemory();
-    expect(think(dIn({ self: w, target: warden({ windup: { attack: 'keepers_toll', total: 3, left: 1, interruptible: true } }), telegraphs: [toll(1)] }), m).intents.some((i) => i.t === 'dodge')).toBe(false);
-    expect(think(dIn({ self: w, target: warden(), telegraphs: [toll(0.2)] }), m).intents.some((i) => i.t === 'dodge')).toBe(true);
+  it('an unavoidable Keeper\'s Toll is not rolled: the brain shields and heals for it', () => {
+    const toll = (left: number): TelegraphView => ({ id: 9, owner: 1, attack: 'keepers_toll', shape: { kind: 'circle', x: 0, z: 0, r: 40 }, total: 3, left, unavoidable: true });
+    const r = self('ranger', JOBS.ranger.picks.duo, { x: 0, z: -10, cd: [9, 9, 9, 9, 9] });
+    for (const left of [1, 0.2]) expect(think(dIn({ self: r, target: warden(), telegraphs: [toll(left)] })).intents.some((i) => i.t === 'dodge')).toBe(false);
+    // a Black Mage puts Bastion Stone (slot 3) on its hurt partner before the Toll lands
+    const bm = self('black_mage', ['bastion_stone', 'rootbreak'], { x: 0, z: -8, cd: [9, 9, 9, 0, 9] });
+    const hurt = partner({ x: 0, z: -4, hp: 90 });
+    expect(think(dIn({ self: bm, target: warden({ targetId: 3 }), allies: [hurt], telegraphs: [toll(2.5)] })).intents).toContainEqual({ t: 'ability', slot: 3, phase: 'press', ally: 3 });
+    // without the Toll it keeps it (the partner is above 85%)
+    expect(think(dIn({ self: bm, target: warden({ targetId: 3 }), allies: [hurt] })).intents.some((i) => i.t === 'ability' && i.slot === 3)).toBe(false);
   });
 
   it('while the Warden uses Brass Fall it keeps 4 m from its partner', () => {
@@ -179,12 +183,8 @@ describe('the dungeon brain (Plan 4)', () => {
     expect(act.intents.slice(0, k).at(-1)).toEqual({ t: 'target', id: 1 });
   });
 
-  it('a ranged adventurer the Warden chases kites out of reach to shed Searing, and stays near its healer or tank', () => {
+  it('a ranged adventurer in a boss fight stays near its healer or tank', () => {
     const bm = (o: Partial<BrainSelf> = {}) => self('black_mage', JOBS.black_mage.picks.duo, { x: 0, z: -5, cd: [9, 9, 9, 9, 9], ...o });
-    const boss = warden({ targetId: 2 });
-    const kite = think(dIn({ self: bm({ searing: 3 }), target: boss }));
-    expect(Math.hypot(kite.moveTo!.x, kite.moveTo!.z)).toBeGreaterThanOrEqual(1.8 + 3.2 + 2.5);
-    expect(think(dIn({ self: bm({ searing: 0 }), target: boss })).moveTo).toBeNull();
     // with a Paladin at the Warden, a Black Mage 16 m out comes within 10 m of it
     const pal = partner({ job: 'paladin', x: 0, z: -3.5 });
     const far = think(dIn({ self: bm({ z: -16 }), target: warden({ targetId: 3 }), allies: [pal] }));

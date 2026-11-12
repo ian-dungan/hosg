@@ -15,7 +15,10 @@ export type BrainSelf = CombatantView & SelfView & { job: JobId; dodgeMax: numbe
 /**
  * allies: the other adventurers within ALLY_VIEW_R (dead ones included), as the caller sees them
  * (required: a caller that forgets them must not compile, rather than play solo). home: the target's
- * camp and leash, when the caller knows them (the formation step stays inside it).
+ * camp spot and its `leash` (ENEMY_KINDS[kind].leash), when the caller knows them; near the leash's edge
+ * the brain fights from the camp side, and the formation step stays inside it, so a fight is not dragged
+ * into a reset. Bots: pass the camp of the enemy they target (for an add that never moves, such as a Lens
+ * Shard, its boss's camp and leash), as simulateEncounter does; leave it out on open ground without camps.
  */
 export interface BrainInput {
   nowS: number; careful: boolean;
@@ -52,7 +55,7 @@ export interface BrainMemory {
   dodged: Set<number>; chargingSince: number | null; holdSince: number | null; reactionS: number;
   slip?: { rate: number; state: number };
   heeded: Map<number, boolean>;
-  /** A ranged brain is kiting a chasing boss (to shed Searing). */
+  /** Stepping out of a chasing boss's reach to shed Searing. */
   kiting: boolean;
 }
 export function newBrainMemory(reactionS = REACTION_S, slip?: { rate: number; seed: number }): BrainMemory {
@@ -84,7 +87,7 @@ const STEP_LOOK = 0.8;
 /** A flanker this close to its spot behind the target stays put, in m. */
 const FLANK_SLACK = 0.5;
 /** healParty (Soft Rain) goes out when anyone within PARTY_R is below this hp fraction (review round 1: was 0.8). */
-const HEAL_PARTY_FRAC = 0.9;
+const HEAL_PARTY_FRAC = 0.95;
 /** Soft Rain's reach (healParty looks for someone hurt within it), in m. */
 const PARTY_R = 10;
 /** An area supporter keeps its nearest ally within its radius minus this (and walks to its radius minus twice this), in m. */
@@ -100,6 +103,13 @@ export const IFRAME_DODGE_LEFT_S = 0.25;
 export const SPREAD_M = 4;
 /** Wellspring goes to an adventurer with at least this many Searing stacks. */
 export const SEARING_CLEANSE = 3;
+/** Whoever the Warden chases steps out of reach from this many Searing stacks (ranged; melee with an ally: the next). */
+export const KITE_SEARING = 3;
+export const KITE_SEARING_MELEE = 4;
+/** A kiting adventurer keeps this far beyond the boss's reach (and goes to twice this), in m. */
+const KITE_SLACK = 2.5;
+/** Bracing for an unavoidable hit, a heal goes to an adventurer below this hp fraction. */
+const BRACE_HEAL_FRAC = 0.8;
 /** A safe spot is this far beyond the edge of what it escapes, in m. */
 const SAFE_MARGIN = 0.6;
 /** Safe spots are looked for this far away at most, in 0.5 m steps along 16 directions, in m. */
@@ -113,12 +123,6 @@ const WALL_IN = 1;
 const CAST_FINISH_SLACK_S = 0.5;
 /** In a boss fight a ranged adventurer keeps its nearest ally within this, in m. */
 const TOGETHER_R = 10;
-/** A ranged adventurer the Warden chases kites from this many Searing stacks until they are gone. */
-export const KITE_SEARING = 3;
-/** A melee adventurer the Warden chases (with an ally to keep hitting it) steps out of reach from this many. */
-export const KITE_SEARING_MELEE = 4;
-/** A ranged adventurer keeps this far beyond a chasing boss's reach (and kites to twice this), in m. */
-const KITE_SLACK = 2.5;
 /** A cast may start inside a Plan 4 telegraph when it ends at least this long before the telegraph lands, in s. */
 const CAST_SPARE_S = 0.4;
 /** Plan 3's attacks keep Plan 3b's dodge rules exactly; every other attack gets the dungeon brain's. */
@@ -161,8 +165,13 @@ export function adventurerBrain(b: BrainInput, memory: BrainMemory): BrainAction
  * only the target known) with, for careful brains (sloppy ones included) unless stated:
  * - Plan 4 telegraphs: after reactionS, run to the nearest safe spot (outside every telegraph and field,
  *   inside the arena) when it can be reached in time; else dodge out when one dodge reaches it; else (a
- *   whole-arena hit) dodge for the i-frames IFRAME_DODGE_LEFT_S before it lands. A sloppy brain ignores
- *   a seeded share of them (one draw per telegraph). Rings are escaped toward the nearer edge (inward);
+ *   whole-arena hit) dodge for the i-frames IFRAME_DODGE_LEFT_S before it lands. A sloppy (or skilled)
+ *   brain ignores a seeded share of them (one draw per telegraph). Rings are escaped toward the nearer edge;
+ * - unavoidable telegraphs (Keeper's Toll, Last Light: ruling P4-f) are never rolled: while one is live it
+ *   braces (party, ally and self shields, Aegis, Soft Rain, a heal below 80%) and interrupts the Toll as usual;
+ * - whoever the Warden chases steps out of reach to shed Searing (ranged from KITE_SEARING stacks, melee
+ *   with an ally from KITE_SEARING_MELEE) until the stacks are gone; a ranged adventurer in a boss fight
+ *   stays within 10 m of its nearest healer, tank or hybrid ally;
  * - fields: never walks into one; standing in one, walks out (toward the arena centre) first;
  * - spread: while a boss's phase uses an attack on each adventurer, keeps SPREAD_M from every ally;
  * - adds first: a warded boss's add (ranged: the nearest; melee: the one nearest the boss);
@@ -215,7 +224,8 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
   if (b.careful && !displaced) {
     let first: TelegraphView | null = null;
     for (const tg of b.telegraphs) {
-      if (!isPlan4(tg) || memory.dodged.has(tg.id) || !inShape(tg.shape, self.x, self.z)) continue;
+      // an unavoidable one (ruling P4-f) is met with shields and heals, not a roll (step 1b of the abilities)
+      if (!isPlan4(tg) || tg.unavoidable || memory.dodged.has(tg.id) || !inShape(tg.shape, self.x, self.z)) continue;
       if (tg.total - tg.left < memory.reactionS - EPS) continue;
       let heed = memory.heeded.get(tg.id);
       if (heed === undefined) { heed = !(memory.slip && slipDraw(memory.slip) < memory.slip.rate); memory.heeded.set(tg.id, heed); }
@@ -326,24 +336,18 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
         if (Math.hypot(live.x - p.x, live.z - p.z) - radius <= range - RANGE_SLACK) moveTo = p;
       }
     }
-    // a ranged adventurer a melee boss is chasing keeps out of its reach (Searing falls off; the boss never surges)
-    // (ranged: to shed Searing from KITE_SEARING stacks until they are gone, and from a boss without Searing
-    // while it chases; melee, with a live ally to keep hitting it: from KITE_SEARING_MELEE stacks)
-    const ranged = range > MELEE_REACH;
+    // whoever the Warden chases steps out of its reach to shed Searing (the plan's counterplay): a ranged
+    // adventurer from KITE_SEARING stacks, a melee one with an ally to keep hitting it from KITE_SEARING_MELEE,
+    // until the stacks are gone (never to keep it chasing for good: ruling P4-j)
     const chaser = b.enemies.find((e) => e.alive && e.targetId === self.id && (e.tier === 'boss' || e.tier === 'mega'));
     const searing = self.searing ?? 0;
-    const afflicts = chaser !== undefined && ENEMY_KINDS[chaser.kind as keyof typeof ENEMY_KINDS]?.auto?.afflict !== undefined;
-    // (a ranged adventurer with no healer, tank or hybrid beside it has nobody to take the hits: from the first stack)
-    const covered = liveAllies.some((a) => a.job !== undefined && JOBS[a.job].role !== 'damage');
-    const from = ranged ? (covered ? KITE_SEARING : 1) : KITE_SEARING_MELEE;
-    memory.kiting = chaser !== undefined && (ranged || (afflicts && liveAllies.length > 0))
-      && ((ranged && !afflicts) || searing >= from || (memory.kiting && searing > 0));
-    if (chaser && memory.kiting) {
-      const k = ENEMY_KINDS[chaser.kind as keyof typeof ENEMY_KINDS];
-      if (k?.auto && !k.auto.ranged) {
-        const out = k.radius + k.auto.reach + KITE_SLACK;
-        if (dist(chaser, self) < out) moveTo = kiteSpot(b, chaser, out + KITE_SLACK) ?? moveTo;
-      }
+    const k = chaser ? ENEMY_KINDS[chaser.kind as keyof typeof ENEMY_KINDS] : undefined;
+    const ranged = range > MELEE_REACH;
+    memory.kiting = k?.auto?.afflict !== undefined && !k.auto.ranged && (ranged || liveAllies.length > 0)
+      && (searing >= (ranged ? KITE_SEARING : KITE_SEARING_MELEE) || (memory.kiting && searing > 0));
+    if (chaser && k?.auto && memory.kiting) {
+      const out = k.radius + k.auto.reach + KITE_SLACK;
+      if (dist(chaser, self) < out) moveTo = kiteSpot(b, chaser, out + KITE_SLACK) ?? moveTo;
     }
     if (spreadNeeded(b)) moveTo = spreadFrom(b, moveTo, live, liveAllies);
     if (moveTo) moveTo = keepSafe(b, moveTo);
@@ -396,6 +400,16 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
   const caster = b.careful
     ? b.enemies.find((e) => e.alive && e.id !== live.id && e.windup !== null && e.windup.interruptible && !PLAN3_ATTACKS.has(e.windup.attack)) ?? null
     : null;
+  /** Careful, with an unavoidable telegraph live where self or an ally stands. */
+  const bracing = b.careful && b.telegraphs.some((t) => t.unavoidable && (inShape(t.shape, self.x, self.z) || liveAllies.some((a) => inShape(t.shape, a.x, a.z))));
+  const brace = (): BrainAction | null =>
+    first('shieldParty', (_ab, s) => action(s))
+    ?? first('shieldAlly', (ab, s) => { const l = lowestWithin(ab.range); return action(s, allyArg(l)); })
+    ?? first('shieldSelf', (_ab, s) => action(s))
+    ?? first('aegis', (_ab, s) => action(s))
+    ?? first('healParty', (_ab, s) => (frac(lowestWithin(PARTY_R)) < 1 - EPS ? action(s) : null))
+    ?? first('allyBigHeal', (ab, s) => { const l = lowestWithin(ab.range); return frac(l) < BRACE_HEAL_FRAC ? action(s, allyArg(l)) : null; })
+    ?? first('allyHeal', (ab, s) => { const l = lowestWithin(ab.range); return frac(l) < BRACE_HEAL_FRAC ? action(s, allyArg(l)) : null; });
   const reachOf = (e: CombatantView) => dist(e, self) - (ENEMY_KINDS[e.kind as keyof typeof ENEMY_KINDS]?.radius ?? 0);
   const retarget = (e: CombatantView, slot: number): BrainAction => {
     intents.push({ t: 'target', id: e.id });
@@ -432,6 +446,9 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
   const steps: (() => BrainAction | null)[] = [
     // 1. revive
     () => tryRevive(b, allies, { moveTo, intents }, castOk),
+    // 1b. an unavoidable hit coming (Keeper's Toll, Last Light; careful): shields first, then heals to brace
+    //     (the Toll's interrupt and Break come from the interrupt and finisher steps as usual)
+    () => (bracing ? brace() : null),
     // 2. allyBigHeal: the lowest (self included) below 50%
     () => first('allyBigHeal', (ab, s) => { const l = lowestWithin(ab.range); return frac(l) < 0.5 ? action(s, allyArg(l)) : null; }),
     // 3. selfHeal
@@ -703,7 +720,8 @@ function wardAdd(b: DungeonBrainInput, boss: CombatantView): CombatantView | nul
   return best;
 }
 
-/** Where a chased ranged adventurer goes: `r` from the boss, the safe point of 16 around it nearest to self (away from the boss on ties). */
+
+/** Where a kiting adventurer goes: `r` from the boss, the safe point of 16 around it nearest to self. */
 function kiteSpot(b: DungeonBrainInput, boss: CombatantView, r: number): { x: number; z: number } | null {
   const self = b.self;
   let best: { x: number; z: number } | null = null, bestD = Infinity;

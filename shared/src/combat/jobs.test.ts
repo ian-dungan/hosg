@@ -23,11 +23,11 @@ describe('job data', () => {
     for (const v of ['monk', 'toString', 'constructor', '', null, 3, {}]) expect(isJobId(v)).toBe(false);
     expect(JOBS.paladin.bar).toEqual(['shield_rap', 'bright_verdict', 'aegis']);
     expect(JOBS.white_mage.pool).toEqual(['second_dawn', 'soft_rain', 'mistveil', 'sun_mote']);
-    // ruling P3b-h: duo = one team pick + one sustain pick (a job's only primer kept); Ninja and Black Mage equal their solo picks
+    // ruling P3b-h: duo = one team pick + one sustain pick (a job's only primer kept); ruling P4-g (Plan 4 Task 5): the Paladin's duo picks are Dawn Ward + Kindle, the Ninja's Weak Point + Ashcloud; the Black Mage's equal its solo picks
     expect(JOBS.black_mage.picks).toEqual({ solo: ['bastion_stone', 'rootbreak'], duo: ['bastion_stone', 'rootbreak'] });
     expect(jobs().map((j) => j.picks.duo)).toEqual([
-      ['skullringer', 'mend'], ['pinning_shot', 'field_dressing'], ['shelter', 'kindle'], ['bloodbond', 'umbral_brand'],
-      ['ashcloud', 'mist_form'], ['second_dawn', 'soft_rain'], ['bastion_stone', 'rootbreak'],
+      ['skullringer', 'mend'], ['pinning_shot', 'field_dressing'], ['dawn_ward', 'kindle'], ['bloodbond', 'umbral_brand'],
+      ['weak_point', 'ashcloud'], ['second_dawn', 'soft_rain'], ['bastion_stone', 'rootbreak'],
     ]);
   });
   it('every ability belongs to exactly one job, in its bar or its pool', () => {

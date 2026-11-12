@@ -36,6 +36,8 @@ export interface EnemyAttackData {
   readonly repeat?: { readonly count: number; readonly every: number; readonly rotate: number };
   /** Raw added per use while enraged. */
   readonly ramp?: number;
+  /** Dodge i-frames do not avoid it and give no perfect-dodge reward (ruling P4-f): shields, heals, a Break or the revive answer it. */
+  readonly unavoidable?: true;
 }
 export interface EnemyKindData {
   readonly id: EnemyKindId; readonly name: string; readonly elite: boolean; readonly tier: EnemyTier; readonly hp: number; readonly defence: number;
@@ -95,34 +97,34 @@ export const ENEMY_ATTACKS: Readonly<Record<EnemyAttackId, EnemyAttackData>> = d
   // ───── the Fallen Warden ─────
   lamp_sweep: {
     id: 'lamp_sweep', name: 'Lamp Sweep', shape: 'cone', r: 12, angle: 100 * DEG,
-    windup: 1.6, raw: 36, cooldown: 0, firstAt: 0, useRange: 12, parryable: false, interruptible: false,
+    windup: 1.6, raw: 28, cooldown: 0, firstAt: 0, useRange: 12, parryable: false, interruptible: false,
   },
   /** A circle on each engaged adventurer: stacked adventurers take every circle they stand in. */
   brass_fall: {
     id: 'brass_fall', name: 'Brass Fall', shape: 'circle-target', r: 3, targets: 'each',
-    windup: 2.0, raw: 31, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
+    windup: 2.0, raw: 24, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
   },
   /** The whole arena. A Break cancels it too. */
   keepers_toll: {
     id: 'keepers_toll', name: "Keeper's Toll", shape: 'circle-self', r: 40,
-    windup: 3.0, raw: 44, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: true,
+    windup: 3.0, raw: 34, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: true, unavoidable: true,
   },
   /** Knocks into the fire ring. */
   beacon_lance: {
     id: 'beacon_lance', name: 'Beacon Lance', shape: 'line', length: 30, width: 3, aimAt: 'farthest',
-    windup: 1.8, raw: 46, cooldown: 0, firstAt: 0, useRange: 30, parryable: false, interruptible: false,
+    windup: 1.8, raw: 36, cooldown: 0, firstAt: 0, useRange: 30, parryable: false, interruptible: false,
     knock: { speed: 12, seconds: 0.4, vy: 5 },
   },
   /** Eight lines from the Warden in sequence, a full turn. */
   turning_light: {
     id: 'turning_light', name: 'Turning Light', shape: 'line', length: 28, width: 3.5,
-    windup: 1.4, raw: 39, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
+    windup: 1.4, raw: 30, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
     repeat: { count: 8, every: 0.6, rotate: Math.PI / 4 },
   },
   /** Enrage only, every 4 s: 15, 20, 25, ... */
   last_light: {
     id: 'last_light', name: 'Last Light', shape: 'circle-self', r: 40,
-    windup: 1.0, raw: 19, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false, ramp: 5,
+    windup: 1.0, raw: 19, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false, ramp: 5, unavoidable: true,
   },
   // ───── the Lens Shard ─────
   focus_beam: {
@@ -159,7 +161,7 @@ export const ENEMY_KINDS: Readonly<Record<EnemyKindId, EnemyKindData>> = deepFre
   },
   /** The Warden's lamp-hound: a brass hound whose wick-mane still burns. Leash: the Wick Den's r − 2. */
   wickhound: {
-    id: 'wickhound', tier: 'boss', name: 'the Wickhound', elite: true, hp: 3200, defence: 15, radius: 1.4, speed: 4.5,
+    id: 'wickhound', tier: 'boss', name: 'the Wickhound', elite: true, hp: 3380, defence: 15, radius: 1.4, speed: 4.5,
     aggro: 10, leash: 14, respawn: Infinity, stagger: 220,
     auto: { reach: 3.0, every: 2.2, raw: 7, ranged: false }, attacks: ['wick_lunge', 'ember_breath', 'cinder_ring'],
     weak: 'water', resist: 'fire', boss: BOSSES.wickhound,
@@ -168,7 +170,7 @@ export const ENEMY_KINDS: Readonly<Record<EnemyKindId, EnemyKindData>> = deepFre
   fallen_warden: {
     id: 'fallen_warden', tier: 'mega', name: 'the Fallen Warden', elite: true, hp: 7800, defence: 18, radius: 1.8, speed: 3.5,
     aggro: 10, leash: 20, respawn: Infinity, stagger: 300,
-    auto: { reach: 3.2, every: 2.8, raw: 9, ranged: false, afflict: 'searing' },
+    auto: { reach: 3.2, every: 2.8, raw: 7, ranged: false, afflict: 'searing' },
     attacks: ['lamp_sweep', 'brass_fall', 'keepers_toll', 'beacon_lance', 'turning_light', 'last_light'],
     weak: 'water', resist: 'fire', boss: BOSSES.fallen_warden,
   },

@@ -515,7 +515,7 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
   if (reaction === 'blast') {
     // per enemy (ruling P3b-d): its own defence, break and weakness
     for (const o of w.enemies.values()) {
-      if (o === e || !o.alive || enemyInvulnerable(o) || Math.hypot(o.x - e.x, o.z - e.z) - o.data.radius > BLAST_SPLASH_R) continue;
+      if (o === e || !o.alive || enemyInvulnerable(o) || outsideArenaOf(o, a) || Math.hypot(o.x - e.x, o.z - e.z) - o.data.radius > BLAST_SPLASH_R) continue;
       const part = splashDamage(w, a, o, BLAST_COEF * BLAST_SPLASH_FRAC, s, nowS);
       damageEnemy(w, a.id, o, part, s.by, nowS, undefined, true, { element: s.element });
       total += part;

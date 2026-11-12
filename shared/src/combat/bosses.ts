@@ -60,8 +60,8 @@ export const BOSSES: Readonly<Record<BossKindId, BossData>> = deepFreeze({
   /** The Warden's lamp-hound: a brass hound whose wick-mane still burns. */
   wickhound: {
     phases: [
-      { index: 0, name: 'Brass Hound', untilFrac: 0.5, rotation: ['wick_lunge', 'ember_breath'], gap: 3.5 },
-      { index: 1, name: 'Wick Unbound', untilFrac: 0, rotation: ['wick_lunge', 'cinder_ring', 'ember_breath'], gap: 3.0, autoEvery: 1.8 },
+      { index: 0, name: 'Brass Hound', untilFrac: 0.5, rotation: ['wick_lunge', 'ember_breath'], gap: 2.6 },
+      { index: 1, name: 'Wick Unbound', untilFrac: 0, rotation: ['wick_lunge', 'cinder_ring', 'ember_breath'], gap: 2.2, autoEvery: 1.8 },
     ],
     scale: [1, 1, 1.5, 2.0],
     transitionS: 2,
@@ -91,10 +91,10 @@ export const BOSSES: Readonly<Record<BossKindId, BossData>> = deepFreeze({
         onEnter: { clearFields: true, fields: [{ id: 'lampfire_deep', shape: { kind: 'ring', x: 0, z: 0, dir: 0, inner: 12, r: 40 }, raw: 10 }] },
       },
     ],
-    scale: [1, 1, 1.2, 1.9],
+    scale: [1, 1, 1.1, 1.9],
     transitionS: 4,
     breakS: 5,
-    enrage: { s: 300, attack: 'last_light', every: 4 },
+    enrage: { s: 330, attack: 'last_light', every: 4 },
     lore: {
       phases: ['The Keeper Wakes', 'The Lamp Kindles', 'The Lens Falls'],
       victory: "The Warden's lamp steadies, and for a moment its beam points the same way as Ellie's arm.",

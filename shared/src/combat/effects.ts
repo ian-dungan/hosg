@@ -71,11 +71,21 @@ export function takenMult(w: CombatWorld, a: AdventurerState, e: EnemyState | nu
   let m = traitOf(a) === 'steadfast' ? STEADFAST_TAKEN : 1;
   if (hasBuff(a, 'aegis', nowS)) m *= AEGIS_TAKEN;
   else if (hasBuff(a, 'aegis_ally', nowS)) m *= AEGIS_ALLY_TAKEN;
-  if (a.afflictions.size) {
-    const s = a.afflictions.get('searing');
-    if (s && s.until > nowS) m *= 1 + AFFLICTIONS.searing.takenPerStack * s.stacks;
+  return m * searingMult(a, nowS);
+}
+/** (1 + takenPerStack × stacks) for live Searing, else 1. */
+export function searingMult(a: AdventurerState, nowS: number): number {
+  if (!a.afflictions.size) return 1;
+  const s = a.afflictions.get('searing');
+  return s && s.until > nowS ? 1 + AFFLICTIONS.searing.takenPerStack * s.stacks : 1;
+}
+/** Inside the arena of some awake arena boss. */
+export function insideAwakeArena(w: CombatWorld, p: { x: number; z: number }): boolean {
+  for (const e of w.enemies.values()) {
+    if (!e.alive || e.camp.arena === undefined || !e.data.boss) continue;
+    if (bossAiStateOf(e)?.wokeAt != null && inArena(e, p)) return true;
   }
-  return m;
+  return false;
 }
 
 // ───────── allies and afflictions ─────────
@@ -288,6 +298,8 @@ export function tickBuffs(w: CombatWorld, a: AdventurerState, nowS: number): voi
       }
       rain.lastHealAt = rain.startedAt + k;
       const src = rain.orphan ? undefined : w.adventurers.get(rain.src);
+      // an orphan rain whose caster has left cannot be checked against the arena edge: it stops inside an awake arena
+      if (!w.adventurers.has(rain.src) && insideAwakeArena(w, a)) { rain.until = nowS; break; }
       const healed = healAdventurer(w, a, RAIN_HEAL * (src ? healMult(src, a) : 1), rain.src, nowS, src !== undefined);
       onHealDone(w, src, a, healed, nowS);
       k++;

@@ -16,7 +16,7 @@ export interface AfflictionData {
 }
 
 export const AFFLICTIONS: Readonly<Record<AfflictionId, AfflictionData>> = deepFreeze({
-  searing: { id: 'searing', name: 'Searing', maxStacks: 5, s: 8, takenPerStack: 0.12, bit: 1 },
+  searing: { id: 'searing', name: 'Searing', maxStacks: 5, s: 8, takenPerStack: 0.10, bit: 1 },
 });
 
 export const AFFLICTION_IDS: readonly AfflictionId[] = deepFreeze(['searing']);

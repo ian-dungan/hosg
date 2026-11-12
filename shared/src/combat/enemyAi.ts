@@ -24,7 +24,7 @@ import { knockDisplacement } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
 import type { AdventurerState, CombatWorld, CombatZone, EnemyState, TelegraphState } from './engine';
 import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
-import { acrossArena, applyAffliction, hasBuff, hasDebuff, takenMult, threatMult, traitOf } from './effects';
+import { acrossArena, applyAffliction, hasBuff, searingMult, hasDebuff, takenMult, threatMult, traitOf } from './effects';
 import { breakCast } from './casting';
 import { gainMomentum } from './momentum';
 import { inShape, type Shape } from './shapes';
@@ -673,7 +673,7 @@ export function resolveTelegraph(w: CombatWorld, e: EnemyState, tg: TelegraphSta
   for (const a of w.adventurers.values()) {
     if (!a.alive || !e.alive || !inArena(e, a)) continue;
     if (inShape(shape, a.x, a.z)) resolveHit(w, e, a, raw, atk.id, atk.parryable, atk.knock ?? null, now, shape, lineDir);
-    else if (isInvulnerable(a, now) && dodgedFrom(a, shape, now)) resolveHit(w, e, a, raw, atk.id, atk.parryable, null, now, shape, lineDir);
+    else if (!atk.unavoidable && isInvulnerable(a, now) && dodgedFrom(a, shape, now)) resolveHit(w, e, a, raw, atk.id, atk.parryable, null, now, shape, lineDir);
   }
   if (atk.dashToEnd && e.alive && shape.kind === 'line') dash(w, e, shape);
 }
@@ -718,7 +718,9 @@ export function resolveHit(
 ): void {
   if (!a.alive) return;
   a.lastCombatAt = now;
-  if (isInvulnerable(a, now)) {
+  // an unavoidable attack (ruling P4-f) goes through dodge i-frames, with no perfect-dodge reward
+  const unavoidable = by !== 'auto' && ENEMY_ATTACKS[by].unavoidable === true;
+  if (!unavoidable && isInvulnerable(a, now)) {
     const perfect = shape !== undefined && (inShape(shape, a.x, a.z) || dodgedFrom(a, shape, now));
     fxOf(w).push({ t: 'miss', src: e.id, dst: a.id, perfect });
     if (perfect) {
@@ -750,7 +752,9 @@ export function resolveHit(
   const sheltered = pal !== undefined && pal !== a && pal.alive && pal.job === 'paladin' && !acrossArena(w, a, pal);
   const moved = sheltered ? Math.floor(final * SHELTER_SHARE) : 0;
   const got = hurtAdventurer(w, a, final - moved, e.id, by, now);
-  if (sheltered && moved > 0) hurtAdventurer(w, pal, Math.round(moved * takenMult(w, pal, e, now)), e.id, by, now, true);
+  // the Paladin's part: the share without the sheltered one's Searing, then × the Paladin's own taken-mult
+  // (ruling P4-g: its own Searing only, never both)
+  if (sheltered && moved > 0) hurtAdventurer(w, pal, Math.round((moved / searingMult(a, now)) * takenMult(w, pal, e, now)), e.id, by, now, true);
   const landed = got.taken + got.absorbed > 0;
   // an afflicting auto that lands (hp or shield) adds a stack to the one it hit (a Shelter share adds none)
   if (by === 'auto' && landed && e.data.auto?.afflict) applyAffliction(w, a, e.data.auto.afflict, e.id, now);
