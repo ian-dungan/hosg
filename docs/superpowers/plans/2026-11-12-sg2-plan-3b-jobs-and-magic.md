@@ -1408,86 +1408,29 @@ S2C: jobs: JobsView;                     // on join, after a job or loadout chan
 
 **Files:**
 - Modify:
-  - this plan, `docs/superpowers/plans/2026-11-12-sg2-plan-3b-jobs-and-magic.md` (fill `## Outcome`);
-  - `docs/superpowers/plans/2026-11-11-sg2-plan-1-online-foundation.md` (the roadmap line for 3b, and line 5's scope).
+  - this plan, `docs/superpowers/plans/2026-11-12-sg2-plan-3b-jobs-and-magic.md` (fill `## Outcome
 
-**Interfaces:**
-- **Roadmap 3b** becomes:
+Built by subagent-driven development: Tasks 1–9, each implemented and reviewed, with review fixes applied by the next worker on the same files. Task 10 (this section) was written by the coordinator. Last commit of the phase's build: `b80285e` (later phases continued on the same branch).
 
-  > **Jobs and magic** — seven starting jobs (Warrior, Paladin, Dark Knight, Ninja, White Mage, Black Mage, Ranger) levelled separately on one adventurer, changed only in towns and sanctuary zones; each job's own bar and pick pool (no borrowed abilities), strong support abilities so any two jobs make a duo; the Staff and four elements, cast times and interrupts, element reactions; per-job xp (stub curve); data hooks for Monk, Bard, Beastmaster and Sky Lancer. Done (`2026-11-12-sg2-plan-3b-jobs-and-magic.md`).
+**What exists**
+- Seven starting jobs on one adventurer, switched only at the Guild Board in a town or sanctuary; picks change anywhere out of combat. Six weapons. 49 abilities. Casting with cast bars, interrupts and half-speed movement. Four element reactions (Blast, Conduct, Steam, Bedrock). Revive. Per-job xp (replaced by the real level curve in Plan 5).
+- Job board, portrait ability grid, ally focus by tap, weapon models, spell and support effects, per-job tabards and silhouette cues.
+- Mixed-job bots, a browser smoke test that shows a real reaction and a real revive, and the 100-bot runs.
 
-  Roadmap 5 gains: "the job level curve and level-gated abilities, job talent trees (about ten points) and retraining for gold, each job's remembered outfit".
+**Verified by workers (not re-run by the coordinator yet; the coordinator's own verification happens at the end of Plan 6 on the whole branch):** root `npm test` 1437 passed at the Task 9 commit in a clean worktree; typecheck clean; both client builds; the bundle scan with `SG2_REQUIRE_BUNDLE_SCAN=1`; smoke test PASS; walkers 9.0 KiB/s and clustered 10.8 KiB/s per bot.
 
-- [ ] **Step 1: Run the verification list below. Record each result, with numbers, in `## Outcome`:**
-  1. Root `npm test`: the pass and skip counts, pristine.
-  2. `npm run typecheck`: clean.
-  3. `npm run build` and `npm run build:online` in `client/`: both succeed. The offline demo has no job UI.
-  4. The solo and duo band tables from Task 4's report (final numbers), plus every tuning change.
-  5. Mixed-job fight run (port 2579, 120 s, 100 bots): Hz, corrections, kills by job, casts, reactions, tick p95, RSS.
-  6. The clustered grove walk (port 2579, after the fight run): KiB/s per bot.
-  7. `node server/scripts/smoke.mjs` against a fresh server on port 2579: PASS.
-  8. Review Focus 1–6: for each, the test names that cover it.
-  9. Grep the repository for hard-coded "White Mage" and "Black Mage" outside `shared/src/combat/jobs.ts`, docs and tests: there should be none.
-  10. Grep the client bundle for model names, and the repository for secrets (`SG2_JWT_SECRET=` with a value outside docs and the local test command): there should be none.
-- [ ] **Step 2: Write `## Outcome (date)`**, in Plan 2's style: status, numbers, decisions made during the build, deferred items (minor), and "For Plan 4" and "For Plan 5" notes.
-- [ ] **Step 3: Commit**: `docs: Plan 3b outcome and roadmap`.
+**Rulings**
+- P3b-a Momentum decay pauses while casting. P3b-b Revive needs line of sight and grants 2 s of safety (a plain miss, never a perfect dodge).
+- P3b-c Root immunity 6 s after Rooted ends; roots last half as long on elites. P3b-d Area damage is computed per enemy hit.
+- P3b-e Ranger solo band floor 8.5 s. P3b-f Support is not the tuning lever for solo bands; support values restored and raised. P3b-g The 25%-of-median rule uses the five new jobs.
+- P3b-h Duo default picks are one team pick plus one sustain pick. P3b-i The duo-versus-solo-picks gate: deaths no higher, wins within 3 of 280.
+- P3b-j The mixed bot cycle gate is reactions ≥ 5 of ≥ 2 kinds; per-kind and revive gates moved to the party bots (Plan 4 Task 10).
+- Renames: Crimson Tithe, Dusk Slip, Crossed Fangs. Later pick-default changes under Plan 4 ruling P4-g are recorded in the Jobs table.
 
-## Decisions this plan makes that the spec leaves open
-
-These are recorded so that reviewers can check the tasks against them.
-
-**Jobs**
-- The bar belongs to the job, not the weapon. Weapons give only the auto-attack and the model. White Mage and Black Mage share the Staff but have different bars and different crystal tints.
-- There are six weapons:
-  - Blade (Warrior; the Plan 3 sword without the shield);
-  - Sword and Shield (Paladin);
-  - Greatsword (Dark Knight);
-  - Twin Daggers (Ninja);
-  - Staff (both mages);
-  - Bow (Ranger).
-- Plan 3's four free picks are not a shared pool any more. Mend and Bulwark belong to the Warrior, Taunt to the Paladin, and Sprint to the Ranger, so a Plan 3 Blade save keeps its picks exactly.
-- Each job has a pool of four picks. Each job has two pick presets: solo (the default for a new job record) and duo (used by the simulation and suggested on the board). There are no level gates on abilities in 3b.
-- Every job has a primer (a non-finisher that sets a mark without detonating) whose mark differs from its finisher's mark. That gives solo combos inside the job, and cross-combos in every pair, mirrors included.
-- Picks can change anywhere out of combat. Only the job itself is town-only.
-- A job change resets Momentum to 0 and keeps per-ability cooldowns.
-- The Ninja's extra dodge is a third charge.
-- The grove is a town everywhere. The Greenway has no sanctuaries yet: the list is a data hook.
-- The job board opens at a code-built Guild Board in the Plaza (decorative, not an obstacle), or with `J` / a Jobs button anywhere. Outside a town its buttons stay enabled, and the server refuses with a clear reason.
-- The `Q` swap and the `swap` message are removed.
-
-**Magic**
-- There is no mana. Spells use Momentum costs and cooldowns.
-- A cast checks at its start and spends at its end. A failed re-check fizzles with no cost.
-- Casting allows walking at 0.5× and is never cancelled by movement, which suits phones. Casts break on the caster's own dodge (no penalty), on knockbacks, and on telegraph hits that land, with a 1.5 s lock; enemy autos do not break them.
-- Only Staff spells have elements. Light is a cosmetic school with no reactions.
-- Reactions happen when an elemental hit meets a reacting mark: Fire+Marked, Lightning+Soaked, Water+Burning, Earth+Dazed. Finishers still detonate the other marks as plain combos.
-- Two new marks: Rooted (slows to 0.6×) and Dazed (detonation fodder).
-- Enemies get small elemental weaknesses and resistances (×1.25 / ×0.75).
-- There is no ground aiming. Area effects centre on the caster or the target.
-
-**Support and duos**
-- Ally aims pick the explicit tapped ally when valid, else the lowest-hp adventurer in range.
-- Until Plan 4 every adventurer in the room counts as an ally.
-- Second Dawn revives where the adventurer lies, at 40% hp, inside the 30 s respawn window. There is no new movement ack.
-- Shelter moves half of each enemy hit from the ally to the Paladin.
-- Shields don't stack: the larger one wins.
-- White Mage's cleanse is a hook on an empty affliction set.
-
-**Progression boundary**
-- Per-job level and xp use a flat stub: 100 xp a level, cap 10. Kill XP is 10 for ordinary enemies and 40 for elites, credited to each credited adventurer's current job. Level has no combat effect in 3b.
-- Talents (`[]`) and outfit (`null`) are stored per job for Plan 5.
-- The adventurer-level `level`/`xp` columns are left unused.
-- The `loadout` column is kept, unused, for rollback.
-
-**Testing and tooling**
-- The bands cover:
-  - every job solo against each ordinary kind and the Mossback;
-  - careless deaths;
-  - all 28 pairs (21 distinct plus 7 mirrors) against the Thornling and the Mossback, with synergy (`crossCombos`, `assists`) and the four reactions asserted.
-- Only one task (4) tunes numbers, under a written rule.
-- New test-only server switch: `SG2_TEST_DUMMY=1` (a dummy camp in the grove), like `SG2_START_ZONE`; never set in Docker.
-- The bots switch jobs in the grove and then prove a refusal in the Greenway.
-
-## Outcome
-
-To be written by Task 10.
+**Deferred**
+- Support (duo) picks are not clearly stronger than solo picks; live tuning.
+- The mixed bot cycle run does not reliably show every reaction kind and a revive within 120 s.
+- The spell depth fix over a telegraph was not confirmed with a screenshot (Plan 4 Task 10).
+- Adventurer bodies cost about 61 draw calls for 20 adventurers; a cheaper far body is left to Plan 5 Tasks 8 and 9.
+- The names "White Mage" and "Black Mage" may be changed before public release.
+- Never tested on a real phone.
