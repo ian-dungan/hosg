@@ -1,5 +1,6 @@
 // Accounts API: register, log in or play as a guest (each answers {token, name} or {error}, where name
-// is the adventurer's name, null until chosen), and name your adventurer (answers {name} or {error}).
+// is the adventurer's name, null until chosen), name your adventurer (answers {name} or {error}), and
+// ask which zone it is in (GET /zone answers {zone}: the room to join).
 import argon2 from 'argon2';
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
@@ -27,6 +28,24 @@ export function authRouter(store: Store, secret: string, opts: { ratePerMinute?:
 
   // Hashed once, so a login for an unknown name costs as much as one with a wrong password.
   let dummyHash: Promise<string> | undefined;
+
+  /** The account a request's `Authorization: Bearer <token>` names, or null. */
+  const bearer = async (req: express.Request): Promise<Account | null> => {
+    const token = BEARER_RE.exec(req.get('authorization') ?? '')?.[1];
+    const verified = token ? verifyToken(token, secret) : null;
+    return (verified && (await store.findAccountById(verified.accountId))) || null;
+  };
+
+  // Before the login limit: a client asks this before every join (and after each travel), which is
+  // not a login attempt. It needs a valid token, so it reveals nothing to a guesser.
+  router.get('/zone', async (req, res) => {
+    const account = await bearer(req);
+    if (!account) {
+      res.status(401).json({ error: SIGN_IN_AGAIN });
+      return;
+    }
+    res.json({ zone: (await store.getOrCreateAdventurer(account.id)).zone });
+  });
 
   router.use(rateLimit(opts.ratePerMinute ?? 10, 'Too many attempts, wait a minute'));
   // Parse every body as JSON, whatever its declared type, so the 2 KB cap always applies.
@@ -86,9 +105,7 @@ export function authRouter(store: Store, secret: string, opts: { ratePerMinute?:
   });
 
   router.post('/name', async (req, res) => {
-    const token = BEARER_RE.exec(req.get('authorization') ?? '')?.[1];
-    const verified = token ? verifyToken(token, secret) : null;
-    const account = verified && (await store.findAccountById(verified.accountId));
+    const account = await bearer(req);
     if (!account) {
       res.status(401).json({ error: SIGN_IN_AGAIN });
       return;

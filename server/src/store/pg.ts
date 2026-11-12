@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { SPAWN } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, type Account, type Adventurer, type Store } from './types';
+import { DEFAULT_LOADOUT, MAX_HP, SPAWN, isZoneId, parseLoadout } from '@sg2/shared';
+import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,14 +60,16 @@ interface AdventurerRow {
   x: number;
   z: number;
   facing: number;
-  zone: 'grove';
+  zone: string;
+  hp: number;
+  loadout: unknown;
   level: number;
   xp: number;
   gold: number;
 }
 
 const ACCOUNT_COLUMNS = 'id, username, password_hash, is_guest, is_gm';
-const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, level, xp, gold';
+const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, loadout, level, xp, gold';
 
 function toAccount(r: AccountRow): Account {
   return { id: r.id, username: r.username, passwordHash: r.password_hash, isGuest: r.is_guest, isGm: r.is_gm };
@@ -81,7 +83,11 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     x: r.x,
     z: r.z,
     facing: r.facing,
-    zone: r.zone,
+    // A zone this server does not know (only possible by hand) reads as the grove: the join then
+    // stands at its spawn if the spot is not walkable there.
+    zone: isZoneId(r.zone) ? r.zone : 'grove',
+    hp: r.hp,
+    loadout: parseLoadout(r.loadout) ?? parseLoadout(DEFAULT_LOADOUT)!,
     level: r.level,
     xp: r.xp,
     gold: r.gold,
@@ -101,7 +107,8 @@ export function createPool(databaseUrl: string): pg.Pool {
   return pool;
 }
 
-export async function createPgStore(databaseUrl: string): Promise<Store> {
+export async function createPgStore(databaseUrl: string, opts: { start?: StartSpot } = {}): Promise<Store> {
+  const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const pool = createPool(databaseUrl);
   try {
     await migrate(pool);
@@ -113,10 +120,10 @@ export async function createPgStore(databaseUrl: string): Promise<Store> {
   /** Makes the account's adventurer if it has none; insert-or-nothing keeps one per account even if two calls race. */
   async function insertAdventurer(accountId: string): Promise<void> {
     await pool.query(
-      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold)
-       VALUES ($1, NULL, $2, $3, $4, 'grove', 1, 0, 0)
+      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, hp, loadout, level, xp, gold)
+       VALUES ($1, NULL, $2, $3, $4, $5, $6, $7::jsonb, 1, 0, 0)
        ON CONFLICT (account_id) DO NOTHING`,
-      [accountId, SPAWN.x, SPAWN.z, SPAWN.facing],
+      [accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(DEFAULT_LOADOUT)],
     );
   }
 
@@ -176,13 +183,16 @@ export async function createPgStore(databaseUrl: string): Promise<Store> {
       return toAdventurer(rows[0]);
     },
 
-    async saveAdventurer({ id, x, z, facing }) {
-      await pool.query('UPDATE adventurers SET x = $2, z = $3, facing = $4, updated_at = now() WHERE id = $1', [
-        id,
-        x,
-        z,
-        facing,
-      ]);
+    async saveAdventurer(a, expect) {
+      const { id, x, z, facing, zone, hp, loadout } = checkedSave(a);
+      // Like findAccountById: an id that is not a uuid is unknown, not a SQL error.
+      if (!UUID_RE.test(id)) return false;
+      const { rowCount } = await pool.query(
+        `UPDATE adventurers SET x = $2, z = $3, facing = $4, zone = $5, hp = $6, loadout = $7::jsonb, updated_at = now()
+         WHERE id = $1 AND ($8::text IS NULL OR zone = $8)`,
+        [id, x, z, facing, zone, hp, JSON.stringify(loadout), expect?.zone ?? null],
+      );
+      return (rowCount ?? 0) > 0;
     },
 
     async close() {

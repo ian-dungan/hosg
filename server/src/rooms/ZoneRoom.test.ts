@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { signToken } from '../auth/tokens';
-import { SECRET, accountFor, collect, joinGrove, sleep, startServer, waitFor, walk, type TestServer } from './testHelpers';
+import { SECRET, accountFor, collect, joinGrove, saveAs, sleep, startServer, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -95,8 +95,7 @@ describe('joining the grove', () => {
   it('uses SPAWN when the saved position is not walkable in the town', async () => {
     const { url, store } = await start();
     const { accountId, token } = await accountFor(store, 'Ellie');
-    const saved = await store.getOrCreateAdventurer(accountId);
-    await store.saveAdventurer({ id: saved.id, x: 420, z: -260, facing: 1 }); // the far Beacon clearing
+    await saveAs(store, accountId, { x: 420, z: -260, facing: 1 }); // the far Beacon clearing
     const { room } = await joinGrove(url, token);
     expect(room.state.players.get(room.sessionId)).toMatchObject({ x: SPAWN.x, z: SPAWN.z });
   });
@@ -487,8 +486,7 @@ async function sendPoses(room: Room<any, any>, poses: SentPose[]): Promise<void>
 /** Joins with the adventurer saved at (x, z) first. */
 async function joinAt(url: string, store: Store, name: string, x: number, z: number) {
   const { accountId, token } = await accountFor(store, name);
-  const saved = await store.getOrCreateAdventurer(accountId);
-  await store.saveAdventurer({ id: saved.id, x, z, facing: 0 });
+  await saveAs(store, accountId, { x, z, facing: 0 });
   return joinGrove(url, token);
 }
 
@@ -548,7 +546,7 @@ describe('height', () => {
   });
 
   it('climbing a tall platform by legal jumps, then stepping off its edge, costs fallDamage(drop) and sends hurt', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, SPAWN.z);
     const corrections = collect(a.room, 'correct');
     const hurts = collect(a.room, 'hurt');
@@ -568,7 +566,7 @@ describe('height', () => {
   });
 
   it('repeated falls never take hp below 1, even when the poses in the air are never sent', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const corrections = collect(a.room, 'correct');
     const hurts = collect(a.room, 'hurt');
@@ -592,7 +590,7 @@ describe('height', () => {
   }, 15_000);
 
   it('health comes back HP_REGEN_PER_S a second once the regen delay has passed since the last fall', async () => {
-    const { url, store } = await start({ surface: testSurface, hpRegenDelaySeconds: 1 });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } }, hpRegenDelaySeconds: 1 });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const hurts = collect(a.room, 'hurt');
     const me = () => a.room.state.players.get(a.room.sessionId);
@@ -612,7 +610,7 @@ describe('height', () => {
   }, 10_000);
 
   it('dropping the socket in mid-air and reconnecting on the ground still costs the health', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const corrections = collect(a.room, 'correct');
     await sendPoses(a.room, [...rampPoses(), { x: RAMP_END + 0.3, z: RAMP_Z, y: 9.9, facing: 0, moving: true }]);
@@ -630,10 +628,9 @@ describe('height', () => {
   });
 
   it('a re-joining account keeps its air track: landing after a re-join mid-air still costs the health', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const { accountId, token } = await accountFor(store, 'Alice');
-    const saved = await store.getOrCreateAdventurer(accountId);
-    await store.saveAdventurer({ id: saved.id, x: 0, z: RAMP_Z, facing: 0 });
+    await saveAs(store, accountId, { x: 0, z: RAMP_Z, facing: 0 });
     const first = await joinGrove(url, token);
     await sendPoses(first.room, [...rampPoses(), { x: RAMP_END + 0.3, z: RAMP_Z, y: 9.9, facing: 0, moving: true }]);
     await waitFor(() => first.room.state.players.get(first.room.sessionId).y === 9.9);
@@ -653,7 +650,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
 
   // From a 10 m take-off the jump ceiling is below the ground after about 1.7 s: these gaps are longer.
   it('accepts a landing that arrives 2.5 s after the last pose in the air', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const corrections = collect(a.room, 'correct');
     const hurts = collect(a.room, 'hurt');
@@ -666,7 +663,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
   });
 
   it('reconnecting 2.5 s after going airborne, on the ground, still costs the health and is not corrected', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     await sendPoses(a.room, [...rampPoses(), offTheTop]);
     await waitFor(() => a.room.state.players.get(a.room.sessionId).y === 9.9);
@@ -685,10 +682,9 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
   });
 
   it('re-joining 2.5 s after going airborne lands on the ground with the fall\'s damage', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const { accountId, token } = await accountFor(store, 'Alice');
-    const saved = await store.getOrCreateAdventurer(accountId);
-    await store.saveAdventurer({ id: saved.id, x: 0, z: RAMP_Z, facing: 0 });
+    await saveAs(store, accountId, { x: 0, z: RAMP_Z, facing: 0 });
     const first = await joinGrove(url, token);
     await sendPoses(first.room, [...rampPoses(), offTheTop]);
     await waitFor(() => first.room.state.players.get(first.room.sessionId).y === 9.9);
@@ -704,7 +700,7 @@ describe('height after a long gap in the air', { timeout: 15_000 }, () => {
   });
 
   it('a correction in the air puts the adventurer on the ground below, with the fall\'s damage, and the next step from there is accepted', async () => {
-    const { url, store } = await start({ surface: testSurface });
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } } });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const corrections = collect(a.room, 'correct');
     const hurts = collect(a.room, 'hurt');

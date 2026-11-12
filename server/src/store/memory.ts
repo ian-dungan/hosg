@@ -1,9 +1,13 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
-import { SPAWN } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, type Account, type Adventurer, type Store } from './types';
+import { DEFAULT_LOADOUT, MAX_HP, SPAWN } from '@sg2/shared';
+import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
-export function createMemoryStore(): Store {
+/** A copy that shares nothing with the stored adventurer (its loadout is copied too). */
+const copy = (a: Adventurer): Adventurer => ({ ...a, loadout: { weapon: a.loadout.weapon, free: [a.loadout.free[0], a.loadout.free[1]] } });
+
+export function createMemoryStore(opts: { start?: StartSpot } = {}): Store {
+  const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const accountsByName = new Map<string, Account>(); // key: lower-cased username
   const accountsById = new Map<string, Account>();
   const adventurersByAccount = new Map<string, Adventurer>();
@@ -17,10 +21,12 @@ export function createMemoryStore(): Store {
         id: randomUUID(),
         accountId,
         name: null,
-        x: SPAWN.x,
-        z: SPAWN.z,
-        facing: SPAWN.facing,
-        zone: 'grove',
+        x: start.x,
+        z: start.z,
+        facing: start.facing,
+        zone: start.zone,
+        hp: MAX_HP,
+        loadout: { weapon: DEFAULT_LOADOUT.weapon, free: [DEFAULT_LOADOUT.free[0], DEFAULT_LOADOUT.free[1]] },
         level: 1,
         xp: 0,
         gold: 0,
@@ -52,7 +58,7 @@ export function createMemoryStore(): Store {
     },
 
     async getOrCreateAdventurer(accountId) {
-      return { ...adventurerFor(accountId) };
+      return copy(adventurerFor(accountId));
     },
 
     async nameAdventurer(accountId, name) {
@@ -62,15 +68,15 @@ export function createMemoryStore(): Store {
       if (adventurerNames.has(key)) throw new NameTakenError(name);
       adventurerNames.add(key);
       adventurer.name = name;
-      return { ...adventurer };
+      return copy(adventurer);
     },
 
-    async saveAdventurer({ id, x, z, facing }) {
+    async saveAdventurer(a, expect) {
+      const { id, ...values } = checkedSave(a);
       const adventurer = adventurersById.get(id);
-      if (!adventurer) return;
-      adventurer.x = x;
-      adventurer.z = z;
-      adventurer.facing = facing;
+      if (!adventurer || (expect && adventurer.zone !== expect.zone)) return false;
+      Object.assign(adventurer, values);
+      return true;
     },
 
     async close() {},

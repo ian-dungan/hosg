@@ -1,12 +1,13 @@
-// The game server: the accounts API, health check and client files over Express, and the Colyseus zone room, on one port.
+// The game server: the accounts API, health check and client files over Express, and one Colyseus room per zone, on one port.
 import { once } from 'node:events';
 import type { Server as HttpServer } from 'node:http';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { HP_REGEN_DELAY_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, groveTownSurface, type Surface } from '@sg2/shared';
+import { HP_REGEN_DELAY_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, ZONE_IDS, zoneDef, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
+import { Presence } from './rooms/presence';
 import { zoneRoomFor, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
 
 export interface AppOptions {
@@ -18,10 +19,12 @@ export interface AppOptions {
   authRatePerMinute?: number;
   /** Reverse proxies in front of the server whose X-Forwarded-For is believed (Express's `trust proxy` hop count); none when unset. */
   trustProxy?: number;
-  /** Test-only: a smaller grove (default MAX_PLAYERS). */
+  /** Test-only: smaller zones (default MAX_PLAYERS in each zone's room). */
   maxPlayers?: number;
-  /** Test-only: the height surface moves are checked against (default groveTownSurface). */
-  surface?: Surface;
+  /** Test-only: fields merged over each zone's zoneDef (its surface, spawn, exits, ...). */
+  zones?: Partial<Record<ZoneId, Partial<ZoneDef>>>;
+  /** Exits to open at start, beside those open by default: from zone -> destinations (SG2_OPEN_EXITS). */
+  openExits?: Partial<Record<ZoneId, readonly ZoneId[]>>;
   /** Test-only: seconds after a fall before health comes back (default HP_REGEN_DELAY_S). */
   hpRegenDelaySeconds?: number;
 }
@@ -29,18 +32,49 @@ export interface AppOptions {
 export interface App {
   listen(port: number): Promise<void>;
   close(): Promise<void>;
-  /** Adventurers online, and state patches sent per second over the last 5 s. */
-  stats(): { players: number; tickHz: number };
+  /**
+   * Adventurers online, and state patches sent per second over the last 5 s: in all, and per zone.
+   * The overall tickHz is the lowest among zones with adventurers (the grove's when none have any).
+   */
+  stats(): { players: number; tickHz: number; zones: Record<ZoneId, { players: number; tickHz: number }> };
+  /** Whether the exits from `from` to `to` are open now. */
+  isExitOpen(from: ZoneId, to: ZoneId): boolean;
+  /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
+  setExitOpen(from: ZoneId, to: ZoneId, open: boolean): void;
 }
 
 // Room messages are small; this leaves room for a full chat line (CHAT_MAX characters of any script).
 const MAX_WS_PAYLOAD = 16 * 1024;
 
 export function createApp(opts: AppOptions): App {
-  const live = new Set<ZoneRoom>();
-  const players = () => [...live].reduce((n, room) => n + room.playerCount, 0);
-  const tickHz = () => Math.round(([...live][0]?.measuredPatchHz ?? 0) * 10) / 10;
-  const stats = () => ({ players: players(), tickHz: tickHz() });
+  const rooms = new Map<ZoneId, ZoneRoom>();
+  const presence = new Presence();
+  const zones = new Map<ZoneId, ZoneDef>(ZONE_IDS.map((id) => [id, { ...zoneDef(id), ...opts.zones?.[id], id }]));
+
+  // Open gates by "from>to": each exit's own default, then openExits.
+  const openGates = new Set<string>();
+  const gate = (from: ZoneId, to: ZoneId) => `${from}>${to}`;
+  for (const zone of zones.values()) for (const exit of zone.exits) if (exit.open) openGates.add(gate(zone.id, exit.to));
+  for (const [from, tos] of Object.entries(opts.openExits ?? {}) as [ZoneId, readonly ZoneId[]][]) {
+    for (const to of tos) openGates.add(gate(from, to));
+  }
+  const isExitOpen = (from: ZoneId, to: ZoneId) => openGates.has(gate(from, to));
+
+  const round = (hz: number) => Math.round(hz * 10) / 10;
+  const stats = () => {
+    const perZone = Object.fromEntries(
+      ZONE_IDS.map((id) => {
+        const room = rooms.get(id);
+        return [id, { players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0) }];
+      }),
+    ) as Record<ZoneId, { players: number; tickHz: number }>;
+    const busy = ZONE_IDS.filter((id) => perZone[id].players > 0).map((id) => perZone[id].tickHz);
+    return {
+      players: ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),
+      tickHz: busy.length > 0 ? Math.min(...busy) : perZone.grove.tickHz,
+      zones: perZone,
+    };
+  };
 
   const transport = new WebSocketTransport({ maxPayload: MAX_WS_PAYLOAD });
   const gameServer = new Server({
@@ -60,16 +94,20 @@ export function createApp(opts: AppOptions): App {
     },
   });
 
-  const roomOptions: ZoneRoomOptions = {
-    store: opts.store,
-    reconnectSeconds: opts.reconnectSeconds ?? RECONNECT_SECONDS,
-    saveSeconds: opts.saveSeconds ?? SAVE_SECONDS,
-    maxPlayers: opts.maxPlayers ?? MAX_PLAYERS,
-    surface: opts.surface ?? groveTownSurface,
-    hpRegenDelaySeconds: opts.hpRegenDelaySeconds ?? HP_REGEN_DELAY_S,
-    live,
-  };
-  gameServer.define('grove', zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions);
+  for (const zone of zones.values()) {
+    const roomOptions: ZoneRoomOptions = {
+      store: opts.store,
+      reconnectSeconds: opts.reconnectSeconds ?? RECONNECT_SECONDS,
+      saveSeconds: opts.saveSeconds ?? SAVE_SECONDS,
+      maxPlayers: opts.maxPlayers ?? MAX_PLAYERS,
+      zone,
+      presence,
+      rooms,
+      isExitOpen,
+      hpRegenDelaySeconds: opts.hpRegenDelaySeconds ?? HP_REGEN_DELAY_S,
+    };
+    gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
+  }
 
   return {
     /** Rejects (e.g. EADDRINUSE) when the port cannot be bound. */
@@ -88,8 +126,8 @@ export function createApp(opts: AppOptions): App {
         stopWatching.abort();
         for (const print of printers) http.on('error', print);
       }
-      // The one grove room, made up front so joins find it (a join that got in first already made it).
-      if (live.size === 0) await matchMaker.createRoom('grove', {});
+      // Each zone's one room, made up front so joins and travellers find it (a join that got in first already made it).
+      for (const id of ZONE_IDS) if (!rooms.has(id)) await matchMaker.createRoom(id, {});
     },
 
     /** Saves and disconnects everyone, then closes the HTTP server and its open connections. */
@@ -102,5 +140,10 @@ export function createApp(opts: AppOptions): App {
     },
 
     stats,
+    isExitOpen,
+    setExitOpen(from, to, open) {
+      if (open) openGates.add(gate(from, to));
+      else openGates.delete(gate(from, to));
+    },
   };
 }

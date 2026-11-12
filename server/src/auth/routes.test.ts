@@ -234,6 +234,41 @@ describe('POST /api/name', () => {
   });
 });
 
+describe('GET /api/zone', () => {
+  async function zoneAs(url: string, authorization?: string) {
+    const res = await fetch(url + '/api/zone', { headers: authorization === undefined ? {} : { authorization } });
+    return { status: res.status, body: (await res.json()) as any };
+  }
+
+  it("answers the zone the account's adventurer is saved in", async () => {
+    const { url, store } = await startApp();
+    const { token } = (await post(url, '/api/guest')).body;
+    expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 200, body: { zone: 'grove' } });
+    const account = (await store.findAccountById(verifyToken(token, SECRET)!.accountId))!;
+    const a = await store.getOrCreateAdventurer(account.id);
+    await store.saveAdventurer({ id: a.id, x: 8, z: 3, facing: 0, zone: 'greenway', hp: a.hp, loadout: a.loadout });
+    expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 200, body: { zone: 'greenway' } });
+  });
+
+  it('answers a missing, bad or unknown-account token with 401', async () => {
+    const { url } = await startApp();
+    for (const auth of [undefined, 'Bearer not-a-token', `Bearer ${signToken('acc-1', 'other-secret')}`, `Bearer ${signToken('no-such-account', SECRET)}`, 'Basic abc']) {
+      const res = await zoneAs(url, auth);
+      expect(res.status).toBe(401);
+      expect(typeof res.body.error).toBe('string');
+    }
+  });
+
+  it('does not count toward the login limit', async () => {
+    const { url } = await startApp({ ratePerMinute: 2 });
+    const { token } = (await post(url, '/api/guest')).body;
+    for (let i = 0; i < 20; i++) expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
+    for (let i = 0; i < 20; i++) expect((await zoneAs(url)).status).toBe(401);
+    expect((await post(url, '/api/guest')).status).toBe(200); // the second of two
+    expect((await post(url, '/api/guest')).status).toBe(429);
+  });
+});
+
 describe('limits', () => {
   it('answers the 11th request in a minute from one address with 429', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });

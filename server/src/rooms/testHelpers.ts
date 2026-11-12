@@ -2,11 +2,11 @@
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { Client, type Room } from '@colyseus/sdk';
-import { TICK_HZ, groveTownSurface, type Surface } from '@sg2/shared';
-import { createApp } from '../app';
+import { TICK_HZ, groveTownSurface, type Surface, type ZoneId } from '@sg2/shared';
+import { createApp, type AppOptions } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
-import type { Store } from '../store/types';
+import type { Adventurer, Store } from '../store/types';
 
 export const SECRET = 'test-secret-that-is-at-least-32-characters';
 
@@ -26,17 +26,7 @@ async function freePort(): Promise<number> {
 
 /** Starts an app on a free port; the caller must `app.close()` it. */
 export async function startServer(
-  opts: {
-    store?: Store;
-    reconnectSeconds?: number;
-    saveSeconds?: number;
-    clientDir?: string;
-    maxPlayers?: number;
-    authRatePerMinute?: number;
-    trustProxy?: number;
-    surface?: Surface;
-    hpRegenDelaySeconds?: number;
-  } = {},
+  opts: Partial<Omit<AppOptions, 'jwtSecret'>> = {},
 ): Promise<TestServer> {
   const store = opts.store ?? createMemoryStore();
   const app = createApp({ ...opts, store, jwtSecret: SECRET });
@@ -54,8 +44,13 @@ export async function accountFor(store: Store, username: string): Promise<{ acco
 
 /** Joins the grove and waits until the client sees itself in the state. Automatic reconnection is off. */
 export async function joinGrove(url: string, token: string): Promise<{ client: Client; room: Room<any, any> }> {
+  return joinZone(url, token, 'grove');
+}
+
+/** Joins the room of `zone` and waits until the client sees itself in the state. Automatic reconnection is off. */
+export async function joinZone(url: string, token: string, zone: ZoneId = 'grove'): Promise<{ client: Client; room: Room<any, any> }> {
   const client = new Client(url);
-  const room = await client.joinOrCreate('grove', { token });
+  const room = await client.joinOrCreate(zone, { token });
   room.reconnection.enabled = false;
   await waitFor(() => room.state.players?.get(room.sessionId));
   return { client, room };
@@ -98,4 +93,14 @@ export async function walk(
     room.send('move', { x, z, y: surface(x, z) ?? 0, facing: 0, moving: i < steps });
     await sleep(1000 / TICK_HZ);
   }
+}
+
+/** Saves the account's adventurer with these changes (position, zone, hp, loadout) before it joins. */
+export async function saveAs(
+  store: Store,
+  accountId: string,
+  changes: Partial<Pick<Adventurer, 'x' | 'z' | 'facing' | 'zone' | 'hp' | 'loadout'>>,
+): Promise<void> {
+  const { id, x, z, facing, zone, hp, loadout } = await store.getOrCreateAdventurer(accountId);
+  await store.saveAdventurer({ id, x, z, facing, zone, hp, loadout, ...changes });
 }

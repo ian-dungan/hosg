@@ -1,4 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
+import { ZONE_IDS, isZoneId, zoneDef, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -38,7 +39,39 @@ function trustProxyHops(): number | undefined {
   return hops;
 }
 
+/** SG2_START_ZONE (for local test servers): the zone new adventurers start in, at its spawn; grove by default. */
+function startZone(): ZoneId {
+  const raw = process.env.SG2_START_ZONE;
+  if (raw === undefined || raw === '') return 'grove';
+  if (!isZoneId(raw)) fail(`SG2_START_ZONE must be ${ZONE_IDS.join(' or ')} (got "${raw}").`);
+  return raw;
+}
+
+/**
+ * SG2_OPEN_EXITS (for local test servers): exits to open beside those open by default, as
+ * comma-separated from:to zone pairs, for example grove:greenway; unset or empty opens none.
+ */
+function openExits(): Partial<Record<ZoneId, ZoneId[]>> | undefined {
+  const raw = process.env.SG2_OPEN_EXITS;
+  if (raw === undefined || raw === '') return undefined;
+  const open: Partial<Record<ZoneId, ZoneId[]>> = {};
+  for (const pair of raw.split(',')) {
+    const [from, to, extra] = pair.trim().split(':');
+    if (!isZoneId(from) || !isZoneId(to) || extra !== undefined || from === to) {
+      fail(`SG2_OPEN_EXITS must be a comma-separated list of from:to zone pairs, for example grove:greenway (got "${raw}").`);
+    }
+    (open[from] ??= []).push(to);
+  }
+  return open;
+}
+
 const port = positiveInt('SG2_PORT', 2570);
+const start = (() => {
+  const zone = startZone();
+  const { x, z, facing } = zoneDef(zone).spawn;
+  return { zone, x, z, facing };
+})();
+const exitsOpen = openExits();
 const trustProxy = trustProxyHops();
 const authRatePerMinute = positiveInt('SG2_AUTH_RATE_PER_MIN', 10);
 const jwtSecret = process.env.SG2_JWT_SECRET;
@@ -49,18 +82,18 @@ const clientDir = process.env.SG2_CLIENT_DIR || undefined;
 let store: Store;
 if (process.env.SG2_STORE === 'memory') {
   console.warn('Shady Grove 2 server: SG2_STORE=memory, nothing is saved across restarts.');
-  store = createMemoryStore();
+  store = createMemoryStore({ start });
 } else {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) fail('DATABASE_URL is not set (or set SG2_STORE=memory to run without a database).');
   try {
-    store = await createPgStore(databaseUrl);
+    store = await createPgStore(databaseUrl, { start });
   } catch (err) {
     fail(`cannot open the database at DATABASE_URL: ${reason(err)}.`);
   }
 }
 
-const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute, trustProxy });
+const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen });
 try {
   await app.listen(port);
 } catch (err) {
@@ -68,6 +101,8 @@ try {
   fail(inUse ? `port ${port} is already in use; stop whatever uses it or set SG2_PORT to another port.` : `cannot listen on port ${port}: ${reason(err)}.`);
 }
 console.log(`Shady Grove 2 server listening on port ${port}${clientDir ? `, serving ${clientDir}` : ''}.`);
+if (start.zone !== 'grove') console.log(`Shady Grove 2 server: SG2_START_ZONE=${start.zone}; new adventurers start there.`);
+if (exitsOpen) console.log(`Shady Grove 2 server: SG2_OPEN_EXITS=${process.env.SG2_OPEN_EXITS}; those exits are open.`);
 console.log(
   trustProxy === undefined
     ? 'Shady Grove 2 server: SG2_TRUST_PROXY is off; login limits count each connection\'s own address.'

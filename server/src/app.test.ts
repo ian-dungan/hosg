@@ -35,3 +35,14 @@ describe('trust proxy', () => {
     expect(await guestAs(server.url, '198.51.100.9, 203.0.113.1')).toBe(429);
   });
 });
+
+describe('a room per zone', () => {
+  it('makes one room for each zone on listen, named after it', async () => {
+    const { matchMaker } = await import('@colyseus/core');
+    server = await startServer();
+    for (const zone of ['grove', 'greenway']) expect(await matchMaker.query({ name: zone })).toHaveLength(1);
+    expect(server.app.stats()).toMatchObject({ players: 0, zones: { grove: { players: 0 }, greenway: { players: 0 } } });
+    const health = (await (await fetch(`${server.url}/healthz`)).json()) as any;
+    expect(health).toMatchObject({ ok: true, players: 0, zones: { grove: { players: 0 }, greenway: { players: 0 } } });
+  });
+});

@@ -65,4 +65,17 @@ describe('server startup', () => {
       );
     }
   }, 60_000);
+
+  it('exits with one line when SG2_START_ZONE or SG2_OPEN_EXITS names no zone', async () => {
+    const start = await runServer({ SG2_STORE: 'memory', SG2_START_ZONE: 'moon' });
+    expect(start.code).toBe(1);
+    expect(start.stderr.trim()).toBe('Shady Grove 2 server: SG2_START_ZONE must be grove or greenway (got "moon").');
+    for (const value of ['grove', 'grove:moon', 'grove:greenway,greenway']) {
+      const exits = await runServer({ SG2_STORE: 'memory', SG2_OPEN_EXITS: value });
+      expect(exits.code).toBe(1);
+      expect(exits.stderr.trim()).toBe(
+        `Shady Grove 2 server: SG2_OPEN_EXITS must be a comma-separated list of from:to zone pairs, for example grove:greenway (got "${value}").`,
+      );
+    }
+  }, 60_000);
 });
