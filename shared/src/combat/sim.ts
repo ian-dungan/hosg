@@ -15,6 +15,8 @@ export interface PartyResult {
   members: { died: boolean; hpLeft: number; dodges: number; damage: number }[];
   /** Finisher hits that detonated another member's mark. */
   combos: number;
+  /** Seconds the enemy spent in its chase surge. */
+  surgeS: number;
 }
 
 /** Half-width of the flat field, in m (80 × 80). */
@@ -67,7 +69,7 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
     return { ...m, id, memory, body: makeBody(x, z, zone.surface) as Body, startAt: rng() * 0.5, died: false, dodges: 0, damage: 0, facing: angle };
   });
   const byId = new Map(members.map((m) => [m.id, m]));
-  let firstHitAt: number | null = null, killedAt: number | null = null, combos = 0;
+  let firstHitAt: number | null = null, killedAt: number | null = null, combos = 0, surgeTicks = 0;
   const dt = 1 / TICK_HZ;
   for (let k = 0; k <= Math.round(maxS * TICK_HZ); k++) {
     const t = k / TICK_HZ;
@@ -99,6 +101,7 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
       }
     }
     const out = c.tick(t);
+    if (c.get(enemyId)!.surging) surgeTicks++;
     for (const d of out.displaced) {
       const m = byId.get(d.id);
       if (m) m.body = { ...m.body, x: d.result.x, z: d.result.z, y: d.result.y, vy: 0, grounded: true, peakY: d.result.y };
@@ -119,7 +122,7 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
   return {
     firstHitAt, killedAt, ttk: killedAt !== null && firstHitAt !== null ? killedAt - firstHitAt : null,
     members: members.map((m) => ({ died: m.died, hpLeft: m.died ? 0 : c.get(m.id)!.hp, dodges: m.dodges, damage: m.damage })),
-    combos,
+    combos, surgeS: surgeTicks / TICK_HZ,
   };
 }
 

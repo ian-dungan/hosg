@@ -935,3 +935,87 @@ describe('more AI rules (M6)', () => {
     expect(e.act).toBe('return');
   });
 });
+
+// ═════════ fix round 2 ═════════
+describe('the chase surge ends only on a landed hit (fix round 2)', () => {
+  function ring(kind: EnemyKindId) {
+    const r = new Rig([camp(kind)]);
+    const e = r.enemy(kind);
+    const a = r.add(0, -10, BOW);
+    r.i(a, { t: 'target', id: e.id });
+    let ang = Math.PI;
+    r.at(20, () => { ang += RUN_SPEED / 10 / 15; r.move(a, 10 * Math.sin(ang), 10 * Math.cos(ang)); });
+    const taken = r.hitsOn(a).reduce((s, h) => s + h.amount + h.absorbed, 0);
+    const dealt = r.fx('hit').filter((h) => h.src === a).reduce((s, h) => s + h.amount, 0);
+    return { taken, dealt, hits: r.hitsOn(a).length };
+  }
+  it('a Bow running 10 m circles round the camp at full speed is caught and hit by a Boar and a Thornling', () => {
+    // measured over 20 s: Boar 2 hits (12 taken, 112 dealt), Thornling 2 hits (10 taken, 140 dealt); their
+    // telegraphs (useRange beyond auto reach) still root them while surging, so the kite is taxed, not stopped
+    for (const kind of ['boar', 'thornling'] as const) {
+      const k = ring(kind);
+      expect(k.hits, kind).toBeGreaterThanOrEqual(2);
+      expect(k.taken, kind).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it('a surging enemy with its target in auto reach autos instead of starting a telegraph, and a dodged swing does not end the surge', () => {
+    const r = new Rig([camp('thornling')]);
+    const e = r.enemy('thornling');
+    const a = r.add(0, -2);
+    r.tick();
+    e.surging = true;
+    only(e, 'thorn_burst', r.now); // ready, and the target is within its useRange
+    const ai = enemyAiStateOf(e)!;
+    ai.nextAutoAt = r.now;
+    const A = r.w.adventurers.get(a)!;
+    A.iframeUntil = r.now + 0.2; // the swing will be dodged
+    r.tick();
+    expect(e.windup).toBeNull();
+    expect(r.fx('miss')).toHaveLength(1);
+    expect(e.surging).toBe(true);
+  });
+
+  it('a player who stops and fights sees the surge end on the first landed hit', () => {
+    const r = new Rig([camp('thornling')], { half: 200 });
+    const e = r.enemy('thornling');
+    const a = r.add(0, -6.5);
+    r.tick();
+    let z = -6.5;
+    r.until(() => e.surging, SURGE_AFTER_S + 0.5, () => { z -= 5.5 / 15; r.move(a, 0, z); });
+    let endedAt: number | null = null;
+    r.until(() => !e.surging, 6, () => { endedAt = r.now; });
+    const first = r.hitsOn(a).filter((h) => h.amount + h.absorbed > 0)[0];
+    expect(first).toBeDefined();
+    expect(first.at).toBeCloseTo(endedAt!, 6);
+  });
+});
+
+describe('Thorn Hail is aimed at the farthest engaged adventurer in range (fix round 2)', () => {
+  it('the cone points at the far player, not the threat target in melee', () => {
+    const r = new Rig([camp('mossback')]);
+    const e = r.enemy('mossback');
+    const near = r.add(0, -3), far = r.add(9, 0, BOW);
+    r.tick();
+    e.threat.add(near, 500);
+    e.threat.add(far, 1);
+    only(e, 'thorn_hail', r.now);
+    r.tick();
+    expect(e.targetId).toBe(near);
+    const tg = [...r.c.telegraphs()][0];
+    expect(tg.attack).toBe('thorn_hail');
+    expect((tg.shape as { dir: number }).dir).toBeCloseTo(Math.atan2(9 - e.x, 0 - e.z), 6);
+  });
+  it('out of its range the far player is ignored: aimed at the nearer one', () => {
+    const r = new Rig([camp('mossback')]);
+    const e = r.enemy('mossback');
+    const near = r.add(0, -3), far = r.add(30, 0, BOW);
+    r.tick();
+    e.threat.add(near, 500);
+    e.threat.add(far, 1);
+    only(e, 'thorn_hail', r.now);
+    r.tick();
+    const tg = [...r.c.telegraphs()][0];
+    expect((tg.shape as { dir: number }).dir).toBeCloseTo(Math.atan2(0 - e.x, -3 - e.z), 6);
+  });
+});

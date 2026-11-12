@@ -62,6 +62,23 @@ describe('seeded fight simulation: the bands', () => {
     }
   });
 
+  it('a careless Blade + Bow duo loses a member in at least 80% of seeds (measured 19/20 on seeds 1–20, 92/100 on 1–100)', () => {
+    // Recorded, not a band: further elite tuning waits for live play-testing (coordinator decision, fix round 2).
+    let lost = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const r = simulateParty({ seed, party: [{ weapon: 'blade', careful: false }, { weapon: 'bow', careful: false }], enemy: 'mossback' });
+      if (r.members.some((m) => m.died)) lost++;
+    }
+    expect(lost).toBeGreaterThanOrEqual(16);
+  });
+
+  it('the chase surge rarely triggers in a stand-up fight: only a careful Bow vs the Mossback, under 2 s a fight', () => {
+    for (const enemy of ['thornling', 'boar', 'archer', 'mossback'] as const) for (const weapon of WEAPONS) for (const careful of [true, false]) {
+      const r = simulateParty({ seed: 1, party: [{ weapon, careful }], enemy });
+      expect(r.surgeS, `${enemy} ${weapon} ${careful}`).toBeLessThan(2);
+    }
+  });
+
   it('is deterministic for a seed', () => {
     expect(simulateFight({ seed: 9, weapon: 'bow', enemy: 'mossback', careful: true })).toEqual(simulateFight({ seed: 9, weapon: 'bow', enemy: 'mossback', careful: true }));
   });

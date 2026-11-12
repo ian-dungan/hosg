@@ -35,7 +35,11 @@ export const RETURN_SPEED_SCALE = 1.5;
 export const RETURN_MAX_S = 20;
 /** The chase surge: an enemy with a target that has been out of range of every attack for this long… */
 export const SURGE_AFTER_S = 3;
-/** …moves at SURGE_SCALE × RUN_SPEED until it next starts an attack (so plain running never kites it). */
+/**
+ * …moves at SURGE_SCALE × RUN_SPEED until a hit lands on its target (damage taken or absorbed: a dodged,
+ * parried or missed attack does not end it); while surging with its target in auto reach it autos rather
+ * than starting a telegraph. So plain running never kites it; Sprint and dodges break away briefly.
+ */
 export const SURGE_SCALE = 1.3;
 /** Elites scale with the adventurers engaged (on their threat table, alive): ×(1 + this × (n − 1))… */
 export const ELITE_SCALE_PER = 0.7;
@@ -334,7 +338,7 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   const dist = hyp(t.x - e.x, t.z - e.z);
   const sees = lineOfSight(w.zone.sight, e.x, e.z, t.x, t.z);
 
-  // the chase surge: out of range of every attack for SURGE_AFTER_S → faster until it next attacks
+  // the chase surge: out of range of every attack for SURGE_AFTER_S → faster until a hit lands on the target
   const auto = d.auto;
   const reachE = dist - d.radius;
   const inReach = auto !== null && reachE <= auto.reach && (!auto.ranged || sees);
@@ -345,25 +349,18 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   if (chance && !e.surging) ai.chanceAt = now;
   if (!e.surging && now - ai.chanceAt > SURGE_AFTER_S + TIME_EPS) e.surging = true;
 
-  // a telegraphed attack, when one is ready and the target is within its useRange
-  for (const id of d.attacks) {
-    const atk = ENEMY_ATTACKS[id];
-    if (now >= (e.attackReadyAt[id] ?? Infinity) - TIME_EPS && dist <= atk.useRange && sees) {
-      startWindup(w, e, atk, t, now);
-      attacked(e, ai, now);
+  // a telegraphed attack, when one is ready and the target is within its useRange (Thorn Hail: aimed at
+  // the farthest engaged adventurer within it). A surging enemy with its target in auto reach autos instead.
+  if (!(e.surging && inReach)) {
+    for (const id of d.attacks) {
+      const atk = ENEMY_ATTACKS[id];
+      if (now < (e.attackReadyAt[id] ?? Infinity) - TIME_EPS) continue;
+      const aim = AIM_FARTHEST.has(id) ? farthestEngaged(w, e, atk.useRange) : dist <= atk.useRange && sees ? t : null;
+      if (!aim) continue;
+      startWindup(w, e, atk, aim, now);
+      ai.chanceAt = now;
       holdProgress(ai, now);
       return;
-    }
-  }
-
-  // the auto, when in reach (horizontal only: an adventurer on a rock within reach is hit)
-  if (inReach) {
-    holdProgress(ai, now);
-    if (dist > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
-    if (now >= ai.nextAutoAt - TIME_EPS) {
-      ai.nextAutoAt = now + auto.every;
-      attacked(e, ai, now);
-      resolveHit(w, e, t, auto.raw, 'auto', !auto.ranged, null, now);
     }
   }
 
@@ -381,10 +378,24 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
     free = moved && !ai.dirty && hyp(e.x - x0, e.z - z0) >= 0.5 * speed * dt;
   } else if (dist > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
 
+  // the auto, when in reach after this tick's step (horizontal only: an adventurer on a rock within
+  // reach is hit). Checked after moving, so a chaser that closes the gap swings on the same tick.
+  const dist2 = hyp(t.x - e.x, t.z - e.z);
+  const inReach2 = auto !== null && dist2 - d.radius <= auto.reach && (!auto.ranged || (dist2 === dist ? sees : lineOfSight(w.zone.sight, e.x, e.z, t.x, t.z)));
+  if (inReach2) {
+    holdProgress(ai, now);
+    if (dist2 > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
+    if (now >= ai.nextAutoAt - TIME_EPS) {
+      ai.nextAutoAt = now + auto.every;
+      ai.chanceAt = now;
+      resolveHit(w, e, t, auto.raw, 'auto', !auto.ranged, null, now);
+    }
+  }
+
   // the unreachable rule: out of reach with no progress for UNREACHABLE_S → home. Progress is what is
   // left to go: along the path while one is followed (a detour that first leads away still counts),
   // else the straight distance. No path at all means no progress.
-  if (!inReach) {
+  if (!inReach2) {
     if (ai.progTarget !== t.id) { ai.progTarget = t.id; ai.progBest = Infinity; ai.progAt = now; }
     const left = toGo(e, ai, t);
     if (left < ai.progBest - PROGRESS_M) { ai.progBest = left; ai.progAt = now; }
@@ -393,9 +404,18 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void
   }
 }
 
-function attacked(e: EnemyState, ai: EnemyAi, now: number): void {
-  e.surging = false;
-  ai.chanceAt = now;
+/** Attacks aimed at the farthest engaged adventurer within their useRange, not the threat target. */
+const AIM_FARTHEST: ReadonlySet<EnemyAttackId> = new Set<EnemyAttackId>(['thorn_hail']);
+/** The live adventurer on e's threat table farthest from it within `range` and in sight (ties: earliest in the table). */
+function farthestEngaged(w: CombatWorld, e: EnemyState, range: number): AdventurerState | null {
+  let best: AdventurerState | null = null, bestD = -1;
+  for (const id of e.threat.ids()) {
+    const a = liveAdventurer(w, id);
+    if (!a) continue;
+    const d = hyp(a.x - e.x, a.z - e.z);
+    if (d <= range && d > bestD && lineOfSight(w.zone.sight, e.x, e.z, a.x, a.z)) { best = a; bestD = d; }
+  }
+  return best;
 }
 
 /** What is left to go to the target: along the path being followed, else straight. */
@@ -632,7 +652,9 @@ export function resolveHit(
     }
     return;
   }
-  hurtAdventurer(w, a, enemyHit(raw, a.stats.defence), e.id, by, now);
+  const got = hurtAdventurer(w, a, enemyHit(raw, a.stats.defence), e.id, by, now);
+  // the chase surge ends only when a hit lands on its target (taken or absorbed)
+  if (e.surging && a.id === e.targetId && got.taken + got.absorbed > 0) { e.surging = false; aiOf(e, now).chanceAt = now; }
   if (knock && a.alive) knockAdventurer(w, a, knockDisplacement({ x: e.x, z: e.z }, a, knock, lineDir), now);
 }
 
