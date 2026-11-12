@@ -12,6 +12,7 @@ import type { FxEvent } from './combat/fx';
 import type { InstanceView, VictoryView } from './instance';
 import type { PartyOp, PartyRefusal, PartyView } from './party';
 import type { Pose } from './movement';
+import type { QuestAct, QuestGiven, QuestRefusal, QuestsView } from './quests';
 import type { ZoneId } from './world/zones';
 
 /** Why a job change is refused where the zone allows none (`refused { action: 'job', reason: 'not-here' }`). */
@@ -91,6 +92,12 @@ export type C2S = {
   look: { look: Look };
   /** An emote (EMOTES): alive and out of combat, at most one every EMOTE_MIN_S; a move cancels it on clients. */
   emote: { emote: EmoteId };
+  /**
+   * A quest act (parseQuestAct; ids only: an NPC, a prop, a quest, a reward choice index). The server checks
+   * reach from its own last accepted pose. Answered by `quests` (and `questDone`) or `questRefused`; a talk
+   * that completes nothing is answered by nothing. At most QUEST_OPS_PER_S a second.
+   */
+  quest: QuestAct;
 };
 
 /** Emotes are accepted at most this often (s); others are dropped. */
@@ -200,6 +207,12 @@ export type S2C = {
   inventory: InventoryView;
   /** An operation (or a Barber `look`; op null: a message that is no operation at all) refused: nothing changed (text: INV_TEXT[reason], or INV_SAVE_TEXT for 'save'). */
   invRefused: { op: InvOp['op'] | 'look' | null; reason: InvRefusedReason; text: string };
+  /** The owner's quests (to the owner only): a step after joining (like `jobs` and `inventory`), and after every change (only when it changed). */
+  quests: QuestsView;
+  /** One completed step's reward and moment (to the owner only). */
+  questDone: QuestGiven;
+  /** A quest act refused: nothing changed (text: QUEST_TEXT[reason], or INV_SAVE_TEXT for 'save'; act null: no act at all). */
+  questRefused: { act: QuestAct['act'] | null; reason: QuestRefusal | 'save'; text: string };
   /**
    * What one kill or pack clear gave this adventurer (sent to it only; personal loot): items that landed in the
    * bag (with their new uids), the gold, the gold from drops sold because the bag was full (each with a notice),

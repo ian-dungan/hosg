@@ -24,3 +24,5 @@ export * from './items';
 export * from './kit';
 export * from './loot';
 export * from './inventory';
+export * from './quests';
+export * from './story/spots';

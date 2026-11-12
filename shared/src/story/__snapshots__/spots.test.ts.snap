@@ -1,0 +1,61 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`story spots > the chosen spots are stable 1`] = `
+{
+  "bram": {
+    "facing": 1.09,
+    "x": -26.42,
+    "z": 12.37,
+    "zone": "grove",
+  },
+  "crater_edge": {
+    "x": 229,
+    "z": -7.2,
+    "zone": "greenway",
+  },
+  "marrow": {
+    "facing": 2.52,
+    "x": -3.3,
+    "z": -6.4,
+    "zone": "grove",
+  },
+  "nell": {
+    "facing": -1.97,
+    "x": 14,
+    "z": 5.92,
+    "zone": "greenway",
+  },
+  "pim": {
+    "facing": -2.7,
+    "x": -29.09,
+    "z": 10.98,
+    "zone": "grove",
+  },
+  "plaque": {
+    "x": 0,
+    "z": -5.3,
+    "zone": "grove",
+  },
+  "tamsin": {
+    "facing": -1.13,
+    "x": -36.19,
+    "z": 14.68,
+    "zone": "grove",
+  },
+  "waymark_1": {
+    "x": 72.2,
+    "z": -5.56,
+    "zone": "greenway",
+  },
+  "waymark_2": {
+    "x": 130.7,
+    "z": 5.7,
+    "zone": "greenway",
+  },
+  "waymark_3": {
+    "x": 189.2,
+    "z": 14.59,
+    "zone": "greenway",
+  },
+}
+`;
