@@ -30,6 +30,7 @@ import {
   parsePose,
   refillAllowance,
   createCombat,
+  worldOf,
   zoneFullReason,
   type Carry,
   type Combat,
@@ -79,6 +80,8 @@ export interface ZoneRoomOptions {
   autoRespawnSeconds: number;
   /** Test-only: the wall clock (ms) the movement checks and budgets use (default Date.now). */
   wallClock?: () => number;
+  /** Test-only: how long a failed respawn save waits before it is tried again (ms; default 5000). */
+  respawnRetryMs?: number;
 }
 
 /** Where the dead get up again: the statue in this zone. */
@@ -274,6 +277,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** Failures caught in steps and handlers since the room started (stats). */
   stepErrors = 0;
   private wallMs!: () => number;
+  private respawnRetryMs!: number;
+  private disposed = false;
   /** The combat clock at the engine's last tick. */
   private lastTickAt = 0;
   /** Enemy and telegraph state keys, by engine id. */
@@ -305,6 +310,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.isExitOpen = options.isExitOpen;
     this.autoRespawnSeconds = options.autoRespawnSeconds;
     this.wallMs = options.wallClock ?? Date.now;
+    this.respawnRetryMs = options.respawnRetryMs ?? RESPAWN_RETRY_MS;
     const createdAt = performance.now();
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
@@ -445,6 +451,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   async onDispose() {
+    this.disposed = true;
     if (this.rooms.get(this.zone.id) === this) this.rooms.delete(this.zone.id);
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.removeSession(sessionId)));
   }
@@ -595,9 +602,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * dodge refused as 'stale'. It must carry the latest ack, or the one before when the latest
    * displacement was this client's own dodge (a client that predicts its rolls sends the second
    * before the first's `displaced` reaches it; its pose is then checked from the first roll's end).
-   * One arriving just inside the minimum gap (network jitter) is held until the gap has passed. The
-   * engine then rolls from the accepted pose and the room stamps the result on the next step; if
-   * the engine refuses it, the refusal is followed by a `correct` to that pose.
+   * One arriving up to DODGE_GAP_TOLERANCE_S before its minimum gap or its next charge (network
+   * jitter) is held until then; one arriving earlier than that is refused ('cooldown' or 'charges')
+   * before its pose is taken, with no correction, so mashing the button while empty never piles up
+   * corrections. Otherwise the engine rolls from the accepted pose and the room stamps the result on
+   * the next step; if the engine refuses it (busy, in the air, ...), the refusal is followed by a
+   * `correct` to that pose. For the client every refused dodge means the same: back to the pose it
+   * was sent from (then any `correct`, as always).
    */
   private onDodge(client: Client, message: unknown) {
     const session = this.actor(client);
@@ -606,13 +617,24 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (!session || !pose || !finite(dx) || !finite(dz) || Math.abs(dx) > 1e6 || Math.abs(dz) > 1e6) return;
     if (session.dead) return this.refuse(session, 'dodge', 'dead');
     const ownRollBefore = pose.ack === session.displaceSeq - 1 && session.lastDisplaceKind === 'dodge';
-    if (session.awaitingDisplace || (pose.ack !== session.displaceSeq && !ownRollBefore)) return this.refuse(session, 'dodge', 'stale');
+    // A dodge still held (not rolled yet) gives way to a newer press: the latest press is the one rolled.
+    const replacing = session.pendingDodge !== undefined;
+    if ((session.awaitingDisplace && !replacing) || (pose.ack !== session.displaceSeq && !ownRollBefore)) return this.refuse(session, 'dodge', 'stale');
+    if (replacing) {
+      session.pendingDodge = undefined;
+      session.awaitingDisplace = false;
+    }
+    const now = this.nowS();
+    // The engine's view is computed at its own latest time (the last tick or intent): the refill is
+    // that much nearer now.
+    const view = this.combat.self(session.eid);
+    const stale = Math.max(0, now - worldOf(this.combat).now);
+    const gapWait = session.lastDodgeAt + DODGE_MIN_GAP_S - now;
+    const chargeWait = view && view.dodgeCharges <= 0 ? Math.max(0, view.dodgeNextIn - stale) : 0;
+    if (chargeWait > DODGE_GAP_TOLERANCE_S) return this.refuse(session, 'dodge', 'charges');
+    if (gapWait > DODGE_GAP_TOLERANCE_S) return this.refuse(session, 'dodge', 'cooldown');
     if (!this.acceptPose(session, pose, this.wallMs())) return this.refuse(session, 'dodge', 'stale');
     if (session.travelling) return;
-    const now = this.nowS();
-    const view = this.combat.self(session.eid);
-    const gapWait = session.lastDodgeAt + DODGE_MIN_GAP_S - now;
-    const chargeWait = view && view.dodgeCharges <= 0 ? view.dodgeNextIn : 0;
     const wait = Math.max(gapWait, chargeWait);
     if (wait > 1e-6 && wait <= DODGE_GAP_TOLERANCE_S) {
       session.pendingDodge = { dx, dz, due: now + wait + 1e-6 };
@@ -683,7 +705,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           await this.sendOn(session);
           return;
         }
-        if (respawn) session.respawnRetryAt = this.wallMs() + RESPAWN_RETRY_MS; // the store is down: not every step
+        if (respawn) session.respawnRetryAt = this.wallMs() + this.respawnRetryMs; // the store is down: not every step
         if (!respawn) {
           session.lastGood = before;
           Object.assign(session.player, before, { moving: false });
@@ -694,7 +716,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         return;
       }
       // Died while the travel was being saved (alive, in the next zone): saved again, as respawned.
-      if (session.dead && !respawn) await this.save(session, undefined, exit.to);
+      // Never left saved alive: tried again (with the respawn backoff) until written or no longer there.
+      if (session.dead && !respawn) {
+        while ((await this.save(session, undefined, exit.to)) === 'failed' && !this.disposed) {
+          await new Promise((resolve) => setTimeout(resolve, this.respawnRetryMs));
+        }
+      }
       // Its height here means nothing there: it arrives standing (the next room's join places it).
       session.movement.zone = exit.to;
       await this.removeSession(sessionId, { save: false });

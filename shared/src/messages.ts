@@ -32,7 +32,14 @@ export type C2S = {
   ability: { slot: number; phase: 'press' | 'release' };
   /** Blade ⇄ Bow (only out of combat). */
   swap: Record<string, never>;
-  /** A dodge roll: the pose it starts from (checked like a move; its ack must be the latest displacement) and a direction. */
+  /**
+   * A dodge roll: the pose it starts from (checked like a move) and a direction. Its ack must be the
+   * latest displacement's seq, or the one before while the latest displacement was this client's own
+   * dodge (a predicted double roll). A dodge arriving up to 0.15 s before its minimum gap or its next
+   * charge is held and rolled then (never closer than 0.4 s to the last roll); a held dodge is
+   * dropped silently by a knock or a death (the client rolls back from `displaced` or the death).
+   * Any refused dodge means: back to the pose it was sent from (then any `correct`, as always).
+   */
   dodge: Pose & { dx: number; dz: number };
   /** The two free picks (only out of combat). */
   loadout: { free: [AbilityId, AbilityId] };
@@ -70,10 +77,11 @@ export type S2C = {
    */
   displaced: { seq: number; kind: 'dodge' | 'knock' | 'resync'; from: { x: number; z: number; y: number }; d: Displacement; to: { x: number; z: number; y: number } };
   /**
-   * An intent the server refused. 'stale': a dodge with an old ack, or whose pose was refused (a
-   * `correct` came first). 'rate': more intents than the intent budget (20 a second, bursts of 30).
-   * A dodge refused after its pose was accepted (cooldown, charges, ...) is always followed by a
-   * `correct` to the pose it started from: the one rollback path for a predicted roll.
+   * An intent the server refused. For a dodge: 'stale' alone for a bad ack; `correct` then 'stale'
+   * when its pose was refused; 'cooldown' or 'charges' alone when it came too early to be held (its
+   * pose not taken); and a refusal from the engine after its pose was taken (busy, air, ...) is
+   * followed by a `correct` to that pose. 'rate': more intents than the intent budget (20 a second,
+   * bursts of 30).
    */
   refused: { action: IntentAction; reason: Refusal | 'stale' | 'rate' };
   /** The adventurer's own combat numbers, at most 5 times a second, only when they changed. */

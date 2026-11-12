@@ -315,6 +315,7 @@ describe('dodge', () => {
     a.room.send('move', { ...pose(d.to.x + 0.4, d.to.z, 1), moving: true });
     await waitFor(() => me(a.room).x === d.to.x + 0.4);
     expect(corrections).toEqual([]);
+    await sleep(450); // past the minimum gap (an earlier one is refused 'cooldown' before its pose is looked at)
     a.room.send('dodge', { ...pose(d.to.x + 20, d.to.z, 1), dx: 1, dz: 0 });
     await waitFor(() => refused.length > 0);
     expect(refused).toEqual([{ action: 'dodge', reason: 'stale' }]);
@@ -501,7 +502,18 @@ describe('dodges at higher latency (fix round 1)', () => {
     expect(refused).toEqual([]);
   });
 
-  it('a dodge the engine refuses after its pose was accepted comes back refused with a correct to that pose', async () => {
+  it('a dodge the engine refuses after its pose was accepted (in the air) comes back refused with a correct', async () => {
+    const { url, store } = await start(grove([]));
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const refused = collect(a.room, 'refused');
+    const corrections = collect(a.room, 'correct');
+    a.room.send('dodge', { ...pose(SPAWN.x + 0.2, SPAWN.z), y: 0.5, dx: 1, dz: 0 }); // just jumped
+    await waitFor(() => refused.length === 1);
+    expect(refused).toEqual([{ action: 'dodge', reason: 'air' }]);
+    expect(corrections).toEqual([{ x: SPAWN.x + 0.2, z: SPAWN.z, y: 0 }]); // landed below the pose it was sent from
+  });
+
+  it('a dodge too early to be held is refused (cooldown, charges) without its pose being taken and without a correct', async () => {
     const clock = testClock(0);
     const { url, store } = await start({ ...grove([]), combatClock: clock.now });
     const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
@@ -514,18 +526,43 @@ describe('dodges at higher latency (fix round 1)', () => {
     clock.skip(0.1); // still rolling
     a.room.send('dodge', { ...pose(end.x + 0.2, end.z, 1), dx: 0, dz: 1 });
     await waitFor(() => refused.length === 1);
-    expect(refused).toEqual([{ action: 'dodge', reason: 'busy' }]);
-    expect(corrections).toEqual([{ x: end.x + 0.2, z: end.z, y: 0 }]);
-    // and out of charges
+    expect(refused).toEqual([{ action: 'dodge', reason: 'cooldown' }]);
     clock.skip(0.5);
     a.room.send('dodge', { ...pose(end.x + 0.2, end.z, 1), dx: 0, dz: 1 });
     await waitFor(() => displaced.length === 2);
     clock.skip(0.5);
     const end2 = displaced[1].to;
-    a.room.send('dodge', { ...pose(end2.x, end2.z, 2), dx: 0, dz: -1 });
-    await waitFor(() => refused.length === 2);
-    expect(refused[1]).toEqual({ action: 'dodge', reason: 'charges' });
-    expect(corrections[1]).toEqual({ x: end2.x, z: end2.z, y: 0 });
+    for (let i = 0; i < 5; i++) a.room.send('dodge', { ...pose(end2.x, end2.z, 2), dx: 0, dz: -1 }); // mashing while empty
+    await waitFor(() => refused.length === 6);
+    expect(refused.slice(1)).toEqual(Array(5).fill({ action: 'dodge', reason: 'charges' }));
+    expect(corrections).toEqual([]);
+  });
+
+  it('a dodge 0.12 s before a charge is back is held even when the engine\'s view is a step old', async () => {
+    const clock = testClock(0);
+    const { url, store } = await start({ ...grove([]), combatClock: clock.now });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const room = serverRoom(a.room) as any;
+    const displaced = collect(a.room, 'displaced');
+    const refused = collect(a.room, 'refused');
+    a.room.send('dodge', { ...pose(SPAWN.x, SPAWN.z), dx: 1, dz: 0 });
+    await waitFor(() => displaced.length === 1);
+    clock.skip(0.45);
+    a.room.send('dodge', { ...pose(displaced[0].to.x, displaced[0].to.z, 1), dx: 0, dz: 1 });
+    await waitFor(() => displaced.length === 2);
+    room.setSimulationInterval(undefined); // steps by hand from here: the engine's clock stays behind
+    const firstAt = 0; // the first roll's refill is due 5 s after it
+    clock.skip(5 - 0.45 - 0.12 - firstAt);
+    const end = displaced[1].to;
+    a.room.send('dodge', { ...pose(end.x, end.z, 2), dx: -1, dz: 0 });
+    await sleep(100);
+    expect(refused).toEqual([]);
+    expect(sessionOf(a.room).pendingDodge).toBeDefined();
+    clock.skip(0.2);
+    room.step();
+    room.step();
+    await waitFor(() => displaced.length === 3);
+    expect(refused).toEqual([]);
   });
 
   it('a displacement while away is sent again on reconnecting', async () => {
@@ -680,6 +717,34 @@ describe('respawn saves (fix round 1)', () => {
     release();
     await waitFor(() => travels.length > 0);
     await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).zone === 'grove');
+    expect(await store.getOrCreateAdventurer(a.accountId)).toMatchObject({ zone: 'grove', x: SPAWN.x, z: SPAWN.z, hp: 100 });
+  });
+
+  it('a failed re-save of a death during a travel is tried again until it is written', async () => {
+    const base = createMemoryStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let failures = 1;
+    const store: Store = Object.assign(Object.create(base), {
+      saveAdventurer: async (a: any, expect?: any) => {
+        if (a.zone === 'greenway') await gate;
+        if (expect?.zone === 'greenway' && a.zone === 'grove' && failures > 0) { failures--; throw new Error('db blip'); }
+        return base.saveAdventurer(a, expect);
+      },
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = { to: 'greenway' as const, x: 0, z: -15, r: 1.5, arrive: { ...zoneDef('greenway').spawn }, open: true };
+    const { url } = await start({ store, zones: { grove: { ...flatZone([]), exits: [exit] } }, respawnRetryMs: 50 });
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    await walk(a.room, { x: 0, z: SPAWN.z }, { x: 0, z: -13.6 }, flat);
+    await waitFor(() => sessionOf(a.room)?.travelling !== undefined);
+    const w = worldOf((serverRoom(a.room) as any).combat);
+    killAdventurer(w, w.adventurers.get(me(a.room).eid)!, 1);
+    await waitFor(() => sessionOf(a.room).dead === true);
+    const travels = collect(a.room, 'travel');
+    release();
+    await waitFor(() => travels.length > 0); // sent only once the re-save is written
+    expect(failures).toBe(0);
     expect(await store.getOrCreateAdventurer(a.accountId)).toMatchObject({ zone: 'grove', x: SPAWN.x, z: SPAWN.z, hp: 100 });
   });
 

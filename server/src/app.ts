@@ -33,6 +33,8 @@ export interface AppOptions {
   autoRespawnSeconds?: number;
   /** Test-only: the wall clock (ms) the rooms' movement checks and budgets use (default Date.now). */
   wallClock?: () => number;
+  /** Test-only: how long a failed respawn save waits before it is tried again (ms; default 5000). */
+  respawnRetryMs?: number;
 }
 
 export interface App {
@@ -116,6 +118,7 @@ export function createApp(opts: AppOptions): App {
       combatClock: opts.combatClock,
       autoRespawnSeconds: opts.autoRespawnSeconds ?? AUTO_RESPAWN_S,
       wallClock: opts.wallClock,
+      respawnRetryMs: opts.respawnRetryMs,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }

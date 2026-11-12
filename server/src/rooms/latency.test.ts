@@ -7,7 +7,7 @@ import { appendFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DISPLACE_FUZZ_M, DODGE_CHARGES, DODGE_DISTANCE, DODGE_MIN_GAP_S, DODGE_REFILL_S, MAX_MOVE_ALLOWANCE, MAX_MOVE_SPEED, RUN_SPEED, SPAWN, TICK_HZ,
-  dodgeDisplacement, makeBody, simulateDisplacement, stepBody, type Body, type CampSpawn, type Surface,
+  SPRINT_SCALE, SPRINT_S, dodgeDisplacement, makeBody, simulateDisplacement, stepBody, type Body, type CampSpawn, type Surface,
 } from '@sg2/shared';
 import { accountFor, joinZone, saveAs, serverRoom, startServer, type TestServer } from './testHelpers';
 
@@ -17,7 +17,14 @@ afterEach(async () => {
   server = undefined;
 });
 
-const flat: Surface = (x, z) => (Math.hypot(x, z) > 200 ? null : 0);
+const flatGround: Surface = (x, z) => (Math.hypot(x, z) > 200 ? null : 0);
+/** Flat ground with, east of x = 2, a 1:4 slope up to a 1 m shelf (x 6..9) that ends in a 1 m ledge. */
+const ledgeGround: Surface = (x, z) => {
+  if (Math.hypot(x, z) > 200) return null;
+  if (x > 2 && x < 6) return (x - 2) * 0.25;
+  if (x >= 6 && x < 9) return 1;
+  return 0;
+};
 const BOAR: CampSpawn = { kind: 'boar', x: 0, z: -20, facing: 0 };
 
 function rng(seed: number) {
@@ -59,6 +66,11 @@ interface Run {
   /** Second dodges sent exactly DODGE_MIN_GAP_S after the first (by the client's clock). */
   doubles: number;
   dodgesRolled: number;
+  /** Mash mode: presses sent while empty, and the rolls that came of them (held ones). */
+  mashes: number;
+  /** The highest speed scale the server gave it (sprint). */
+  maxScale: number;
+  mashRolls: number;
   knocks: number;
   /** Server-side accepted path (lastGood), and the virtual seconds run. */
   serverPath: number;
@@ -70,8 +82,19 @@ interface Run {
  * two jittery channels. The honest client runs about at RUN_SPEED, jumps, dodges (sometimes twice at
  * the minimum gap) and predicts each roll; the cheater sends far moves and dodges with made-up acks.
  */
-async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: number; seconds: number; boar: boolean; cheat?: boolean }): Promise<Run> {
+async function fuzz(o: {
+  seed: number; fps: number; rttMs: number; jitterMs: number; seconds: number; boar: boolean; cheat?: boolean;
+  /** The ground (flat by default). */
+  surface?: Surface;
+  /** Dodge on the first frame the client's own count allows (a charge back, the minimum gap passed). */
+  eager?: boolean;
+  /** While its own count says it is empty, press dodge every send tick anyway (without predicting a roll). */
+  mash?: boolean;
+  /** Sprint (free pick) once, a second in, running at RUN_SPEED × SPRINT_SCALE for SPRINT_S. */
+  sprint?: boolean;
+}): Promise<Run> {
   const clock = { ms: 0 };
+  const flat = o.surface ?? flatGround;
   server = await startServer({
     combatSeed: o.seed, combatClock: () => clock.ms / 1000, wallClock: () => clock.ms,
     zones: { grove: { surface: flat, ground: flat, sight: () => true, camps: o.boar ? [BOAR] : [] } },
@@ -79,7 +102,7 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
   const { store, url } = server;
   const account = await accountFor(store, `Fuzz${o.seed}`);
   const start = { x: 0, z: -13 };
-  await saveAs(store, account.accountId, { ...start, facing: 0 });
+  await saveAs(store, account.accountId, { ...start, facing: 0, ...(o.sprint ? { loadout: { weapon: 'blade', free: ['sprint', 'mend'] } } : {}) });
   const { room: sdkRoom } = await joinZone(url, account.token, 'grove');
   const room = serverRoom(sdkRoom) as any;
   room.setSimulationInterval(undefined); // stepped by hand, on the virtual clock
@@ -90,14 +113,15 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
   session.client = client;
   session.movement.metres = MAX_MOVE_ALLOWANCE; // as after standing a second
 
-  const out: Run = { corrections: 0, wrongRefusals: [], excusedRefusals: 0, dodgesSent: 0, doubles: 0, dodgesRolled: 0, knocks: 0, serverPath: 0, seconds: o.seconds };
+  const out: Run = { corrections: 0, wrongRefusals: [], excusedRefusals: 0, dodgesSent: 0, doubles: 0, dodgesRolled: 0, mashes: 0, mashRolls: 0, maxScale: 1, knocks: 0, serverPath: 0, seconds: o.seconds };
   let body: Body = makeBody(start.x, start.z, flat);
   let ack = 0, heading = r() * 2 * Math.PI;
   let rollUntil = -Infinity;
   let rollEnd = null as { x: number; z: number; y: number } | null;
   let charges = DODGE_CHARGES, refillAt: number | null = null, lastDodge = -Infinity, secondAt: number | null = null;
   let standing = false, phaseUntil = 0;
-  let quietUntil = 0; // no dodges for a while after a knock (the server holds it 'knock' until it ends)
+  let quietUntil = 0;
+  let predicted = 0, nextMash = 0, sprintAt: number | null = null; // no dodges for a while after a knock (the server holds it 'knock' until it ends)
   const knockTimes: number[] = [];
   let last = { ...session.lastGood };
   const frameMs = 1000 / o.fps, stepMs = 1000 / TICK_HZ;
@@ -108,6 +132,7 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
     const from = { x: body.x, z: body.z, y: body.y };
     up.push(t, 'dodge', { ...from, facing: heading, moving: true, ack, dx: Math.sin(dir), dz: Math.cos(dir) });
     out.dodgesSent++;
+    predicted++;
     const result = simulateDisplacement(from, dodgeDisplacement(Math.sin(dir), Math.cos(dir)), flat);
     rollUntil = t + result.seconds * 1000;
     rollEnd = { x: result.x, z: result.z, y: result.y };
@@ -130,15 +155,18 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
           rollEnd = null;
           secondAt = null;
           quietUntil = t + 1500;
+          predicted = 0;
         } else if (m.msg.kind === 'dodge') {
           out.dodgesRolled++;
+          if (predicted > 0) predicted--;
+          else { out.mashRolls++; body = makeBody(m.msg.to.x, m.msg.to.z, flat); } // a roll it pressed for while empty: taken as it comes
         }
       } else if (m.type === 'correct') {
         out.corrections++;
         body = makeBody(m.msg.x, m.msg.z, flat);
         body.y = m.msg.y;
       } else if (m.type === 'refused' && m.msg.action === 'dodge') {
-        const excused = knockTimes.some((k) => t - k < 2000) || session.dead;
+        const excused = knockTimes.some((k) => t - k < 2000) || session.dead || o.mash;
         if (!excused) out.wrongRefusals.push(`${m.msg.reason} at ${t} ms`);
         else out.excusedRefusals++;
       }
@@ -146,6 +174,7 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
     // client → server
     for (const m of up.due(t)) {
       if (m.type === 'move') room.onMove(client, m.msg);
+      else if (m.type === 'ability') room.onAbility(client, m.msg);
       else room.onDodge(client, m.msg);
       const g = session.lastGood;
       out.serverPath += Math.hypot(g.x - last.x, g.z - last.z);
@@ -154,6 +183,7 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
     if (t >= nextStep) {
       nextStep += stepMs;
       room.step();
+      out.maxScale = Math.max(out.maxScale, room.combat.speedScale(session.eid, t / 1000));
       const g = session.lastGood;
       out.serverPath += Math.hypot(g.x - last.x, g.z - last.z);
       last = { ...g };
@@ -181,14 +211,22 @@ async function fuzz(o: { seed: number; fps: number; rttMs: number; jitterMs: num
       const home = Math.hypot(body.x - start.x, body.z - start.z) > 10;
       heading = home ? Math.atan2(start.x - body.x, start.z - body.z) : heading + (r() - 0.5) * 0.3;
       const jump = body.grounded && r() < (standing ? 0.04 : 0.02);
-      const speed = standing ? 0 : RUN_SPEED;
+      if (o.sprint && sprintAt === null && t >= 1000) { sprintAt = t; up.push(t, 'ability', { slot: 3, phase: 'press' }); }
+      const sprinting = sprintAt !== null && t < sprintAt + SPRINT_S * 1000;
+      if (sprinting) standing = false;
+      const speed = standing ? 0 : RUN_SPEED * (sprinting ? SPRINT_SCALE : 1);
       stepBody(body, { vx: Math.sin(heading) * speed, vz: Math.cos(heading) * speed, jump }, frameMs / 1000, flat);
       const canDodge = body.grounded && charges > 0 && t - lastDodge >= DODGE_MIN_GAP_S * 1000 && t >= quietUntil && t < o.seconds * 1000 - 1500;
       if (secondAt !== null && t >= secondAt) {
         secondAt = null;
         if (canDodge) { dodgeNow(t); out.doubles++; continue; }
       }
-      if (canDodge && r() < frameMs / 1000) { // about once a second, whenever a charge allows
+      if (o.mash && charges === 0 && t >= nextMash && body.grounded && t < o.seconds * 1000 - 1500) {
+        nextMash = t + stepMs; // pressed while empty: sent, not predicted
+        up.push(t, 'dodge', { x: body.x, z: body.z, y: body.y, facing: heading, moving: true, ack, dx: 1, dz: 0 });
+        out.mashes++;
+      }
+      if (canDodge && (o.eager || r() < frameMs / 1000)) { // about once a second (eager: at once), whenever a charge allows
         dodgeNow(t);
         if (charges > 0 && r() < 0.7) secondAt = t + DODGE_MIN_GAP_S * 1000; // the double dodge, at the minimum gap
         continue;
@@ -225,6 +263,34 @@ describe('dodges and knockbacks over a slow, jittery network', () => {
     expect(totals.dodges).toBeGreaterThan(50);
     expect(totals.doubles).toBeGreaterThan(10);
     expect(totals.knocks).toBeGreaterThan(5);
+  });
+
+  it.each([
+    { name: 'a slope, a shelf and a ledge', surface: ledgeGround, fps: 30, rttMs: 0 },
+    { name: 'a slope, a shelf and a ledge', surface: ledgeGround, fps: 30, rttMs: 400 },
+    { name: 'a slope, a shelf and a ledge', surface: ledgeGround, fps: 60, rttMs: 150 },
+    { name: 'sprinting', sprint: true, fps: 60, rttMs: 150 },
+    { name: 'sprinting', sprint: true, fps: 15, rttMs: 400 },
+    { name: 'dodging the first frame its own count allows', eager: true, fps: 15, rttMs: 0 },
+    { name: 'dodging the first frame its own count allows', eager: true, fps: 60, rttMs: 400 },
+    { name: 'dodging the first frame its own count allows', eager: true, fps: 30, rttMs: 150 },
+  ])('honest, $name, at $fps fps and $rttMs ms: never corrected, no dodge refused', async (c) => {
+    const run = await fuzz({ seed: 31 + c.fps + c.rttMs, jitterMs: 60, seconds: 15, boar: true, ...c });
+    if (process.env.FUZZ_LOG) appendFileSync(process.env.FUZZ_LOG, `${c.name} ${c.fps} ${c.rttMs}: ${JSON.stringify(run)}\n`);
+    expect(run.corrections).toBe(0);
+    expect(run.wrongRefusals).toEqual([]);
+    expect(run.dodgesRolled).toBe(run.dodgesSent - run.excusedRefusals);
+    if (c.sprint) expect(run.maxScale).toBeGreaterThan(1.3); // it really sprinted, and ran faster
+    if (c.eager) expect(run.dodgesSent).toBeGreaterThanOrEqual(DODGE_CHARGES + 2); // two at once, then each refill as it comes
+  });
+
+  it.each([0, 150, 400].flatMap((rttMs) => [1, 2, 3].map((seed) => ({ rttMs, seed }))))('mashing dodge while empty at $rttMs ms (seed $seed): at most one roll per charge, no corrections', async ({ rttMs, seed }) => {
+    const run = await fuzz({ seed: 51 + rttMs + seed * 1000, fps: [15, 30, 60][seed - 1], rttMs, jitterMs: 60, seconds: 15, boar: false, eager: true, mash: true });
+    if (process.env.FUZZ_LOG) appendFileSync(process.env.FUZZ_LOG, `mash ${rttMs}: ${JSON.stringify(run)}\n`);
+    expect(run.corrections).toBe(0);
+    expect(run.mashes).toBeGreaterThan(10);
+    expect(run.dodgesRolled).toBeLessThanOrEqual(DODGE_CHARGES + Math.ceil(run.seconds / DODGE_REFILL_S));
+    expect(run.dodgesRolled).toBeGreaterThanOrEqual(run.dodgesSent - run.mashRolls - 1);
   });
 
   it.each([0, 400])('a cheater (ack games, dodge spam, far moves) at %i ms gains no distance beyond its rolls', async (rttMs) => {
