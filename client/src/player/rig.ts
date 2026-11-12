@@ -11,7 +11,7 @@
 import { Scene, ArcRotateCamera, Vector3, Plane, type AbstractMesh, type Node } from '@babylonjs/core';
 import type { CreatePlayerRig, PlayerRig, PlayerRigOpts, TapInfo } from '../core/contracts';
 import { makeCharacter } from './character';
-import { RUN_SPEED, STEP_UP, makeBody, stepBody, type Body, type Surface } from '@sg2/shared';
+import { RUN_SPEED, STEP_UP, makeBody, simulateDisplacement, stepBody, type Body, type Displacement, type Surface } from '@sg2/shared';
 
 const ACCEL = 14;             // exponential approach rate toward target velocity (1/s)
 const TURN_RATE = 12;         // rad/s max turn speed
@@ -22,6 +22,7 @@ const MIN_RADIUS = 7, MAX_RADIUS = 34;
 const TAP_MS = 300;
 const ROT_SENS = 0.0065;      // rad per CSS pixel
 const TARGET_LIFT = 1.8;      // camera looks at chest height
+const PORTRAIT_SHIFT = 2.6;   // view-space shift of the framing on narrow portrait screens (m at the target)
 
 const wrapAngle = (a: number) => { a = (a + Math.PI) % (Math.PI * 2); if (a < 0) a += Math.PI * 2; return a - Math.PI; };
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
@@ -50,6 +51,8 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
   const doJump = () => { if (moveScale > 0 && !cinematic) jumpWanted = true; };
   const vel = { x: 0, z: 0 };
   let running = false;
+  /** A displacement playing (a dodge or a knockback): its path samples and the time into it. */
+  let disp: { path: { t: number; x: number; z: number; y: number }[]; t: number } | null = null;
 
   // camera
   let alphaGoal = -Math.PI / 2, betaGoal = DEFAULT_BETA, radiusGoal = DEFAULT_RADIUS;
@@ -59,6 +62,13 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
   camera.inputs.clear();          // we drive the camera ourselves
   camera.fov = 0.8;
   if (!scene.activeCamera) scene.activeCamera = camera;
+  // Narrow portrait phones: the thumb cluster fills the lower right, so the adventurer is framed higher up the screen.
+  const frame = () => {
+    const portrait = innerHeight > innerWidth && innerWidth <= 700;
+    camera.targetScreenOffset.set(0, portrait ? PORTRAIT_SHIFT : 0);
+  };
+  frame();
+  window.addEventListener('resize', frame);
 
   const alphaBehind = (f: number) => Math.atan2(-Math.cos(f), -Math.sin(f));
 
@@ -182,6 +192,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
     get moving() { return moving; },
     get body() { return body; },
     teleport(pos: Vector3, f: number) {
+      disp = null;
       body = makeBody(pos.x, pos.z, surface);
       if (surface(pos.x, pos.z) === null) body.y = body.peakY = pos.y;
       position.set(body.x, body.y, body.z);
@@ -197,6 +208,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       }
     },
     place(pos: Vector3) {
+      disp = null;
       // Where the server says the adventurer is: on the surface if the height is on (or under) it, else in the
       // air there, falling from rest. Facing and camera angle stay; the camera target follows as usual.
       body = makeBody(pos.x, pos.z, surface);
@@ -208,7 +220,19 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       vel.x = vel.z = 0;
       view.root.position.copyFrom(position);
     },
-    setMoveScale(s: number) { moveScale = clamp(s, 0, 1); },
+    setMoveScale(s: number) { moveScale = clamp(Number.isFinite(s) ? s : 0, 0, 1.5); },
+    get displacing() { return disp !== null; },
+    displace(from, d: Displacement) {
+      // the shared simulation from `from`: the server ran the same and ends the body at the same point
+      const r = simulateDisplacement(from, d, surface);
+      disp = { path: r.path, t: 0 };
+      body = makeBody(from.x, from.z, surface);
+      const g = surface(from.x, from.z);
+      if (g === null || from.y > g + 0.05) Object.assign(body, { y: from.y, peakY: from.y, grounded: g === null });
+      position.set(body.x, body.y, body.z);
+      jumpWanted = false;
+      vel.x = vel.z = 0;
+    },
     faceTowards(x: number, z: number) {
       const dx = x - position.x, dz = z - position.z;
       if (dx * dx + dz * dz > 1e-6) facingGoal = Math.atan2(dx, dz);
@@ -238,11 +262,29 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       if (moveScale === 0) { vel.x = vel.z = 0; }
 
       // the shared controller: walk (sliding along whatever blocks), step, jump, fall
-      const jump = jumpWanted && moveScale > 0 && !cinematic;
+      const jump = jumpWanted && moveScale > 0 && !cinematic && !disp;
       jumpWanted = false;
       const x0 = body.x, z0 = body.z;
-      const res = stepBody(body, { vx: vel.x, vz: vel.z, jump }, dt, surface);
-      if (dt > 0) {
+      let res: { landed: boolean; drop: number } = { landed: false, drop: 0 };
+      if (disp) {
+        // a displacement plays its path, input ignored; at its end the body stands where the path ends
+        disp.t += dt;
+        const path = disp.path, last = path[path.length - 1];
+        let i = 1;
+        while (i < path.length - 1 && path[i].t < disp.t) i++;
+        const a = path[i - 1] ?? last, b = path[i] ?? last;
+        const k = b.t > a.t ? Math.min(1, Math.max(0, (disp.t - a.t) / (b.t - a.t))) : 1;
+        const x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k, z = a.z + (b.z - a.z) * k;
+        if (disp.t >= last.t) {
+          body = makeBody(last.x, last.z, surface);
+          const g = surface(last.x, last.z);
+          if (g === null || last.y > g + 0.05) Object.assign(body, { y: last.y, peakY: last.y, grounded: g === null });
+          disp = null;
+        } else Object.assign(body, { x, y, z, vy: 0, grounded: false, peakY: y });
+        vel.x = vel.z = 0;
+        moving = false;
+      } else res = stepBody(body, { vx: vel.x, vz: vel.z, jump }, dt, surface);
+      if (dt > 0 && !disp) {
         // keep only the velocity that was actually achieved (blocked or sliding along a wall)
         const ax = (body.x - x0) / dt, az = (body.z - z0) / dt;
         if (Math.abs(ax - vel.x) > 1e-3) vel.x = ax;
@@ -286,6 +328,7 @@ export const createPlayerRig: CreatePlayerRig = (scene: Scene, opts: PlayerRigOp
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
+      window.removeEventListener('resize', frame);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);

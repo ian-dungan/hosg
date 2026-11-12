@@ -155,17 +155,17 @@ export class Overlays {
   }
 
   // ───────────── loadout ─────────────
-  loadout(pool: AbilityDef[], current: string[], weapon: WeaponId): Promise<string[]> {
+  loadout(pool: AbilityDef[], current: string[], weapon: WeaponId, count = 5): Promise<string[]> {
     return new Promise((resolve) => {
-      const chosen = current.filter((id) => pool.some((a) => a.id === id)).slice(0, 5);
+      const chosen = current.filter((id) => pool.some((a) => a.id === id)).slice(0, count);
       const root = h('div', 'sg-modal sg-ctl', this.layer);
       const panel = h('div', 'sg-panel sg-loadout', root);
       const head = h('div', 'sg-panel-head', panel);
       h('div', 'sg-panel-title', head, 'Loadout');
-      h('div', 'sg-panel-sub', head, `Choose five abilities · wielding ${weapon === 'blade' ? 'Blade' : 'Bow'}`);
+      h('div', 'sg-panel-sub', head, `Choose ${count === 5 ? 'five' : count === 2 ? 'two' : count} abilities · wielding ${weapon === 'blade' ? 'Blade' : 'Bow'}`);
       const grid = h('div', 'sg-lo-grid', panel);
       const foot = h('div', 'sg-panel-foot', panel);
-      const count = h('div', 'sg-lo-count', foot);
+      const countEl = h('div', 'sg-lo-count', foot);
       const cancel = h('div', 'sg-btn', foot, 'Cancel');
       const ok = h('div', 'sg-btn sg-btn-gold', foot, 'Confirm');
       const cards = pool.map((a) => {
@@ -184,8 +184,8 @@ export class Overlays {
         c.addEventListener('click', () => {
           const i = chosen.indexOf(a.id);
           if (i >= 0) chosen.splice(i, 1);
-          else if (chosen.length < 5) chosen.push(a.id);
-          else count.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'none' }], { duration: 240 });
+          else if (chosen.length < count) chosen.push(a.id);
+          else countEl.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'none' }], { duration: 240 });
           refresh();
         });
         return { a, c, badge };
@@ -196,16 +196,16 @@ export class Overlays {
           c.classList.toggle('sel', i >= 0);
           badge.textContent = i >= 0 ? String(i + 1) : '';
         }
-        count.textContent = `${chosen.length} / 5 chosen`;
-        ok.classList.toggle('disabled', chosen.length !== 5);
+        countEl.textContent = `${chosen.length} / ${count} chosen`;
+        ok.classList.toggle('disabled', chosen.length !== count);
       };
       const done = (ids: string[]) => { off(); this.close(root); resolve(ids); };
-      ok.addEventListener('click', () => { if (chosen.length === 5) done(chosen.slice()); });
+      ok.addEventListener('click', () => { if (chosen.length === count) done(chosen.slice()); });
       cancel.addEventListener('click', () => done(current.slice()));
       root.addEventListener('pointerdown', (e) => e.stopPropagation());
       const off = this.push('loadout', (e) => {
         if (e.code === 'Escape' || e.code === 'KeyL') done(current.slice());
-        else if (e.code === 'Enter' && chosen.length === 5) done(chosen.slice());
+        else if (e.code === 'Enter' && chosen.length === count) done(chosen.slice());
         return true;
       });
       refresh();
@@ -214,7 +214,9 @@ export class Overlays {
   }
 
   // ───────────── end screen ─────────────
-  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[]): Promise<number> {
+  private endDone: ((i: number) => void) | null = null;
+  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts: { countdown?: { seconds: number; text: string }; waitS?: number } = {}): Promise<number> {
+    this.endDone?.(-1); // one end screen at a time
     return new Promise((resolve) => {
       const root = h('div', 'sg-end sg-ctl ' + kind, this.layer);
       const box = h('div', 'sg-end-box', root);
@@ -222,14 +224,27 @@ export class Overlays {
       h('div', 'sg-end-rule', box);
       for (const l of lines) h('div', 'sg-end-line', box, l);
       const row = h('div', 'sg-end-btns', box);
+      const t0 = performance.now();
+      let awake = !(opts.waitS && opts.waitS > 0);
       const btns = (buttons.length ? buttons : ['Continue']).map((b, i) => {
-        const el = h('div', 'sg-btn' + (i === 0 ? ' sg-btn-gold' : ''), row, b);
-        el.addEventListener('click', () => done(i));
+        const el = h('div', 'sg-btn sg-end-btn' + (i === 0 ? ' sg-btn-gold' : '') + (awake ? '' : ' waiting'), row, b);
+        el.addEventListener('click', () => { if (awake) done(i); });
         return el;
       });
-      const done = (i: number) => { off(); this.close(root); resolve(i); };
+      const cd = opts.countdown ? h('div', 'sg-end-count', box) : null;
+      let timer = 0;
+      const tick = () => {
+        const el = (performance.now() - t0) / 1000;
+        if (!awake && el >= (opts.waitS ?? 0)) { awake = true; for (const b of btns) b.classList.remove('waiting'); }
+        if (cd && opts.countdown) cd.textContent = opts.countdown.text.replace('{s}', String(Math.max(0, Math.ceil(opts.countdown.seconds - el))));
+      };
+      tick();
+      timer = window.setInterval(tick, 200);
+      const done = (i: number) => { if (this.endDone !== done) return; this.endDone = null; clearInterval(timer); off(); this.close(root); resolve(i); };
+      this.endDone = done;
       root.addEventListener('pointerdown', (e) => e.stopPropagation());
       const off = this.push('end', (e) => {
+        if (!awake) return true;
         if (e.code === 'Enter') done(0);
         const d = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
         if (d && +d[1] <= btns.length) done(+d[1] - 1);
@@ -238,6 +253,8 @@ export class Overlays {
       this.show(root);
     });
   }
+  /** Closes the end screen, if one is open (it resolves with -1). */
+  dismissEndScreen(): void { this.endDone?.(-1); }
 
   // ───────────── fade ─────────────
   fade(toOpaque: boolean, color = '#000', seconds = 0.8): Promise<void> {

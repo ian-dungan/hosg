@@ -16,9 +16,17 @@ export interface PlayerView {
   readonly y: number;
   readonly facing: number;
   readonly moving: boolean;
-  /** Health, 1..maxHp. */
+  /** Health, 1..maxHp (0 when dead). */
   readonly hp: number;
   readonly maxHp: number;
+  /** Combat (Task 6): the engine id, weapon, target (−1 none), dead, act and shield. Missing on an older server. */
+  readonly eid?: number;
+  readonly weapon?: string;
+  readonly target?: number;
+  readonly dead?: boolean;
+  /** '' | 'charge' | 'dodge' | 'knock' | 'dead'. */
+  readonly act?: string;
+  readonly shield?: number;
 }
 
 /** One enemy as the room state shows it (the server's EnemyState, from Task 6). */
@@ -36,6 +44,37 @@ export interface EnemyStateView {
   /** The attack being wound up ('' when none) and its whole wind-up time in s. */
   readonly windup: string;
   readonly windupTotal: number;
+  /** The engine id of its target, or −1. */
+  readonly target?: number;
+  readonly stagger?: number;
+  readonly maxStagger?: number;
+  /** Live marks as bits (MARK_BITS). */
+  readonly marks?: number;
+  /** The chase surge is on. */
+  readonly surging?: boolean;
+  /** Seconds until its stagger bar can fill again (0 = it can). */
+  readonly staggerImmune?: number;
+}
+
+/** A telegraph on the ground (the server's TelegraphState): immutable, deleted when it resolves or is cancelled. */
+export interface TelegraphStateView {
+  readonly id: number;
+  /** The enemy's engine id. */
+  readonly owner: number;
+  readonly attack: string;
+  /** 'circle' | 'cone' | 'line'. */
+  readonly shape: string;
+  readonly x: number;
+  readonly z: number;
+  /** Direction (cone, line), as `facing`. */
+  readonly dir: number;
+  /** Radius (circle, cone) or length (line). */
+  readonly r: number;
+  readonly width: number;
+  /** Cone full width (rad). */
+  readonly angle: number;
+  /** Wind-up length in s. */
+  readonly total: number;
 }
 
 /** A synchronised map in the room state (a Colyseus MapSchema as the client sees it). */
@@ -52,6 +91,7 @@ export interface StateMap<T> {
 export interface ZoneState {
   readonly players?: StateMap<PlayerView>;
   readonly enemies?: StateMap<EnemyStateView>;
+  readonly telegraphs?: StateMap<TelegraphStateView>;
   /** The zone's true head count (players holds only those within this client's interest radius). */
   readonly online?: number;
 }

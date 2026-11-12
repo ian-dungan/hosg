@@ -120,9 +120,9 @@ describe('travel through an open exit', () => {
     expect(travels).toEqual([{ zone: 'greenway' }]);
   });
 
-  it('openExits opens the real east gate; without it the gate stays shut', async () => {
+  it('the real east gate is open by default (Plan 3 Task 8), and openExits keeps it open', async () => {
     const shut = await start();
-    expect(shut.app.isExitOpen('grove', 'greenway')).toBe(false);
+    expect(shut.app.isExitOpen('grove', 'greenway')).toBe(true);
     await shut.app.close();
     const open = await start({ openExits: { grove: ['greenway'] } });
     expect(open.app.isExitOpen('grove', 'greenway')).toBe(true);

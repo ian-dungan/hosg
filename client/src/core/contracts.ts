@@ -4,7 +4,7 @@
 // Units: metres, seconds, radians. Babylon left-handed, Y up. Ground plane is X/Z.
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
-import type { Body } from '@sg2/shared';
+import type { Body, Displacement } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
@@ -85,6 +85,8 @@ export interface CharacterView {
   setWeapon(w: WeaponId | 'none'): void;
   /** Ring under the feet when targeted. */
   setTargeted(on: boolean): void;
+  /** A short white flash (it was hit). */
+  flash(): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -117,8 +119,15 @@ export interface PlayerRig {
   /** Moves the feet to `pos` (a server correction): stands on the surface there, or falls from `pos.y` if that is
    *  above it. Keeps the facing and the camera angle, and stops any jump in progress. */
   place(pos: Vector3): void;
-  /** 0 = rooted, 1 = normal. Used for stuns, dialogue and cutscenes. */
+  /** 0 = rooted, 1 = normal, up to 1.5 (Sprint). Used for stuns, dialogue, cutscenes, charging and sprinting. */
   setMoveScale(s: number): void;
+  /**
+   * Plays a displacement (a dodge or a knockback): stands the body at `from` and replays the shared
+   * simulateDisplacement from there, ignoring input meanwhile. The end is exactly where the server puts it.
+   */
+  displace(from: { x: number; z: number; y: number }, d: Displacement): void;
+  /** True while a displacement plays. */
+  readonly displacing: boolean;
   /** Turn the character to face a world point (used when attacking). */
   faceTowards(x: number, z: number): void;
   /** When true the camera stops following the player (cutscenes drive camera.target/alpha/beta/radius). */
@@ -234,8 +243,25 @@ export type CreateCombatSim = (opts: CombatSimOpts) => CombatSim;
 // ───────────────────────── HUD (src/hud) — DOM only, NO Babylon imports ─────────────────────────
 export interface HudBar { name: string; hp: number; maxHp: number; statuses: StatusId[] }
 export interface HudState {
-  player: HudBar & { level: number; weapon: WeaponId; cast: { name: string; frac: number } | null };
-  target: (HudBar & { stagger: number; maxStagger: number; isBoss: boolean; cast: { name: string; frac: number; interruptible: boolean } | null }) | null;
+  player: HudBar & {
+    level: number; weapon: WeaponId;
+    /** A cast or a charge; `mark` (0..1) draws a notch on the bar (Charged Shot's interrupt threshold). */
+    cast: { name: string; frac: number; mark?: number } | null;
+    /** Momentum 0..100 (undefined hides the bar: the offline demo). */
+    momentum?: number;
+    /** Dodge charges, and the next charge's refill progress 0..1 (undefined hides the dodge button). */
+    dodge?: { charges: number; max: number; refill: number };
+    dead?: boolean;
+    /** Weapon swap and loadout are refused in a fight: their buttons grey out. */
+    swapLocked?: boolean;
+  };
+  target: (HudBar & {
+    stagger: number; maxStagger: number; isBoss: boolean; cast: { name: string; frac: number; interruptible: boolean } | null;
+    /** Seconds until the stagger bar can fill again (0 = it can): the bar greys out meanwhile. */
+    staggerImmune?: number;
+    /** It is running to catch up (the chase surge). */
+    surging?: boolean;
+  }) | null;
   party: HudBar[];                       // companions (empty when solo)
   slots: { ability: AbilityDef; cdRemaining: number; usable: boolean }[];   // 5 entries
   quest: { title: string; steps: { text: string; done: boolean }[] } | null;
@@ -245,6 +271,11 @@ export interface HudState {
 }
 export type HudEvent =
   | { type: 'ability'; slot: number }   // button tap or keys 1-5
+  | { type: 'abilityUp'; slot: number } // button released or key 1-5 up (Charged Shot fires on release)
+  | { type: 'dodge'; dir: { x: number; y: number } | null } // Dodge button, Shift or a double tap (screen-space direction; null = facing)
+  | { type: 'cycleTarget' }             // Tab
+  | { type: 'respawn' }                 // the death screen's button
+  | { type: 'jump' }                    // the touch Jump button (Space is the rig's own)
   | { type: 'interact' }                // prompt button or E key
   | { type: 'swapWeapon' }              // button or Q key
   | { type: 'openLoadout' }             // button or L key
@@ -260,13 +291,21 @@ export interface HudApi {
   banner(title: string, subtitle: string): void;                 // big location banner, fades after ~4 s
   toast(text: string): void;                                     // small message, e.g. "Out of range"
   /** Floating combat text at a screen position (px). */
-  floatText(x: number, y: number, text: string, kind: 'damage' | 'crit' | 'heal' | 'combo' | 'hurt' | 'info'): void;
+  floatText(x: number, y: number, text: string, kind: 'damage' | 'crit' | 'heal' | 'combo' | 'hurt' | 'info' | 'other'): void;
   /** Dialogue box; resolves with the index of the chosen option (0 if there are no choices) after the last line. */
   dialogue(speaker: string, lines: string[], choices?: string[]): Promise<number>;
   titleScreen(): Promise<void>;                                  // "Shady Grove 2" + Play
-  /** Pick 5 abilities from the pool; resolves with the chosen ids. */
-  loadout(pool: AbilityDef[], current: string[], weapon: WeaponId): Promise<string[]>;
-  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[]): Promise<number>;
+  /** Pick `count` abilities from the pool; resolves with the chosen ids. */
+  loadout(pool: AbilityDef[], current: string[], weapon: WeaponId, count?: number): Promise<string[]>;
+  /**
+   * opts.countdown: a line counting down `seconds` (its text has `{s}` for the seconds left);
+   * opts.waitS: the buttons wake up after this long. Resolves with the button chosen, or -1 when dismissed.
+   */
+  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts?: { countdown?: { seconds: number; text: string }; waitS?: number }): Promise<number>;
+  /** Closes the end screen, if one is open (it resolves with -1). */
+  dismissEndScreen(): void;
+  /** The red screen edge: a flash (hurt), or held on while standing in a telegraph. */
+  danger(mode: 'flash' | 'on' | 'off'): void;
   /** Fade to/from a colour for cutscenes (resolves when done). */
   fade(toOpaque: boolean, color?: string, seconds?: number): Promise<void>;
   /** Hide/show the combat HUD (cutscenes, dialogue). */

@@ -1281,6 +1281,9 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
 
   let ring: Mesh | null = null;
   let targeted = false;
+  /** Time into a hit flash (−1 = none): a white overlay on the body (the body material is shared by everyone). */
+  let flashT = -1;
+  body.overlayColor = new Color3(1, 1, 1);
 
   // weapon visibility via bone scaling (keeps one draw call)
   let weapon: WeaponId | 'none' = opts.weapon ?? DEFAULT_WEAPON[kind];
@@ -1343,6 +1346,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       }
     },
     setWeapon(w) { weapon = w; applyWeapon(); },
+    flash() { flashT = 0; body.renderOverlay = true; body.overlayAlpha = 0.85; },
     setTargeted(on: boolean) {
       targeted = on;
       if (on && !ring) {
@@ -1439,6 +1443,11 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       if (glowMat) {
         const k = looping === 'dead' ? 0.25 : pose === 'staggered' ? 0.55 + 0.3 * Math.abs(Math.sin(T * 9)) : 0.82 + 0.18 * Math.sin(T * 4);
         glowMat.emissiveColor.set(k, k, k);
+      }
+      if (flashT >= 0) {
+        flashT += dt;
+        body.overlayAlpha = Math.max(0, 1 - flashT / 0.18) * 0.85;
+        if (flashT > 0.18) { flashT = -1; body.renderOverlay = false; }
       }
       if (ring && targeted) {
         ring.rotation.y += dt * 1.2;

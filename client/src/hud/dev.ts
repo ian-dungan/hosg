@@ -103,6 +103,12 @@ function frame(now: number): void {
   if (scene === 'combat') {
     target = { name: 'Brine Grunt', hp: 300 + 260 * Math.sin(t * 0.7), maxHp: 600, statuses: ['soaked', 'marked'], stagger: 0, maxStagger: 0, isBoss: false,
       cast: (t % 6) < 2 ? { name: 'Shell Slam', frac: (t % 6) / 2, interruptible: true } : null };
+  } else if (scene === 'elite') {
+    // the Greenway's elite as Plan 3 shows it: stagger bar (greyed while immune), an interruptible wind-up, marks
+    const ph = t % 10, immune = ph > 6;
+    target = { name: 'Mossback', hp: 750 - (t * 9) % 700, maxHp: 1275, statuses: ['marked', 'burning'], stagger: immune ? 0 : (ph / 6) * 100, maxStagger: 170,
+      isBoss: true, staggerImmune: immune ? 10 - ph : 0, surging: ph > 8.5,
+      cast: ph < 2.2 ? { name: 'Thorn Hail', frac: ph / 2.2, interruptible: true } : ph < 3.8 ? { name: 'Ground Slam', frac: (ph - 2.2) / 1.6, interruptible: false } : null };
   } else if (scene === 'boss') {
     if (staggeredT > 0) { staggeredT -= dt; stagger = 0; } else { stagger += dt * 14; if (stagger >= 100) { stagger = 0; staggeredT = 3; } }
     const ph = t % 8;
@@ -112,7 +118,8 @@ function frame(now: number): void {
   }
   const state: HudState = {
     player: { name: 'Wren', hp: combat ? 620 + 380 * Math.sin(t * 0.4) : 1000, maxHp: 1000, statuses: st, level: 4, weapon,
-      cast: castT >= 0 ? { name: 'Casting…', frac: castT / 1.2 } : null },
+      cast: castT >= 0 ? { name: 'Casting…', frac: castT / 1.2 } : scene === 'elite' ? { name: 'Charged Shot', frac: Math.min(1, (t % 3) / 1.5), mark: 0.8 } : null,
+      ...(scene === 'elite' ? { momentum: (t * 12) % 110 > 100 ? 100 : (t * 12) % 110, dodge: { charges: Math.floor(t / 3) % 3, max: 2, refill: (t % 5) / 5 } } : {}) },
     target,
     party: party ? [{ name: 'Pim', hp: 700 + 200 * Math.sin(t), maxHp: 900, statuses: ['regen'] }, { name: 'Ash', hp: 300, maxHp: 800, statuses: [] }] : [],
     slots: combat || params.has('slots') ? loadout.map((id, i) => {
@@ -166,7 +173,7 @@ const panel = document.getElementById('dev')!;
 document.getElementById('devtoggle')!.addEventListener('click', () => panel.classList.toggle('open'));
 const btns: [string, () => unknown][] = [
   ['Title', dev.title], ['Dialogue', dev.dialogue], ['Banner', dev.banner], ['Toast', dev.toast], ['Fade', dev.fade],
-  ['Hide/show HUD', () => dev.toggleHud()], ['Town', () => dev.setScene('town')], ['Combat', () => dev.setScene('combat')], ['Boss', () => dev.setScene('boss')],
+  ['Hide/show HUD', () => dev.toggleHud()], ['Town', () => dev.setScene('town')], ['Combat', () => dev.setScene('combat')], ['Boss', () => dev.setScene('boss')], ['Elite', () => dev.setScene('elite')],
   ['Party', () => { party = !party; }], ['Prompt', () => { prompt = prompt ? null : 'Talk · Old Marrow'; }], ['Step done', () => dev.completeStep(1)],
   ['Floats', burst], ['Loadout', dev.loadout], ['Victory', dev.victory], ['Defeat', dev.defeat],
 ];

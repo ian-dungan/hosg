@@ -87,6 +87,9 @@ if (wfxTarget.w > 0.0) {
     float wDist = length(vPositionW - (wCam + wD * wt));
     float wA = (1.0 - smoothstep(wfxTarget.w * 0.5, wfxTarget.w, wDist)) * (1.0 - smoothstep(0.8, 0.93, wt)) * step(0.0, wt)
              * smoothstep(wfxTarget.y + 0.6, wfxTarget.y + 2.0, vPositionW.y);
+    // and whatever stands right in front of the lens (a pine beside the camera filling half the view)
+    float wNear = 1.0 - smoothstep(5.0, 10.0, length(vPositionW - wCam));
+    wA = max(wA, wNear * 0.85);
     if (wA * 0.9 > wfxBayer(gl_FragCoord.xy)) discard;
   }
 }

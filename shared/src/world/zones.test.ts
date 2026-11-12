@@ -38,7 +38,7 @@ describe('zone registry', () => {
     expect(g(x + 2, groveRoadZ(x + 2))).toBeNull();
   });
 
-  it('grove: town surface, SPAWN, no camps, one closed exit to the Greenway entry', () => {
+  it('grove: town surface, SPAWN, no camps, one open exit to the Greenway entry', () => {
     const grove = zoneDef('grove');
     expect(grove.spawn).toEqual(SPAWN);
     expect(grove.camps).toEqual([]);
@@ -49,7 +49,7 @@ describe('zone registry', () => {
     const e = grove.exits[0];
     expect(e).toMatchObject({ to: 'greenway', x: GROVE_EAST_GATE.x, z: GROVE_EAST_GATE.z, r: 2.5 });
     expect(e.arrive).toEqual(generateZone(GREENWAY_RECIPE).entry);
-    expect(e.open).toBe(false);
+    expect(e.open).toBe(true);
     expect(grove.banner).toEqual(['The Plaza of the Two', 'Shady Grove']);
   });
 
@@ -100,7 +100,7 @@ describe('zone registry', () => {
       expect(() => { (d.exits[0] as { open: boolean }).open = !d.exits[0].open; }).toThrow(TypeError);
       expect(() => { (d.exits as unknown as unknown[]).push({}); }).toThrow(TypeError);
     }
-    expect(zoneDef('grove').exits[0].open).toBe(false);
+    expect(zoneDef('grove').exits[0].open).toBe(true);
   });
 
   it('zoneFullReason', () => {
@@ -108,7 +108,7 @@ describe('zone registry', () => {
     expect(zoneFullReason('greenway')).toBe('The Greenway is full, try again soon');
   });
 
-  it("zoneDef('grove').exits[0].open === false", () => {
-    expect(zoneDef('grove').exits[0].open).toBe(false);
+  it("zoneDef('grove').exits[0].open === true (the east gate is open)", () => {
+    expect(zoneDef('grove').exits[0].open).toBe(true);
   });
 });

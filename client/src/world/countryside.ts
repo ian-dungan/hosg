@@ -187,8 +187,20 @@ export function buildCountryside(terrain: Builder, band: Kit, far: Kit, water: B
     // farm gate across the road
     const b = band.b; const gz = roadZ(gateX), gy = H(gateX, gz);
     for (const s of [-2.6, 2.6]) b.prism([gateX, gy - 0.3, gz + s], [gateX, gy + 1.5, gz + s], 0.14, 0.12, 5, PAL.timber);
-    for (const yy of [0.45, 0.9, 1.3]) b.prism([gateX, gy + yy, gz - 2.6], [gateX, gy + yy, gz + 2.6], 0.06, 0.06, 4, PAL.woodLight);
-    b.prism([gateX, gy + 0.45, gz - 2.5], [gateX, gy + 1.3, gz + 2.5], 0.05, 0.05, 4, PAL.woodLight);
+    // the gate stands open (the way east is open): each leaf swung out from its post, along the verge.
+    // Drawn without moving the band's random stream, so what is placed after it (and the baked obstacles) stays put.
+    // (the stream advances as the old closed gate advanced it: that gate is drawn into a scratch builder first)
+    const was = new Builder(1); was.rng.s = b.rng.s; was.cj = b.cj;
+    for (const yy of [0.45, 0.9, 1.3]) was.prism([gateX, gy + yy, gz - 2.6], [gateX, gy + yy, gz + 2.6], 0.06, 0.06, 4, PAL.woodLight);
+    was.prism([gateX, gy + 0.45, gz - 2.5], [gateX, gy + 1.3, gz + 2.5], 0.05, 0.05, 4, PAL.woodLight);
+    const rngState = was.rng.s;
+    for (const s of [-1, 1]) {
+      const hz = gz + s * 2.6, ex = gateX + 2.45, ez = gz + s * 2.75;
+      for (const yy of [0.45, 0.9, 1.3]) b.prism([gateX, gy + yy, hz], [ex, gy + yy, ez], 0.06, 0.06, 4, PAL.woodLight);
+      b.prism([gateX, gy + 0.45, hz], [ex - 0.1, gy + 1.3, ez], 0.05, 0.05, 4, PAL.woodLight);
+      b.prism([ex, gy - 0.1, ez], [ex, gy + 1.45, ez], 0.09, 0.08, 5, PAL.timber);
+    }
+    b.rng.s = rngState;
     lantern(band, gateX - 1, gy, gz + 3.4, 2.8, Math.PI / 2);
   }
 

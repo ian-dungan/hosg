@@ -24,6 +24,7 @@ import { showLogin } from './net/loginScreen';
 import { LeaveNameScreen, showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
 import { createEnemies, type Enemies } from './net/enemies';
+import { COMBAT_MESSAGES, createCombat, type CombatController, type CombatDebug } from './combat/controller';
 import {
   UNREACHABLE,
   connect,
@@ -54,13 +55,12 @@ const ENTER_TIMEOUT_MS = 15_000;
 const TRAVEL_LEAVE_MS = 5_000;
 
 const CSS = /* css */ `
-.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 50px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
+.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 58px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
   font-size:13px;font-weight:600;background:rgba(16,18,42,.45)}
 .sg-online.away{color:#ffd9a0}
+@media (max-width:700px) and (orientation:portrait){ .sg-online{right:auto;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--sb) + 4px);font-size:11px;padding:2px 8px;background:none} }
 .sg-online:empty{display:none}
 .sg-net-off{display:none}
-.sg-hurt-edge{position:absolute;inset:0;opacity:0;pointer-events:none;
-  background:radial-gradient(ellipse at center,transparent 50%,rgba(214,40,32,.55))}
 .sg-travel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;pointer-events:none;
   font:600 18px/1.3 var(--sans,system-ui,sans-serif);color:#fff6e6;letter-spacing:.04em;text-shadow:0 1px 6px rgba(0,0,0,.6);
   opacity:0;transition:opacity .3s}
@@ -78,6 +78,14 @@ interface NetDebug {
   lastTravelMs: number;
   /** How long building the last zone took (ms, wall clock). */
   lastLoadMs: number;
+  /** This adventurer's combat numbers as the server states them (null before entering). */
+  self: { hp: number; momentum: number; dead: boolean; target: number | null } | null;
+  /** Combat fx events received so far. */
+  fxSeen: number;
+  /** The controller's counters (dodges, refusals, corrections, ...). */
+  combat: CombatDebug | null;
+  /** Moves sent (and with which ack, the last). */
+  moves: number;
 }
 /** What ended a connection: a reason for the login screen, or a travel to another zone. */
 type Ended = { reason: string } | { travel: ZoneId };
@@ -86,8 +94,9 @@ function boot(): void {
   let room: ZoneRoom | null = null;
   let remotes: Remotes | null = null;
   let enemies: Enemies | null = null;
+  let combat: CombatController | null = null;
 
-  const game = bootGame({ busy: () => !room });
+  const game = bootGame({ busy: () => !room, onTap: (tap) => combat?.onTap(tap) ?? false });
   const { hud, hudRoot } = game;
   game.rig.setMoveScale(0);
   game.onZoneLoaded(() => game.rig.setMoveScale(0)); // a new zone's adventurer waits for its room
@@ -100,16 +109,26 @@ function boot(): void {
   // Outside netUi, so "Connecting…" shows before the room does.
   const status = h('div', 'sg-online', h('div', 'sg-hud', hudRoot));
   const chat = createChat(netUi, (text) => room && send(room, 'chat', { text }));
-  const hurtEdge = h('div', 'sg-hurt-edge', hudRoot);
   const travelLabel = h('div', 'sg-travel', document.body);
 
-  const net: NetDebug = { remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0 };
+  const net: NetDebug = { remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0 };
+  hud.on((e) => combat?.onHud(e));
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
   // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
   // Getters: a zone change replaces the scene, world and rig.
   (window as unknown as Record<string, unknown>).__sg2 = {
     get rig() { return game.rig; }, get world() { return game.world; }, get scene() { return game.scene; },
     hud, engine: game.engine, game,
+    /** Where a world point is on screen, in CSS px (null behind the camera): for playtests that tap things. */
+    screenOf(x: number, y: number, z: number) {
+      const sc = game.scene, cam = sc.activeCamera, cv = sc.getEngine().getRenderingCanvas();
+      if (!cam || !cv) return null;
+      const at = Vector3.Project(new Vector3(x, y, z), Matrix.IdentityReadOnly, sc.getTransformMatrix(), cam.viewport.toGlobal(cv.clientWidth, cv.clientHeight));
+      return at.z > 0 && at.z < 1 ? { x: at.x, y: at.y } : null;
+    },
+    /** The combat controller of the room this page is in (null between rooms). */
+    get combat() { return combat; },
+    get room() { return room; },
   };
 
   const state: HudState = {
@@ -128,6 +147,8 @@ function boot(): void {
   game.start((dt) => {
     remotes?.update(dt);
     enemies?.update(dt);
+    combat?.update(dt);
+    if (combat) { net.self = combat.debug.self; net.fxSeen = combat.debug.fxSeen; }
     let text = connecting ? CONNECTING : '';
     if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.online ?? room.state.players?.size ?? 0}`;
     if (text !== statusText) {
@@ -152,7 +173,7 @@ function boot(): void {
       if (at.z > 0 && at.z < 1) { x = at.x; y = at.y; }
     }
     hud.floatText(x, y, `−${amount}`, 'hurt');
-    hurtEdge.animate([{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 0 }], { duration: 600, easing: 'ease-out' });
+    hud.danger('flash');
   };
 
   /** Set from a `travel` message until the next room is entered: the zone, the fade and when it began. */
@@ -176,6 +197,7 @@ function boot(): void {
       let travelTimer = 0;
       let entered = false;
       const sent: SentPose = { x: NaN, z: NaN, y: NaN, facing: NaN, moving: false };
+      let sentAck = 0;
 
       // Reconnect for up to RECONNECT_SECONDS, however long the room has been up, then give up.
       Object.assign(r.reconnection, CLIENT_RECONNECTION);
@@ -192,7 +214,11 @@ function boot(): void {
       });
       r.onMessage('kicked', (m: S2C['kicked']) => { kickedFor = m.reason; });
       r.onMessage('chat', (m: S2C['chat']) => chat.add(m.from, m.text));
+      // combat messages: forwarded to the controller once it exists (it is made on entering the room)
+      const early: [typeof COMBAT_MESSAGES[number], unknown][] = [];
+      for (const type of COMBAT_MESSAGES) r.onMessage(type, (m: unknown) => { if (combat) combat.message(type, m); else early.push([type, m]); });
       r.onMessage('correct', (m: S2C['correct']) => {
+        combat?.onCorrect();
         game.walkTo(null);
         rig.place(new Vector3(m.x, m.y, m.z)); // keeps the facing and the camera angle
         Object.assign(sent, { x: m.x, z: m.z, y: m.y });
@@ -203,6 +229,7 @@ function boot(): void {
         // The server has moved the adventurer to `m.zone` and ends this session: fade out meanwhile.
         if (travelTo) return;
         travelTo = m.zone;
+        hud.dismissEndScreen();
         rig.setMoveScale(0);
         game.walkTo(null);
         clearInterval(sendTimer);
@@ -235,6 +262,9 @@ function boot(): void {
         room = r;
         remotes = createRemotes(game.scene, game.world, r, r.sessionId);
         enemies = createEnemies(game.scene, game.world, r);
+        combat = createCombat({ game, hud, room: r, state, remotes, enemies, send: (type, message) => send(r, type, message) });
+        net.combat = combat.debug;
+        for (const [type, m] of early.splice(0)) combat.message(type, m);
         rig.setMoveScale(1);
         hud.setVisible(true);
         netUi.className = '';
@@ -250,12 +280,14 @@ function boot(): void {
         sendTimer = window.setInterval(sendPose, 1000 / TICK_HZ);
       };
       const sendPose = () => {
-        if (r.reconnection.isReconnecting) return;
+        if (r.reconnection.isReconnecting || !combat || !combat.canSendPose()) return;
         const p = rig.position;
-        const pose: C2S['move'] = { x: p.x, z: p.z, y: p.y, facing: rig.facing, moving: rig.moving };
-        if (!poseWorthSending(pose, sent)) return;
+        const pose: C2S['move'] = { x: p.x, z: p.z, y: p.y, facing: rig.facing, moving: rig.moving, ack: combat.ack };
+        if (!poseWorthSending(pose, sent) && sentAck === combat.ack) return;
         send(r, 'move', pose);
+        net.moves++;
         Object.assign(sent, pose);
+        sentAck = combat.ack;
       };
       r.onStateChange(onState);
       onState();
@@ -267,6 +299,10 @@ function boot(): void {
         clearTimeout(lostTimer);
         clearTimeout(travelTimer);
         clearInterval(sendTimer);
+        combat?.dispose();
+        combat = null;
+        net.combat = null;
+        net.self = null;
         remotes?.dispose();
         remotes = null;
         enemies?.dispose();

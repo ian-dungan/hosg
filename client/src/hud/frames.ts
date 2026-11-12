@@ -67,6 +67,8 @@ export class Chips {
 class CastBar {
   readonly el: HTMLElement;
   private bar: Bar;
+  private markEl: HTMLElement | null = null;
+  private mark = -1;
   private name = '';
   private nameEl: HTMLElement;
   private on = false;
@@ -76,10 +78,17 @@ class CastBar {
     this.nameEl = h('div', 'sg-cast-name', this.el);
     this.bar = new Bar(this.el, 'sg-cast-bar', false);
   }
-  set(c: { name: string; frac: number; interruptible?: boolean } | null): void {
+  set(c: { name: string; frac: number; interruptible?: boolean; mark?: number } | null): void {
     const on = !!c;
     if (on !== this.on) { this.on = on; toggle(this.el, 'on', on); }
     if (!c) return;
+    const mark = c.mark ?? -1;
+    if (mark !== this.mark) {
+      this.mark = mark;
+      if (mark >= 0 && !this.markEl) this.markEl = h('i', 'sg-cast-mark', this.bar.el);
+      if (this.markEl) { this.markEl.style.left = `${(mark * 100).toFixed(1)}%`; this.markEl.hidden = mark < 0; }
+    }
+    if (this.markEl) toggle(this.el, 'past-mark', mark >= 0 && c.frac >= mark);
     if (c.name !== this.name) { this.name = c.name; this.nameEl.textContent = c.name; this.bar.snap(c.frac); }
     const intr = !!c.interruptible;
     if (intr !== this.intr) { this.intr = intr; toggle(this.el, 'intr', intr); }
@@ -95,9 +104,10 @@ export class PlayerFrame {
   private nameEl: HTMLElement;
   private weaponEl: HTMLElement;
   private hp: Bar;
+  private mom: Bar;
   private chips: Chips;
   readonly cast: CastBar;
-  private c = { name: '', level: -1, hp: -1, max: -1, weapon: '' as WeaponId | '', low: false };
+  private c = { name: '', level: -1, hp: -1, max: -1, weapon: '' as WeaponId | '', low: false, mom: -1, momOn: false, momState: '' };
   constructor(parent: HTMLElement, castParent: HTMLElement) {
     this.el = h('div', 'sg-pf', parent);
     const em = h('div', 'sg-pf-emblem', this.el);
@@ -107,6 +117,9 @@ export class PlayerFrame {
     this.nameEl = h('div', 'sg-pf-name', top);
     this.weaponEl = h('div', 'sg-pf-weapon', top);
     this.hp = new Bar(main, 'sg-hp-player');
+    // Momentum: gold, with the finisher threshold (50) marked; it pulses at 50 and at 100
+    this.mom = new Bar(main, 'sg-mom', false);
+    h('i', 'sg-mom-mark', this.mom.el);
     this.chips = new Chips(main, false);
     this.cast = new CastBar(castParent, 'sg-cast-player');
   }
@@ -122,6 +135,18 @@ export class PlayerFrame {
       const low = f < 0.3 && f > 0;
       if (low !== c.low) { c.low = low; toggle(this.el, 'low', low); }
     }
+    const momOn = p.momentum !== undefined;
+    if (momOn !== c.momOn) { c.momOn = momOn; toggle(this.el, 'has-mom', momOn); }
+    if (momOn && p.momentum !== c.mom) {
+      c.mom = p.momentum!;
+      this.mom.set(c.mom / 100);
+      const st = c.mom >= 100 ? 'full' : c.mom >= 50 ? 'ready' : '';
+      if (st !== c.momState) {
+        if (st && st !== c.momState) this.mom.el.animate([{ filter: 'brightness(2.2)' }, { filter: 'brightness(1)' }], { duration: 500 });
+        c.momState = st; toggle(this.mom.el, 'ready', st !== ''); toggle(this.mom.el, 'full', st === 'full');
+      }
+    }
+    toggle(this.el, 'dead', !!p.dead);
     this.chips.set(p.statuses);
     this.cast.set(p.cast);
   }
@@ -184,9 +209,12 @@ export class TargetFrame {
       if ((c.stag >= 0.9 && sf < 0.2 && !fresh) || (staggered && !c.staggered)) this.flashBreak();
       if (staggered !== c.staggered) { c.staggered = staggered; toggle(this.boss, 'staggered', staggered); }
       if (Math.abs(sf - c.stag) > 0.001) { c.stag = sf; this.bStag.set(sf); }
+      toggle(this.boss, 'immune', (t.staggerImmune ?? 0) > 0);
+      toggle(this.boss, 'surge', !!t.surging);
       this.bChips.set(t.statuses);
       this.bCast.set(t.cast);
     } else {
+      toggle(this.el, 'surge', !!t.surging);
       this.chips.set(t.statuses);
       this.cast.set(t.cast);
     }

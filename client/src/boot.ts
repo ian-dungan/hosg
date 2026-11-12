@@ -18,6 +18,14 @@ const WAYPOINT_REACHED = 0.4;
 const ARRIVED = 0.35;
 /** A walk that makes no progress for this long is given up, in s. */
 const STUCK_S = 0.8;
+/** A walk that follows a moving goal plans its way again this often, in s. */
+const FOLLOW_REPLAN_S = 0.5;
+
+/**
+ * How a walk ends: within `within` m of its goal, then `then`. With `follow`, the goal moves (an enemy): the walk
+ * re-plans toward follow() every FOLLOW_REPLAN_S, and stops when it returns null.
+ */
+export interface WalkArrive { within: number; then: () => void; follow?: () => Vector3 | null }
 
 export interface GameOpts {
   /** Handles a tap itself and returns true; otherwise tap-to-walk walks to the tapped point (when the setting is on). */
@@ -51,7 +59,11 @@ export interface Game {
    * `then`. Does nothing while the "Tap to walk" setting is off; toasts "Can't get there" when there is no way.
    * True if a walk started.
    */
-  walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): boolean;
+  walkTo(p: Vector3 | null, arrive?: WalkArrive): boolean;
+  /** True while a tap-to-walk is under way. */
+  readonly walking: boolean;
+  /** When (performance.now ms) the player last took over from a tap-to-walk (joystick or a movement key). */
+  readonly walkOverriddenAt: number;
   /** Starts the render loop; `frame(dt)` runs after the rig and world update, before the scene renders. */
   start(frame: (dt: number) => void): void;
 }
@@ -88,7 +100,9 @@ export function bootGame(opts: GameOpts = {}): Game {
   let rigRef: PlayerRig | null = null;
   let route: Vec2[] = [];                  // waypoints still to reach; the last is where the walk ends
   let walkGoal: Vector3 | null = null;     // the tapped point or person
-  let walkThen: { within: number; then: () => void } | null = null;
+  let walkThen: WalkArrive | null = null;
+  let replanIn = 0;
+  let overriddenAt = -Infinity;
   let walkOnGround = false;                // the walk has had the adventurer on the ground (not up on something)
   let stuckTime = 0;
   const lastPos = new Vector3();
@@ -107,8 +121,9 @@ export function bootGame(opts: GameOpts = {}): Game {
     route = []; walkGoal = null; walkThen = null; stuckTime = 0; walkOnGround = false;
     marker.setEnabled(false);
   };
-  function walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): boolean {
+  function walkTo(p: Vector3 | null, arrive?: WalkArrive): boolean {
     stopWalk();
+    replanIn = FOLLOW_REPLAN_S;
     const r = rigRef;
     if (!p || !r || !hud.settings.tapToWalk) return false;
     const from = { x: r.position.x, z: r.position.z };
@@ -139,7 +154,7 @@ export function bootGame(opts: GameOpts = {}): Game {
     const j = hud.joystick();
     const r = rigRef;
     if (!r || !walkGoal || route.length === 0) return j;
-    if (busy() || Math.hypot(j.x, j.y) > 0.15) { stopWalk(); return j; }
+    if (busy() || Math.hypot(j.x, j.y) > 0.15) { if (!busy()) overriddenAt = performance.now(); stopWalk(); return j; }
     // routes keep to the ground: up on something after a jump (a bench, the Lookout), the walk ends before it
     // could walk the adventurer off the edge
     const b = r.body;
@@ -165,7 +180,7 @@ export function bootGame(opts: GameOpts = {}): Game {
   }
   // Any movement key cancels a tap-to-walk (not while typing).
   window.addEventListener('keydown', (e) => {
-    if (!isTyping(e) && /^(Key[WASD]|Arrow)/.test(e.code)) stopWalk();
+    if (!isTyping(e) && /^(Key[WASD]|Arrow)/.test(e.code)) { overriddenAt = performance.now(); stopWalk(); }
   });
 
   const makeRig = (): PlayerRig => {
@@ -231,13 +246,8 @@ export function bootGame(opts: GameOpts = {}): Game {
     for (const cb of zoneLoaded) cb(z);
   }
 
-  if (touch) {
-    const jb = document.createElement('div');
-    jb.textContent = 'Jump';
-    jb.style.cssText = 'position:fixed;right:max(18px,env(safe-area-inset-right));bottom:calc(max(18px,env(safe-area-inset-bottom)) + 96px);width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 15px system-ui,sans-serif;color:#3a2a08;background:rgba(242,183,66,.88);box-shadow:0 2px 10px rgba(0,0,0,.3);pointer-events:auto;touch-action:none;';
-    jb.addEventListener('pointerdown', (e) => { e.preventDefault(); if (!busy()) rigRef?.jump(); });
-    hudRoot.appendChild(jb);
-  }
+  // the touch Jump button lives in the HUD's thumb cluster (Space is the rig's own)
+  hud.on((e) => { if (e.type === 'jump' && !busy()) rigRef?.jump(); });
   window.addEventListener('resize', () => engine.resize());
 
   return {
@@ -246,6 +256,8 @@ export function bootGame(opts: GameOpts = {}): Game {
     get world() { return world; },
     get rig() { return rig; },
     get zone() { return zone; },
+    get walking() { return walkGoal !== null; },
+    get walkOverriddenAt() { return overriddenAt; },
     loadZone,
     onZoneLoaded(cb) { zoneLoaded.push(cb); },
     walkTo,
@@ -271,6 +283,15 @@ export function bootGame(opts: GameOpts = {}): Game {
         }
         lastFrameMs = now;
         rig.update(dt);
+        if (walkGoal && walkThen?.follow) {
+          replanIn -= dt;
+          if (replanIn <= 0) {
+            const a = walkThen, goal = a.follow!();
+            if (!goal) stopWalk();
+            else if (Vector3.Distance(goal, walkGoal) > 0.3) walkTo(goal, a);
+            else replanIn = FOLLOW_REPLAN_S;
+          }
+        }
         if (walkGoal) {
           // give up if no progress for a moment (pushed against something)
           if (Vector3.Distance(rig.position, lastPos) < 1.2 * dt) stuckTime += dt; else stuckTime = 0;

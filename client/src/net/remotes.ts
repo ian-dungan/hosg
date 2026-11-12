@@ -17,12 +17,20 @@ const CSS = /* css */ `
 .sg-labels{z-index:0}
 .sg-nl{position:absolute;left:0;top:0;padding:2px 9px 3px;border-radius:10px;white-space:nowrap;
   font:600 13px/1.2 var(--sans);color:var(--cream);background:rgba(16,18,42,.55);
-  box-shadow:0 0 0 1px rgba(255,226,160,.3);will-change:transform}
+  box-shadow:0 0 0 1px rgba(255,226,160,.3);will-change:transform;display:flex;flex-direction:column;align-items:center;gap:2px}
+.sg-nl-hp{width:54px;height:5px;border-radius:3px;overflow:hidden;background:rgba(10,10,26,.7);display:none}
+.sg-nl-hp.on{display:block}
+.sg-nl-hp i{display:block;height:100%;transform-origin:0 50%;background:linear-gradient(90deg,#5fb84a,#8FD16A)}
+.sg-nl.dead{opacity:.55}
 `;
 
 interface Remote {
   view: CharacterView;
   label: HTMLElement;
+  nameEl: HTMLElement;
+  hpEl: HTMLElement;
+  hpFill: HTMLElement;
+  hp: number;
   buf: PoseBuffer;
   name: string;
   running: boolean;
@@ -35,6 +43,8 @@ export interface Remotes {
   update(dt: number): void;
   /** Other adventurers currently shown. */
   count(): number;
+  /** The character drawn for this session, if it is in view. */
+  viewOf(sessionId: string): CharacterView | undefined;
   /** Removes every character and label (leaving the room). */
   dispose(): void;
 }
@@ -90,8 +100,12 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     const label = document.createElement('div');
     label.className = 'sg-nl';
     label.style.visibility = 'hidden';
+    const nameEl = document.createElement('span');
+    const hpEl = document.createElement('div'); hpEl.className = 'sg-nl-hp';
+    const hpFill = document.createElement('i'); hpEl.appendChild(hpFill);
+    label.append(nameEl, hpEl);
     layer.appendChild(label);
-    const r: Remote = { view, label, buf: new PoseBuffer(), name: '', running: false, placed: false };
+    const r: Remote = { view, label, nameEl, hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
     remotes.set(sessionId, r);
     return r;
   }
@@ -116,7 +130,15 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
       seen.add(sessionId);
       const r = remotes.get(sessionId) ?? add(sessionId);
       r.buf.push(now, p.x, p.z, p.facing, p.y);
-      if (p.name !== r.name) { r.name = p.name; r.label.textContent = p.name; }
+      if (p.name !== r.name) { r.name = p.name; r.nameEl.textContent = p.name; }
+      // health under the name once it is not full (and greyed when dead)
+      const f = p.maxHp > 0 ? Math.max(0, Math.min(1, p.hp / p.maxHp)) : 1;
+      if (f !== r.hp) {
+        r.hp = f;
+        r.hpFill.style.transform = `scaleX(${f.toFixed(3)})`;
+        r.hpEl.classList.toggle('on', f < 1);
+        r.label.classList.toggle('dead', f <= 0);
+      }
     });
     for (const sessionId of [...remotes.keys()]) if (!seen.has(sessionId)) remove(sessionId);
   };
@@ -156,6 +178,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
       }
     },
     count: () => remotes.size,
+    viewOf: (sessionId) => remotes.get(sessionId)?.view,
     dispose() {
       room.onStateChange.remove(onState);
       for (const sessionId of [...remotes.keys()]) remove(sessionId);

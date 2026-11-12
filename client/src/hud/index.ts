@@ -9,6 +9,12 @@ import { QuestTracker } from './quest';
 import { FloatText } from './float';
 import { Overlays } from './overlays';
 import { Settings } from './settings';
+import { createDoubleTap } from '../combat/doubleTap';
+
+/** Movement keys as a screen-space direction (x right, y up), for a dodge. */
+const MOVE_KEYS: Record<string, [number, number]> = {
+  KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0],
+};
 
 export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   injectStyles();
@@ -45,7 +51,17 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const bossSlot = h('div', 'sg-bossslot', combat);
   const target = new TargetFrame(combat, bossSlot, () => emit({ type: 'clearTarget' }));
   const quest = new QuestTracker(combat);
-  const abar = new AbilityBar(combat, emit);
+  // the movement keys held now (a Shift dodge goes that way) and double taps of one of them
+  const held = new Set<string>();
+  const taps = createDoubleTap();
+  const keyDir = (): { x: number; y: number } | null => {
+    let x = 0, y = 0;
+    for (const k of held) { const v = MOVE_KEYS[k]; if (v) { x += v[0]; y += v[1]; } }
+    return x || y ? { x, y } : null;
+  };
+  const dodgeDir = () => (touch ? (() => { const j = joy.value(); return Math.hypot(j.x, j.y) > 0.2 ? j : null; })() : keyDir());
+  const abar = new AbilityBar(combat, emit, dodgeDir);
+  joy.onFlick = (dir) => { abar.flash('dodge'); emit({ type: 'dodge', dir }); };
 
   const promptRow = h('div', 'sg-promptrow', combat);
   const prompt = h('div', 'sg-prompt sg-ctl', promptRow);
@@ -61,6 +77,11 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
 
   // ── fx layer: floats, banner, toasts ──
   const floats = new FloatText(fx);
+  // the red screen edge sits under the controls (they stay readable while it pulses)
+  const danger = h('div', 'sg-danger', null);
+  const hurtFlash = h('div', 'sg-danger', null);
+  root.insertBefore(hurtFlash, combat);
+  root.insertBefore(danger, hurtFlash);
   const banner = h('div', 'sg-banner', fx);
   const bKick = h('div', 'sg-banner-kicker', banner);
   const bTitle = h('div', 'sg-banner-title', banner);
@@ -99,7 +120,14 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     }
     const d = /^(?:Digit|Numpad)([1-5])$/.exec(c);
     if (d) { if (!e.repeat) { const i = +d[1] - 1; abar.flash(i); abar.press(i); } e.preventDefault(); return; }
-    if (e.repeat) return;
+    if (MOVE_KEYS[c]) {
+      held.add(c);
+      if (taps.down(c, performance.now(), e.repeat)) { const v = MOVE_KEYS[c]; abar.flash('dodge'); emit({ type: 'dodge', dir: { x: v[0], y: v[1] } }); }
+      return; // the rig moves on these
+    }
+    if (e.repeat) { if (c === 'Tab') e.preventDefault(); return; }
+    if (c === 'ShiftLeft' || c === 'ShiftRight') { abar.flash('dodge'); emit({ type: 'dodge', dir: keyDir() }); return; }
+    if (c === 'Tab') { e.preventDefault(); emit({ type: 'cycleTarget' }); return; }
     if (c === 'KeyE') { if (promptCache) prompt.animate([{ filter: 'brightness(1.5)' }, { filter: 'none' }], { duration: 200 }); emit({ type: 'interact' }); }
     else if (c === 'KeyQ') { abar.flash('swap'); emit({ type: 'swapWeapon' }); }
     else if (c === 'KeyL') { abar.flash('loadout'); emit({ type: 'openLoadout' }); }
@@ -108,6 +136,13 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     else return;
     e.preventDefault();
   });
+
+  window.addEventListener('keyup', (e) => {
+    held.delete(e.code);
+    const d = /^(?:Digit|Numpad)([1-5])$/.exec(e.code);
+    if (d) emit({ type: 'abilityUp', slot: +d[1] - 1 });
+  });
+  window.addEventListener('blur', () => { held.clear(); taps.reset(); });
 
   const cache = { boss: false, combat: false, hasParty: false };
 
@@ -122,7 +157,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
       toggle(root, 'sg-has-target', hasT);
       party.update(s.party);
       quest.update(s.quest);
-      abar.update(s.slots, s.player.weapon);
+      abar.update(s.slots, s.player);
       toggle(root, 'sg-no-abilities', s.slots.length === 0);
       if (s.inCombat !== cache.combat) { cache.combat = s.inCombat; toggle(root, 'sg-in-combat', s.inCombat); }
       if (s.prompt !== promptCache) {
@@ -162,8 +197,13 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     floatText(x, y, text, kind) { floats.spawn(x, y, text, kind); },
     dialogue: (speaker, lines, choices) => overlays.dialogue(speaker, lines, choices),
     titleScreen: () => overlays.titleScreen(),
-    loadout: (pool, current, weapon) => overlays.loadout(pool, current, weapon),
-    endScreen: (kind, lines, buttons) => overlays.endScreen(kind, lines, buttons),
+    loadout: (pool, current, weapon, count) => overlays.loadout(pool, current, weapon, count),
+    endScreen: (kind, lines, buttons, opts) => overlays.endScreen(kind, lines, buttons, opts),
+    dismissEndScreen: () => overlays.dismissEndScreen(),
+    danger(mode) {
+      if (mode === 'flash') hurtFlash.animate([{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 0 }], { duration: 600, easing: 'ease-out' });
+      else toggle(danger, 'on', mode === 'on');
+    },
     fade: (toOpaque, color, seconds) => overlays.fade(toOpaque, color, seconds),
     setVisible(on) { toggle(root, 'sg-hidden', !on); if (!on) { joy.reset(); settings.close(); } },
   };

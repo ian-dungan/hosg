@@ -22,6 +22,8 @@ export interface EnemyView {
   setEntityId(id: number): void;
   /** windup plays over `seconds` (default: the attack's wind-up). Setting the mode it already has does nothing. */
   setMode(mode: EnemyMode, attack?: EnemyAttackId, seconds?: number, elapsed?: number): void;
+  /** The chase surge: a pulsing cold tint while it runs to catch up. */
+  setSurging(on: boolean): void;
   /** Back to a fresh idle enemy (a pooled view about to be used for another enemy of its kind). */
   reset(): void;
   /** The attack lands: releases the wind-up in progress (or just ended), else a quick auto attack. */
@@ -645,6 +647,7 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
   poser.reset(); out.set(poser.v); from.set(out);
   let blend = 1;
   const a: Anim = { T: Math.random() * 10, mode: 'idle', attack: null, wT: 0, wDur: 1, sT: -1, sAttack: null, hT: -1, deadT: 0, stunT: 0, speed: 0, phase: Math.random() };
+  let surging = false;
   let flashT = -1, lastWindup: { attack: EnemyAttackId; endedAt: number } | null = null, spawnT = 1;
   const prev = new Vector3(NaN, 0, 0);
   const startBlend = () => { from.set(out); blend = 0; };
@@ -672,7 +675,9 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       a.sAttack = atk; a.sT = 0;
       startBlend();
     },
+    setSurging(on) { surging = on; },
     reset() {
+      surging = false;
       a.mode = 'idle'; a.attack = null; a.wT = 0; a.sT = -1; a.sAttack = null; a.hT = -1; a.deadT = 0; a.stunT = 0; a.speed = 0;
       flashT = -1; lastWindup = null; spawnT = 1; blend = 1;
       poser.reset(); out.set(poser.v); from.set(out);
@@ -738,6 +743,7 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
         glowK = 1.1 + 0.35 * Math.sin(a.T * 18) * rise(a.wT, 0.12);
       }
       if (a.mode === 'stunned') glowK = 0.5 + 0.3 * Math.abs(Math.sin(a.T * 9));
+      if (surging && a.mode !== 'dead') { const p = 0.5 + 0.5 * Math.sin(a.T * 16); e.r += 0.04 * p; e.g += 0.22 * p; e.b += 0.3 * p; }
       if (a.mode === 'dead') glowK = 0.2;
       if (flashT >= 0) {
         flashT += dt;

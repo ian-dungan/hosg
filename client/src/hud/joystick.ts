@@ -1,5 +1,10 @@
 // Floating virtual joystick: appears where the thumb lands inside the bottom-left zone.
 import { h } from './dom';
+import { createDoubleTap } from '../combat/doubleTap';
+
+/** A push past this much of the way out, within FLICK_MS of the thumb landing, is a flick. */
+const FLICK_AT = 0.75;
+const FLICK_MS = 220;
 
 const DEAD = 0.14;
 
@@ -12,6 +17,11 @@ export class Joystick {
   private cy = 0;
   private vx = 0;
   private vy = 0;
+  private downAt = 0;
+  private flicked = false;
+  private taps = createDoubleTap();
+  /** Two flicks the same way, quickly: a dodge that way (set by the HUD). */
+  onFlick: ((dir: { x: number; y: number }) => void) | null = null;
   constructor(parent: HTMLElement) {
     this.zone = h('div', 'sg-joyzone sg-ctl', parent);
     this.base = h('div', 'sg-joy', this.zone);
@@ -22,6 +32,8 @@ export class Joystick {
       if (this.pid !== null) return;          // a second finger in the zone is ignored
       e.preventDefault(); e.stopPropagation();
       this.pid = e.pointerId;
+      this.downAt = performance.now();
+      this.flicked = false;
       try { z.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       const zr = z.getBoundingClientRect();
       const R = this.radius();
@@ -56,6 +68,13 @@ export class Joystick {
     const len = Math.hypot(dx, dy) || 1;
     this.vx = Math.max(-1, Math.min(1, (dx / len) * sc));
     this.vy = Math.max(-1, Math.min(1, (-dy / len) * sc));
+    const t = performance.now();
+    if (!this.flicked && m >= FLICK_AT && t - this.downAt <= FLICK_MS) {
+      this.flicked = true;
+      // which way: one of four sectors (a flick right then right again)
+      const sector = Math.abs(this.vx) > Math.abs(this.vy) ? (this.vx > 0 ? 'R' : 'L') : (this.vy > 0 ? 'U' : 'D');
+      if (this.taps.down(sector, t)) this.onFlick?.({ x: this.vx, y: this.vy });
+    }
   }
   reset(): void {
     this.pid = null; this.vx = 0; this.vy = 0;

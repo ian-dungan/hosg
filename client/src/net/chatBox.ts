@@ -22,12 +22,13 @@ const CSS = /* css */ `
 .sg-chat-send{min-width:0;min-height:44px;padding:0 16px}
 .sg-chat-hint{position:absolute;left:calc(var(--sl) + var(--g));bottom:calc(var(--sb) + var(--g) + 12px);font-size:12px;opacity:.75}
 .sg-chat-open .sg-chat-hint{display:none}
-.sg-chat-btn{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g) + 30px);min-width:0;min-height:44px;padding:0 18px;
+.sg-chat-btn{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g) + 58px);min-width:0;min-height:44px;padding:0 18px;
   pointer-events:auto;background:rgba(16,18,42,.55)}
 /* touch: the log sits under the name plate, the typing line at the top, clear of the joystick and the keyboard */
 .sg-chat-touch .sg-chat-log{bottom:auto;top:calc(var(--st) + var(--g) + 76px);max-height:min(26vh,160px);width:min(360px,calc(62% - var(--g)))}
 .sg-chat-touch .sg-chat-bar{bottom:auto;top:calc(var(--st) + var(--g));width:calc(100% - 2 * var(--g))}
 .sg-chat-touch .sg-chat-hint{display:none}
+@media (max-width:700px) and (orientation:portrait){ .sg-chat-touch .sg-chat-log{top:calc(var(--st) + var(--g) + 150px);width:min(300px,56%)} }
 .sg-chat:not(.sg-chat-touch) .sg-chat-btn,.sg-chat-open .sg-chat-btn{display:none}
 .sg-chat:not(.sg-chat-touch) .sg-chat-send{display:none}
 `;

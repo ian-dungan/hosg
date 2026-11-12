@@ -126,6 +126,7 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
     if (respawned || Math.hypot(e.x - d.lx, e.z - d.lz) > SNAP_M) { d.buf.clear(); d.placed = false; }
     d.lx = e.x; d.lz = e.z;
     d.buf.push(now, e.x, e.z, e.facing, e.y);
+    d.view.setSurging(!!e.surging);
     apply(d, e);
   };
   const onState = () => {
