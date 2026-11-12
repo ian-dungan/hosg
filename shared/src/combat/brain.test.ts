@@ -201,3 +201,14 @@ describe('the dungeon brain (Plan 4)', () => {
     expect(act.intents.slice(0, k).at(-1)).toEqual({ t: 'target', id: 1 });
   });
 });
+
+describe('the brain reads the kit (Plan 5)', () => {
+  it('a careful brain spends a finisher at the reduced effectiveCost (SelfView.finisherCost)', () => {
+    // a Ranger 10 m from a Mossback that carries a mark Pitch Arrow detonates: only the finisher is ready
+    const r = (o: Partial<BrainSelf>) => self('ranger', JOBS.ranger.picks.solo, { momentum: 42, cd: [9, 0, 9, 9, 9], ...o });
+    const target = enemy({ marks: 1 });
+    expect(ability(input({ self: r({}), target }))).toBeUndefined();
+    expect(ability(input({ self: r({ finisherCost: 40 }), target }))).toEqual({ t: 'ability', slot: 1, phase: 'press' });
+    expect(ability(input({ self: r({ finisherCost: 40, momentum: 39 }), target }))).toBeUndefined();
+  });
+});

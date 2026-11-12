@@ -104,7 +104,7 @@ export function indexMods(mods: readonly Mod[]): ModIndex {
   for (const [id, v] of x.hpCost) x.hpCost.set(id, clamp(v, MOD_LIMITS.hpCost));
   for (const [id, v] of x.stagger) x.stagger.set(id, clamp(v, MOD_LIMITS.staggerAdd));
   for (const [ev, v] of x.momentumOn) {
-    const min = ev === 'hitTaken' ? MOD_LIMITS.hitTakenMinEveryS : 0;
+    const min = ev === 'hitTaken' ? MOD_LIMITS.hitTakenMinEveryS : ev === 'behind' ? MOD_LIMITS.behindMinEveryS : 0;
     x.momentumOn.set(ev, { amount: clamp(v.amount, MOD_LIMITS.momentumOn), everyS: Math.max(min, clamp(v.everyS, MOD_LIMITS.momentumOnEveryS)) });
   }
   x.dodgeCharges = Math.min(1, Math.max(0, Math.floor(charges)));

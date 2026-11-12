@@ -273,7 +273,7 @@ At level 10, a full kit gives these totals:
 | `mossweave` | Mossweave | T1 | cloth | heals and shields you give × 1.1 (`given`; ruling P5-b, was: heals you give also shield 15% of the amount healed, cap 15, 6 s) | your casts take 10% less time |
 | `thornrunner` | Thornrunner | T1 | light | a perfect dodge gives +10 Momentum | dodge charges refill 20% faster |
 | `rootbound` | Rootbound | T1 | heavy | +3 Momentum when an enemy hit lands on you (at most once a second) | falling below 35% hp shields you for 15% of max hp (6 s; once every 30 s) |
-| `wickthread` | Wickthread | T2 | cloth | a completed cast takes 0.5 s off your other cooldowns | interrupting a wind-up, a cleanse or a revive gives +20 Momentum (ruling P5-b, was: interrupting only) |
+| `wickthread` | Wickthread | T2 | cloth | a completed cast takes 0.5 s off your other cooldowns | interrupting a wind-up, a cleanse or a revive gives +20 Momentum; the cleanse pays on a cleanse cast (an affliction removed or not) at most once every 10 s (ruling P5-g, `everyS: 10`) (ruling P5-b, was: interrupting only) |
 | `cinderstep` | Cinderstep | T2 | light | a finisher that detonates a mark refunds 10 Momentum | for 2 s after a dodge, your next ability deals ×1.2 |
 | `brassbound` | Brassbound | T2 | heavy | your taunts also shield you for 15 (6 s) | the stagger you deal × 1.2 |
 | `lenslight` | Lenslight | T3 | cloth | heals and shields you give × 1.15 (`given`; ruling P5-b, was: overhealing you give becomes a shield, 30% of the overheal, cap 20, 6 s) | your finishers cost 10 less Momentum |
@@ -299,7 +299,7 @@ Bonus magnitudes are tunable ±30%. The piece nouns:
 | bow | `grove_bow` Grove Bow | `ashwood_longbow` Ashwood Longbow | `cinderstring` Cinderstring | `longwatch` **Longwatch**: Charged Shot × 1.2; interrupting gives +15 Momentum |
 | sword | `grove_sword` Grove Sword | `millward_sword` Millward Sword | `cogtooth_blade` Cogtooth Blade | `lampwardens_oath` **Lampwarden's Oath**: your taunts shield you for 25 (6 s); Dawn Ward × 1.2 |
 | greatsword | `grove_greatsword` Grove Greatsword | `woodsmans_cleaver` Woodsman's Cleaver | `furnace_edge` Furnace Edge | `grief_of_brass` **Grief of Brass**: Crimson Pact's hp cost × 0.5 (ruling P5-b, was: costs no hp, which left Pact of Ash nothing to do); Nightfall × 1.1 |
-| daggers | `grove_knives` Grove Knives | `thornpick_pair` Thornpick Pair | `twin_sparks` Twin Sparks | `twin_wicks` **Twin Wicks**: each hit from behind +5 Momentum; Ghost Edge × 1.15 (ruling P5-b, was: a perfect dodge resets your quick ability, which Tollwind's 5 pieces already do, and for 2 s after a dodge your next ability × 1.15, which Cinderstep's ×1.2 hid) |
+| daggers | `grove_knives` Grove Knives | `thornpick_pair` Thornpick Pair | `twin_sparks` Twin Sparks | `twin_wicks` **Twin Wicks**: a hit from behind +5 Momentum, at most once a second (ruling P5-f: was unthrottled, so every auto from behind paid; the engine throttles `behind` at ≥ 1 s, `MOD_LIMITS.behindMinEveryS`); Ghost Edge × 1.15 (ruling P5-b, was: a perfect dodge resets your quick ability, which Tollwind's 5 pieces already do, and for 2 s after a dodge your next ability × 1.15, which Cinderstep's ×1.2 hid) |
 | staff | `grove_staff` Grove Staff | `rowan_staff` Rowan Staff | `lampglass_rod` Lampglass Rod | `dawnlantern` **Dawnlantern**: Second Dawn's cast × 0.6; heals you give also shield 15% (cap 15) — and `ember_lens` **Ember Lens**: Hearthfall's cast × 0.75; a reaction you trigger gives +10 Momentum |
 
 | off-hand | starter | T1 | T2 | T3 |
@@ -510,7 +510,7 @@ export type Mod =
   | { k: 'cd'; ability: AbilityId; add: number }                    // cooldown, never below 1 s
   | { k: 'cast'; ability: AbilityId | 'all'; mult: number }         // cast time, never below 0.3 s (instants stay instant)
   | { k: 'buffS'; ability: AbilityId; add: number }                 // its buff, debuff and shield durations
-  | { k: 'given'; mult: number }                                    // ruling P5-b: × every ability heal and shield amount it gives
+  | { k: 'given'; mult: number }                                    // ruling P5-b: × every ability heal and shield amount it gives (not Soft Rain ticks, not kit shields)
   | { k: 'hpCost'; ability: AbilityId; mult: number }               // its hp-cost (0 allowed)
   | { k: 'stagger'; ability: AbilityId; add: number }
   | { k: 'finisherCost'; add: number }                              // finishers' cost, never below 30

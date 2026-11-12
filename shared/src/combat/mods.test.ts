@@ -7,7 +7,7 @@ import type { Kit, Mod } from '../mods';
 import { STARTER_STATS } from './stats';
 import { probe, addKitted, use, picksWith, ENEMY } from './kitRig';
 import { Rig, camp } from './testRig';
-import { hurtAdventurer, damageEnemy } from './adventurer';
+import { hurtAdventurer, damageEnemy, modMomentum } from './adventurer';
 import { resolveHit } from './enemyAi';
 import { indexMods, effectiveCost } from './kitIndex';
 import { ABILITIES } from './abilities';
@@ -202,6 +202,29 @@ describe('mods, one test per kind', () => {
     hit(3.3, 'auto', true); expect(s.momentum).toBe(9);
     // an unthrottled hitTaken is throttled at hitTakenMinEveryS anyway
     expect(indexMods([{ k: 'momentumOn', on: 'hitTaken', amount: 3 }]).momentumOn.get('hitTaken')!.everyS).toBe(0.5);
+  });
+
+  it('ruling P5-f: Momentum from hits from behind pays at most once a second (Twin Wicks)', () => {
+    expect(ITEMS.twin_wicks.named!.mods).toContainEqual({ k: 'momentumOn', on: 'behind', amount: 5, everyS: 1 });
+    // an unthrottled one is throttled at behindMinEveryS anyway
+    expect(indexMods([{ k: 'momentumOn', on: 'behind', amount: 5 }]).momentumOn.get('behind')!.everyS).toBe(MOD_LIMITS.behindMinEveryS);
+    expect(MOD_LIMITS.behindMinEveryS).toBe(1);
+    const r = new Rig([camp(ENEMY, 0, 0)]);
+    const a = addKitted(r, 'ninja', picksWith('ninja'), kit([{ k: 'momentumOn', on: 'behind', amount: 5 }]));
+    const s = r.w.adventurers.get(a)!;
+    modMomentum(s, 'behind', 0); expect(s.momentum).toBe(5);
+    modMomentum(s, 'behind', 0.5); expect(s.momentum).toBe(5);
+    modMomentum(s, 'behind', 1.05); expect(s.momentum).toBe(10);
+  });
+
+  it('ruling P5-g: Wickthread 5 pays a cleanse cast at most once every 10 s', () => {
+    expect(SETS.wickthread.bonus5).toContainEqual({ k: 'momentumOn', on: 'cleanse', amount: 20, everyS: 10 });
+    const r = new Rig([camp(ENEMY, 0, 0)]);
+    const a = addKitted(r, 'white_mage', picksWith('white_mage'), kit([...SETS.wickthread.bonus5]));
+    const s = r.w.adventurers.get(a)!;
+    modMomentum(s, 'cleanse', 0); expect(s.momentum).toBe(20);
+    modMomentum(s, 'cleanse', 9); expect(s.momentum).toBe(20);
+    modMomentum(s, 'cleanse', 10.05); expect(s.momentum).toBe(40);
   });
 
   it('dodge: +1 charge at most, refill faster', () => {

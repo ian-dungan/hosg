@@ -28,7 +28,10 @@ export type Mod =
   | { readonly k: 'cast'; readonly ability: AbilityId | 'all'; readonly mult: number }
   /** Its buff, debuff, shield (and sprint) durations. */
   | { readonly k: 'buffS'; readonly ability: AbilityId; readonly add: number }
-  /** × on every ability heal and shield amount this adventurer gives (ruling P5-b: "heals and shields you give"). */
+  /**
+   * × on every ability heal and shield amount this adventurer gives (ruling P5-b: "heals and shields you
+   * give"). It does not reach Soft Rain's ticks or kit shields (healShield, shieldOn, lowHpShield).
+   */
   | { readonly k: 'given'; readonly mult: number }
   /** Its hp-cost (0 allowed). */
   | { readonly k: 'hpCost'; readonly ability: AbilityId; readonly mult: number }

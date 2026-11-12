@@ -4,10 +4,11 @@
 import { ABILITIES, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, WEAPONS, type AbilityData, type AbilityId } from './abilities';
 import { ENEMY_ATTACKS, ENEMY_KINDS, type EnemyAttackId } from './enemies';
 import type { CastView, CombatantView, FieldView, Intent, SelfView, TelegraphView } from './engine';
-import { DODGE_DISTANCE, FINISHER_COST, MELEE_REACH, MOMENTUM_MAX } from './constants';
+import { DODGE_DISTANCE, MELEE_REACH, MOMENTUM_MAX } from './constants';
 import { RUN_SPEED } from '../constants';
 import { JOBS, type JobId } from './jobs';
 import { MARK_BITS } from './marks';
+import { effectiveCost } from './kitIndex';
 import { escapeDir, inShape } from './shapes';
 
 /** The brain's own view: SelfView with the job fields the engine always fills made required. */
@@ -381,6 +382,8 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
   const inTelegraph = b.telegraphs.some((t) => inShape(t.shape, self.x, self.z));
   const ready = (slot: number) => slot >= 0 && slot < self.slots.length && self.cd[slot] <= EPS;
   const castOk = castRule(b, escape !== null);
+  /** Its Momentum cost under the kit (SelfView.finisherCost; 0 for an ability that costs none). */
+  const costOf = (ab: AbilityData) => effectiveCost(self, ab) ?? 0;
   const enemyInRange = (ab: AbilityData) => reach <= ab.range;
   const action = (slot: number, ally?: number): BrainAction => {
     intents.push(ally === undefined ? { t: 'ability', slot, phase: 'press' } : { t: 'ability', slot, phase: 'press', ally });
@@ -460,7 +463,7 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
       let best = -1, bestStagger = 0;
       for (let s = 0; s < self.slots.length; s++) {
         const ab = ABILITIES[self.slots[s]];
-        if (!ready(s) || !castOk(ab) || ab.aim !== 'enemy' || (ab.cost !== undefined && self.momentum < ab.cost)) continue;
+        if (!ready(s) || !castOk(ab) || ab.aim !== 'enemy' || costOf(ab) > self.momentum) continue;
         if (reachOf(tolling) > ab.range) continue;
         const st = (ab.stagger ?? 0) + (s === FINISHER ? COMBO_STAGGER_GUESS : 0);
         if (st > bestStagger) { best = s; bestStagger = st; }
@@ -525,13 +528,13 @@ export function dungeonBrain(b: DungeonBrainInput, memory: BrainMemory): BrainAc
     // 18b. an interrupting finisher on another enemy's interruptible Plan 4 wind-up in its range (Keeper's Toll while on a shard)
     () => {
       const fin = ABILITIES[self.slots[FINISHER]];
-      if (!caster || interruptibleWindup || fin.interrupts !== true || self.momentum < FINISHER_COST || !ready(FINISHER) || !castOk(fin) || reachOf(caster) > fin.range) return null;
+      if (!caster || interruptibleWindup || fin.interrupts !== true || self.momentum < costOf(fin) || !ready(FINISHER) || !castOk(fin) || reachOf(caster) > fin.range) return null;
       memory.holdSince = null;
       return retarget(caster, FINISHER);
     },
     // 19. the finisher (Plan 3's rules, the careful hold included)
     () => {
-      if (!(self.momentum >= FINISHER_COST && ready(FINISHER) && enemyInRange(ABILITIES[self.slots[FINISHER]]) && castOk(ABILITIES[self.slots[FINISHER]]))) {
+      if (!(self.momentum >= costOf(ABILITIES[self.slots[FINISHER]]) && ready(FINISHER) && enemyInRange(ABILITIES[self.slots[FINISHER]]) && castOk(ABILITIES[self.slots[FINISHER]]))) {
         memory.holdSince = null;
         return null;
       }

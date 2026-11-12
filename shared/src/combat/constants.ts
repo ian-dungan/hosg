@@ -251,4 +251,6 @@ export const MOD_LIMITS = Object.freeze({
   momentumOnEveryS: [0, 600] as const,
   /** hitTaken is always throttled at least this much (an unthrottled one would pay on every field tick). */
   hitTakenMinEveryS: 0.5,
+  /** behind (Twin Wicks) is always throttled at least this much (ruling P5-f: once a second; autos from behind would pay on every swing). */
+  behindMinEveryS: 1,
 });
