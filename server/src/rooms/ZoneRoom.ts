@@ -153,6 +153,7 @@ function p95(times: Timing[]): number {
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const round2 = (v: number) => Math.round(v * 100) / 100;
 const byte = (v: number) => Math.min(255, Math.max(0, Math.round(v)));
+const u16 = (v: number) => Math.min(65535, Math.max(0, Math.round(v)));
 
 /**
  * A carry `seconds` older: cooldowns, the GCD, the swap cooldown, the shield and sprint run down,
@@ -326,8 +327,6 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private disposed = false;
   /** The combat clock at the engine's last tick. */
   private lastTickAt = 0;
-  /** Enemy and telegraph state keys, by engine id. */
-  private keys = new Map<number, string>();
   private sessions = new Map<string, Session>(); // key: sessionId
   /** Accounts with a seat here (joining, in the room or away), by the session that holds it: accountId -> sessionId. */
   private sessionByAccount = new Map<string, string>();
@@ -963,6 +962,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const here = [...this.sessions.values()].filter((session) => !session.travelling && !this.savedElsewhere(session));
     await Promise.all(
       here.map(async (session) => {
+        // A death still being saved (as respawned, in the grove): saving it again from here meanwhile
+        // would be refused once that lands, and kick the dead adventurer. Wait for it, then look again.
+        if (session.dead && session.deathSave) {
+          await session.deathSave;
+          if (session.travelling || this.savedElsewhere(session) || this.sessions.get(session.client.sessionId) !== session) return;
+        }
         if ((await this.save(session)) !== 'refused') return;
         if (this.sessions.get(session.client.sessionId) === session && !session.travelling) await this.sendOn(session);
       }),
@@ -1190,6 +1195,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const end = { x: d.result.x, z: d.result.z, y: d.result.y + 0 };
     const seq = ++session.displaceSeq;
     session.awaitingDisplace = false;
+    // A dodge still held for its gap gives way to this: say so (the client predicted it, and rolls back).
+    if (session.pendingDodge && kind !== 'dodge' && !session.reconnection) this.refuse(session, 'dodge', 'busy');
     session.pendingDodge = undefined;
     session.lastDisplaceKind = kind;
     session.lastGood = end;
@@ -1197,7 +1204,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const now = this.wallMs();
     // Knocked in mid-air: the fall it was already in is charged too, from its highest point to where the push began.
     const air = movement.air;
-    const before = air.grounded ? 0 : fallDamage(Math.max(air.peakY, air.airStartY) - d.from.y);
+    // (Down to where the push really starts: an airborne start more than 2 m up is clamped, path[0].)
+    const pushedFrom = d.result.path[0]?.y ?? d.from.y;
+    const before = air.grounded ? 0 : fallDamage(Math.max(air.peakY, air.airStartY) - pushedFrom);
     movement.air = makeAirTrack(end.y);
     const scale = this.combat.speedScale(session.eid, this.nowS());
     movement.metres = Math.min(refillAllowance(movement.metres, (now - movement.at) / 1000, scale), MAX_MOVE_ALLOWANCE * Math.max(1, scale)) + DISPLACE_FUZZ_M;
@@ -1268,6 +1277,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (!list) this.targeting.set(e.target, (list = []));
       list.push(e);
     }
+    // an adventurer nobody targets any more (or one that left) keeps no entry: the map holds the targeted only
+    for (const [eid, list] of this.targeting) if (list.length === 0) this.targeting.delete(eid);
   }
 
   /**
@@ -1422,12 +1433,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       let e = this.state.enemies.get(key);
       if (!e) {
         e = new EnemySchema({
-          eid: v.id, kind: v.kind, x: v.x, z: v.z, y: v.y, facing: v.facing, hp: Math.ceil(v.hp), maxHp: v.maxHp, stagger: 0,
-          maxStagger: byte(v.maxStagger), marks: 0, mode: 'idle', target: -1, windup: '', windupTotal: 0, surging: false, staggerImmune: 0,
+          eid: v.id, kind: v.kind, x: v.x, z: v.z, y: v.y, facing: v.facing, hp: Math.ceil(v.hp), maxHp: u16(v.maxHp), stagger: 0,
+          maxStagger: u16(v.maxStagger), marks: 0, mode: 'idle', target: -1, windup: '', windupTotal: 0, surging: false, staggerImmune: 0,
         });
         this.state.enemies.set(key, e);
       }
-      const hp = Math.ceil(v.hp), stagger = byte(v.stagger), mode = enemyMode(v), target = v.targetId ?? -1;
+      const hp = Math.ceil(v.hp), stagger = u16(v.stagger), maxStagger = u16(v.maxStagger), mode = enemyMode(v), target = v.targetId ?? -1;
       const windup = v.windup?.attack ?? '', windupTotal = v.windup?.total ?? 0;
       if (e.x !== v.x) e.x = v.x;
       if (e.z !== v.z) e.z = v.z;
@@ -1435,12 +1446,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (e.facing !== v.facing) e.facing = v.facing;
       if (e.hp !== hp) e.hp = hp;
       if (e.stagger !== stagger) e.stagger = stagger;
+      if (e.maxStagger !== maxStagger) e.maxStagger = maxStagger; // an elite's bar grows with the adventurers it fights
       if (e.marks !== v.marks) e.marks = v.marks;
       if (e.mode !== mode) e.mode = mode;
       if (e.target !== target) e.target = target;
       if (e.windup !== windup) e.windup = windup;
       if (e.windupTotal !== windupTotal) e.windupTotal = windupTotal;
-      if (e.maxHp !== v.maxHp) e.maxHp = v.maxHp;
+      const maxHp = u16(v.maxHp);
+      if (e.maxHp !== maxHp) e.maxHp = maxHp;
       const surging = v.surging === true, staggerImmune = round2(v.staggerImmune ?? 0);
       if (e.surging !== surging) e.surging = surging;
       if (e.staggerImmune !== staggerImmune) e.staggerImmune = staggerImmune;
@@ -1474,10 +1487,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     return Math.max(0, Math.round(s * TICK_HZ));
   }
 
+  /** The state key of an enemy or telegraph (no cache: telegraph ids are never reused, so one would only grow). */
   private keyOf(id: number): string {
-    let key = this.keys.get(id);
-    if (key === undefined) this.keys.set(id, (key = String(id)));
-    return key;
+    return String(id);
   }
 
   /**

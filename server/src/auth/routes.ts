@@ -6,7 +6,7 @@ import express from 'express';
 import type { ErrorRequestHandler } from 'express';
 import { validateAdventurerName, validatePassword, validateUsername } from '@sg2/shared';
 import { AlreadyNamedError, NameTakenError, type Account, type Store } from '../store/types';
-import { rateLimit } from './rateLimit';
+import { createLimiter, rateLimit } from './rateLimit';
 import { signToken, verifyToken } from './tokens';
 
 const WRONG_LOGIN = 'Wrong name or password';
@@ -19,7 +19,7 @@ function randomGuestName(): string {
   return `Guest-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
 }
 
-export function authRouter(store: Store, secret: string, opts: { ratePerMinute?: number; zoneRatePerMinute?: number } = {}): express.Router {
+export function authRouter(store: Store, secret: string, opts: { ratePerMinute?: number; zoneRatePerMinute?: number; zoneIpRatePerMinute?: number } = {}): express.Router {
   const router = express.Router();
   const session = async (account: Account) => ({
     token: signToken(account.id, secret),
@@ -38,9 +38,19 @@ export function authRouter(store: Store, secret: string, opts: { ratePerMinute?:
 
   // Before the login limit: a client asks this before every join (and after each travel), which is
   // not a login attempt. It needs a valid token, so it reveals nothing to a guesser. Its own, generous
-  // limit (60 a minute per address by default) keeps one client from querying the store without bound.
-  router.get('/zone', rateLimit(opts.zoneRatePerMinute ?? 60, 'Too many requests, wait a minute'), async (req, res) => {
-    const account = await bearer(req);
+  // limit is per account (60 a minute by default), keyed after the token is verified (no store lookup
+  // before it), so players behind one NAT or proxy never hold each other up; a loose per-address
+  // ceiling (600 a minute by default, bad tokens included) keeps one address from hammering it.
+  const zoneLimit = createLimiter(opts.zoneRatePerMinute ?? 60);
+  const TOO_MANY = 'Too many requests, wait a minute';
+  router.get('/zone', rateLimit(opts.zoneIpRatePerMinute ?? 600, TOO_MANY), async (req, res) => {
+    const token = BEARER_RE.exec(req.get('authorization') ?? '')?.[1];
+    const verified = token ? verifyToken(token, secret) : null;
+    if (verified && !zoneLimit.hit(verified.accountId)) {
+      res.status(429).json({ error: TOO_MANY });
+      return;
+    }
+    const account = verified && (await store.findAccountById(verified.accountId));
     if (!account) {
       res.status(401).json({ error: SIGN_IN_AGAIN });
       return;

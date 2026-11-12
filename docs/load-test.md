@@ -3,8 +3,8 @@
 `server/scripts/bots.ts` signs in `--count` guest adventurers into one zone, has each walk in random
 legal steps at the server's update rate (15 a second, at running speed, jumping now and then) and say
 a chat line every 20 seconds, then prints what it measured. It exits with status 1 unless every bot
-stayed connected, the mean state-update rate the bots saw was at least 14 a second, and no bot had a
-step corrected. Without `--fight` the bots do not fight; a knockback or a respawn only moves them.
+stayed connected, the mean state-update rate the bots saw was at least 14 a second, no bot had a
+step corrected, and no bot was stuck for a second (15 ticks) or more. Without `--fight` the bots do not fight; a knockback or a respawn only moves them.
 With `--fight` they fight in the Greenway with the shared brain (see "Fighting bots" below).
 
 ## How to run it
@@ -42,7 +42,7 @@ With `--fight` they fight in the Greenway with the shared brain (see "Fighting b
    | `--count` | 100 | bots |
    | `--seconds` | 60 | how long to measure |
    | `--zone grove\|greenway` | grove | the room to join; must be the server's start zone (`SG2_START_ZONE`) |
-   | `--stand` | off | stand still (still chat); the patch rate is not checked then, since an unchanged state sends no patches |
+   | `--stand` | off | stand still (still chat); the patch rate is still checked: the state's `clock` changes every step, so a room where nobody moves still sends a patch each step |
    | `--warmup <s>` | 2 | wait this long after the last join before measuring: with 40 the bots have spread out over the zone |
    | `--cluster <m>` | none | keep every bot within this many metres of where it joined (all join at the spawn): with 15, all 100 are within 30 m of each other, the worst case for interest management |
    | `--fight` | off | bots that fight (below); each asks `GET /api/zone` which room to join, so `--zone` is not needed (start the server with `SG2_START_ZONE=greenway`) |
@@ -70,9 +70,9 @@ npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 120 
 ```
 
 Each bot asks `GET /api/zone` which room to join. That endpoint allows 60 requests a minute per
-address, so with 100 bots on one machine the last 40 are refused and take the zone the others were
-told (the script prints how many). Every 4th bot swaps to the Bow before it fights. Every tick a bot
-in the Greenway:
+account (and 600 per address, a loose ceiling), so every bot asks for itself. Every 4th bot swaps to
+the Bow before it fights, and every 5th (by index mod 5 = 0, the sprinters) takes Sprint as its
+second free pick. Every 5th from index 2 is a predictor (below). Every tick a bot in the Greenway:
 
 - picks an enemy:
   - its current one while it lives within 45 m;
@@ -92,24 +92,37 @@ in the Greenway:
 
   It then runs the shared `adventurerBrain`, careful for 3 bots in 4 and careless for the 4th. Three
   careless bots go solo at a Mossback, so deaths happen.
-- walks toward the brain's `moveTo` with the shared controller:
-  - at 95% of run speed, at 0.4× while charging;
-  - only with poses the server's own check takes.
+- walks toward the brain's `moveTo` with the shared controller, and sends each pose as the browser
+  does: what its controller did, with no check of its own first, so a pose the server wrongly refuses
+  shows up as a correction:
+  - most bots at 95% of run speed, at 0.4× while charging;
+  - sprinters at the browser's full speed: run speed, ×1.4 from the moment Sprint's `use` fx arrives
+    until 0.15 s before it ends, ×0.4 while charging; they press Sprint for walks longer than 10 m.
 - sends the brain's intents:
   - a dodge carries the pose it starts from and the latest ack, and nothing more is sent until its
   `displaced` or `refused`;
   - a `displaced` (dodge, knock or resync) gives the new ack, and is played out for as long as the
     bot's own `simulateDisplacement` of it takes, with no poses meanwhile.
+  - predictors roll as the browser does instead: at once, by their own `simulateDisplacement`, rolled
+    back to the start on a refusal. They see their `displaced`, `correct`, `refused` and `respawned`
+    450–650 ms late (a slow downlink), and roll twice in a row when both charges are there: the second
+    roll goes 0.43 s after the first, from its predicted end, before the first's `displaced` has
+    arrived, so it carries the ack before it (the server takes that from a client's own roll).
 
 After a death a bot asks to respawn after 3 s, wakes at the grove's statue, walks to the east gate
 and travels back. A `correct` that follows a dodge the engine refused is the protocol's rollback and
-is counted apart. Every other `correct` is a failure.
+is counted apart, by the refusal's reason. Only `busy` (a knock landed between the press and the
+server) can follow a legal dodge; a rollback for any other reason is a failure (the room took a dodge
+the engine then refused). Every other `correct` is a failure.
 
 A fight run passes only if all of these hold:
 - every bot stayed connected;
 - the mean patch rate is at least 14 Hz;
-- 0 corrections;
+- 0 corrections, and no dodge rollback for a reason other than `busy`;
+- no bot stuck (no move it could make) for 15 ticks in a row;
 - credited kills ≥ 50, dodges ≥ 25 and knockbacks ≥ 1;
+- at least one predicted second roll sent before the first's `displaced`, and every such roll rolled;
+- at least one move sent at Sprint speed;
 - every bot that died is back in the Greenway or on its way;
 - the zone step p95 ≤ 15 ms;
 - peak RSS ≤ 400 MB;
@@ -125,7 +138,9 @@ and deaths are gated on the 120 s `--cycle` run.
 
 It prints, beside the usual numbers:
 - kills credited (by kind) and the enemy deaths seen;
-- deaths (careless and careful), dodges sent and rolled, knockbacks, resyncs and dodge rollbacks;
+- deaths (careless and careful), dodges sent and rolled, knockbacks, resyncs and dodge rollbacks (by
+  reason);
+- predicted second rolls sent early and rolled; sprints and moves sent sprinting;
 - displacements whose end differed from the bot's own simulation;
 - telegraphs a bot stood in;
 - bots back after a death, travels, and where the bots are at the end;
@@ -155,6 +170,37 @@ must fit within ±500 m and heights −52..180 m (`shared/src/world/limits.ts`; 
 the generator throw otherwise).
 
 ## Results
+
+### 2026-11-12: stricter bots (Plan 3 final review)
+
+Same machine and settings as below, port 2576. The bots now send their poses unchecked, a fifth of
+them at the browser's full speed with Sprint, a fifth predicting their rolls with a slow downlink and
+double rolls; stalls and rollback reasons are gated. No server false rejection showed up in any run:
+0 corrections, 0 rollbacks, every early second roll (`ack` before its first roll's) rolled, every
+displacement's end matched the bot's own simulation. GET /api/zone is now limited per account, so
+every bot asked for itself. The final bots (with the sidestep around obstacles, below) gave:
+
+| run | result | bot Hz | KiB/s per bot (mean / p95) | step p95 | patch p95 | event-loop p99 | peak RSS |
+|---|---|---|---|---|---|---|---|
+| `--fight`, 100 bots, 60 s, 2 runs | PASS ×2 | 15.12–15.18 | 5.5–5.6 / 6.7–6.8 | 6.4–6.9 ms | 3.0–3.4 ms | 15.5–16.2 ms | 150–160 MB |
+| `--cycle`, 100 bots, 120 s, 2 runs | PASS, FAIL (0 deaths) | 15.14–15.16 | 4.6–4.7 / 5.4 | 6.8 ms | 3.0–3.7 ms | 16.5–16.7 ms | 150 MB |
+| grove, 100 walking bots, 30 s | PASS | 15.10 | 9.1 / 10.6 | 6.16 ms | 9.62 ms | 25.4 ms | 154 MB |
+| grove, clustered (`--cluster 15`), 30 s | PASS | 15.10 | 10.5 / 10.6 | 5.71 ms | 10.21 ms | 21.5 ms | 154 MB |
+
+| fight run | kills credited | deaths | back after a death | dodges rolled | knockbacks | early second rolls (sent / rolled) | sprints (moves sprinting) | longest stall |
+|---|---|---|---|---|---|---|---|---|
+| 60 s (2 runs) | 164–176 | 1 | 0 (on their way) | 31–38 | 12–13 | 3–5 / all | 56 (2187–2201) | 0 ticks |
+| 120 s, PASS | 463 | 3 (the Mossback hunters) | 3 | 55 | 20 | 8 / 8 | 94 (3422) | 0 ticks |
+| 120 s, FAIL | 483 (6 Mossback kill credits) | 0 | 0 | 55 | 15 | 4 / 4 | 89 (3585) | 0 ticks |
+
+Earlier runs of the same bots before the sidestep: 60 s ×5 gave 23–42 dodges (one run FAILed at 23 <
+25) and one FAILed with a bot stuck 32 ticks against a rock at (175, 28) in the Greenway (its path
+started inside the clearance margin): the bots now sidestep a blocked step as a player would and
+search a new route after 8 sidesteps. A 120 s cycle run then PASSed (3 deaths, 3 back). The deaths
+gate depends on the three careless hunters losing to a Mossback; in the failing run the Mossbacks
+died 6 times instead (other bots joined in), so the gate is not deterministic. The clustered case
+with the state `clock` (ruling P3-g accepted ≤ ~11 KiB/s): 10.5 KiB/s, as before the clock. A 10-bot
+`--stand` run saw 15.00 Hz.
 
 ### 2026-11-12: fighting bots, the smoke test (Plan 3 Task 9)
 

@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 // A fresh app per test, so each test starts with an empty store and rate limiter.
-async function startApp(opts?: { ratePerMinute?: number }): Promise<{ url: string; store: Store }> {
+async function startApp(opts?: { ratePerMinute?: number; zoneIpRatePerMinute?: number }): Promise<{ url: string; store: Store }> {
   const store = createMemoryStore();
   const app = express();
   app.use('/api', authRouter(store, SECRET, opts));
@@ -268,16 +268,39 @@ describe('GET /api/zone', () => {
     expect((await post(url, '/api/guest')).status).toBe(429);
   });
 
-  it('has its own, more generous limit of 60 a minute from one address', async () => {
+  it('has its own, more generous limit of 60 a minute per account (not per address: players share NATs and proxies)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'));
+    const { url } = await startApp({ ratePerMinute: 100 });
+    const { token } = (await post(url, '/api/guest')).body;
+    const other = (await post(url, '/api/guest')).body.token;
+    for (let i = 0; i < 60; i++) expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
+    expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 429, body: { error: 'Too many requests, wait a minute' } });
+    // another account at the same address is not held up
+    for (let i = 0; i < 60; i++) expect((await zoneAs(url, `Bearer ${other}`)).status).toBe(200);
+    expect((await post(url, '/api/guest')).status).toBe(200); // the login limit is its own
+    vi.setSystemTime(new Date('2026-11-11T12:01:01Z'));
+    expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
+  });
+
+  it('keeps a loose ceiling per address (600 a minute by default), bad tokens included', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'));
+    const { url } = await startApp({ ratePerMinute: 100, zoneIpRatePerMinute: 5 });
+    const tokens = [];
+    for (let i = 0; i < 4; i++) tokens.push((await post(url, '/api/guest')).body.token);
+    for (const token of tokens) expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
+    expect((await zoneAs(url, 'Bearer not-a-token')).status).toBe(401); // the 5th from this address
+    expect(await zoneAs(url, `Bearer ${tokens[0]}`)).toEqual({ status: 429, body: { error: 'Too many requests, wait a minute' } });
+  });
+
+  it('a bad token is answered 401 and spends no account\'s limit', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-11T12:00:00Z'));
     const { url } = await startApp();
     const { token } = (await post(url, '/api/guest')).body;
+    for (let i = 0; i < 100; i++) expect((await zoneAs(url, 'Bearer junk')).status).toBe(401);
     for (let i = 0; i < 60; i++) expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
-    expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 429, body: { error: 'Too many requests, wait a minute' } });
-    expect((await post(url, '/api/guest')).status).toBe(200); // the login limit is its own
-    vi.setSystemTime(new Date('2026-11-11T12:01:01Z'));
-    expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
   });
 });
 

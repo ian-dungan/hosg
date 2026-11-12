@@ -1,34 +1,46 @@
 // Load test: `count` guest adventurers join `--zone` (the grove by default; the Greenway for a server
-// started with SG2_START_ZONE=greenway; GET /api/zone allows only 60 a minute per address), run about at TICK_HZ with the shared character
+// started with SG2_START_ZONE=greenway), run about at TICK_HZ with the shared character
 // controller (over that zone's height surface, jumping now and then) and chat every 20 s. With
 // --stand they stand still instead (they still chat). Prints the patch rate the bots saw, the bytes a
 // second each received (state patches and messages), the server's peak memory and step time (p95),
 // and exits non-zero unless every bot stayed connected, the mean patch rate is at least 14 Hz, no
 // legal step was corrected, no bot was ever left in the air without a pose it could send, and none
 // was stuck for a second or more. The first few corrections are printed in full, with the pose the
-// bot had sent (with --stand the patch rate is not checked: an unchanged state sends none). Bots do not fight; a knockback or a respawn only moves them (they adopt its ack), and
-// one that dies stands still until it gets up.
+// bot had sent. With --stand the patch rate is checked too: the state's `clock` changes every step, so
+// even a room where nobody moves sends a patch each step. Bots do not fight; a knockback or a respawn
+// only moves them (they adopt its ack), and one that dies stands still until it gets up.
 // --warmup <s> waits that long after the last join before measuring (default 2), so walking bots
 // have spread out over the zone; --cluster <m> keeps every bot within that many metres of where it
 // joined (all join at the spawn: the worst case for interest management, everyone sees everyone).
 // It also prints how many adventurers each bot had in its state (its view) and the online count field.
 //
 // --fight: bots that fight, with the shared brain (adventurerBrain, as the tuning simulation runs it).
-// Each asks GET /api/zone and joins that room (when that endpoint's limit of 60 a minute per address
-// refuses, it takes the zone the others were told); every 4th bot swaps to the Bow first. In the
+// Each asks GET /api/zone (60 a minute per account) and joins that room; every 4th bot swaps to the Bow
+// first, and every 5th (SPRINTERS) takes Sprint for its second free pick. In the
 // Greenway, every tick it picks an enemy (its current one while it lives; else one attacking it; else the
 // nearest live one within TARGET_RANGE that fewer than FIGHTERS_PER_ENEMY others in its view fight, one
 // for an elite), or with none walks to the nearest camp it has not just visited (by findPath over the
 // zone's ground) and waits just outside it. It builds a BrainInput from the state it sees (its interest
 // view) and its last `self`, and does what the brain says: careful for 3 bots in 4, careless for the
 // 4th; a few careless ones (ELITE_HUNTERS) go solo at a Mossback. Moves carry the ack of the latest
-// `displaced`/`respawned`; a dodge waits for its `displaced` (or `refused`), and a displacement is
-// played out (no poses) before it moves on from its end. After a death it asks to respawn, wakes at the
-// grove's statue, walks to the east gate and travels back. It passes only if every bot stayed
-// connected, the mean patch rate is at least 14 Hz, no move was corrected (the `correct` that follows a
-// dodge the engine refused is the protocol's rollback, counted apart), credited kills >= 50, dodges
-// >= 25, knockbacks >= 1, every bot that died is back in the Greenway or on its way, the zone step
-// p95 <= 15 ms, peak RSS <= 400 MB, and no bot saw more than MAX_ENEMIES_PER_ZONE enemies.
+// `displaced`/`respawned` and are sent as the browser sends them: what its controller did, with no
+// check of its own first (so any pose the server would wrongly refuse shows up as a correction).
+// Most bots walk at WALK_SHARE of the allowed speed; sprinters walk at the full speed the browser uses
+// (RUN_SPEED, ×SPRINT_SCALE from the moment Sprint's `use` arrives until SPRINT_EARLY_S before it ends,
+// ×0.4 while charging) and press Sprint for long walks. A dodge waits for its `displaced` (or
+// `refused`), and a displacement is played out (no poses) before it moves on from its end; PREDICTORS
+// instead roll at once as the browser does (its own simulateDisplacement, rolled back on a refusal),
+// see their `displaced`/`correct`/`refused`/`respawned` PREDICTOR_LAG_MS late (a slow downlink), and
+// roll twice in a row when they have both charges: the second roll goes from the first's predicted
+// end before the first's `displaced` has arrived, with the ack before it (the server's ownRollBefore).
+// After a death it asks to respawn, wakes at the grove's statue, walks to the east gate and travels
+// back. It passes only if every bot stayed connected, the mean patch rate is at least 14 Hz, no move
+// was corrected (the `correct` that follows a dodge the engine refused is the protocol's rollback,
+// counted apart by the refusal's reason, and only RACY_ROLLBACKS may cause one), no bot was stuck for
+// TICK_HZ ticks in a row, credited kills >= 50, dodges >= 25, knockbacks >= 1, predicted second rolls
+// sent early >= 1 and every one of them rolled, every bot that died is back in the Greenway or on its
+// way, the zone step p95 <= 15 ms, peak RSS <= 400 MB, and no bot saw more than MAX_ENEMIES_PER_ZONE
+// enemies.
 // --cycle (implies --fight; for a 120 s run): also deaths >= 1 and at least one bot back in the
 // Greenway after one (the whole death -> statue -> east gate -> Greenway cycle).
 //   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30] [--fight [--cycle]]
@@ -40,6 +52,7 @@ import {
   DEATH_MIN_S,
   DEFAULT_LOADOUT,
   DODGE_CHARGES,
+  DODGE_MIN_GAP_S,
   ENEMY_ATTACKS,
   ENEMY_KINDS,
   GCD_S,
@@ -48,10 +61,13 @@ import {
   MAX_ENEMIES_PER_ZONE,
   RESPAWN_CLEAR_RADIUS,
   RUN_SPEED,
+  SPRINT_S,
+  SPRINT_SCALE,
   TARGET_RANGE,
   TICK_HZ,
   adventurerBrain,
   checkPose,
+  dodgeDisplacement,
   findPath,
   greenwayLayout,
   inShape,
@@ -79,6 +95,7 @@ import {
   type Surface,
   type TelegraphView,
   type Vec2,
+  type AbilityId,
   type WeaponId,
   type ZoneId,
 } from '@sg2/shared';
@@ -97,15 +114,35 @@ const BODY_STEP_MAX_S = 0.25;
 /** The fight run's pass marks. */
 // (Ruling P3-i: the brief asked for dodges >= 100 and deaths >= 1 in 60 s, which 21 enemies on a 25 s
 // respawn cannot give; deaths and the whole way back are gated by --cycle, on a 120 s run.)
-const FIGHT_MIN = { kills: 50, dodges: 25, knocks: 1 };
+const FIGHT_MIN = { kills: 50, dodges: 25, knocks: 1, earlyRolls: 1 };
 /** With --cycle: at least this many deaths, and this many bots back in the Greenway after one. */
 const CYCLE_MIN = { deaths: 1, returned: 1 };
 /** Careless bots (by index) sent solo at a Mossback from the start, so that deaths happen. */
 const ELITE_HUNTERS = [3, 7, 11];
 const MAX_STEP_P95_MS = 15;
 const MAX_PEAK_RSS_MB = 400;
-/** Walking speed as a share of what the server allows (RUN_SPEED × its speed scale). */
+/** Walking speed as a share of what the server allows (RUN_SPEED × its speed scale); sprinters walk at 1. */
 const WALK_SHARE = 0.95;
+/** Bots (by index mod 5) that walk at the browser's full speed and take Sprint (free picks Mend, Sprint). */
+const SPRINTER = 0;
+const SPRINTER_FREE: [AbilityId, AbilityId] = ['mend', 'sprint'];
+/** The browser stops sprinting this long before Sprint ends (client/src/combat/controller.ts). */
+const SPRINT_EARLY_S = 0.15;
+/** A sprinter presses Sprint when its walk goal is farther than this. */
+const SPRINT_FROM_M = 10;
+/** Bots (by index mod 5) that predict their rolls as the browser does, with a slow downlink. */
+const PREDICTOR = 2;
+/** How late a predictor sees its `displaced`, `correct`, `refused` and `respawned` (by index: 450, 550, 650 ms). */
+const predictorLagMs = (index: number) => 450 + (index % 3) * 100;
+/**
+ * Dodge refusals from the engine (after the server took the dodge's pose) that may follow a legal dodge,
+ * so their rollback is no failure: only 'busy' (a knock landed between the press and the server). Any
+ * other reason means the server took a dodge the engine then refused: a false rejection. ('dead' never
+ * gets this far: the room refuses a dead adventurer's dodge itself, with no `correct`; 'air' cannot
+ * follow a legal dodge from bots that never jump; 'charges' and 'cooldown' from the engine come with a
+ * `correct` the bot counts as a correction, since the room's own check let the dodge through.)
+ */
+const RACY_ROLLBACKS = ['busy'];
 /** Charged Shot slows to this from its press until it is released (the server: 0.4 from 0.25 s in). */
 const CHARGE_WALK_SCALE = 0.4;
 /** A dodge with no answer after this long is given up (the server resyncs a lost one after 1 s). */
@@ -206,9 +243,6 @@ function stepFor(b: Body, input: BodyInput, dt: number, surface: Surface): BodyS
 
 const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
 
-/** The zone `/api/zone` named last (for a bot whose own ask was rate-limited). */
-let zoneAnswered: ZoneId | null = null;
-const zoneAsks = { answered: 0, limited: 0 };
 
 /** Where an adventurer may walk in a zone, with the tap-to-walk clearance (built once per zone). */
 const walkable = new Map<ZoneId, (x: number, z: number) => boolean>();
@@ -353,9 +387,44 @@ class Bot {
   fxEvents = 0;
   hpSeenMin = Infinity;
 
+  /** Walks at the browser's full speed and has Sprint (SPRINTER). */
+  readonly sprinter: boolean;
+  /** Predicts its rolls, sees its displacements late and rolls twice (PREDICTOR). */
+  readonly predictor: boolean;
+  /** Its free picks. */
+  private readonly free: [AbilityId, AbilityId];
+  /** Sprinting (by the browser's rule: from Sprint's `use` fx) until then (performance.now ms). */
+  private sprintUntil = -Infinity;
+  /** A predictor's rolls sent and not answered yet, oldest first: where each went from and its predicted end. */
+  private predictions: { from: { x: number; z: number; y: number }; end: { x: number; z: number; y: number }; early: boolean }[] = [];
+  /** A predictor's second roll, due then (performance.now ms), in the first's direction. */
+  private secondDodge: { at: number; dx: number; dz: number } | null = null;
+  /** Second rolls sent before the first's `displaced` arrived (with the ack before it), and of those, rolled. */
+  earlySent = 0;
+  earlyRolled = 0;
+  /** Sprints it used (by its `use` fx), and moves it sent while sprinting. */
+  sprints = 0;
+  sprintMoves = 0;
+  /** What became of early second rolls that were not answered by their own `displaced` (for the log). */
+  earlyLost: string[] = [];
+  /** Drops the outstanding predictions (the server's displacement or correction wins), noting lost early rolls. */
+  private dropPredictions(why: string) {
+    for (const p of this.predictions) if (p.early) this.earlyLost.push(`${this.name}: ${why}`);
+    this.predictions = [];
+    this.secondDodge = null;
+  }
+  /** Rollbacks (a `correct` right after an engine refusal of a dodge) by the refusal's reason. */
+  rollbacksByReason: Record<string, number> = {};
+  private rollbackReason = '';
+  /** The first time it was stuck for TICK_HZ ticks: where, and where to. */
+  stallLog: string | null = null;
+
   constructor(readonly index: number) {
     this.careful = index % 4 !== 3;
     this.hunter = fight && ELITE_HUNTERS.includes(index);
+    this.sprinter = fight && index % 5 === SPRINTER;
+    this.predictor = fight && index % 5 === PREDICTOR;
+    this.free = this.sprinter ? SPRINTER_FREE : [...DEFAULT_LOADOUT.free];
   }
 
   async join() {
@@ -368,21 +437,17 @@ class Bot {
     this.name = body.name ?? `bot ${this.index}`;
     this.token = body.token;
     await this.connect(fight ? await this.askZone() : zoneId);
-    // A quarter of the fighters use the Bow: a swap out of combat (saved with the adventurer, so it stays across travels).
+    // Loadout changes out of combat (saved with the adventurer, so they stay across travels): sprinters
+    // take Sprint, and a quarter of the fighters use the Bow.
+    if (this.sprinter) this.room.send('loadout', { free: this.free });
     if (fight && this.index % 4 === 1) this.room.send('swap', {});
   }
 
-  /** GET /api/zone: the room to join. Its limit is 60 a minute per address; past it, the zone the others were told. */
+  /** GET /api/zone: the room to join (60 a minute per account, so every bot asks for itself). */
   private async askZone(): Promise<ZoneId> {
     const res = await fetch(`${url}/api/zone`, { headers: { authorization: `Bearer ${this.token}` } });
-    if (res.status === 429 && zoneAnswered) {
-      zoneAsks.limited++;
-      return zoneAnswered;
-    }
     const body = (await res.json()) as { zone?: unknown; error?: string };
     if (!res.ok || !isZoneId(body.zone)) throw new Error(`GET /api/zone failed: ${res.status} ${body.error ?? ''}`);
-    zoneAsks.answered++;
-    zoneAnswered = body.zone;
     return body.zone;
   }
 
@@ -404,47 +469,69 @@ class Bot {
     room.onMessage('self', (m: S2C['self']) => { this.selfView = m; this.selfAt = performance.now(); });
     room.onMessage('fx', (m: S2C['fx']) => this.onFx(m));
     room.onMessage('credit', (m: S2C['credit']) => { this.kills++; killsByKind[m.kind] = (killsByKind[m.kind] ?? 0) + 1; });
-    room.onMessage('refused', (m: S2C['refused']) => this.onRefused(m));
+    // A predictor sees what moves it late (a slow downlink), all by the same lag, so in order.
+    const lag = this.predictor ? predictorLagMs(this.index) : 0;
+    const late = <T,>(fn: (m: T) => void) => (m: T) => {
+      if (lag === 0) return fn(m);
+      setTimeout(() => { if (this.room === room) fn(m); }, lag);
+    };
+    room.onMessage('refused', late((m: S2C['refused']) => this.onRefused(m)));
     const moved = (to: { x: number; z: number; y: number }, seq: number) => {
       this.ack = seq;
       this.body = makeBody(to.x, to.z, this.surface);
       this.body.y = to.y;
       this.air = makeAirTrack(to.y);
     };
-    room.onMessage('displaced', (m: S2C['displaced']) => {
+    room.onMessage('displaced', late((m: S2C['displaced']) => {
       this.displacements++;
-      moved(m.to, m.seq);
-      this.dodgeSentAt = null;
       if (m.kind === 'knock') this.knocks++;
       else if (m.kind === 'dodge') this.dodgesRolled++;
       else this.resyncs++;
+      const predicted = m.kind === 'dodge' ? this.predictions.shift() : undefined;
+      if (m.kind !== 'dodge') this.dropPredictions(`a ${m.kind} (seq ${m.seq}) came first`); // the server's displacement wins
+      if (predicted) {
+        // its own roll, already played: only the ack changes, unless the server's end is elsewhere
+        if (predicted.early) this.earlyRolled++;
+        this.ack = m.seq;
+        const off = dist(predicted.end, m.to) > 0.01 || Math.abs(predicted.end.y - m.to.y) > 0.01;
+        if (off) this.displaceMismatch++;
+        if (this.predictions.length === 0) {
+          this.dodgeSentAt = null;
+          if (off) moved(m.to, m.seq);
+        }
+        return;
+      }
+      moved(m.to, m.seq);
+      this.dodgeSentAt = null;
       if (m.kind !== 'resync') {
         // Played out (no poses) for as long as the push and any fall take; the end is the server's.
         const sim = simulateDisplacement(m.from, m.d, this.surface);
         if (dist(sim, m.to) > 0.01 || Math.abs(sim.y - m.to.y) > 0.01) this.displaceMismatch++;
         this.busyUntil = performance.now() + sim.seconds * 1000;
       }
-    });
-    room.onMessage('respawned', (m: S2C['respawned']) => moved(m, m.seq));
+    }));
+    room.onMessage('respawned', late((m: S2C['respawned']) => { this.dropPredictions('respawned'); moved(m, m.seq); }));
     room.onMessage('travel', (m: S2C['travel']) => {
       if (!fight) { this.travelled = true; return; }
       this.switchingTo = m.zone;
       // The server ends the session itself; if it has not after 5 s, leave.
       this.timers.push(setTimeout(() => { if (this.room === room && this.switchingTo) void room.leave().catch(() => {}); }, 5000));
     });
-    room.onMessage('correct', (m: { x: number; z: number; y: number }) => {
+    room.onMessage('correct', late((m: { x: number; z: number; y: number }) => {
       if (this.rollbackDue) {
         this.rollbackDue = false;
         this.rollbacks++;
+        this.rollbacksByReason[this.rollbackReason] = (this.rollbacksByReason[this.rollbackReason] ?? 0) + 1;
       } else {
         this.corrections++;
         if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}${fight ? ` (${this.lastScale})` : ''}`);
       }
       // go where the server says, standing, as the browser does
+      this.dropPredictions(`corrected to ${JSON.stringify(m)}`);
       this.body = makeBody(m.x, m.z, this.surface);
       this.body.y = m.y;
       this.air = makeAirTrack(m.y);
-    });
+    }));
     room.onMessage('hurt', (m: { amount: number }) => {
       this.hurts++;
       this.hurtHp += m.amount;
@@ -493,6 +580,9 @@ class Bot {
     this.dodgeSentAt = null;
     this.busyUntil = 0;
     this.rollbackDue = false;
+    this.predictions = [];
+    this.secondDodge = null;
+    this.sprintUntil = -Infinity;
     this.route = null;
     this.campGoal = null;
     this.deadSince = null;
@@ -603,7 +693,10 @@ class Bot {
   private onFx(m: S2C['fx']) {
     this.fxEvents += m.events.length;
     const now = performance.now();
+    const mine = this.room.state.players?.get(this.room.sessionId)?.eid;
     for (const e of m.events) {
+      // the browser's rule: faster from Sprint's `use`, until a little before it ends
+      if (e.t === 'use' && e.src === mine && e.ability === 'sprint') { this.sprintUntil = now + (SPRINT_S - SPRINT_EARLY_S) * 1000; this.sprints++; }
       if (e.t !== 'death' || !enemyKinds.has(e.dst)) continue;
       // every bot that sees it gets the event: count it once (an enemy waits at least 5 s to respawn)
       const last = enemyDeathAt.get(e.dst);
@@ -613,14 +706,32 @@ class Bot {
     }
   }
 
+  /** Rolls still waiting for their answer (at the end of a run: sent too late to hear back). */
+  get predictionsLeft(): number { return this.predictions.filter((p) => p.early).length; }
+
   private onRefused(m: S2C['refused']) {
     const key = `${m.action} ${m.reason}`;
     this.refusals[key] = (this.refusals[key] ?? 0) + 1;
     if (m.action !== 'dodge') return;
     this.dodgeSentAt = null;
+    // A predicted roll is undone, as the browser does: back where it was sent from (any later prediction
+    // went from this one's end, so it goes too; its answer is taken as the server's own then).
+    const undone = this.predictions.shift();
+    if (undone) {
+      if (undone.early) this.earlyLost.push(`${this.name}: refused ${m.reason}`);
+      this.dropPredictions(`refused ${m.reason} (an earlier roll)`);
+      this.body = makeBody(undone.from.x, undone.from.z, this.surface);
+      this.body.y = undone.from.y;
+      this.air = makeAirTrack(undone.from.y);
+      this.busyUntil = 0;
+    }
     // Refused by the engine after its pose was taken: a `correct` to that pose follows (the rollback).
-    // 'stale', 'cooldown', 'charges', 'dead' and 'rate' come alone (or after a real correction).
-    if (!['stale', 'cooldown', 'charges', 'dead', 'rate'].includes(m.reason)) this.rollbackDue = true;
+    // 'stale', 'cooldown', 'charges', 'dead' (the room's own check) and 'rate' come alone (or after a
+    // real correction). ('dead' from the engine also has a `correct`; the room's check comes first.)
+    if (!['stale', 'cooldown', 'charges', 'dead', 'rate'].includes(m.reason)) {
+      this.rollbackDue = true;
+      this.rollbackReason = m.reason;
+    }
   }
 
   /** Its own SelfView, its timers counted down from when it arrived (and the GCD of a press it sent since). */
@@ -639,7 +750,7 @@ class Bot {
   /** A fresh adventurer's own numbers (nothing used yet), with the weapon the state shows. */
   private freshSelf(weapon: string): SelfView {
     const w: WeaponId = weapon === 'bow' ? 'bow' : 'blade';
-    const slots = slotsFor({ weapon: w, free: DEFAULT_LOADOUT.free });
+    const slots = slotsFor({ weapon: w, free: this.free });
     const localGcd = Math.max(0, GCD_S - (performance.now() - this.pressedAt) / 1000);
     return { momentum: 0, weapon: w, slots, cd: slots.map(() => 0), gcd: localGcd, swapCd: 0, swapLock: 0, dodgeCharges: DODGE_CHARGES, dodgeNextIn: 0, charge: null, inCombat: false };
   }
@@ -737,6 +848,15 @@ class Bot {
       return;
     }
     this.deadSince = null;
+    // A predictor's second roll, due once the first (predicted) has played and the gap has passed: sent
+    // from the first's predicted end, with whatever ack it has (the one before the first's, while that
+    // `displaced` is still on its way).
+    const second = this.secondDodge;
+    if (second && now >= second.at && now >= this.busyUntil) {
+      this.secondDodge = null;
+      this.rollPredicted(second.dx, second.dz, now, this.predictions.length > 0);
+      return;
+    }
     if (this.dodgeSentAt !== null) {
       if (now - this.dodgeSentAt < DODGE_WAIT_MS) return;
       this.dodgeSentAt = null; // no answer: carry on (the server resyncs a lost one)
@@ -746,6 +866,7 @@ class Bot {
 
     if (this.zone !== 'greenway') {
       // Back from a death (or started in the grove): to the east gate, and through it.
+      this.maybeSprint(dist(GROVE_EAST_GATE, this.body), this.agedSelf(now) ?? this.freshSelf(me.weapon), now);
       this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
       return;
     }
@@ -779,6 +900,12 @@ class Bot {
         } else this.releasedAt = now;
         this.room.send('ability', { slot: i.slot, phase: i.phase });
       } else if (i.t === 'dodge') {
+        if (this.predictor) {
+          // rolls at once (predicted), and again from its end after the gap when both charges are there
+          this.rollPredicted(i.dx, i.dz, now, false);
+          if (sv.dodgeCharges >= 2) this.secondDodge = { at: now + (DODGE_MIN_GAP_S + 0.03) * 1000, dx: i.dx, dz: i.dz };
+          return;
+        }
         // from where the body is (its last sent pose), with the latest ack; nothing more until it is answered
         this.dodgesSent++;
         this.dodgeSentAt = now;
@@ -790,7 +917,10 @@ class Bot {
     if (target) {
       this.route = null;
       this.campGoal = null;
-      if (act.moveTo) this.walkRoute(act.moveTo, dt, now, scale, false);
+      if (act.moveTo) {
+        if (act.intents.length === 0) this.maybeSprint(dist(act.moveTo, this.body), sv, now);
+        this.walkRoute(act.moveTo, dt, now, scale, false);
+      }
       return;
     }
     // Nothing to fight in range: to the nearest camp not visited lately, where it waits a while at a
@@ -822,7 +952,37 @@ class Bot {
       }
       return;
     }
+    this.maybeSprint(dist(spot, this.body), sv, now);
     this.walkRoute(spot, dt, now, 1, false);
+  }
+
+  /** A sprinter presses Sprint for a walk longer than SPRINT_FROM_M, when it is ready (and not already on). */
+  private maybeSprint(far: number, sv: SelfView, now: number) {
+    if (!this.sprinter || far < SPRINT_FROM_M || now < this.sprintUntil) return;
+    const slot = sv.slots.indexOf('sprint');
+    if (slot < 0 || sv.gcd > 0 || sv.cd[slot] > 0 || now - this.pressedAt < 1000) return;
+    this.pressedAt = now;
+    this.room.send('ability', { slot, phase: 'press' });
+  }
+
+  /**
+   * A predicted roll, as the browser rolls: sent from where the body is with its ack, and played at
+   * once by its own simulateDisplacement (no poses until it is answered and has played). `early`: sent
+   * while an earlier roll's `displaced` has not arrived.
+   */
+  private rollPredicted(dx: number, dz: number, now: number, early: boolean) {
+    const from = { x: this.body.x, z: this.body.z, y: this.body.y };
+    const sim = simulateDisplacement(from, dodgeDisplacement(dx, dz), this.surface);
+    this.dodgesSent++;
+    if (early) this.earlySent++;
+    this.dodgeSentAt = now;
+    this.room.send('dodge', { ...from, facing: Math.atan2(dx, dz), moving: true, ack: this.ack, dx, dz });
+    const end = { x: sim.x, z: sim.z, y: sim.y };
+    this.predictions.push({ from, end, early });
+    this.body = makeBody(end.x, end.z, this.surface);
+    this.body.y = end.y;
+    this.air = makeAirTrack(end.y);
+    this.busyUntil = now + sim.seconds * 1000;
   }
 
   /** A spot CAMP_STANDOFF_M from the camp's centre that it can stand on, at least RESPAWN_CLEAR_RADIUS + 1 m from every spawn point. */
@@ -856,25 +1016,41 @@ class Bot {
     }
     const dx = to.x - this.body.x, dz = to.z - this.body.z, d = Math.hypot(dx, dz);
     if (d < 0.05) return;
-    const speed = Math.min(RUN_SPEED * scale * WALK_SHARE, d / Math.max(dt, 1e-3));
-    const body = { ...this.body };
-    stepFor(body, { vx: (dx / d) * speed, vz: (dz / d) * speed, jump: false }, dt, this.surface);
-    const facing = Math.atan2(dx, dz);
-    const next = { x: body.x, z: body.z, y: body.y, facing, moving: true, ack: this.ack };
-    const air = { ...this.air };
-    const moved = dist(body, this.body);
-    if (moved < speed * Math.min(dt, BODY_STEP_MAX_S) * 0.3 || (!intoExit && this.nearExit(body)) || checkPose(this.body, air, next, Date.now(), Infinity, this.surface).result !== 'ok') {
+    // the browser's speed: ×SPRINT_SCALE while it thinks Sprint is on (with any charge slow on top)
+    const sprinting = now < this.sprintUntil ? SPRINT_SCALE : 1;
+    const speed = Math.min(RUN_SPEED * scale * sprinting * (this.sprinter ? 1 : WALK_SHARE), d / Math.max(dt, 1e-3));
+    // Straight at the next point; blocked (against a rock, say), it sidesteps as a player would, and
+    // searches a new route from where that leaves it. No check of its own (as the browser): a pose the
+    // server refuses is a correction, and fails the run. Nothing it can do moves it (or only into an
+    // exit it should not take): a stall, and nothing is sent.
+    const ahead = Math.atan2(dx, dz);
+    let body: Body | null = null, facing = ahead;
+    for (const turn of [0, 0.79, -0.79, 1.57, -1.57, 2.36, -2.36, 3.14]) {
+      const h = ahead + turn;
+      const b = { ...this.body };
+      stepFor(b, { vx: Math.sin(h) * speed, vz: Math.cos(h) * speed, jump: false }, dt, this.surface);
+      if (dist(b, this.body) < speed * Math.min(dt, BODY_STEP_MAX_S) * 0.3 || (!intoExit && this.nearExit(b))) continue;
+      body = b;
+      facing = h;
+      break;
+    }
+    if (!body) {
       this.stuckTicks++;
       this.stalledTicks++;
       this.longestStall = Math.max(this.longestStall, ++this.stallRun);
+      if (this.stallRun === TICK_HZ) this.stallLog ??= `${this.name} in ${this.zone} at (${this.body.x.toFixed(1)}, ${this.body.z.toFixed(1)}) toward (${to.x.toFixed(1)}, ${to.z.toFixed(1)}), goal (${goal.x.toFixed(1)}, ${goal.z.toFixed(1)}), route ${this.route ? this.route.points.length : 'none'}`;
       if (this.stuckTicks >= STUCK_TICKS * 4) this.route = null; // the route itself is no good: search again
       return;
     }
-    this.stuckTicks = 0;
     this.stallRun = 0;
+    if (facing !== ahead) {
+      // a sidestep: the way ahead is blocked, so after a few, a new route from here
+      if (++this.stuckTicks >= STUCK_TICKS && this.stuckTicks % STUCK_TICKS === 0) this.route = null;
+    } else this.stuckTicks = 0;
+    const next = { x: body.x, z: body.z, y: body.y, facing, moving: true, ack: this.ack };
     this.heading = facing;
     this.body = body;
-    this.air = air;
+    if (sprinting > 1) this.sprintMoves++;
     this.room.send('move', next);
     this.lastSent = next;
   }
@@ -919,7 +1095,6 @@ try {
 bots.forEach((bot) => bot.start());
 const zones = [...new Set(bots.map((bot) => bot.zone))].join(', ');
 console.log(`All ${count} joined (${zones}); ${fight ? 'fighting' : stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
-if (fight) console.log(`GET /api/zone: ${zoneAsks.answered} answered, ${zoneAsks.limited} rate-limited (took the zone the others were told)`);
 await sleep(warmupMs);
 
 const healthSamples: Health[] = [];
@@ -998,17 +1173,25 @@ console.log(`falls that hurt: ${hurts} (${hurtHp} hp in all)`);
 console.log(`ticks with no sendable pose: ${stalledTicks} (${airStalls} in the air); longest run: ${longestStall} ticks`);
 for (const line of bots.flatMap((bot) => bot.correctionLog).slice(0, 5)) console.log(`  correction: ${line}`);
 for (const line of bots.flatMap((bot) => bot.airStallLog ?? []).slice(0, 5)) console.log(`  stalled in the air: ${line}`);
+for (const line of bots.flatMap((bot) => bot.stallLog ?? []).slice(0, 5)) console.log(`  stuck for ${TICK_HZ} ticks: ${line}`);
+for (const line of bots.flatMap((bot) => [...bot.earlyLost, ...(bot.predictionsLeft ? [`${bot.name}: ${bot.predictionsLeft} still unanswered at the end`] : [])]).slice(0, 5)) console.log(`  early second roll not rolled: ${line}`);
 
 const kills = sum((bot) => bot.kills);
 const dodges = sum((bot) => bot.dodgesRolled);
 const knocks = sum((bot) => bot.knocks);
 const returned = sum((bot) => bot.returned);
+const rollbacksByReason: Record<string, number> = {};
+for (const bot of bots) for (const [k, v] of Object.entries(bot.rollbacksByReason)) rollbacksByReason[k] = (rollbacksByReason[k] ?? 0) + v;
+const falseRollbacks = Object.entries(rollbacksByReason).filter(([k]) => !RACY_ROLLBACKS.includes(k));
+const earlySent = sum((bot) => bot.earlySent);
+const earlyRolled = sum((bot) => bot.earlyRolled);
 if (fight) {
   const refusals: Record<string, number> = {};
   for (const bot of bots) for (const [k, v] of Object.entries(bot.refusals)) refusals[k] = (refusals[k] ?? 0) + v;
   const carelessDeaths = sum((bot) => (bot.careful ? 0 : bot.deaths));
   console.log(`fight (over the whole run): kills credited ${kills} ${JSON.stringify(killsByKind)} (enemy deaths seen: ${enemyDeaths}); deaths ${deaths} (${carelessDeaths} careless, ${deaths - carelessDeaths} careful)`);
-  console.log(`  dodges sent ${sum((bot) => bot.dodgesSent)}, rolled ${dodges}; knockbacks ${knocks}; resyncs ${sum((bot) => bot.resyncs)}; dodge rollbacks (correct after an engine refusal) ${sum((bot) => bot.rollbacks)}; displacement ends off the bot's own simulation ${sum((bot) => bot.displaceMismatch)}`);
+  console.log(`  dodges sent ${sum((bot) => bot.dodgesSent)}, rolled ${dodges}; knockbacks ${knocks}; resyncs ${sum((bot) => bot.resyncs)}; dodge rollbacks (correct after an engine refusal) ${sum((bot) => bot.rollbacks)} ${JSON.stringify(rollbacksByReason)}; displacement ends off the bot's own simulation ${sum((bot) => bot.displaceMismatch)}`);
+  console.log(`  predictors (${bots.filter((bot) => bot.predictor).length}): second rolls sent before the first's displaced ${earlySent}, rolled ${earlyRolled}; sprinters: ${bots.filter((bot) => bot.sprinter).length} at full speed, ${sum((bot) => bot.sprints)} sprints, ${sum((bot) => bot.sprintMoves)} moves sent sprinting`);
   console.log(`  telegraphs a bot stood in: ${sum((bot) => bot.inside.size)} (careful bots: ${sum((bot) => (bot.careful ? bot.inside.size : 0))})`);
   console.log(`  back in the Greenway after a death (respawn at the statue, walk to the east gate, travel): ${returned}; hunters' deaths ${sum((bot) => (bot.hunter ? bot.deaths : 0))}`);
   console.log(`  travels ${sum((bot) => bot.travels)}; where the bots are at the end: ${JSON.stringify(zoneNow)}; died and not on their way back: ${stuckAfterDeath.length}`);
@@ -1019,15 +1202,19 @@ if (fight) {
 
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);
-// Standing bots change nothing, and an unchanged state sends no patches: the rate means nothing then.
-if (!stand && !(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
+// (Standing bots too: the state's `clock` changes every step, so a patch goes out every step.)
+if (!(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
 if (corrections) failures.push(`${corrections} legal steps were corrected`);
 if (airStalls) failures.push(`${airStalls} ticks in the air had no pose the server would accept`);
-if (!fight && longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
+if (longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
 if (fight) {
   if (kills < FIGHT_MIN.kills) failures.push(`${kills} kills credited, fewer than ${FIGHT_MIN.kills}`);
   if (dodges < FIGHT_MIN.dodges) failures.push(`${dodges} dodges rolled, fewer than ${FIGHT_MIN.dodges}`);
   if (knocks < FIGHT_MIN.knocks) failures.push(`${knocks} knockbacks, fewer than ${FIGHT_MIN.knocks}`);
+  if (falseRollbacks.length) failures.push(`dodge rollbacks for reasons that cannot follow a legal dodge: ${falseRollbacks.map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  if (earlySent < FIGHT_MIN.earlyRolls) failures.push(`${earlySent} predicted second rolls sent before the first's displaced, fewer than ${FIGHT_MIN.earlyRolls}`);
+  if (sum((bot) => bot.sprintMoves) < 1) failures.push('no move was sent at Sprint speed');
+  if (earlyRolled < earlySent) failures.push(`${earlySent - earlyRolled} of ${earlySent} predicted second rolls were not rolled`);
   if (cycle && deaths < CYCLE_MIN.deaths) failures.push(`${deaths} deaths, fewer than ${CYCLE_MIN.deaths}`);
   if (cycle && returned < CYCLE_MIN.returned) failures.push(`${returned} bots back in the Greenway after a death, fewer than ${CYCLE_MIN.returned}`);
   if (stuckAfterDeath.length) failures.push(`${stuckAfterDeath.length} bots died and are not on their way back (first: ${stuckAfterDeath[0].name}, in ${stuckAfterDeath[0].zone})`);

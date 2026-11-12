@@ -62,8 +62,9 @@ export const EnemyState = schema(
     hp: t.uint16(),
     /** Scaled with the adventurers it fights (elites): it can change. */
     maxHp: t.uint16(),
-    stagger: t.uint8(),
-    maxStagger: t.uint8(),
+    /** Uint16: an elite's bar scales with the adventurers it fights (×3.1 at 4: 310). */
+    stagger: t.uint16(),
+    maxStagger: t.uint16(),
     /** Live marks as bits (markBits). */
     marks: t.uint8(),
     /** 'idle' | 'fight' | 'windup' | 'stunned' | 'return' | 'dead'. */
