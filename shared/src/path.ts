@@ -4,7 +4,13 @@
 export interface Vec2 { x: number; z: number }
 /** cell: grid size in m (0.5). maxNodes: most cells expanded before giving up (20000). snap: how far the goal (or a
  *  start on blocked ground) may move to the nearest passable cell, in m (2). */
-export interface PathOpts { cell?: number; maxNodes?: number; snap?: number }
+export interface PathOpts {
+  cell?: number; maxNodes?: number; snap?: number;
+  /** false: skip the goal-pocket check (a caller with its own node budget, like the enemy AI). Default true. */
+  pockets?: boolean;
+  /** Filled in when given: cells expanded, and whether the search stopped at maxNodes. */
+  stats?: { expanded: number; exhausted: boolean };
+}
 
 /** Distance between line-of-sight samples when smoothing, in m. */
 const SIGHT_STEP = 0.25;
@@ -82,6 +88,8 @@ class Heap {
  */
 export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) => boolean, opts: PathOpts = {}): Vec2[] | null {
   const cell = opts.cell ?? 0.5, maxNodes = opts.maxNodes ?? 20000, snap = opts.snap ?? 2;
+  const checkPockets = opts.pockets ?? true, stats = opts.stats;
+  if (stats) { stats.expanded = 0; stats.exhausted = false; }
 
   // nodes, created as the search touches cells; passability is asked once per cell
   const index = new Map<number, number>();
@@ -145,6 +153,7 @@ export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) 
   for (let tries = 0; ; tries++) {
     goal = nearestPassable(to, pockets);
     if (goal < 0) return null;
+    if (!checkPockets) break;
     const pocket = pocketOf(goal);
     if (!pocket) break;
     if (tries === POCKET_TRIES) return null;
@@ -168,7 +177,11 @@ export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) 
     if (closed[cur]) continue;
     if (cur === goal) { found = true; break; }
     closed[cur] = true;
-    if (++expanded > maxNodes) return null;
+    if (++expanded > maxNodes) {
+      if (stats) { stats.expanded = maxNodes; stats.exhausted = true; }
+      return null;
+    }
+    if (stats) stats.expanded = expanded;
     eachStep(cur, (nb, diag) => {
       if (closed[nb]) return;
       const ng = g[cur] + (diag ? SQRT2 : 1);

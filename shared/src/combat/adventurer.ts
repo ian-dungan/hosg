@@ -121,9 +121,14 @@ export function carryOfState(a: AdventurerState, nowS: number): Carry {
     if (r > 0) cooldowns[id] = r;
   }
   refillDodges(a, nowS);
+  const since = (t: number) => Math.min(SINCE_CAP, Math.max(0, nowS - t));
+  const shield = liveShield(a, nowS);
   return {
     cooldowns, gcd: Math.max(0, a.gcdUntil - nowS), dodgeCharges: a.dodgeCharges,
     dodgeRefillIn: a.dodgeRefillAt === null ? 0 : Math.max(0, a.dodgeRefillAt - nowS), momentum: a.momentum,
+    sinceCombat: since(a.lastCombatAt), sinceHurt: since(a.lastHurtAt), sinceDealt: since(a.lastDealtAt),
+    swapCd: Math.max(0, a.swapReadyAt - nowS), shield, shieldLeft: shield > 0 ? a.shieldUntil - nowS : 0,
+    sprintLeft: Math.max(0, a.sprintUntil - nowS),
   };
 }
 
@@ -140,7 +145,23 @@ export function applyCarry(a: AdventurerState, c: Carry, nowS: number): void {
   a.dodgeCharges = Math.floor(clamp(c.dodgeCharges, 0, DODGE_CHARGES, DODGE_CHARGES));
   a.dodgeRefillAt = a.dodgeCharges < DODGE_CHARGES ? nowS + clamp(c.dodgeRefillIn, 0, DODGE_REFILL_S, DODGE_REFILL_S) : null;
   a.momentum = clamp(c.momentum, 0, MOMENTUM_MAX, 0);
+  // the optional extras: absent = fresh; present but nonsense = the most restrictive value
+  const since = (v: unknown) => nowS - clamp(v, 0, SINCE_CAP, 0);
+  if (c.sinceCombat !== undefined) a.lastCombatAt = since(c.sinceCombat);
+  if (c.sinceHurt !== undefined) a.lastHurtAt = since(c.sinceHurt);
+  if (c.sinceDealt !== undefined) a.lastDealtAt = since(c.sinceDealt);
+  if (c.swapCd !== undefined) a.swapReadyAt = nowS + clamp(c.swapCd, 0, SWAP_COOLDOWN_S, SWAP_COOLDOWN_S);
+  if (c.shield !== undefined && c.shieldLeft !== undefined) {
+    const amount = clamp(c.shield, 0, BULWARK_ABSORB, 0), left = clamp(c.shieldLeft, 0, BULWARK_S, 0);
+    if (amount > 0 && left > 0) { a.shield = amount; a.shieldUntil = nowS + left; }
+  }
+  if (c.sprintLeft !== undefined) {
+    const left = clamp(c.sprintLeft, 0, SPRINT_S, 0);
+    if (left > 0) a.sprintUntil = nowS + left;
+  }
 }
+/** "since" values in a Carry are capped here (an absent timer is "long ago", not Infinity, so it survives JSON). */
+const SINCE_CAP = 1e6;
 
 /** revive: full hp at `at`, Momentum 0, cooldowns, charges and timers reset, out of combat. */
 export function resetAdventurer(w: CombatWorld, a: AdventurerState, at: { x: number; z: number; y: number }, nowS: number): void {
@@ -175,7 +196,7 @@ function cancelCharge(a: AdventurerState): void {
 export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
   const c = e.camp;
   e.x = c.x; e.z = c.z; e.y = w.zone.ground(c.x, c.z) ?? 0; e.facing = c.facing;
-  e.hp = e.maxHp; e.alive = true; e.act = ''; e.actUntil = -Infinity; e.targetId = null;
+  e.maxHp = e.data.hp; e.hp = e.maxHp; e.alive = true; e.act = ''; e.actUntil = -Infinity; e.targetId = null; e.surging = false;
   e.threat.clear(); e.stagger = { value: 0, max: e.data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity };
   e.marks = {}; e.burning = null; e.windup = null; e.attackReadyAt = {};
   e.respawnAt = Infinity; e.lastDamagedAt = -Infinity;

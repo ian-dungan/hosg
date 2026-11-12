@@ -1,16 +1,20 @@
 // The enemy AI: every live enemy, every tick (called from engine.tick, after the adventurers and
 // before enemy status). Aggro, target choice, chasing (straight lines, else budgeted path searches),
-// the leash and the unreachable rule (walk home invulnerable, heal on arrival), autos, telegraphed
-// attacks and how a hit on an adventurer resolves (i-frames, parry, shield, knock).
+// the chase surge, the leash and the unreachable rule (walk home invulnerable, heal on arrival),
+// autos, telegraphed attacks, elite scaling and how a hit on an adventurer resolves (i-frames,
+// parry, shield, knock).
 //
 // Deterministic: enemies are visited in id order (the engine's Map is insertion ordered and ids only
-// grow), and nothing reads the clock or Math.random. Bounded: at most PATHS_PER_TICK path searches of
-// at most ENEMY_PATH_NODES per tick across the zone; every other check is a handful of ground samples.
-// Robust to adventurers vanishing at any point: only ids are kept, and every one is looked up again.
+// grow), path searches are served first-come first-served (ties by id), and nothing reads the clock
+// or Math.random. Bounded: path searches share ENEMY_PATH_BUDGET expanded nodes per tick (and at most
+// PATHS_PER_TICK searches), each over a cached per-zone clearance grid; every other check is a handful
+// of ground samples. Robust to adventurers vanishing at any point: only ids are kept, and every one is
+// looked up again.
 import type { Surface } from '../body';
+import { RUN_SPEED } from '../constants';
 import { findPath, withClearance, type Vec2 } from '../path';
 import {
-  AGGRO_THREAT, ENEMY_PATH_NODES, ENEMY_REPLAN_S, PARRY_MOMENTUM, PARRY_STAGGER, PARRY_STUN_S, PATHS_PER_TICK,
+  AGGRO_THREAT, DISPLACE_SUBSTEP_M, ENEMY_PATH_NODES, ENEMY_REPLAN_S, PARRY_MOMENTUM, PARRY_STAGGER, PARRY_STUN_S, PATHS_PER_TICK,
   PERFECT_DODGE_MOMENTUM, PERFECT_DODGE_STAGGER, PERFECT_DODGE_WINDOW_S, UNREACHABLE_S,
 } from './constants';
 import { knockDisplacement } from './displace';
@@ -27,59 +31,97 @@ import { enemyHit } from './stats';
 export const NO_TARGET_S = 3;
 /** Speed scale while walking home. */
 export const RETURN_SPEED_SCALE = 1.5;
-/** Home when this close to the camp spot, in m. */
-const ARRIVE_M = 0.25;
 /** A walk home that takes longer than this (or finds no way) ends with the enemy put back at its camp. */
 export const RETURN_MAX_S = 20;
+/** The chase surge: an enemy with a target that has been out of range of every attack for this long… */
+export const SURGE_AFTER_S = 3;
+/** …moves at SURGE_SCALE × RUN_SPEED until it next starts an attack (so plain running never kites it). */
+export const SURGE_SCALE = 1.3;
+/** Elites scale with the adventurers engaged (on their threat table, alive): ×(1 + this × (n − 1))… */
+export const ELITE_SCALE_PER = 0.7;
+/** …counting at most this many. */
+export const ELITE_SCALE_CAP = 4;
+/** An ordinary enemy cannot be parry-stunned again for this long after a parry stun ends. */
+export const PARRY_STUN_IMMUNE_S = 3;
+/** Expanded path-search nodes shared by every enemy of a zone per tick. */
+export const ENEMY_PATH_BUDGET = 2000;
+/** A search starts only with at least this much of the tick's budget left. */
+const MIN_SEARCH_NODES = 200;
+/** Grid of enemy path searches, in m. */
+export const ENEMY_PATH_CELL = 1;
+/** Resolution of the cached clearance grid, in m (path cells and smoothing samples land on it). */
+const GRID = 0.5;
+/** A clearance-grid fill (17 ground samples) counts as this many expanded nodes against the budget. */
+const FILL_COST = 2;
+/** Home when this close to the camp spot, in m. */
+const ARRIVE_M = 0.25;
 /** A melee enemy closes to this much inside its auto reach, so a small step back does not break contact. */
 const REACH_MARGIN = 0.3;
-/** "Progress" toward an out-of-reach target: getting this much closer than the best so far, in m. */
+/** "Progress" toward an out-of-reach target: this much less to go than the best so far, in m. */
 const PROGRESS_M = 0.5;
 /** A path whose end is this far from where the goal now is gets re-planned (at the next allowed time). */
 const GOAL_MOVED_M = 1.5;
 /** Spacing of the samples a straight walk is checked with, in m. */
 const LINE_STEP = 0.4;
+/** A refused step re-checks the straight line at most this often, in s. */
+const RECHECK_S = 0.25;
 /** Step of the Gore Charge dash, in m. */
 const DASH_STEP = 0.25;
 
 // ───────── per-enemy AI state (kept beside the engine's EnemyState) ─────────
-interface Ai {
+export interface EnemyAi {
   engaged: boolean;
   noTargetSince: number | null;
   nextAutoAt: number;
   /** Movement: walking straight at the goal, or along `path`. */
   direct: boolean;
   path: Vec2[] | null; pathIdx: number; pathGoalX: number; pathGoalZ: number;
-  /** Next straight-line check, and the earliest next path search. */
-  planAt: number; searchAt: number;
-  /** A step was refused: re-plan at once (a search still waits for searchAt). */
+  /** Next straight-line check (planAt), the earliest refused-step re-check, and the earliest next search. */
+  planAt: number; checkAt: number; searchAt: number;
+  /** A step was refused: re-check soon (a search still waits for searchAt). */
   dirty: boolean;
-  /** The last path search found no way. */
+  /** The last finished path search found no way. */
   noWay: boolean;
-  /** Unreachable rule: the best distance to the target so far, and when it last improved. */
+  /** Waiting for a path search since (null: not waiting), toward (wantX, wantZ). */
+  wantSince: number | null; wantX: number; wantZ: number;
+  /** When it last searched, and the longest it ever waited for a search (s). */
+  searchedAt: number; longestWaitS: number;
+  /** Unreachable rule: the least still to go so far (path length, or straight distance), and when it last shrank. */
   progTarget: number | null; progBest: number; progAt: number;
+  /** The chase surge: last time it was in range of any attack (or started one). */
+  chanceAt: number;
+  /** Elite scaling: the most adventurers engaged so far this fight. */
+  scaleN: number;
+  /** An ordinary enemy's parry-stun immunity ends then. */
+  parryImmuneUntil: number;
   returnSince: number;
 }
-const AI = new WeakMap<EnemyState, Ai>();
-function aiOf(e: EnemyState, nowS: number): Ai {
+const AI = new WeakMap<EnemyState, EnemyAi>();
+function aiOf(e: EnemyState, nowS: number): EnemyAi {
   let ai = AI.get(e);
   if (!ai) {
     ai = {
       engaged: false, noTargetSince: null, nextAutoAt: -Infinity,
-      direct: true, path: null, pathIdx: 0, pathGoalX: 0, pathGoalZ: 0, planAt: -Infinity, searchAt: -Infinity, dirty: false, noWay: false,
-      progTarget: null, progBest: Infinity, progAt: nowS, returnSince: -Infinity,
+      direct: true, path: null, pathIdx: 0, pathGoalX: 0, pathGoalZ: 0, planAt: -Infinity, checkAt: -Infinity, searchAt: -Infinity,
+      dirty: false, noWay: false, wantSince: null, wantX: 0, wantZ: 0, searchedAt: -Infinity, longestWaitS: 0,
+      progTarget: null, progBest: Infinity, progAt: nowS, chanceAt: nowS, scaleN: 1, parryImmuneUntil: -Infinity, returnSince: -Infinity,
     };
     AI.set(e, ai);
   }
   return ai;
 }
-function resetMovement(ai: Ai): void {
-  ai.direct = true; ai.path = null; ai.pathIdx = 0; ai.planAt = -Infinity; ai.dirty = false; ai.noWay = false;
+/** The AI's internal state of an enemy (for tests, debugging and determinism checks). */
+export function enemyAiStateOf(e: EnemyState): EnemyAi | undefined {
+  return AI.get(e);
+}
+function resetMovement(ai: EnemyAi): void {
+  ai.direct = true; ai.path = null; ai.pathIdx = 0; ai.planAt = -Infinity; ai.checkAt = -Infinity; ai.dirty = false; ai.noWay = false;
+  ai.wantSince = null;
 }
 
 // ───────── per-zone helpers (cached: no allocation per tick) ─────────
 const passCache = new WeakMap<CombatZone, Map<number, (x: number, z: number) => boolean>>();
-/** Where an enemy of radius r may stand: on `ground` with r of ground all round it. */
+/** Where an enemy of radius r may stand, exactly: on `ground` with r of ground all round it. */
 export function enemyPassable(zone: CombatZone, r: number): (x: number, z: number) => boolean {
   let m = passCache.get(zone);
   if (!m) { m = new Map(); passCache.set(zone, m); }
@@ -92,10 +134,51 @@ export function enemyPassable(zone: CombatZone, r: number): (x: number, z: numbe
   return f;
 }
 
-/** Path searches run in the last tick of each world (for tests and the server's metrics). */
-const stats = new WeakMap<CombatWorld, { searches: number; ticks: number }>();
-export function enemyAiStats(w: CombatWorld): { searches: number } {
-  return { searches: stats.get(w)?.searches ?? 0 };
+/** Grid points filled so far (all zones): the cost of a cold grid, charged to the path budget. */
+let gridFills = 0;
+/** Chunks of the clearance grid: CHUNK × CHUNK points, 0 unknown, 1 passable, 2 not. */
+const CHUNK = 64;
+const gridCache = new WeakMap<CombatZone, Map<number, (x: number, z: number) => boolean>>();
+/**
+ * Passability for enemy path searches: a lazily filled, per-zone, per-radius grid of GRID m (built once
+ * from the zone's ground and shared by every enemy of that radius), so a search node costs one lookup.
+ * A point is answered by the grid point nearest it, tested with both r and r + GRID·√½ of clearance: at
+ * grid points (where every search cell lies) it never says passable where the exact enemyPassable(r)
+ * refuses; between them the wider ring keeps it on the safe side. Ground is static for a zone.
+ */
+export function enemyPathPassable(zone: CombatZone, r: number): (x: number, z: number) => boolean {
+  let m = gridCache.get(zone);
+  if (!m) { m = new Map(); gridCache.set(zone, m); }
+  let f = m.get(r);
+  if (!f) {
+    const exactR = enemyPassable(zone, r), wide = enemyPassable(zone, r + GRID * Math.SQRT1_2);
+    const exact = (x: number, z: number) => exactR(x, z) && wide(x, z);
+    const chunks = new Map<number, Uint8Array>();
+    f = (x: number, z: number): boolean => {
+      const i = Math.round(x / GRID), j = Math.round(z / GRID);
+      if (!Number.isFinite(i) || !Number.isFinite(j)) return false;
+      const ci = Math.floor(i / CHUNK), cj = Math.floor(j / CHUNK);
+      const key = (ci + 32768) * 65536 + (cj + 32768);
+      let ch = chunks.get(key);
+      if (!ch) { ch = new Uint8Array(CHUNK * CHUNK); chunks.set(key, ch); }
+      const k = (i - ci * CHUNK) * CHUNK + (j - cj * CHUNK);
+      let v = ch[k];
+      if (v === 0) { v = exact(i * GRID, j * GRID) ? 1 : 2; ch[k] = v; gridFills++; }
+      return v === 1;
+    };
+    m.set(r, f);
+  }
+  return f;
+}
+
+/** Path searches, expanded nodes and straight-line checks in the last tick (for tests and server metrics). */
+interface Stats { searches: number; nodes: number; fills: number; lineChecks: number; ticks: number; warm: WarmCursor }
+interface WarmCursor { camp: number; k: number; done: boolean }
+const stats = new WeakMap<CombatWorld, Stats>();
+/** Last tick: path searches, nodes they expanded, clearance-grid points filled, straight-line checks. */
+export function enemyAiStats(w: CombatWorld): { searches: number; nodes: number; fills: number; lineChecks: number } {
+  const s = stats.get(w);
+  return { searches: s?.searches ?? 0, nodes: s?.nodes ?? 0, fills: s?.fills ?? 0, lineChecks: s?.lineChecks ?? 0 };
 }
 
 const hyp = Math.hypot;
@@ -118,33 +201,93 @@ function liveAdventurer(w: CombatWorld, id: number | null): AdventurerState | nu
 }
 
 // ───────── the tick ─────────
+let curStats: Stats = { searches: 0, nodes: 0, fills: 0, lineChecks: 0, ticks: 0, warm: { camp: 0, k: 0, done: false } };
+const waiting: EnemyState[] = [];
+const searchStats = { expanded: 0, exhausted: false };
+
 export function stepEnemies(w: CombatWorld, nowS: number, dt: number): void {
   let st = stats.get(w);
-  if (!st) { st = { searches: 0, ticks: 0 }; stats.set(w, st); }
-  st.searches = 0;
-  const budget = { left: PATHS_PER_TICK };
-  // Visit enemies in id order, but start each tick one further along, so no enemy is always last in
-  // line for the search budget.
-  const n = w.enemies.size;
-  if (n > 0) {
-    const start = st.ticks % n;
-    let i = 0;
-    for (const e of w.enemies.values()) { if (i >= start) stepEnemy(w, e, nowS, dt, budget); i++; }
-    i = 0;
-    for (const e of w.enemies.values()) { if (i >= start) break; stepEnemy(w, e, nowS, dt, budget); i++; }
-  }
+  if (!st) { st = { searches: 0, nodes: 0, fills: 0, lineChecks: 0, ticks: 0, warm: { camp: 0, k: 0, done: false } }; stats.set(w, st); }
+  st.searches = 0; st.nodes = 0; st.fills = 0; st.lineChecks = 0;
+  curStats = st;
+  const fills0 = gridFills;
+  for (const e of w.enemies.values()) stepEnemy(w, e, nowS, dt);
+  const left = runSearches(w, nowS, st);
+  warmGrid(w, st, Math.min(WARM_PER_TICK, Math.floor(left / FILL_COST)));
+  st.fills = gridFills - fills0;
   st.ticks++;
-  st.searches = PATHS_PER_TICK - budget.left;
   separate(w);
 }
 
-function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number, budget: { left: number }): void {
+/**
+ * The tick's path searches, first come first served (ties by id), while the node budget lasts. A
+ * search the budget cut short is not a "no way": the enemy stays first in line for the next tick.
+ */
+function runSearches(w: CombatWorld, now: number, st: Stats): number {
+  waiting.length = 0;
+  for (const e of w.enemies.values()) { const ai = AI.get(e); if (e.alive && ai && ai.wantSince !== null) waiting.push(e); }
+  if (waiting.length === 0) return ENEMY_PATH_BUDGET;
+  waiting.sort((a, b) => AI.get(a)!.wantSince! - AI.get(b)!.wantSince! || a.id - b.id);
+  let left = ENEMY_PATH_BUDGET;
+  for (const e of waiting) {
+    if (st.searches >= PATHS_PER_TICK || left < MIN_SEARCH_NODES) break;
+    const ai = AI.get(e)!;
+    const maxNodes = Math.min(ENEMY_PATH_NODES, left);
+    const fills0 = gridFills;
+    const p = findPath({ x: e.x, z: e.z }, { x: ai.wantX, z: ai.wantZ }, enemyPathPassable(w.zone, e.data.radius),
+      { cell: ENEMY_PATH_CELL, maxNodes, pockets: false, stats: searchStats });
+    st.searches++;
+    left -= searchStats.expanded + FILL_COST * (gridFills - fills0);
+    st.nodes += searchStats.expanded;
+    if (!p && searchStats.exhausted && maxNodes < ENEMY_PATH_NODES) continue; // cut short by the budget: retry
+    ai.longestWaitS = Math.max(ai.longestWaitS, now - ai.wantSince!);
+    ai.wantSince = null;
+    ai.searchedAt = now;
+    ai.searchAt = now + ENEMY_REPLAN_S; ai.planAt = now + ENEMY_REPLAN_S;
+    ai.direct = false; ai.path = p; ai.pathIdx = 0; ai.pathGoalX = ai.wantX; ai.pathGoalZ = ai.wantZ; ai.dirty = false; ai.noWay = p === null;
+    // a new route: progress is measured along it from here (the clock is not reset)
+    ai.progBest = p ? pathLeft(e, ai) + hyp(ai.wantX - p[p.length - 1].x, ai.wantZ - p[p.length - 1].z) : ai.progBest;
+  }
+  return Math.max(0, left);
+}
+
+/** Clearance-grid points filled ahead of need per tick, from what the path budget left over. */
+const WARM_PER_TICK = 150;
+/**
+ * Fills the clearance grid ahead of need, camp by camp (each with its enemy's radius, out to its leash
+ * plus 5 m, row by row), with what the tick's path budget left over: after a couple of minutes every
+ * search near a camp runs on a warm grid. Deterministic: the camps in the zone's order.
+ */
+function warmGrid(w: CombatWorld, st: Stats, n: number): void {
+  const c = st.warm;
+  if (c.done || n <= 0) return;
+  const enemies = w.enemies;
+  let budget = n;
+  for (const e of enemies.values()) {
+    if (budget <= 0) break;
+    if (e.id < c.camp) continue;
+    const R = Math.ceil((e.data.leash + 5) / GRID), side = 2 * R + 1;
+    const pass = enemyPathPassable(w.zone, e.data.radius);
+    while (c.k < side * side && budget > 0) {
+      const di = (c.k % side) - R, dj = Math.floor(c.k / side) - R;
+      c.k++;
+      if (di * di + dj * dj > R * R) continue;
+      const before = gridFills;
+      pass((Math.round(e.camp.x / GRID) + di) * GRID, (Math.round(e.camp.z / GRID) + dj) * GRID);
+      budget -= gridFills - before;
+    }
+    if (c.k >= side * side) { c.camp = e.id + 1; c.k = 0; }
+  }
+  if (budget > 0) c.done = true;
+}
+
+function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number): void {
   if (!e.alive) { AI.delete(e); return; }
   const d = e.data;
   if (d.speed <= 0 && d.auto === null && d.attacks.length === 0) return; // the training dummy
   const ai = aiOf(e, now);
 
-  if (e.act === 'return') { walkHome(w, e, ai, now, dt, budget); return; }
+  if (e.act === 'return') { walkHome(w, e, ai, now, dt); return; }
   if (e.act === 'stun' && now < e.actUntil - TIME_EPS) { holdProgress(ai, now); return; }
 
   if (e.windup) {
@@ -167,7 +310,9 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number, budge
     ai.nextAutoAt = now;
     ai.noTargetSince = null;
     ai.progTarget = null;
+    ai.chanceAt = now;
   }
+  if (d.elite) scaleElite(w, e, ai);
 
   // target: the threat table's choice, every tick (its TARGET_SWITCH_MULT hysteresis keeps it steady,
   // and a taunt then starts and ends on the tick); only live adventurers in this zone are valid
@@ -176,6 +321,7 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number, budge
   const t = liveAdventurer(w, e.targetId);
   if (!t) {
     e.targetId = null;
+    e.surging = false;
     ai.noTargetSince ??= now;
     if (now - ai.noTargetSince >= NO_TARGET_S - TIME_EPS) startReturn(w, e, ai, now);
     return;
@@ -188,25 +334,35 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number, budge
   const dist = hyp(t.x - e.x, t.z - e.z);
   const sees = lineOfSight(w.zone.sight, e.x, e.z, t.x, t.z);
 
+  // the chase surge: out of range of every attack for SURGE_AFTER_S → faster until it next attacks
+  const auto = d.auto;
+  const reachE = dist - d.radius;
+  const inReach = auto !== null && reachE <= auto.reach && (!auto.ranged || sees);
+  let chance = inReach;
+  // "in range to start an attack": in auto reach, or a ready telegraph's useRange (one still cooling down
+  // cannot be started, so circling just outside auto reach does not hold the surge off)
+  for (const id of d.attacks) if (sees && dist <= ENEMY_ATTACKS[id].useRange && now >= (e.attackReadyAt[id] ?? Infinity) - TIME_EPS) chance = true;
+  if (chance && !e.surging) ai.chanceAt = now;
+  if (!e.surging && now - ai.chanceAt > SURGE_AFTER_S + TIME_EPS) e.surging = true;
+
   // a telegraphed attack, when one is ready and the target is within its useRange
   for (const id of d.attacks) {
     const atk = ENEMY_ATTACKS[id];
     if (now >= (e.attackReadyAt[id] ?? Infinity) - TIME_EPS && dist <= atk.useRange && sees) {
       startWindup(w, e, atk, t, now);
+      attacked(e, ai, now);
       holdProgress(ai, now);
       return;
     }
   }
 
   // the auto, when in reach (horizontal only: an adventurer on a rock within reach is hit)
-  const auto = d.auto;
-  const reachE = dist - d.radius;
-  const inReach = auto !== null && reachE <= auto.reach && (!auto.ranged || sees);
   if (inReach) {
     holdProgress(ai, now);
     if (dist > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
     if (now >= ai.nextAutoAt - TIME_EPS) {
       ai.nextAutoAt = now + auto.every;
+      attacked(e, ai, now);
       resolveHit(w, e, t, auto.raw, 'auto', !auto.ranged, null, now);
     }
   }
@@ -214,47 +370,104 @@ function stepEnemy(w: CombatWorld, e: EnemyState, now: number, dt: number, budge
   // chase: melee closes to a little inside reach, a ranged enemy to keepRange (and into sight)
   const stopReach = auto === null ? 0 : auto.ranged ? Math.min(auto.reach, d.keepRange ?? auto.reach) : auto.reach - REACH_MARGIN;
   const stop = stopReach + d.radius;
-  if (dist > stop || (auto?.ranged && !sees)) walk(w, e, ai, t.x, t.z, auto?.ranged && !sees ? 0 : stop, d.speed, dt, now, budget);
-  else if (dist > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
+  const speed = e.surging ? SURGE_SCALE * RUN_SPEED : d.speed;
+  let free = false;
+  if (dist > stop || (auto?.ranged && !sees)) {
+    const x0 = e.x, z0 = e.z;
+    ai.dirty = false;
+    const moved = walk(w, e, ai, t.x, t.z, auto?.ranged && !sees ? 0 : stop, speed, dt, now);
+    // walking unhindered (a whole step, nothing refused) is progress too: a runner is the surge's and the
+    // leash's business, not the unreachable rule's
+    free = moved && !ai.dirty && hyp(e.x - x0, e.z - z0) >= 0.5 * speed * dt;
+  } else if (dist > 0) e.facing = Math.atan2(t.x - e.x, t.z - e.z);
 
-  // the unreachable rule: out of reach with no progress for UNREACHABLE_S → home
+  // the unreachable rule: out of reach with no progress for UNREACHABLE_S → home. Progress is what is
+  // left to go: along the path while one is followed (a detour that first leads away still counts),
+  // else the straight distance. No path at all means no progress.
   if (!inReach) {
-    if (ai.progTarget !== t.id) { ai.progTarget = t.id; ai.progBest = Infinity; }
-    const nd = hyp(t.x - e.x, t.z - e.z);
-    if (nd < ai.progBest - PROGRESS_M) { ai.progBest = nd; ai.progAt = now; }
+    if (ai.progTarget !== t.id) { ai.progTarget = t.id; ai.progBest = Infinity; ai.progAt = now; }
+    const left = toGo(e, ai, t);
+    if (left < ai.progBest - PROGRESS_M) { ai.progBest = left; ai.progAt = now; }
+    else if (free) ai.progAt = now;
     if (now - ai.progAt >= UNREACHABLE_S - TIME_EPS) startReturn(w, e, ai, now);
   }
 }
 
+function attacked(e: EnemyState, ai: EnemyAi, now: number): void {
+  e.surging = false;
+  ai.chanceAt = now;
+}
+
+/** What is left to go to the target: along the path being followed, else straight. */
+function toGo(e: EnemyState, ai: EnemyAi, t: AdventurerState): number {
+  if (!ai.direct && ai.path && ai.pathIdx < ai.path.length) {
+    const end = ai.path[ai.path.length - 1];
+    return pathLeft(e, ai) + hyp(t.x - end.x, t.z - end.z);
+  }
+  return hyp(t.x - e.x, t.z - e.z);
+}
+function pathLeft(e: EnemyState, ai: EnemyAi): number {
+  const p = ai.path!;
+  let s = 0, x = e.x, z = e.z;
+  for (let i = ai.pathIdx; i < p.length; i++) { s += hyp(p[i].x - x, p[i].z - z); x = p[i].x; z = p[i].z; }
+  return s;
+}
+
+/** ENEMY_REPLAN_S, spread ±25% by id, so enemies engaged on the same tick do not all re-check together. */
+function replanIn(e: EnemyState): number {
+  return ENEMY_REPLAN_S * (0.75 + 0.5 * ((e.id * 0.6180339887) % 1));
+}
+
 /** Rooted, stunned or in reach: the unreachable clock does not run. */
-function holdProgress(ai: Ai, now: number): void {
+function holdProgress(ai: EnemyAi, now: number): void {
   ai.progBest = Infinity; ai.progAt = now;
+}
+
+/**
+ * Elite scaling: n = distinct live adventurers on its threat table (at most ELITE_SCALE_CAP). When n
+ * rises, max hp and the stagger bar's capacity become base × (1 + ELITE_SCALE_PER × (n − 1)), and hp
+ * keeps its fraction. Never scales down during a fight; back to base at home or on respawn.
+ */
+function scaleElite(w: CombatWorld, e: EnemyState, ai: EnemyAi): void {
+  let n = 0;
+  for (const id of e.threat.ids()) if (liveAdventurer(w, id)) n++;
+  n = Math.min(ELITE_SCALE_CAP, n);
+  if (n <= ai.scaleN) return;
+  ai.scaleN = n;
+  const f = 1 + ELITE_SCALE_PER * (n - 1);
+  const max = e.data.hp * f;
+  e.hp = (e.hp * max) / e.maxHp;
+  e.maxHp = max;
+  e.stagger.max = e.data.stagger * f;
 }
 
 // ───────── walking ─────────
 /**
  * One tick of walking toward (gx, gz), stopping `stop` short of it: straight when the line is clear,
- * else along a path (a search runs only when the budget and ENEMY_REPLAN_S allow). Every step must be
- * passable ground (a step from an unclear spot may go anywhere on ground, to get clear); a refused
- * step marks the plan dirty. y follows the ground.
+ * else along a path (asking for a search, which runs at the end of the tick when ENEMY_REPLAN_S and the
+ * node budget allow). Every step must be passable ground (a step from an unclear spot may go anywhere
+ * on ground, to get clear); a refused step marks the plan dirty. y follows the ground.
  */
-function walk(w: CombatWorld, e: EnemyState, ai: Ai, gx: number, gz: number, stop: number, speed: number, dt: number, now: number, budget: { left: number }): boolean {
+function walk(w: CombatWorld, e: EnemyState, ai: EnemyAi, gx: number, gz: number, stop: number, speed: number, dt: number, now: number): boolean {
   const d = hyp(gx - e.x, gz - e.z);
   if (d <= stop || !(dt > 0)) return false;
   const pass = enemyPassable(w.zone, e.data.radius);
+  const grid = enemyPathPassable(w.zone, e.data.radius);
   const goalMoved = !ai.direct && ai.path !== null && hyp(gx - ai.pathGoalX, gz - ai.pathGoalZ) > GOAL_MOVED_M;
-  if (ai.dirty || now >= ai.planAt - TIME_EPS || goalMoved || (!ai.direct && ai.path === null)) {
-    if (clearLine(e.x, e.z, gx, gz, pass)) {
-      ai.direct = true; ai.path = null; ai.dirty = false; ai.noWay = false; ai.planAt = now + ENEMY_REPLAN_S;
-    } else if (now >= ai.searchAt - TIME_EPS && budget.left > 0) {
-      budget.left--;
-      const p = findPath({ x: e.x, z: e.z }, { x: gx, z: gz }, pass, { maxNodes: ENEMY_PATH_NODES });
-      ai.searchAt = now + ENEMY_REPLAN_S; ai.planAt = now + ENEMY_REPLAN_S;
-      ai.direct = false; ai.path = p; ai.pathIdx = 0; ai.pathGoalX = gx; ai.pathGoalZ = gz; ai.dirty = false; ai.noWay = p === null;
-    } else if (ai.direct) {
-      ai.direct = false; ai.path = null; // blocked straight ahead: wait for a search
+  const due = now >= ai.planAt - TIME_EPS || ((ai.dirty || goalMoved || (!ai.direct && ai.path === null)) && now >= ai.checkAt - TIME_EPS);
+  if (due && ai.wantSince === null) {
+    curStats.lineChecks++;
+    ai.checkAt = now + RECHECK_S;
+    if (clearLine(e.x, e.z, gx, gz, grid)) {
+      ai.direct = true; ai.path = null; ai.dirty = false; ai.noWay = false; ai.planAt = now + replanIn(e);
+    } else if (now >= ai.searchAt - TIME_EPS) {
+      ai.wantSince = now; ai.wantX = gx; ai.wantZ = gz; ai.dirty = false;
+      if (ai.direct) { ai.direct = false; ai.path = null; }
+    } else {
+      if (ai.direct) { ai.direct = false; ai.path = null; } // blocked straight ahead: wait for the next search
+      ai.dirty = false; ai.planAt = Math.min(ai.planAt, ai.searchAt);
     }
-  }
+  } else if (ai.wantSince !== null) { ai.wantX = gx; ai.wantZ = gz; }
   let wx = gx, wz = gz, limit = d - stop;
   if (!ai.direct) {
     const p = ai.path;
@@ -269,32 +482,38 @@ function walk(w: CombatWorld, e: EnemyState, ai: Ai, gx: number, gz: number, sto
 }
 
 /** Moves up to `len` toward (wx, wz) (sliding along x or z when the straight step is refused). */
-function stepToward(w: CombatWorld, e: EnemyState, ai: Ai, wx: number, wz: number, len: number, pass: (x: number, z: number) => boolean): boolean {
+function stepToward(w: CombatWorld, e: EnemyState, ai: EnemyAi, wx: number, wz: number, len: number, pass: (x: number, z: number) => boolean): boolean {
   const dx = wx - e.x, dz = wz - e.z, l = hyp(dx, dz);
   if (!(l > 1e-9) || !(len > 0)) return false;
-  const mx = (dx / l) * len, mz = (dz / l) * len;
   const ground = w.zone.ground;
   const ok = pass(e.x, e.z)
     ? pass
     : (x: number, z: number) => ground(x, z) !== null; // not clear where it stands: any ground gets it clear
-  let nx = e.x + mx, nz = e.z + mz;
-  if (!ok(nx, nz)) {
-    if (ok(e.x + mx, e.z)) nz = e.z;
-    else if (ok(e.x, e.z + mz)) nx = e.x;
-    else { ai.dirty = true; return false; }
-    ai.dirty = true;
+  // in sub-steps of at most DISPLACE_SUBSTEP_M, so no thin obstacle is stepped over
+  const n = Math.max(1, Math.ceil(len / DISPLACE_SUBSTEP_M));
+  const sx = ((dx / l) * len) / n, sz = ((dz / l) * len) / n;
+  let x = e.x, z = e.z, moved = false;
+  for (let k = 0; k < n; k++) {
+    let nx = x + sx, nz = z + sz;
+    if (!ok(nx, nz)) {
+      ai.dirty = true;
+      if (ok(x + sx, z)) nz = z;
+      else if (ok(x, z + sz)) nx = x;
+      else break;
+    }
+    if (ground(nx, nz) === null) { ai.dirty = true; break; }
+    x = nx; z = nz; moved = true;
   }
-  const y = ground(nx, nz);
-  if (y === null) { ai.dirty = true; return false; }
-  e.facing = Math.atan2(nx - e.x, nz - e.z);
-  e.x = nx; e.z = nz; e.y = y;
+  if (!moved) { ai.dirty = true; return false; }
+  e.facing = Math.atan2(x - e.x, z - e.z);
+  e.x = x; e.z = z; e.y = ground(x, z)!;
   return true;
 }
 
 // ───────── going home ─────────
-function startReturn(w: CombatWorld, e: EnemyState, ai: Ai, now: number): void {
+function startReturn(w: CombatWorld, e: EnemyState, ai: EnemyAi, now: number): void {
   cancelWindup(w, e);
-  e.act = 'return'; e.actUntil = Infinity; e.targetId = null;
+  e.act = 'return'; e.actUntil = Infinity; e.targetId = null; e.surging = false;
   e.threat.clear();
   e.marks = {}; e.burning = null;
   e.stagger = { value: 0, max: e.stagger.max, brokenUntil: -Infinity, lastGainAt: -Infinity };
@@ -302,17 +521,19 @@ function startReturn(w: CombatWorld, e: EnemyState, ai: Ai, now: number): void {
   resetMovement(ai);
 }
 
-function walkHome(w: CombatWorld, e: EnemyState, ai: Ai, now: number, dt: number, budget: { left: number }): void {
+function walkHome(w: CombatWorld, e: EnemyState, ai: EnemyAi, now: number, dt: number): void {
   const c = e.camp;
   if (hyp(c.x - e.x, c.z - e.z) > ARRIVE_M) {
-    walk(w, e, ai, c.x, c.z, 0, e.data.speed * RETURN_SPEED_SCALE, dt, now, budget);
+    walk(w, e, ai, c.x, c.z, 0, e.data.speed * RETURN_SPEED_SCALE, dt, now);
     const lost = ai.noWay; // searched, and there is no way home
     if (!lost && now - ai.returnSince < RETURN_MAX_S - TIME_EPS && hyp(c.x - e.x, c.z - e.z) > ARRIVE_M) return;
   }
-  // home (or put back): full hp, threat clear, ready to notice adventurers again
+  // home (or put back): base and full hp, threat clear, ready to notice adventurers again
   e.x = c.x; e.z = c.z; e.y = w.zone.ground(c.x, c.z) ?? e.y; e.facing = c.facing;
-  e.hp = e.maxHp; e.act = ''; e.actUntil = -Infinity; e.targetId = null;
+  e.maxHp = e.data.hp; e.hp = e.maxHp; e.act = ''; e.actUntil = -Infinity; e.targetId = null;
+  e.stagger = { value: 0, max: e.data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity };
   e.threat.clear(); e.attackReadyAt = {};
+  ai.scaleN = 1; ai.parryImmuneUntil = -Infinity;
   resetMovement(ai);
 }
 
@@ -378,8 +599,8 @@ function dash(w: CombatWorld, e: EnemyState, s: Extract<Shape, { kind: 'line' }>
  * One enemy hit on an adventurer, in order: i-frames → `miss` (perfect when inside the telegraph, or
  * dodged from inside it within PERFECT_DODGE_WINDOW_S: elite +15 stagger, adventurer +10 Momentum);
  * an open parry against a parryable hit → `parry` (nothing taken, +20 Momentum, the elite +35
- * stagger, an ordinary enemy stunned PARRY_STUN_S); else enemyHit(raw, defence) through the shield,
- * then the knock.
+ * stagger, an ordinary enemy stunned PARRY_STUN_S unless it is still parry-stun immune); else
+ * enemyHit(raw, defence) through the shield, then the knock.
  */
 export function resolveHit(
   w: CombatWorld, e: EnemyState, a: AdventurerState, raw: number, by: EnemyAttackId | 'auto', parryable: boolean,
@@ -402,8 +623,12 @@ export function resolveHit(
     a.momentum = gainMomentum(a.momentum, PARRY_MOMENTUM);
     if (e.data.elite) applyStagger(w, e, PARRY_STAGGER, now);
     else {
-      cancelWindup(w, e);
-      e.act = 'stun'; e.actUntil = now + PARRY_STUN_S;
+      const ai = aiOf(e, now);
+      if (now >= ai.parryImmuneUntil - TIME_EPS) {
+        cancelWindup(w, e);
+        e.act = 'stun'; e.actUntil = now + PARRY_STUN_S;
+        ai.parryImmuneUntil = now + PARRY_STUN_S + PARRY_STUN_IMMUNE_S;
+      }
     }
     return;
   }
@@ -415,8 +640,9 @@ export function resolveHit(
 const sepDx: number[] = [], sepDz: number[] = [], sepList: EnemyState[] = [];
 /**
  * Overlapping enemies are pushed apart by their radii: each moves half the overlap (all of it when the
- * other is rooted), only onto passable ground. Pushes are summed first and then applied, so the result
- * does not depend on the order enemies are visited in.
+ * other is rooted), at most DISPLACE_SUBSTEP_M a tick, only onto passable ground and never across
+ * anything (the midpoint is checked too). Pushes are summed first and then applied, so the result does
+ * not depend on the order enemies are visited in.
  */
 function separate(w: CombatWorld): void {
   sepList.length = 0;
@@ -444,10 +670,14 @@ function separate(w: CombatWorld): void {
   }
   if (!any) return;
   for (let i = 0; i < n; i++) {
-    if (sepDx[i] === 0 && sepDz[i] === 0) continue;
+    let px = sepDx[i], pz = sepDz[i];
+    if (px === 0 && pz === 0) continue;
+    const l = hyp(px, pz);
+    if (l > DISPLACE_SUBSTEP_M) { px *= DISPLACE_SUBSTEP_M / l; pz *= DISPLACE_SUBSTEP_M / l; }
     const e = sepList[i];
-    const nx = e.x + sepDx[i], nz = e.z + sepDz[i];
-    if (!enemyPassable(w.zone, e.data.radius)(nx, nz)) continue;
+    const pass = enemyPassable(w.zone, e.data.radius);
+    const nx = e.x + px, nz = e.z + pz;
+    if (!pass(nx, nz) || !pass(e.x + px / 2, e.z + pz / 2)) continue;
     const y = w.zone.ground(nx, nz);
     if (y === null) continue;
     e.x = nx; e.z = nz; e.y = y;

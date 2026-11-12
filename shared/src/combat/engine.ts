@@ -9,7 +9,7 @@ import type { FxEvent } from './fx';
 import type { Marks } from './marks';
 import { markBits } from './marks';
 import type { Shape } from './shapes';
-import type { StaggerBar } from './stagger';
+import { staggerImmuneLeft, type StaggerBar } from './stagger';
 import type { Stats } from './stats';
 import { ThreatTable } from './threat';
 import { stepEnemies } from './enemyAi';
@@ -29,6 +29,10 @@ export interface CombatantView {
   x: number; z: number; y: number; facing: number; hp: number; maxHp: number; alive: boolean; shield: number;
   marks: number; stagger: number; maxStagger: number; targetId: number | null; act: Act;
   windup: { attack: EnemyAttackId; total: number; left: number; interruptible: boolean } | null;
+  /** Enemies: the chase surge is on (moving at SURGE_SCALE × RUN_SPEED). */
+  surging?: boolean;
+  /** Enemies with a stagger bar: seconds until it can gain stagger again (a break, then STAGGER_IMMUNE_S); 0 = it can. */
+  staggerImmune?: number;
 }
 /**
  * cd: seconds left per slot; gcd, swapCd, dodgeNextIn: seconds left (0 = ready / full);
@@ -55,6 +59,12 @@ export type Refusal = 'dead' | 'busy' | 'invalid' | 'cooldown' | 'momentum' | 'n
  */
 export interface Carry {
   cooldowns: Partial<Record<AbilityId, number>>; gcd: number; dodgeCharges: number; dodgeRefillIn: number; momentum: number;
+  /**
+   * Optional (absent = fresh), seconds: since combat damage dealt or taken (in combat), since any damage
+   * taken (regen delay), since damage dealt (Momentum decay), swap cooldown left, shield amount and time
+   * left, sprint left. carryOf always fills them; "since" values are capped at 1e6.
+   */
+  sinceCombat?: number; sinceHurt?: number; sinceDealt?: number; swapCd?: number; shield?: number; shieldLeft?: number; sprintLeft?: number;
 }
 /**
  * Every `nowS` (intents, ticks, damage, revive) is the caller's clock in seconds: it must be monotonic
@@ -119,6 +129,8 @@ export interface EnemyState {
   /** When each attack may next start (the enemy AI sets these; an interrupt restarts the cooldown). */
   attackReadyAt: Partial<Record<EnemyAttackId, number>>;
   diedAt: number; respawnAt: number; lastDamagedAt: number;
+  /** The chase surge (enemyAi): faster until it next starts an attack. */
+  surging: boolean;
 }
 export interface TelegraphState { id: number; owner: number; attack: EnemyAttackId; shape: Shape; startedAt: number; endsAt: number }
 export interface CombatWorld {
@@ -155,7 +167,7 @@ function newEnemy(w: CombatWorld, c: CampSpawn, nowS: number): EnemyState {
     id: w.nextId++, team: 'enemy', kind: c.kind, data, camp: { ...c },
     x: 0, z: 0, y: 0, facing: 0, hp: data.hp, maxHp: data.hp, alive: true, act: '', actUntil: -Infinity, targetId: null,
     threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {},
-    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity,
+    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false,
   };
   spawnEnemyState(w, e);
   void nowS;
@@ -188,6 +200,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     hp: e.hp, maxHp: e.maxHp, alive: e.alive, shield: 0, marks: markBits(e.marks, w.now),
     stagger: e.stagger.value, maxStagger: e.stagger.max, targetId: e.targetId, act: e.act,
     windup: e.windup ? { attack: e.windup.attack, total: e.windup.endsAt - e.windup.startedAt, left: Math.max(0, e.windup.endsAt - w.now), interruptible: e.windup.interruptible } : null,
+    surging: e.surging, staggerImmune: e.stagger.max > 0 ? staggerImmuneLeft(e.stagger, w.now) : 0,
   });
   const advView = (a: AdventurerState): CombatantView => ({
     id: a.id, team: 'adventurer', kind: 'adventurer', x: a.x, z: a.z, y: a.y, facing: a.facing,

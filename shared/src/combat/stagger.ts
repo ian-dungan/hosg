@@ -8,12 +8,20 @@ export function isBroken(bar: StaggerBar, nowS: number): boolean {
   return nowS < bar.brokenUntil;
 }
 
+/** After a break ends, the bar gains nothing for this long (the client shows it greyed). */
+export const STAGGER_IMMUNE_S = 6;
+/** Seconds until the bar can gain stagger again: the rest of a break plus STAGGER_IMMUNE_S after it; 0 = it can. */
+export function staggerImmuneLeft(bar: StaggerBar, nowS: number): number {
+  return Math.max(0, bar.brokenUntil + STAGGER_IMMUNE_S - nowS);
+}
+
 /**
  * Adds stagger. Returns true when it breaks the bar: value back to 0 and brokenUntil = nowS +
- * BREAK_STUN_S. Nothing is gained while broken, by a bar with max 0, or for amount <= 0.
+ * BREAK_STUN_S. Nothing is gained while broken or for STAGGER_IMMUNE_S after, by a bar with max 0, or
+ * for amount <= 0.
  */
 export function addStagger(bar: StaggerBar, amount: number, nowS: number): boolean {
-  if (!(bar.max > 0) || !(amount > 0) || isBroken(bar, nowS)) return false;
+  if (!(bar.max > 0) || !(amount > 0) || staggerImmuneLeft(bar, nowS) > 0) return false;
   bar.value += amount;
   bar.lastGainAt = nowS;
   if (bar.value < bar.max) return false;

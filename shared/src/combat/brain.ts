@@ -43,7 +43,8 @@ const QUICK = 0, FINISHER = 1, SIGNATURE = 2;
 /**
  * One decision, every tick:
  * - dodging (careful only): a telegraph containing self, not yet dodged, up for reactionS → dodge
- *   along escapeDir (a held Charged Shot of frac ≥ 0.8 is loosed first);
+ *   along escapeDir (a held Charged Shot of frac ≥ 0.8 is loosed first). The dodge's `from` is the pose
+ *   the brain read; a caller that has moved the body since should put its current pose there;
  * - movement: toward the target while reach > range − 0.3; not during a dodge or a knock, and (careful)
  *   not back into a telegraph it is outside of;
  * - abilities, at most one per tick, in order: Mend below 50% hp; Bulwark in combat; the finisher at

@@ -3,7 +3,7 @@ import {
   mitigation, hitDamage, enemyHit, STARTER_STATS,
   gainMomentum, decayMomentum,
   applyFinisherMark, liveMarks, markBits, MARK_BITS, type Marks,
-  addStagger, tickStagger, isBroken, type StaggerBar,
+  addStagger, tickStagger, isBroken, staggerImmuneLeft, STAGGER_IMMUNE_S, type StaggerBar,
   ThreatTable,
   inShape, escapeDir, type Shape,
   lineOfSight,
@@ -82,8 +82,8 @@ describe('marks', () => {
 });
 
 describe('stagger', () => {
-  const bar = (max = 100): StaggerBar => ({ value: 0, max, brokenUntil: 0, lastGainAt: -Infinity });
-  it('breaks at max, then takes nothing while broken', () => {
+  const bar = (max = 100): StaggerBar => ({ value: 0, max, brokenUntil: -Infinity, lastGainAt: -Infinity });
+  it('breaks at max, then takes nothing while broken nor for STAGGER_IMMUNE_S after', () => {
     const b = bar();
     expect(addStagger(b, 60, 0)).toBe(false);
     expect(addStagger(b, 40, 1)).toBe(true);
@@ -94,6 +94,9 @@ describe('stagger', () => {
     expect(b.value).toBe(0);
     expect(isBroken(b, 1 + BREAK_STUN_S)).toBe(false);
     expect(addStagger(b, 50, 1 + BREAK_STUN_S)).toBe(false);
+    expect(b.value).toBe(0); // immune
+    expect(staggerImmuneLeft(b, 1 + BREAK_STUN_S + 1)).toBeCloseTo(STAGGER_IMMUNE_S - 1, 9);
+    expect(addStagger(b, 50, 1 + BREAK_STUN_S + STAGGER_IMMUNE_S)).toBe(false);
     expect(b.value).toBe(50);
   });
   it('decays 5/s only after 4 s without gain', () => {

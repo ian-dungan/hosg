@@ -532,8 +532,9 @@ function crowd(seed: number) {
   adv.forEach((id, i) => r.i(id, { t: 'target', id: es[(i * 3) % es.length].id }));
   return { r, adv, es };
 }
+const threatValues = (e: EnemyState) => [...((e.threat as unknown as { threat: Map<number, number> }).threat)];
 const snapshot = (r: Rig) => JSON.stringify({
-  e: [...r.w.enemies.values()].map((e) => [e.id, e.x, e.z, e.y, e.facing, e.hp, e.act, e.actUntil, e.targetId, e.threat.ids(), e.stagger, e.marks, e.windup, e.attackReadyAt]),
+  e: [...r.w.enemies.values()].map((e) => [e.id, e.x, e.z, e.y, e.facing, e.hp, e.maxHp, e.act, e.actUntil, e.targetId, threatValues(e), e.stagger, e.marks, e.windup, e.attackReadyAt, e.surging, enemyAiStateOf(e) ?? null]),
   a: [...r.w.adventurers.values()].map((a) => [a.id, a.x, a.z, a.hp, a.alive, a.act, a.momentum, a.targetId, a.dodgeCharges]),
   t: [...r.w.telegraphs.values()],
 });
@@ -567,5 +568,370 @@ describe('budget, ground and determinism', () => {
       }
       expect(snapshot(x.r)).toBe(snapshot(y.r));
     }
+  });
+});
+
+// ═════════ fix round 1 ═════════
+import { findPath, withClearance } from '../path';
+import { ENEMY_PATH_BUDGET, enemyAiStateOf, enemyPathPassable, SURGE_AFTER_S, SURGE_SCALE, PARRY_STUN_IMMUNE_S } from './enemyAi';
+import { STAGGER_IMMUNE_S } from './stagger';
+import { RUN_SPEED } from '../constants';
+import { adventurerBrain, newBrainMemory } from './brain';
+import { brainInputFor } from './sim';
+import { COMBAT_TIMEOUT_S, SWAP_COOLDOWN_S } from './constants';
+import { hurtAdventurer } from './adventurer';
+
+describe('path cost (I1)', () => {
+  it('findPath can skip the goal-pocket check and reports the nodes it expanded', () => {
+    // the goal sits in a small walled pocket: the default search refuses it after the pocket check;
+    // pockets: false just runs A* to its node limit
+    const wallRing = (x: number, z: number) => Math.abs(Math.hypot(x - 10, z) - 2) < 0.4;
+    const pass = (x: number, z: number) => !wallRing(x, z);
+    const stats = { expanded: 0, exhausted: false };
+    expect(findPath({ x: 0, z: 0 }, { x: 10, z: 0 }, pass, { maxNodes: 300, pockets: false, stats })).toBeNull();
+    expect(stats.expanded).toBe(300);
+    expect(stats.exhausted).toBe(true);
+    const s2 = { expanded: 0, exhausted: false };
+    expect(findPath({ x: 0, z: 0 }, { x: 5, z: 3 }, pass, { stats: s2 })).not.toBeNull();
+    expect(s2.exhausted).toBe(false);
+    expect(s2.expanded).toBeGreaterThan(0);
+  });
+
+  it('enemy path passability is cached per zone and radius: a repeated search makes no ground calls, and it is conservative', () => {
+    let calls = 0;
+    const base = zone([], { walls: [{ x0: -3, x1: 3, z0: 2, z1: 2.6 }, { x0: 6, x1: 6.4, z0: -9, z1: 9 }] });
+    const z: CombatZone = { ...base, ground: (x, zz) => { calls++; return base.ground(x, zz); } };
+    const pass = enemyPathPassable(z, 0.8);
+    expect(enemyPathPassable(z, 0.8)).toBe(pass);
+    const p1 = findPath({ x: 0, z: 0 }, { x: 0, z: 6 }, pass, { cell: 1, pockets: false });
+    expect(p1).not.toBeNull();
+    const before = calls;
+    findPath({ x: 0, z: 0 }, { x: 0, z: 6 }, pass, { cell: 1, pockets: false });
+    expect(calls).toBe(before);
+    const exact = withClearance((x, zz) => base.ground(x, zz) !== null, 0.8);
+    for (let i = 0; i < 4000; i++) {
+      const x = -8 + ((i * 7919) % 32) / 2, zz = -8 + ((i * 104729) % 32) / 2; // grid points
+      if (pass(x, zz)) expect(exact(x, zz)).toBe(true);
+    }
+  });
+
+  it('a tick never expands more than ENEMY_PATH_BUDGET nodes, and every enemy that needs a path gets one within 3 s', () => {
+    const { r } = crowd(5);
+    const lastSearch = new Map<number, number>();
+    let maxNodes = 0;
+    r.at(12, () => {
+      maxNodes = Math.max(maxNodes, enemyAiStats(r.w).nodes);
+      for (const e of r.w.enemies.values()) {
+        const s = enemyAiStateOf(e);
+        if (s && s.searchedAt > -Infinity) lastSearch.set(e.id, s.searchedAt);
+      }
+    });
+    expect(maxNodes).toBeLessThanOrEqual(ENEMY_PATH_BUDGET);
+    // every enemy that ever waited for a search was served within 3 s of asking
+    for (const e of r.w.enemies.values()) {
+      const s = enemyAiStateOf(e);
+      if (s) expect(s.longestWaitS).toBeLessThanOrEqual(3);
+    }
+    expect(lastSearch.size).toBeGreaterThan(5);
+  });
+
+  it('a blocked enemy does not re-check its straight line every tick (gated by planAt)', () => {
+    const r = new Rig([camp('thornling', -2, 0)], { platforms: [{ x0: 3, x1: 9, z0: -3, z1: 3, h: 1.2 }] });
+    r.add(7, 0, BOW, 100, 1.2);
+    r.i(1 + r.w.enemies.size, { t: 'target', id: r.enemy('thornling').id });
+    let checks = 0;
+    r.at(3, () => { checks += enemyAiStats(r.w).lineChecks; });
+    expect(checks).toBeLessThanOrEqual(3 * 5);
+  });
+});
+
+/** The reviewer's kite: circling the camp at run speed, closing slowly, Bow autos all the way. */
+function kite(kind: EnemyKindId, step: number, RE: number, D0: number) {
+  const r = new Rig([camp(kind)], { half: 200 });
+  const e = r.enemy(kind);
+  const id = r.add(0, -D0, BOW);
+  const mem = newBrainMemory();
+  let px = 0, pz = -D0, took = 0, minGap = 99, surged = false, killedAt: number | null = null, returned = false;
+  const dt = 1 / 15;
+  for (let k = 1; k < 15 * 60; k++) {
+    r.k = k;
+    const t = r.now;
+    const act = adventurerBrain(brainInputFor(r.c, id, e.id, t, true)!, mem);
+    const D = Math.max(4, D0 - Math.floor(t / 2.5) * step);
+    const d = Math.hypot(px - e.x, pz - e.z) || 1e-6;
+    const ux = (px - e.x) / d, uz = (pz - e.z) / d;
+    const rr = Math.hypot(e.x, e.z);
+    let hx: number, hz: number;
+    if (rr < 2) { hx = ux; hz = uz; } else { const rx = e.x / rr, rz = e.z / rr; const kk = ((RE - rr) / RE) * 1.5; hx = -rz + rx * kk; hz = rx + rz * kk; }
+    const cross = ux * hz - uz * hx;
+    const a = Math.max(0, Math.min(RUN_SPEED, e.data.speed + 3 * (D - d)));
+    const b = Math.sqrt(Math.max(0, 36 - a * a)) * Math.max(-1, Math.min(1, cross * 3));
+    const vx = ux * a - uz * b, vz = uz * a + ux * b;
+    const sp = Math.hypot(vx, vz), sc = sp > RUN_SPEED ? RUN_SPEED / sp : 1;
+    px += vx * sc * dt; pz += vz * sc * dt;
+    r.c.setPose(id, px, pz, 0, 0);
+    for (const i of act.intents) { if ((i.t === 'ability' && i.slot === 2) || i.t === 'dodge') continue; r.c.intent(id, i, t); }
+    const out = r.c.tick(t);
+    for (const f of out.fx) if (f.t === 'hit' && f.dst === id) took += f.amount;
+    if (r.c.get(e.id)!.surging) surged = true;
+    if (t > 3) minGap = Math.min(minGap, Math.hypot(px - e.x, pz - e.z));
+    if (out.kills.length) { killedAt = t; break; }
+    if (e.act === 'return') returned = true;
+    if (!r.c.get(id)!.alive || (returned && e.act === '')) break;
+  }
+  return { took, minGap, surged, killedAt, returned, hpAtEnd: e.hp, maxHp: e.maxHp };
+}
+
+describe('the chase surge (I2)', () => {
+  it("the reviewer's slow-closing Bow kite never kills: the enemy surges, and is either caught up or leashed home healed", () => {
+    for (const kind of ['boar', 'thornling'] as const) for (const [step, re, d0] of [[0.7, 12, 12], [0.45, 15, 14], [0.7, 8, 10], [1.5, 20, 12]]) {
+      const k = kite(kind, step, re, d0);
+      const tag = `${kind} ${step} ${re} ${d0}`;
+      expect(k.killedAt, tag).toBeNull();
+      expect(k.surged, tag).toBe(true);
+      if (k.took === 0) expect([k.returned, k.hpAtEnd], tag).toEqual([true, k.maxHp]);
+    }
+  });
+
+  it(`surges at ${SURGE_SCALE} × RUN_SPEED after ${SURGE_AFTER_S} s out of range of every attack, until it next attacks`, () => {
+    const r = new Rig([camp('thornling')], { half: 200 });
+    const e = r.enemy('thornling');
+    const a = r.add(0, -6.5);
+    r.tick();
+    let z = -6.5;
+    const speeds: number[] = [];
+    let last = { x: e.x, z: e.z };
+    // a runner a little faster than the Thornling (5 m/s): out of range the whole time
+    r.until(() => r.c.get(e.id)!.surging === true, SURGE_AFTER_S + 0.5, () => { z -= 5.5 / 15; r.move(a, 0, z); });
+    expect(r.now).toBeGreaterThan(SURGE_AFTER_S);
+    for (let k = 0; k < 5; k++) {
+      z -= 5.5 / 15; r.move(a, 0, z);
+      last = { x: e.x, z: e.z };
+      r.tick();
+      speeds.push(dist(e, last) * 15);
+    }
+    expect(Math.max(...speeds)).toBeCloseTo(SURGE_SCALE * RUN_SPEED, 5);
+    // stop: it catches up, starts an attack, and the surge ends
+    r.until(() => r.c.get(e.id)!.surging === false, 5);
+    expect(e.windup !== null || r.hitsOn(a).length > 0).toBe(true);
+  });
+
+  it('an honest melee fight never surges', () => {
+    const r = new Rig([camp('boar')]);
+    const e = r.enemy('boar');
+    const a = r.add(0, -2.5);
+    r.i(a, { t: 'target', id: e.id });
+    let surged = false;
+    r.at(12, () => { if (r.c.get(e.id)!.surging) surged = true; });
+    expect(surged).toBe(false);
+  });
+});
+
+describe('path progress (I3)', () => {
+  for (const half of [8, 12, 16, 20]) {
+    it(`a Thornling walks round a ${half} m half-length hedge and hits`, () => {
+      const r = new Rig([camp('thornling', 0, 3)], { hedges: [{ x0: -half, x1: half, z0: -1, z1: 0 }], half: 60 });
+      const e = r.enemy('thornling');
+      const a = r.add(0, -3);
+      r.i(a, { t: 'target', id: e.id });
+      let returned = false;
+      r.at(20, () => { if (e.act === 'return') returned = true; });
+      expect(returned).toBe(false);
+      expect(r.hitsOn(a).length).toBeGreaterThan(0);
+    });
+  }
+  it('beyond its leash (a 30 m half-length hedge) it goes home instead of freezing', () => {
+    const r = new Rig([camp('thornling', 0, 3)], { hedges: [{ x0: -30, x1: 30, z0: -1, z1: 0 }], half: 60 });
+    const e = r.enemy('thornling');
+    const a = r.add(0, -3);
+    r.i(a, { t: 'target', id: e.id });
+    r.until(() => e.act === 'return', 15);
+  });
+});
+
+describe('elites scale with the adventurers engaged', () => {
+  it('two engaged: max hp ×1.7 with the hp fraction kept, stagger capacity ×1.7; never down in the fight; base again at home', () => {
+    const r = new Rig([camp('mossback')]);
+    const e = r.enemy('mossback');
+    const a = r.add(0, -3), b = r.add(0, -15, BOW);
+    r.tick();
+    expect(e.maxHp).toBe(750);
+    e.hp = 600;
+    r.i(b, { t: 'target', id: e.id });
+    r.tick();
+    expect(e.maxHp).toBeCloseTo(1275, 6);
+    expect(e.hp / e.maxHp).toBeCloseTo(600 / 750 - 0, 1);
+    expect(e.stagger.max).toBeCloseTo(170, 6);
+    expect(r.c.get(e.id)!.maxHp).toBeCloseTo(1275, 6);
+    hurtAdventurer(r.w, r.w.adventurers.get(b)!, 999, e.id, 'auto', r.now);
+    r.tick();
+    expect(e.maxHp).toBeCloseTo(1275, 6);
+    r.c.removeAdventurer(a);
+    r.until(() => e.act === 'return', 5);
+    r.until(() => e.act === '', 10);
+    expect([e.maxHp, e.hp, e.stagger.max]).toEqual([750, 750, 100]);
+  });
+
+  it('caps at 4 engaged (×3.1) and ordinary enemies never scale', () => {
+    const r = new Rig([camp('mossback'), camp('thornling', 8, 0)]);
+    const m = r.enemy('mossback'), t = r.enemy('thornling');
+    for (let i = 0; i < 6; i++) r.add(4 * Math.sin(i), 4 * Math.cos(i));
+    for (let i = 0; i < 6; i++) r.add(8 + 2 * Math.sin(i), 2 * Math.cos(i));
+    r.tick();
+    expect(m.maxHp).toBeCloseTo(750 * 3.1, 6);
+    expect(t.maxHp).toBe(210);
+  });
+});
+
+describe('stagger and parry immunity (M3)', () => {
+  it(`after a break ends, ${STAGGER_IMMUNE_S} s of no stagger gain, shown in the view`, () => {
+    const r = new Rig([camp('mossback')]);
+    const e = r.enemy('mossback');
+    r.add(0, -3);
+    r.tick();
+    applyStaggerNow(r, e, 100);
+    const until = e.stagger.brokenUntil;
+    r.at(until + 1);
+    expect(r.c.get(e.id)!.staggerImmune).toBeCloseTo(STAGGER_IMMUNE_S - 1 + (Math.round(until * 15) / 15 - until) + 1 / 15 * 0, 0);
+    applyStaggerNow(r, e, 30);
+    expect(e.stagger.value).toBe(0);
+    r.at(until + STAGGER_IMMUNE_S + 0.1);
+    expect(r.c.get(e.id)!.staggerImmune ?? 0).toBe(0);
+    applyStaggerNow(r, e, 30);
+    expect(e.stagger.value).toBe(30);
+  });
+
+  it(`a parry-stunned ordinary enemy cannot be parry-stunned again for ${PARRY_STUN_IMMUNE_S} s (the parry still negates)`, () => {
+    const r = new Rig([camp('thornling')]);
+    const e = r.enemy('thornling');
+    const a = r.add(0, -2);
+    r.tick();
+    only(e, null, 0);
+    const parryNext = () => { const at = enemyAiStateOf(e)!.nextAutoAt; r.at(at - 0.2); expect(r.press(a, 2)).toBeNull(); r.at(at + 0.1); };
+    parryNext();
+    expect(r.fx('parry')).toHaveLength(1);
+    const first = r.fx('parry')[0].at;
+    r.until(() => e.act === '', 2);
+    r.w.adventurers.get(a)!.readyAt.parry = -Infinity;
+    parryNext(); // within 3 s of the first stun
+    expect(r.fx('parry')).toHaveLength(2);
+    expect(r.fx('parry')[1].at - first).toBeLessThan(PARRY_STUN_IMMUNE_S);
+    expect(e.act).toBe('');
+  });
+});
+function applyStaggerNow(r: Rig, e: EnemyState, n: number) { applyStaggerFn(r.w, e, n, r.now); }
+import { applyStagger as applyStaggerFn } from './adventurer';
+
+describe('carry keeps combat state across a relog (M1)', () => {
+  it('in combat, regen delay, swap cooldown, shield and sprint survive a relog', () => {
+    const c = createCombat(zone([]), { seed: 1, nowS: 0 });
+    const a = c.addAdventurer({ x: 0, z: 0, y: 0, facing: 0, hp: 50, loadout: DEFAULT_LOADOUT }, 0);
+    const A = worldOf(c).adventurers.get(a)!;
+    A.lastCombatAt = 9; A.lastHurtAt = 9; A.swapReadyAt = 11; A.shield = 20; A.shieldUntil = 13; A.sprintUntil = 12;
+    c.tick(10);
+    const carry = c.carryOf(a)!;
+    expect(carry).toMatchObject({ sinceCombat: 1, sinceHurt: 1, swapCd: 1, shield: 20, shieldLeft: 3, sprintLeft: 2 });
+    c.removeAdventurer(a);
+    const b = c.addAdventurer({ x: 0, z: 0, y: 0, facing: 0, hp: 50, loadout: DEFAULT_LOADOUT, carry }, 100);
+    expect(c.self(b)!.inCombat).toBe(true);
+    expect(c.intent(b, { t: 'swap' }, 100)).toBe('in-combat');
+    expect(c.get(b)!.shield).toBe(20);
+    expect(c.speedScale(b, 100)).toBeCloseTo(1.4, 6);
+    c.tick(100 + COMBAT_TIMEOUT_S - 1 + 0.01);
+    expect(c.self(b)!.inCombat).toBe(false);
+    expect(c.self(b)!.swapCd).toBe(0);
+    void SWAP_COOLDOWN_S;
+  });
+  it('carry extras are clamped', () => {
+    const c = createCombat(zone([]), { seed: 1, nowS: 0 });
+    const b = c.addAdventurer({ x: 0, z: 0, y: 0, facing: 0, hp: 50, loadout: DEFAULT_LOADOUT, carry: {
+      cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0, sinceCombat: -50, sinceHurt: Number.NaN, swapCd: 1e9, shield: 1e9, shieldLeft: 1e9, sprintLeft: 1e9,
+    } }, 10);
+    expect(c.self(b)!.inCombat).toBe(true);
+    expect(c.self(b)!.swapCd).toBe(SWAP_COOLDOWN_S);
+    expect(c.get(b)!.shield).toBe(25);
+  });
+});
+
+describe('separation (M2)', () => {
+  it('pushes at most DISPLACE_SUBSTEP_M a tick', () => {
+    const r = new Rig([camp('mossback', 0, 0), camp('boar', 0.1, 0)]);
+    const es = [...r.w.enemies.values()];
+    for (let k = 0; k < 20; k++) {
+      const before = es.map((e) => ({ x: e.x, z: e.z }));
+      r.tick();
+      es.forEach((e, i) => expect(dist(e, before[i])).toBeLessThanOrEqual(0.1 + 1e-9));
+    }
+    expect(dist(es[0], es[1])).toBeGreaterThan(1.5);
+  });
+});
+
+describe('more AI rules (M6)', () => {
+  it('a walk home longer than RETURN_MAX_S ends at the camp', () => {
+    const r = new Rig([camp('thornling')]);
+    const e = r.enemy('thornling');
+    const a = r.add(0, -10, BOW);
+    r.i(a, { t: 'target', id: e.id });
+    let z = -10;
+    r.until(() => e.act === 'return', 15, () => { z -= 4 / 15; r.move(a, 0, z); });
+    enemyAiStateOf(e)!.returnSince = r.now - 25;
+    r.tick();
+    expect([e.x, e.z, e.act, e.hp]).toEqual([0, 0, '', e.maxHp]);
+  });
+
+  it('going home clears marks, Burning and stagger at once', () => {
+    const r = new Rig([camp('mossback')]);
+    const e = r.enemy('mossback');
+    const a = r.add(0, -3);
+    r.tick();
+    e.marks = { burning: r.now + 8, marked: r.now + 8 };
+    e.burning = { src: a, power: 10, nextAt: r.now + 1 };
+    e.stagger.value = 50;
+    r.c.removeAdventurer(a);
+    r.until(() => e.act === 'return', 4);
+    expect([e.marks, e.burning, e.stagger.value]).toEqual([{}, null, 0]);
+  });
+
+  it('ranged autos are not parryable', () => {
+    const r = new Rig([camp('archer')]);
+    const e = r.enemy('archer');
+    const a = r.add(0, -8);
+    r.tick();
+    only(e, null, 0);
+    const at = enemyAiStateOf(e)!.nextAutoAt;
+    r.at(at - 0.2);
+    expect(r.press(a, 2)).toBeNull();
+    r.at(at + 0.1);
+    expect(r.fx('parry')).toEqual([]);
+    expect(r.hitsOn(a).filter((h) => h.by === 'auto').length).toBeGreaterThan(0);
+  });
+
+  it('an archer walks until it can see its target, then stops', () => {
+    const r = new Rig([camp('archer')], { walls: [{ x0: -2, x1: 2, z0: -4, z1: -3.5 }] });
+    const e = r.enemy('archer');
+    const a = r.add(0, -8, BOW);
+    r.i(a, { t: 'target', id: e.id }); // engaged by Snap? no: engage it through threat directly
+    e.threat.add(a, 1);
+    r.until(() => r.hitsOn(a).some((h) => h.by === 'auto'), 8);
+    const at = { x: e.x, z: e.z };
+    r.at(r.now + 1);
+    expect(dist(e, at)).toBeLessThan(0.5);
+  });
+
+  it('a Gore Charge that ends past the leash sends the boar home', () => {
+    const r = new Rig([camp('boar')], { half: 100 });
+    const e = r.enemy('boar');
+    const a = r.add(0, -2);
+    r.tick();
+    only(e, null, 0);
+    // lead it out to 19 m, then let it charge outward
+    let z = -2;
+    r.until(() => e.z < -18, 10, () => { z = Math.max(z - 4 / 15, -21); r.move(a, 0, z); });
+    only(e, 'gore_charge', r.now);
+    r.until(() => e.windup !== null, 1);
+    r.until(() => e.windup === null, 2);
+    expect(dist(e, e.camp)).toBeGreaterThan(25);
+    r.tick();
+    expect(e.act).toBe('return');
   });
 });

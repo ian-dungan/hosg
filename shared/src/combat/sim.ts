@@ -87,7 +87,9 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
         }
       } else stepBody(m.body, { vx: 0, vz: 0, jump: false }, dt, zone.surface);
       c.setPose(m.id, m.body.x, m.body.z, m.body.y, m.facing);
-      for (const i of act.intents) {
+      for (const raw of act.intents) {
+        // a dodge starts from where the body is now (as an honest client sends it), not from the view the brain read
+        const i = raw.t === 'dodge' ? { ...raw, from: { x: m.body.x, z: m.body.z, y: m.body.y } } : raw;
         const r = c.intent(m.id, i, t);
         if (i.t === 'dodge' && r === null) {
           m.dodges++;
