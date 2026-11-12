@@ -1,7 +1,7 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
 import { MAX_HP, SPAWN, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
+import { AlreadyNamedError, NameTakenError, checkedSave, jobsNeedRepair, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 /** A stored adventurer, kept as a database row would be: jobs as stored, and Plan 3's loadout column (legacy rows only). */
 type Row = Omit<Adventurer, 'jobs'> & { jobs: unknown; legacyLoadout?: unknown };
@@ -10,7 +10,9 @@ type Row = Omit<Adventurer, 'jobs'> & { jobs: unknown; legacyLoadout?: unknown }
 export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown }
 
 /** A copy that shares nothing with the stored row, read as PgStore reads one (parseJobsSave(jobs, loadout)). */
-const copy = ({ legacyLoadout, jobs, ...a }: Row): Adventurer => ({ ...a, jobs: parseJobsSave(jobs, legacyLoadout) });
+const copy = ({ legacyLoadout, jobs, ...a }: Row): Adventurer => ({
+  ...a, jobs: parseJobsSave(jobs, legacyLoadout), ...(jobsNeedRepair(jobs) ? { jobsRepaired: true as const } : {}),
+});
 
 export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readonly LegacyRow[] } = {}): Store {
   const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };

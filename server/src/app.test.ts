@@ -1,6 +1,6 @@
 // SG2_TRUST_PROXY: whose address the login limit counts.
 import { afterEach, describe, expect, it } from 'vitest';
-import { startServer, type TestServer } from './rooms/testHelpers';
+import { serverRoom, startServer, accountFor, joinZone, type TestServer } from './rooms/testHelpers';
 
 let server: TestServer | undefined;
 
@@ -44,5 +44,24 @@ describe('a room per zone', () => {
     expect(server.app.stats()).toMatchObject({ players: 0, zones: { grove: { players: 0 }, greenway: { players: 0 } } });
     const health = (await (await fetch(`${server.url}/healthz`)).json()) as any;
     expect(health).toMatchObject({ ok: true, players: 0, zones: { grove: { players: 0 }, greenway: { players: 0 } } });
+  });
+});
+
+describe('zone overrides (Task 5 review)', () => {
+  it('jobSwitch follows the merged town and sanctuaries, unless an override gives its own', async () => {
+    server = await startServer({
+      zones: { grove: { town: false, sanctuaries: [{ x: 0, z: 0, r: 5, name: 'Test circle' }] }, greenway: { town: true } },
+    });
+    const { token } = await accountFor(server.store, 'Alice');
+    const { room } = await joinZone(server.url, token, 'grove');
+    const grove = serverRoom(room).zone;
+    expect(grove.jobSwitch(1, 1)).toBe(true);
+    expect(grove.jobSwitch(20, 20)).toBe(false);
+    await room.leave();
+    await server.app.close();
+    server = await startServer({ zones: { grove: { jobSwitch: () => false } } });
+    const b = await accountFor(server.store, 'Bob');
+    const joined = await joinZone(server.url, b.token, 'grove');
+    expect(serverRoom(joined.room).zone.jobSwitch(0, 0)).toBe(false);
   });
 });

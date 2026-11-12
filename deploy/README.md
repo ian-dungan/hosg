@@ -214,6 +214,17 @@ $ docker compose up -d --build
 Players are disconnected for a few seconds while the server restarts; adventurers are saved first.
 Saved accounts and adventurers are kept. Afterwards, check with step 7.
 
+**The update that brings jobs (database migration 004) is one-way.** It turns every adventurer's
+Plan 3 weapon and picks into a job (the Blade becomes the Warrior, the Bow the Ranger) and from then
+on the server saves only the jobs. So, for that update only:
+
+1. Back up the database first (see "Back up the database" below).
+2. Stop the game completely before updating (`docker compose down`), so no older server keeps
+   saving while the new one migrates; then `git pull` and `docker compose up -d --build`.
+3. Going back to a version from before jobs afterwards loses every job change and all job progress
+   made since (the old server reads only the old weapon column, which is no longer written). To
+   really go back, restore the backup from step 1 instead.
+
 ### Back up the database
 
 ```
@@ -263,7 +274,8 @@ $ docker compose down
 
 This removes only `sg2-server`, `sg2-db` and `sg2-net`. Start it again with `docker compose up -d`.
 
-If a new version misbehaves, go back to the one before:
+If a new version misbehaves, go back to the one before (but not back across the jobs update: see
+"Update to a new version"):
 
 ```
 $ git log --oneline -5          # the newest version is on top; copy the code of the one below it

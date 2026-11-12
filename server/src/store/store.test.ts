@@ -113,6 +113,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
         jobs: newJobsSave(),
       });
       expect(first).not.toHaveProperty('loadout');
+      expect(first).not.toHaveProperty('jobsRepaired');
       expect(first.hp).toBe(100);
     });
 
@@ -265,11 +266,14 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
         // A picked ability from the wrong job reads as that job's solo picks; xp and the other record are kept.
         expect(await jobsOf(9)).toEqual({ current: 'paladin', jobs: { paladin: rec(150, ['kindle', 'dawn_ward']), warrior: rec(30, ['mend', 'bulwark']) } });
         for (let i = 0; i < accountIds.length; i++) expect(isJobsSave(await jobsOf(i))).toBe(true);
+        // Each was repaired to read, and says so (the room writes it back on the first join).
+        for (let i = 0; i < accountIds.length; i++) expect((await s.getOrCreateAdventurer(accountIds[i]!)).jobsRepaired).toBe(true);
         // A legacy adventurer saves (and then reads) as any other.
         const a = await s.getOrCreateAdventurer(accountIds[3]!);
         const jobs = { current: 'ranger', jobs: { ranger: rec(10, ['sprint', 'barbed_rain']) } } as JobsSave;
         expect(await s.saveAdventurer(saved(a, { jobs }))).toBe(true);
         expect(await jobsOf(3)).toEqual(jobs);
+        expect(await s.getOrCreateAdventurer(accountIds[3]!)).not.toHaveProperty('jobsRepaired');
       } finally {
         await s.close();
       }

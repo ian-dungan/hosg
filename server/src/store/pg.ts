@@ -4,7 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
+import { AlreadyNamedError, NameTakenError, checkedSave, jobsNeedRepair, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -90,6 +90,7 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     zone: isZoneId(r.zone) ? r.zone : 'grove',
     hp: r.hp,
     jobs: parseJobsSave(r.jobs, r.loadout),
+    ...(jobsNeedRepair(r.jobs) ? { jobsRepaired: true as const } : {}),
     level: r.level,
     xp: r.xp,
     gold: r.gold,

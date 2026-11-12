@@ -26,10 +26,22 @@ export interface Adventurer {
    * loadout column), so bad parts are fixed and a Plan 3 save (Blade or Bow) reads as the Warrior or Ranger.
    */
   jobs: JobsSave;
+  /**
+   * Present (true) only when the stored jobs value had to be repaired to read (a Plan 3 save, garbage,
+   * a pick from the wrong job): the room writes the repaired value back on the adventurer's first join.
+   */
+  jobsRepaired?: true;
+  /**
+   * The adventurer's own level and xp columns: untouched and unused until Plan 5 (the level curve).
+   * Job xp lives in jobs (each job's record).
+   */
   level: number;
   xp: number;
   gold: number;
 }
+
+/** Whether a stored jobs value reads only after repair (isJobsSave refuses it as stored). */
+export const jobsNeedRepair = (stored: unknown): boolean => !isJobsSave(stored);
 
 /**
  * Thrown by createAccount, or by nameAdventurer, when the name is already used by another account or

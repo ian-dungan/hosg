@@ -5,7 +5,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, ZONE_IDS, zoneDef, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, ZONE_IDS, jobSwitchAt, zoneDef, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
 import { Presence } from './rooms/presence';
@@ -22,7 +22,10 @@ export interface AppOptions {
   trustProxy?: number;
   /** Test-only: smaller zones (default MAX_PLAYERS in each zone's room). */
   maxPlayers?: number;
-  /** Test-only: fields merged over each zone's zoneDef (its surface, spawn, exits, ...). */
+  /**
+   * Fields merged over each zone's zoneDef (its surface, spawn, exits, camps, ...): test-only, and
+   * SG2_TEST_DUMMY's dummy camp. jobSwitch follows the merged town and sanctuaries unless given.
+   */
   zones?: Partial<Record<ZoneId, Partial<ZoneDef>>>;
   /** Exits to open at start, beside those open by default: from zone -> destinations (SG2_OPEN_EXITS). */
   openExits?: Partial<Record<ZoneId, readonly ZoneId[]>>;
@@ -66,10 +69,16 @@ const MAX_WS_PAYLOAD = 16 * 1024;
 /** Window of /healthz's eventLoopP99Ms (ms). */
 const EVENT_LOOP_WINDOW_MS = 5000;
 
+/** zoneDef(id) with `over` merged on top; its jobSwitch reads the merged town and sanctuaries (unless `over` gives one). */
+function mergedZone(id: ZoneId, over: Partial<ZoneDef> | undefined): ZoneDef {
+  const merged: ZoneDef = { ...zoneDef(id), ...over, id, jobSwitch: over?.jobSwitch ?? ((x, z) => jobSwitchAt(merged, x, z)) };
+  return merged;
+}
+
 export function createApp(opts: AppOptions): App {
   const rooms = new Map<ZoneId, ZoneRoom>();
   const presence = new Presence();
-  const zones = new Map<ZoneId, ZoneDef>(ZONE_IDS.map((id) => [id, { ...zoneDef(id), ...opts.zones?.[id], id }]));
+  const zones = new Map<ZoneId, ZoneDef>(ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));
 
   // Open gates by "from>to": each exit's own default, then openExits.
   const openGates = new Set<string>();
