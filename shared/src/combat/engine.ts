@@ -293,14 +293,17 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
   const combat: Combat = {
     addAdventurer(a, nowS) {
       const t = at(nowS);
-      const s = newAdventurer(w.nextId++, a, t);
+      // only setParty (and a revive, which keeps it) sets a party: any party key on the input is dropped
+      const { party: _party, ...input } = a as typeof a & { party?: unknown };
+      void _party;
+      const s = newAdventurer(w.nextId++, input, t);
       if (a.carry) applyCarry(s, a.carry, t);
       w.adventurers.set(s.id, s);
       return s.id;
     },
     setParty(id, party) {
       const a = w.adventurers.get(id);
-      if (a) a.party = typeof party === 'string' ? party : null;
+      if (a) a.party = typeof party === 'string' && party !== '' ? party : null;
     },
     *fields() {
       for (const f of w.fields.values()) yield { id: f.id, owner: f.owner, field: f.field, shape: f.shape, raw: f.raw, startedAt: f.startedAt };

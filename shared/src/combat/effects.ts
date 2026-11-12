@@ -7,7 +7,7 @@ import { ABILITIES, type AbilityData, type AbilityId, type BuffId, type DebuffId
 import {
   AEGIS_ALLY_TAKEN, AEGIS_TAKEN, ALLY_RANGE, BEHIND_COS, BEHIND_MULT, BLOCK_MOMENTUM, BLOODBOND_R, BLOOD_LIFESTEAL, BLOOD_MOMENTUM_PER_HP,
   FONT_HEAL_MULT, FONT_MOMENTUM_CAP, FONT_MOMENTUM_PER_HP, FONT_THREAT_MULT, OVERFLOW_MULT, PACT_LIFESTEAL_MULT, PACT_MULT, PINPOINT_MULT,
-  RANGE_FUZZ, REVIVE_IFRAMES_S, ROAR_MULT, STEADFAST_TAKEN, STEADFAST_THREAT, WEAKPOINT_MULT,
+  RANGE_FUZZ, REVIVE_IFRAMES_S, ROAR_MULT, STEADFAST_TAKEN, STEADFAST_THREAT, WEAKPOINT_MULT, CATCH_UP_TICKS,
 } from './constants';
 import { AFFLICTIONS, type AfflictionId } from './afflictions';
 import { elementMult, type ElementId } from './elements';
@@ -259,7 +259,13 @@ export function tickBuffs(w: CombatWorld, a: AdventurerState, nowS: number): voi
   if (rain) {
     // heals at startedAt + 1, + 2, …, up to the expiry
     let k = Math.floor((rain.lastHealAt ?? rain.startedAt) - rain.startedAt + TIME_EPS) + 1;
-    while (a.alive && rain.startedAt + k <= nowS + TIME_EPS && rain.startedAt + k <= rain.until + TIME_EPS) {
+    for (let n = 0; a.alive && rain.startedAt + k <= nowS + TIME_EPS && rain.startedAt + k <= rain.until + TIME_EPS; n++) {
+      // after a stall, at most CATCH_UP_TICKS heals land in one engine tick; the rest are skipped
+      if (n >= CATCH_UP_TICKS) {
+        while (rain.startedAt + k + 1 <= nowS + TIME_EPS && rain.startedAt + k + 1 <= rain.until + TIME_EPS) k++;
+        rain.lastHealAt = rain.startedAt + k;
+        break;
+      }
       rain.lastHealAt = rain.startedAt + k;
       const src = rain.orphan ? undefined : w.adventurers.get(rain.src);
       const healed = healAdventurer(w, a, RAIN_HEAL * (src ? healMult(src, a) : 1), rain.src, nowS, src !== undefined);

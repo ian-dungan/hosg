@@ -6,7 +6,7 @@
 // it goes with the owner's despawn or death, or removeFieldsOf. Deterministic: fields in id order,
 // adventurers in insertion order.
 import type { FieldDef } from './bosses';
-import { FIELD_TICK_S } from './constants';
+import { CATCH_UP_TICKS, FIELD_TICK_S } from './constants';
 import type { CombatWorld, EnemyState, FieldState } from './engine';
 import { hurtAdventurer, TIME_EPS } from './adventurer';
 import { takenMult } from './effects';
@@ -25,6 +25,8 @@ function placed(s: Shape, at: { x: number; z: number }): Shape {
 
 /** A field of `def` owned by `owner`, its shape moved to the owner's camp; first tick at nowS + FIELD_TICK_S. Returns its id. */
 export function addField(w: CombatWorld, owner: EnemyState, def: FieldDef, nowS: number): number {
+  // never earlier than the engine's latest time: a stale stamp would owe several ticks at once
+  nowS = Number.isFinite(nowS) && nowS > w.now ? nowS : w.now;
   const id = w.nextFieldId++;
   const f: FieldState = {
     id, owner: owner.id, field: def.id, shape: placed(def.shape, owner.camp), raw: def.raw, startedAt: nowS, nextAt: nowS + FIELD_TICK_S,
@@ -45,7 +47,9 @@ export function tickFields(w: CombatWorld, nowS: number): void {
   for (const f of w.fields.values()) {
     const owner = w.enemies.get(f.owner);
     if (!owner || !owner.alive) { w.fields.delete(f.id); continue; }
-    while (f.nextAt <= nowS + TIME_EPS) {
+    for (let n = 0; f.nextAt <= nowS + TIME_EPS; n++) {
+      // after a stall, at most CATCH_UP_TICKS land in one engine tick; the rest are skipped
+      if (n >= CATCH_UP_TICKS) { while (f.nextAt <= nowS + TIME_EPS) f.nextAt += FIELD_TICK_S; break; }
       f.nextAt += FIELD_TICK_S;
       for (const a of w.adventurers.values()) {
         if (!a.alive || !inShape(f.shape, a.x, a.z)) continue;

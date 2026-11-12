@@ -190,3 +190,5 @@ export const FONT_THREAT_MULT = 0.5;
 export const BOSS_SCALE_CAP = 4;
 /** A standing field hits every live adventurer inside it once each whole second after it starts. */
 export const FIELD_TICK_S = 1;
+/** After a stall, at most this many of a field's (or a Soft Rain's) due ticks land in one engine tick; the rest are skipped. */
+export const CATCH_UP_TICKS = 2;

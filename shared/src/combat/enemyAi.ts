@@ -455,7 +455,8 @@ function scaleElite(w: CombatWorld, e: EnemyState, ai: EnemyAi): void {
   n = Math.min(ELITE_SCALE_CAP, n);
   if (n <= ai.scaleN) return;
   ai.scaleN = n;
-  const f = 1 + ELITE_SCALE_PER * (n - 1);
+  // on top of an add's spawn scale (1 for a camp)
+  const f = (1 + ELITE_SCALE_PER * (n - 1)) * e.baseScale;
   const max = e.data.hp * f;
   e.hp = (e.hp * max) / e.maxHp;
   e.maxHp = max;
