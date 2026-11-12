@@ -2,17 +2,27 @@
 import { GRAVITY, JUMP_SPEED, RUN_SPEED, STEP_UP, TICK_HZ } from './constants';
 import type { Surface } from './body';
 
-/** y: the height of the adventurer's feet. */
-export interface Pose { x: number; z: number; y: number; facing: number; moving: boolean }
+/**
+ * y: the height of the adventurer's feet. ack: the last displacement (dodge or knockback) the client
+ * has applied, as the server numbered it (0 = none yet), so the server can ignore poses sent before it.
+ */
+export interface Pose { x: number; z: number; y: number; facing: number; moving: boolean; ack?: number }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** Largest displacement ack a pose may carry. */
+const MAX_ACK = 2 ** 31 - 1;
 
-/** A clean Pose (known fields only), or null unless x, z, y and facing are finite numbers and moving is a boolean. */
+/**
+ * A clean Pose (known fields only), or null unless x, z, y and facing are finite numbers, moving is a
+ * boolean, and ack is missing (taken as 0) or an integer from 0 to 2³¹−1.
+ */
 export function parsePose(msg: unknown): Pose | null {
   if (typeof msg !== 'object' || msg === null) return null;
   const m = msg as Record<string, unknown>;
   if (!finite(m.x) || !finite(m.z) || !finite(m.y) || !finite(m.facing) || typeof m.moving !== 'boolean') return null;
-  return { x: m.x, z: m.z, y: m.y, facing: m.facing, moving: m.moving };
+  const ack = m.ack === undefined ? 0 : m.ack;
+  if (typeof ack !== 'number' || !Number.isInteger(ack) || ack < 0 || ack > MAX_ACK) return null;
+  return { x: m.x, z: m.z, y: m.y, facing: m.facing, moving: m.moving, ack };
 }
 
 /** Fastest an adventurer may move, in m/s: running speed plus 30% for timing jitter. */
@@ -25,12 +35,15 @@ export const MAX_MOVE_ALLOWANCE = MAX_MOVE_SPEED * 1 + STEP_SLACK;
 const WALK_SAMPLE = 0.25;
 
 /**
- * A movement allowance after `dtSeconds` more: it refills at MAX_MOVE_SPEED and is capped at
- * MAX_MOVE_ALLOWANCE. A non-finite or negative dt adds nothing.
+ * A movement allowance after `dtSeconds` more at speed scale `scale` (1.4 while sprinting, 0.4 while
+ * charging): it refills at MAX_MOVE_SPEED·scale and is capped at MAX_MOVE_ALLOWANCE·max(1, scale), so
+ * a slow scale never lowers the cap. A non-finite or negative dt adds nothing; a non-finite scale counts
+ * as 1 and a negative one as 0.
  */
-export function refillAllowance(allowance: number, dtSeconds: number): number {
+export function refillAllowance(allowance: number, dtSeconds: number, scale = 1): number {
   const dt = Number.isFinite(dtSeconds) ? Math.max(0, dtSeconds) : 0;
-  return Math.min(MAX_MOVE_ALLOWANCE, allowance + MAX_MOVE_SPEED * dt);
+  const k = Number.isFinite(scale) ? Math.max(0, scale) : 1;
+  return Math.min(MAX_MOVE_ALLOWANCE * Math.max(1, k), allowance + MAX_MOVE_SPEED * k * dt);
 }
 
 // ───────── height ─────────

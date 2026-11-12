@@ -25,8 +25,16 @@ describe('parsePose', () => {
     expect(parsePose({ x: 1, z: 0, y: '0', facing: 0, moving: true })).toBeNull();
   });
   it('returns a clean pose with only the known fields', () => {
-    expect(parsePose({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: false })).toEqual({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: false });
-    expect(parsePose({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: true, extra: 'x' })).toEqual({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: true });
+    expect(parsePose({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: false })).toEqual({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: false, ack: 0 });
+    expect(parsePose({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: true, extra: 'x' })).toEqual({ x: 1, z: 2, y: 0.3, facing: 0.5, moving: true, ack: 0 });
+  });
+  it('keeps an integer displacement ack, defaults a missing one to 0, and rejects anything else', () => {
+    const base = { x: 1, z: 2, y: 0, facing: 0, moving: true };
+    expect(parsePose({ ...base, ack: 3 })?.ack).toBe(3);
+    expect(parsePose({ ...base, ack: 0 })?.ack).toBe(0);
+    expect(parsePose({ ...base, ack: 2 ** 31 - 1 })?.ack).toBe(2 ** 31 - 1);
+    expect(parsePose(base)?.ack).toBe(0);
+    for (const ack of [1.5, -1, '2', 2 ** 31, NaN, Infinity, null, true, {}]) expect(parsePose({ ...base, ack })).toBeNull();
   });
 });
 
@@ -38,6 +46,15 @@ describe('movement allowance', () => {
     expect(refillAllowance(MAX_MOVE_ALLOWANCE - 0.1, 1)).toBe(MAX_MOVE_ALLOWANCE);
     expect(refillAllowance(1, NaN)).toBe(1);
     expect(refillAllowance(1, -5)).toBe(1);
+  });
+  it('refills and caps scaled by a speed scale (sprint), never capping below the normal cap', () => {
+    expect(refillAllowance(0, 1, 1.4)).toBeCloseTo(10.92, 9);
+    expect(refillAllowance(0, 10, 1.4)).toBeCloseTo(MAX_MOVE_ALLOWANCE * 1.4, 9);
+    expect(MAX_MOVE_ALLOWANCE * 1.4).toBeCloseTo(8.3 * 1.4, 9);
+    expect(refillAllowance(0, 0.5, 0.4)).toBeCloseTo(MAX_MOVE_SPEED * 0.4 * 0.5, 9);
+    expect(refillAllowance(0, 10, 0.4)).toBe(MAX_MOVE_ALLOWANCE); // a slow scale keeps the normal cap
+    expect(refillAllowance(2, 0.5, 1)).toBe(refillAllowance(2, 0.5));
+    expect(refillAllowance(0, 10, 1)).toBe(MAX_MOVE_ALLOWANCE);
   });
   it('a burst of small steps runs out of allowance', () => {
     let allowance = MAX_MOVE_ALLOWANCE;
