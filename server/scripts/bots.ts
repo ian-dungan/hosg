@@ -12,25 +12,74 @@
 // have spread out over the zone; --cluster <m> keeps every bot within that many metres of where it
 // joined (all join at the spawn: the worst case for interest management, everyone sees everyone).
 // It also prints how many adventurers each bot had in its state (its view) and the online count field.
-//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30]
+//
+// --fight: bots that fight, with the shared brain (adventurerBrain, as the tuning simulation runs it).
+// Each asks GET /api/zone and joins that room (when that endpoint's limit of 60 a minute per address
+// refuses, it takes the zone the others were told); every 4th bot swaps to the Bow first. In the
+// Greenway, every tick it picks an enemy (its current one while it lives; else one attacking it; else the
+// nearest live one within TARGET_RANGE that fewer than FIGHTERS_PER_ENEMY others in its view fight, one
+// for an elite), or with none walks to the nearest camp it has not just visited (by findPath over the
+// zone's ground) and waits just outside it. It builds a BrainInput from the state it sees (its interest
+// view) and its last `self`, and does what the brain says: careful for 3 bots in 4, careless for the
+// 4th; a few careless ones (ELITE_HUNTERS) go solo at a Mossback. Moves carry the ack of the latest
+// `displaced`/`respawned`; a dodge waits for its `displaced` (or `refused`), and a displacement is
+// played out (no poses) before it moves on from its end. After a death it asks to respawn, wakes at the
+// grove's statue, walks to the east gate and travels back. It passes only if every bot stayed
+// connected, the mean patch rate is at least 14 Hz, no move was corrected (the `correct` that follows a
+// dodge the engine refused is the protocol's rollback, counted apart), credited kills >= 50, dodges
+// >= 25, knockbacks >= 1, every bot that died is back in the Greenway or on its way, the zone step
+// p95 <= 15 ms, peak RSS <= 400 MB, and no bot saw more than MAX_ENEMIES_PER_ZONE enemies.
+// --cycle (implies --fight; for a 120 s run): also deaths >= 1 and at least one bot back in the
+// Greenway after one (the whole death -> statue -> east gate -> Greenway cycle).
+//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30] [--fight [--cycle]]
 // The server's auth limiter allows 10 logins per IP a minute by default: start it with a higher
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
+  DEATH_MIN_S,
+  DEFAULT_LOADOUT,
+  DODGE_CHARGES,
+  ENEMY_ATTACKS,
+  ENEMY_KINDS,
+  GCD_S,
+  GROVE_EAST_GATE,
   INTEREST_RADIUS,
+  MAX_ENEMIES_PER_ZONE,
+  RESPAWN_CLEAR_RADIUS,
   RUN_SPEED,
+  TARGET_RANGE,
   TICK_HZ,
+  adventurerBrain,
   checkPose,
+  findPath,
+  greenwayLayout,
+  inShape,
   isZoneId,
   makeAirTrack,
   makeBody,
+  slotsFor,
+  newBrainMemory,
+  simulateDisplacement,
   stepBody,
+  withClearance,
   zoneDef,
+  type Act,
   type AirTrack,
   type Body,
+  type BodyInput,
+  type BodyStep,
+  type BrainMemory,
+  type CombatantView,
+  type EnemyAttackId,
+  type EnemyKindId,
   type S2C,
+  type SelfView,
+  type Shape,
   type Surface,
+  type TelegraphView,
+  type Vec2,
+  type WeaponId,
   type ZoneId,
 } from '@sg2/shared';
 
@@ -41,6 +90,44 @@ const JOINS_AT_ONCE = 10;
 const SETTLE_MS = 1200;
 /** Chance a grounded bot jumps on a given tick (about once every 4 s). */
 const JUMP_CHANCE = 1 / 60;
+/** stepBody simulates at most 0.25 s a call: longer gaps between ticks are stepped in pieces of this. */
+const BODY_STEP_MAX_S = 0.25;
+
+// --fight
+/** The fight run's pass marks. */
+// (Ruling P3-i: the brief asked for dodges >= 100 and deaths >= 1 in 60 s, which 21 enemies on a 25 s
+// respawn cannot give; deaths and the whole way back are gated by --cycle, on a 120 s run.)
+const FIGHT_MIN = { kills: 50, dodges: 25, knocks: 1 };
+/** With --cycle: at least this many deaths, and this many bots back in the Greenway after one. */
+const CYCLE_MIN = { deaths: 1, returned: 1 };
+/** Careless bots (by index) sent solo at a Mossback from the start, so that deaths happen. */
+const ELITE_HUNTERS = [3, 7, 11];
+const MAX_STEP_P95_MS = 15;
+const MAX_PEAK_RSS_MB = 400;
+/** Walking speed as a share of what the server allows (RUN_SPEED × its speed scale). */
+const WALK_SHARE = 0.95;
+/** Charged Shot slows to this from its press until it is released (the server: 0.4 from 0.25 s in). */
+const CHARGE_WALK_SCALE = 0.4;
+/** A dodge with no answer after this long is given up (the server resyncs a lost one after 1 s). */
+const DODGE_WAIT_MS = 1500;
+/** How many adventurers a bot lets fight one enemy (one elite) before it looks for another. */
+const FIGHTERS_PER_ENEMY = 2;
+const FIGHTERS_PER_ELITE = 1;
+/** Path search settings for a bot's walks (camps, the grove's east gate): coarse, so cheap. */
+const PATH_OPTS = { cell: 1, maxNodes: 60_000 };
+/** Clearance kept from walls on a walk (as the browser's tap-to-walk). */
+const PATH_CLEARANCE = 0.3;
+/**
+ * With nothing to fight, a bot waits CAMP_WAIT_MS at a spot this far outside a camp's edge, then moves
+ * on; a camp it left is not walked to again for CAMP_REVISIT_MS.
+ */
+const CAMP_STANDOFF_M = 4;
+const CAMP_WAIT_MS = 20_000;
+const CAMP_REVISIT_MS = 30_000;
+/** Ticks without a sendable step toward its goal before a bot searches a path around what blocks it. */
+const STUCK_TICKS = 8;
+/** A bot that died must have come this much nearer the Greenway in the last PROGRESS_MS to count as on its way. */
+const PROGRESS_MS = 10_000;
 
 const { values } = parseArgs({
   options: {
@@ -51,6 +138,8 @@ const { values } = parseArgs({
     zone: { type: 'string', default: 'grove' },
     warmup: { type: 'string', default: '2' },
     cluster: { type: 'string' },
+    fight: { type: 'boolean', default: false },
+    cycle: { type: 'boolean', default: false },
   },
 });
 if (!isZoneId(values.zone)) {
@@ -59,13 +148,15 @@ if (!isZoneId(values.zone)) {
 }
 const zoneId: ZoneId = values.zone;
 const stand = values.stand;
+const fight = values.fight || values.cycle;
+const cycle = values.cycle;
 const url = values.url.replace(/\/$/, '');
 const count = Number(values.count);
 const seconds = Number(values.seconds);
 const warmupMs = Number(values.warmup) * 1000;
 const cluster = values.cluster === undefined ? Infinity : Number(values.cluster);
-if (!Number.isInteger(count) || count < 1 || !(seconds > 0) || !(warmupMs >= 0) || !(cluster > 0)) {
-  console.error('Usage: npm run bots -w server -- --url <server> --count <n> --seconds <s> [--warmup <s>] [--cluster <m>]');
+if (!Number.isInteger(count) || count < 1 || !(seconds > 0) || !(warmupMs >= 0) || !(cluster > 0) || (fight && stand)) {
+  console.error('Usage: npm run bots -w server -- --url <server> --count <n> --seconds <s> [--warmup <s>] [--cluster <m>] [--stand | --fight [--cycle]]');
   process.exit(2);
 }
 
@@ -87,9 +178,76 @@ async function health(): Promise<Health> {
   return (await res.json()) as Health;
 }
 
+/**
+ * stepBody over any dt. One stepBody call simulates at most 0.25 s, so a timer that fires late (a busy
+ * process) used to leave the body behind the clock: its jump arc then ran late against the server's
+ * wall-clock ceiling and a legal pose was corrected. This steps the whole gap, in pieces. A jump is
+ * pressed now, at the end of the gap (the last 1/TICK_HZ of it): the server takes an air phase to have
+ * begun at most one send interval before its first pose in the air, so a take-off at the start of a long
+ * gap would put the body further along its arc than the server's ceiling allows.
+ */
+function stepFor(b: Body, input: BodyInput, dt: number, surface: Surface): BodyStep {
+  const out: BodyStep = { landed: false, drop: 0, jumped: false };
+  let left = Math.min(Math.max(dt, 0), 5);
+  const jumpAt = input.jump ? Math.min(left, 1 / TICK_HZ) : 0; // time left when the jump is pressed
+  let jumpDone = !input.jump;
+  while (left > 1e-9) {
+    let h = Math.min(left, BODY_STEP_MAX_S);
+    if (!jumpDone && left - h < jumpAt - 1e-9 && left > jumpAt + 1e-9) h = left - jumpAt; // stop where the jump is pressed
+    const jump = !jumpDone && left <= jumpAt + 1e-9;
+    if (jump) jumpDone = true;
+    const s = stepBody(b, { ...input, jump }, h, surface);
+    if (s.jumped) out.jumped = true;
+    if (s.landed) { out.landed = true; out.drop = Math.max(out.drop, s.drop); }
+    left -= h;
+  }
+  return out;
+}
+
+const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
+
+/** The zone `/api/zone` named last (for a bot whose own ask was rate-limited). */
+let zoneAnswered: ZoneId | null = null;
+const zoneAsks = { answered: 0, limited: 0 };
+
+/** Where an adventurer may walk in a zone, with the tap-to-walk clearance (built once per zone). */
+const walkable = new Map<ZoneId, (x: number, z: number) => boolean>();
+function passableIn(zone: ZoneId) {
+  let p = walkable.get(zone);
+  if (!p) {
+    const ground = zoneDef(zone).ground;
+    p = withClearance((x, z) => ground(x, z) !== null, PATH_CLEARANCE);
+    walkable.set(zone, p);
+  }
+  return p;
+}
+
+/** Every enemy any bot has seen (engine id → kind), and enemy deaths seen in fx (deduplicated across bots). */
+const enemyKinds = new Map<number, string>();
+const enemyDeathAt = new Map<number, number>();
+let enemyDeaths = 0;
+/** Kill credits by enemy kind. */
+const killsByKind: Record<string, number> = {};
+/** The most enemies one bot's state held at once. */
+let mostEnemiesInView = 0;
+
+/** The Greenway camps with an elite. */
+let eliteCampList: number[] | null = null;
+function eliteCamps(): number[] {
+  return (eliteCampList ??= greenwayLayout().camps.flatMap((c, k) => (c.spawns.some((sp) => ENEMY_KINDS[sp.kind].elite) ? [k] : [])));
+}
+
+/** The shared Shape of a telegraph in the state (as the browser builds it). */
+function telegraphShape(t: { shape: string; x: number; z: number; dir: number; r: number; width: number; angle: number }): Shape {
+  if (t.shape === 'cone') return { kind: 'cone', x: t.x, z: t.z, dir: t.dir, r: t.r, angle: t.angle };
+  if (t.shape === 'line') return { kind: 'line', x: t.x, z: t.z, dir: t.dir, length: t.r, width: t.width };
+  return { kind: 'circle', x: t.x, z: t.z, r: t.r };
+}
+
 class Bot {
   room!: Room<any, any>;
   name = '';
+  private token = '';
   /** Patches received while measuring (null: not measuring). */
   patches: number | null = null;
   corrections = 0;
@@ -116,7 +274,7 @@ class Bot {
   bytes = 0;
   displacements = 0;
   deaths = 0;
-  /** Sent on to another zone (a respawn from the Greenway): not a failure. */
+  /** Sent on to another zone (a respawn from the Greenway): not a failure. Without --fight it then stops. */
   travelled = false;
   zone: ZoneId = 'grove';
   private surface: Surface = zoneDef('grove').surface;
@@ -135,7 +293,70 @@ class Bot {
   viewSamples = 0;
   private timers: NodeJS.Timeout[] = [];
 
-  constructor(readonly index: number) {}
+  // --fight
+  readonly careful: boolean;
+  /** Sent solo at a Mossback (see ELITE_HUNTERS): it fights only an elite, and enemies that attack it. */
+  readonly hunter: boolean;
+  /** Times it was back in the Greenway after a death. */
+  returned = 0;
+  private memory: BrainMemory = newBrainMemory();
+  private selfView: SelfView | null = null;
+  private selfAt = 0;
+  /** The target last sent (the state's lags a round trip behind). */
+  private sentTarget: number | null = null;
+  /** When it last pressed an ability (the GCD it starts is assumed until `self` shows it), and Charged Shot. */
+  private pressedAt = -Infinity;
+  private chargeSince: number | null = null;
+  /** When it last sent a release: the charge counts as gone until a `self` sent after it arrives. */
+  private releasedAt = -Infinity;
+  /** What its last fight step walked at (for the correction log). */
+  private lastScale = '';
+  /** A dodge sent and not answered yet: no poses until its `displaced` or `refused`. */
+  private dodgeSentAt: number | null = null;
+  /** Playing a displacement out until then (performance.now ms): no poses. */
+  private busyUntil = 0;
+  /** A dodge the engine refused after taking its pose: the `correct` that follows is the rollback. */
+  private rollbackDue = false;
+  /** Not moving before this (a new session's movement allowance is still filling). */
+  private settleUntil = 0;
+  /** When each telegraph and each enemy's wind-up was first seen (performance.now ms), for `left`. */
+  private telegraphSeen = new Map<number, number>();
+  private windupSeen = new Map<number, { attack: string; at: number }>();
+  /** The walk it is on (waypoints, the next one first) and where to. */
+  private route: { goal: Vec2; points: Vec2[] } | null = null;
+  private stuckTicks = 0;
+  /** Camps visited (index → when), so a cleared camp is left alone until it can respawn. */
+  private campVisited = new Map<number, number>();
+  private campGoal: number | null = null;
+  private campSpot: Vec2 | null = null;
+  private campWaitFrom: number | null = null;
+  /** Between rooms: the zone it is travelling to (it joins that room once this one has ended). */
+  private switchingTo: ZoneId | null = null;
+  private deadSince: number | null = null;
+  private respawnAskedAt = 0;
+  /** While it is on its way back after a death: when it was nearest the Greenway, and that progress. */
+  diedAt: number | null = null;
+  progressAt = 0;
+  private bestProgress = Infinity;
+  kills = 0;
+  /** Telegraphs it stood inside at some tick. */
+  inside = new Set<number>();
+  dodgesSent = 0;
+  dodgesRolled = 0;
+  knocks = 0;
+  resyncs = 0;
+  rollbacks = 0;
+  travels = 0;
+  /** Displacements whose end the bot's own simulateDisplacement put more than 1 cm from the server's. */
+  displaceMismatch = 0;
+  refusals: Record<string, number> = {};
+  fxEvents = 0;
+  hpSeenMin = Infinity;
+
+  constructor(readonly index: number) {
+    this.careful = index % 4 !== 3;
+    this.hunter = fight && ELITE_HUNTERS.includes(index);
+  }
 
   async join() {
     const res = await fetch(`${url}/api/guest`, { method: 'POST' });
@@ -145,58 +366,142 @@ class Bot {
       throw new Error(`guest login failed: ${res.status} ${body.error ?? ''}${hint}`);
     }
     this.name = body.name ?? `bot ${this.index}`;
-    this.zone = zoneId;
+    this.token = body.token;
+    await this.connect(fight ? await this.askZone() : zoneId);
+    // A quarter of the fighters use the Bow: a swap out of combat (saved with the adventurer, so it stays across travels).
+    if (fight && this.index % 4 === 1) this.room.send('swap', {});
+  }
+
+  /** GET /api/zone: the room to join. Its limit is 60 a minute per address; past it, the zone the others were told. */
+  private async askZone(): Promise<ZoneId> {
+    const res = await fetch(`${url}/api/zone`, { headers: { authorization: `Bearer ${this.token}` } });
+    if (res.status === 429 && zoneAnswered) {
+      zoneAsks.limited++;
+      return zoneAnswered;
+    }
+    const body = (await res.json()) as { zone?: unknown; error?: string };
+    if (!res.ok || !isZoneId(body.zone)) throw new Error(`GET /api/zone failed: ${res.status} ${body.error ?? ''}`);
+    zoneAsks.answered++;
+    zoneAnswered = body.zone;
+    return body.zone;
+  }
+
+  /** Joins `zone`'s room and waits until this adventurer is in its state. */
+  private async connect(zone: ZoneId) {
+    this.zone = zone;
     this.surface = zoneDef(this.zone).surface;
-    this.room = await new Client(url).joinOrCreate(this.zone, { token: body.token });
-    this.room.reconnection.enabled = false; // a drop is a failure, not something to ride out
-    const connection = this.room.connection as unknown as { events: { onmessage?: (ev: { data: ArrayBuffer | string }) => void } };
+    this.ack = 0; // each session numbers its displacements from 0
+    const room = await new Client(url).joinOrCreate(this.zone, { token: this.token });
+    this.room = room;
+    room.reconnection.enabled = false; // a drop is a failure, not something to ride out
+    const connection = room.connection as unknown as { events: { onmessage?: (ev: { data: ArrayBuffer | string }) => void } };
     const onmessage = connection.events.onmessage;
     connection.events.onmessage = (ev) => {
       if (this.patches !== null) this.bytes += typeof ev.data === 'string' ? ev.data.length : ev.data.byteLength;
       onmessage?.(ev);
     };
-    this.room.onMessage('*', () => {}); // fx, self, credit, refused: not used by bots
+    room.onMessage('*', () => {});
+    room.onMessage('self', (m: S2C['self']) => { this.selfView = m; this.selfAt = performance.now(); });
+    room.onMessage('fx', (m: S2C['fx']) => this.onFx(m));
+    room.onMessage('credit', (m: S2C['credit']) => { this.kills++; killsByKind[m.kind] = (killsByKind[m.kind] ?? 0) + 1; });
+    room.onMessage('refused', (m: S2C['refused']) => this.onRefused(m));
     const moved = (to: { x: number; z: number; y: number }, seq: number) => {
       this.ack = seq;
       this.body = makeBody(to.x, to.z, this.surface);
       this.body.y = to.y;
       this.air = makeAirTrack(to.y);
     };
-    this.room.onMessage('displaced', (m: S2C['displaced']) => { this.displacements++; moved(m.to, m.seq); });
-    this.room.onMessage('respawned', (m: S2C['respawned']) => moved(m, m.seq));
-    this.room.onMessage('travel', () => { this.travelled = true; });
-    this.room.onMessage('correct', (m: { x: number; z: number; y: number }) => {
-      this.corrections++;
-      if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}`);
+    room.onMessage('displaced', (m: S2C['displaced']) => {
+      this.displacements++;
+      moved(m.to, m.seq);
+      this.dodgeSentAt = null;
+      if (m.kind === 'knock') this.knocks++;
+      else if (m.kind === 'dodge') this.dodgesRolled++;
+      else this.resyncs++;
+      if (m.kind !== 'resync') {
+        // Played out (no poses) for as long as the push and any fall take; the end is the server's.
+        const sim = simulateDisplacement(m.from, m.d, this.surface);
+        if (dist(sim, m.to) > 0.01 || Math.abs(sim.y - m.to.y) > 0.01) this.displaceMismatch++;
+        this.busyUntil = performance.now() + sim.seconds * 1000;
+      }
+    });
+    room.onMessage('respawned', (m: S2C['respawned']) => moved(m, m.seq));
+    room.onMessage('travel', (m: S2C['travel']) => {
+      if (!fight) { this.travelled = true; return; }
+      this.switchingTo = m.zone;
+      // The server ends the session itself; if it has not after 5 s, leave.
+      this.timers.push(setTimeout(() => { if (this.room === room && this.switchingTo) void room.leave().catch(() => {}); }, 5000));
+    });
+    room.onMessage('correct', (m: { x: number; z: number; y: number }) => {
+      if (this.rollbackDue) {
+        this.rollbackDue = false;
+        this.rollbacks++;
+      } else {
+        this.corrections++;
+        if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}${fight ? ` (${this.lastScale})` : ''}`);
+      }
       // go where the server says, standing, as the browser does
       this.body = makeBody(m.x, m.z, this.surface);
       this.body.y = m.y;
       this.air = makeAirTrack(m.y);
     });
-    this.room.onMessage('hurt', (m: { amount: number }) => {
+    room.onMessage('hurt', (m: { amount: number }) => {
       this.hurts++;
       this.hurtHp += m.amount;
     });
-    this.room.onMessage('chat', () => this.chatsHeard++);
-    this.room.onMessage('kicked', (m: { reason: string }) => (this.disconnected ??= `kicked: ${m.reason}`));
-    this.room.onDrop((code) => (this.disconnected ??= `dropped (code ${code})`));
-    this.room.onLeave((code) => { if (!this.travelled) this.disconnected ??= `left (code ${code})`; });
+    room.onMessage('chat', () => this.chatsHeard++);
+    room.onMessage('kicked', (m: { reason: string }) => (this.disconnected ??= `kicked: ${m.reason}`));
+    room.onDrop((code) => (this.disconnected ??= `dropped (code ${code})`));
+    room.onLeave((code) => {
+      if (this.room !== room) return;
+      const next = this.switchingTo;
+      if (next) {
+        this.connect(next).then(
+          () => { this.switchingTo = null; this.travels++; },
+          (err) => { this.disconnected ??= `could not join ${next}: ${err instanceof Error ? err.message : err}`; },
+        );
+        return;
+      }
+      if (!this.travelled) this.disconnected ??= `left (code ${code})`;
+    });
     let wasDead = false;
-    this.room.onStateChange(() => {
+    room.onStateChange(() => {
       if (this.patches !== null) this.patches++;
-      const dead = this.room.state.players?.get(this.room.sessionId)?.dead === true;
-      if (dead && !wasDead) this.deaths++;
+      const me = room.state.players?.get(room.sessionId);
+      const dead = me?.dead === true;
+      if (dead && !wasDead) {
+        this.deaths++;
+        this.diedAt = performance.now();
+        this.bestProgress = Infinity;
+        this.progressAt = this.diedAt;
+      }
+      if (me && !dead) this.hpSeenMin = Math.min(this.hpSeenMin, me.hp);
       wasDead = dead;
     });
     const deadline = Date.now() + 10_000;
     let me;
-    while (!(me = this.room.state.players?.get(this.room.sessionId))) {
+    while (!(me = room.state.players?.get(room.sessionId))) {
       if (Date.now() > deadline) throw new Error(`${this.name} never appeared in the room`);
       await sleep(20);
     }
+    // (Its start is read from the state: positions there are quantised, at most 0.8 cm from the server's.)
     this.body = makeBody(me.x, me.z, this.surface);
     this.air = makeAirTrack(this.body.y);
     this.home = { x: me.x, z: me.z };
+    this.selfView = null;
+    this.sentTarget = null;
+    this.dodgeSentAt = null;
+    this.busyUntil = 0;
+    this.rollbackDue = false;
+    this.route = null;
+    this.campGoal = null;
+    this.deadSince = null;
+    this.telegraphSeen.clear();
+    this.windupSeen.clear();
+    this.memory = newBrainMemory();
+    this.settleUntil = performance.now() + SETTLE_MS;
+    this.lastStepAt = 0;
+    if (this.zone === 'greenway' && this.diedAt !== null) { this.returned++; this.diedAt = null; } // back where it fights
   }
 
   /** Samples how many adventurers its state holds (itself included) and the zone's online count. */
@@ -207,6 +512,9 @@ class Bot {
     this.viewSamples++;
   }
 
+  /** Between rooms (a travel): its room is ending or the next is being joined. */
+  get switching(): boolean { return this.switchingTo !== null; }
+
   private get dead(): boolean {
     return this.room.state.players?.get(this.room.sessionId)?.dead === true;
   }
@@ -214,7 +522,7 @@ class Bot {
   start() {
     const tick = 1000 / TICK_HZ;
     // Random offsets, so the bots' messages are spread over the tick and the chat interval.
-    this.timers.push(setTimeout(() => this.timers.push(setInterval(() => this.step(), tick)), SETTLE_MS + Math.random() * tick));
+    this.timers.push(setTimeout(() => this.timers.push(setInterval(() => (fight ? this.fightStep() : this.step()), tick)), SETTLE_MS + Math.random() * tick));
     this.timers.push(
       setTimeout(() => {
         this.chat();
@@ -226,7 +534,7 @@ class Bot {
   /**
    * One tick of running in a wandering direction with the shared controller, jumping now and then.
    * Like a browser frame, it simulates the time that really passed since the last tick (timers run
-   * late when the process is busy), capped by the controller. Turns away from walls, and from any
+   * late when the process is busy). Turns away from walls, and from any
    * step the server's own check would refuse; if every try is refused it sends the first anyway, as
    * a client would, and the server's correction puts it right.
    */
@@ -246,12 +554,12 @@ class Bot {
       const heading = attempt === 0 ? wander + (Math.random() - 0.5) * 0.4 : Math.random() * 2 * Math.PI;
       const body = { ...this.body };
       const jump = attempt === 0 && Math.random() < JUMP_CHANCE;
-      const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, dt, this.surface);
+      const stepped = stepFor(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, dt, this.surface);
       const moved = Math.hypot(body.x - this.body.x, body.z - this.body.z);
       // stuck against something (in the air it carries on regardless, so its fall keeps up with the clock)
       if (body.grounded && moved < RUN_SPEED * Math.min(dt, 0.25) * 0.5) continue;
       // bots stay in their zone: they turn away from its exits as from walls
-      if (zoneDef(this.zone).exits.some((e) => Math.hypot(body.x - e.x, body.z - e.z) < e.r + 1.5)) continue;
+      if (this.nearExit(body)) continue;
       // and with --cluster, from the edge of their circle
       if (Math.hypot(body.x - this.home.x, body.z - this.home.z) > cluster && Math.hypot(body.x - this.home.x, body.z - this.home.z) > fromHome) continue;
       const next = { x: body.x, z: body.z, y: body.y, facing: heading, moving: true, ack: this.ack };
@@ -286,8 +594,306 @@ class Bot {
     }
   }
 
+  private nearExit(p: { x: number; z: number }): boolean {
+    return zoneDef(this.zone).exits.some((e) => Math.hypot(p.x - e.x, p.z - e.z) < e.r + 1.5);
+  }
+
+  // ───────── --fight ─────────
+
+  private onFx(m: S2C['fx']) {
+    this.fxEvents += m.events.length;
+    const now = performance.now();
+    for (const e of m.events) {
+      if (e.t !== 'death' || !enemyKinds.has(e.dst)) continue;
+      // every bot that sees it gets the event: count it once (an enemy waits at least 5 s to respawn)
+      const last = enemyDeathAt.get(e.dst);
+      if (last !== undefined && now - last < 5000) continue;
+      enemyDeathAt.set(e.dst, now);
+      enemyDeaths++;
+    }
+  }
+
+  private onRefused(m: S2C['refused']) {
+    const key = `${m.action} ${m.reason}`;
+    this.refusals[key] = (this.refusals[key] ?? 0) + 1;
+    if (m.action !== 'dodge') return;
+    this.dodgeSentAt = null;
+    // Refused by the engine after its pose was taken: a `correct` to that pose follows (the rollback).
+    // 'stale', 'cooldown', 'charges', 'dead' and 'rate' come alone (or after a real correction).
+    if (!['stale', 'cooldown', 'charges', 'dead', 'rate'].includes(m.reason)) this.rollbackDue = true;
+  }
+
+  /** Its own SelfView, its timers counted down from when it arrived (and the GCD of a press it sent since). */
+  private agedSelf(now: number): SelfView | null {
+    const s = this.selfView;
+    if (!s) return null;
+    const el = (now - this.selfAt) / 1000;
+    const down = (v: number) => Math.max(0, v - el);
+    const localGcd = Math.max(0, GCD_S - (now - this.pressedAt) / 1000);
+    return {
+      ...s, cd: s.cd.map(down), gcd: Math.max(down(s.gcd), localGcd), swapCd: down(s.swapCd), dodgeNextIn: down(s.dodgeNextIn),
+      charge: s.charge === null || this.releasedAt + 150 >= this.selfAt ? null : s.charge + el,
+    };
+  }
+
+  /** A fresh adventurer's own numbers (nothing used yet), with the weapon the state shows. */
+  private freshSelf(weapon: string): SelfView {
+    const w: WeaponId = weapon === 'bow' ? 'bow' : 'blade';
+    const slots = slotsFor({ weapon: w, free: DEFAULT_LOADOUT.free });
+    const localGcd = Math.max(0, GCD_S - (performance.now() - this.pressedAt) / 1000);
+    return { momentum: 0, weapon: w, slots, cd: slots.map(() => 0), gcd: localGcd, swapCd: 0, swapLock: 0, dodgeCharges: DODGE_CHARGES, dodgeNextIn: 0, charge: null, inCombat: false };
+  }
+
+  /** The brain's view of an enemy in the state. */
+  private enemyView(e: any, now: number): CombatantView {
+    let windup: CombatantView['windup'] = null;
+    if (e.windup) {
+      const seen = this.windupSeen.get(e.eid);
+      let at = seen && seen.attack === e.windup ? seen.at : null;
+      if (at === null) {
+        // a wind-up starts with the telegraph its enemy owns
+        let el = 0;
+        this.room.state.telegraphs?.forEach((t: any) => { if (t.owner === e.eid) el = Math.max(el, this.elapsedOf(t)); });
+        this.windupSeen.set(e.eid, { attack: e.windup, at: (at = now - el * 1000) });
+      }
+      const attack = e.windup as EnemyAttackId;
+      windup = { attack, total: e.windupTotal, left: Math.max(0, e.windupTotal - (now - at) / 1000), interruptible: ENEMY_ATTACKS[attack]?.interruptible ?? false };
+    } else this.windupSeen.delete(e.eid);
+    return {
+      id: e.eid, team: 'enemy', kind: e.kind as EnemyKindId, x: e.x, z: e.z, y: e.y, facing: e.facing, hp: e.hp, maxHp: e.maxHp,
+      alive: e.mode !== 'dead', shield: 0, marks: e.marks, stagger: e.stagger, maxStagger: e.maxStagger,
+      targetId: e.target < 0 ? null : e.target, act: (e.mode === 'stunned' ? 'stun' : e.mode === 'return' ? 'return' : '') as Act,
+      windup, surging: e.surging, staggerImmune: e.staggerImmune,
+    };
+  }
+
+  /** How far along a telegraph is by the state's clock, in s (0 from a server without one). */
+  private elapsedOf(t: { at?: number; total: number }): number {
+    const clock = this.room.state.clock;
+    if (typeof t.at !== 'number' || typeof clock !== 'number') return 0;
+    return Math.max(0, Math.min(t.total, (clock - t.at) / TICK_HZ));
+  }
+
+  /** The live telegraphs it sees, each with the time left since it first saw it. */
+  private telegraphs(now: number): TelegraphView[] {
+    const out: TelegraphView[] = [];
+    const live = new Set<number>();
+    this.room.state.telegraphs?.forEach((t: any) => {
+      live.add(t.id);
+      let at = this.telegraphSeen.get(t.id);
+      // its start by the server's clock (TelegraphState.at), so one first seen late is as far along as it really is
+      if (at === undefined) this.telegraphSeen.set(t.id, (at = now - this.elapsedOf(t) * 1000));
+      out.push({ id: t.id, owner: t.owner, attack: t.attack as EnemyAttackId, shape: telegraphShape(t), total: t.total, left: Math.max(0, t.total - (now - at) / 1000) });
+    });
+    for (const id of this.telegraphSeen.keys()) if (!live.has(id)) this.telegraphSeen.delete(id);
+    return out;
+  }
+
+  /**
+   * The enemy to fight: its current one while that lives within TARGET_RANGE + 5 m; else the nearest
+   * live one (not walking home invulnerable) within TARGET_RANGE that fewer than FIGHTERS_PER_ENEMY
+   * (FIGHTERS_PER_ELITE for an elite) other adventurers in its view already target, as players spread
+   * over a camp. (100 bots on 21 enemies otherwise kill each one in about 2 s, before its first
+   * telegraph: no dodging, no knockbacks, no deaths.) An enemy that targets it is fought whatever the count.
+   */
+  private chooseEnemy(): any {
+    let best: any = null, bestD = TARGET_RANGE, current: any = null, attacker: any = null;
+    const mine = this.room.state.players?.get(this.room.sessionId)?.eid;
+    let n = 0;
+    const claimed = new Map<number, number>();
+    this.room.state.players?.forEach((p: any, id: string) => {
+      if (id !== this.room.sessionId && !p.dead && p.target >= 0) claimed.set(p.target, (claimed.get(p.target) ?? 0) + 1);
+    });
+    this.room.state.enemies?.forEach((e: any) => {
+      n++;
+      if (!enemyKinds.has(e.eid)) enemyKinds.set(e.eid, e.kind);
+      if (e.mode === 'dead' || e.mode === 'return') return;
+      const d = dist(e, this.body);
+      if (e.eid === this.sentTarget && d <= TARGET_RANGE + 5) current = e;
+      if (e.target === mine && d <= TARGET_RANGE) attacker = e;
+      const elite = ENEMY_KINDS[e.kind as EnemyKindId]?.elite === true;
+      // a hunter takes only an elite (whoever else is on it); the others leave elites to one adventurer
+      if (this.hunter ? !elite : (claimed.get(e.eid) ?? 0) >= (elite ? FIGHTERS_PER_ELITE : FIGHTERS_PER_ENEMY)) return;
+      if (d <= bestD) { best = e; bestD = d; }
+    });
+    mostEnemiesInView = Math.max(mostEnemiesInView, n);
+    return current ?? attacker ?? best;
+  }
+
+  /** One tick of a fighting bot (see the file comment). */
+  private fightStep() {
+    if (this.switching || this.disconnected) return;
+    const now = performance.now();
+    const dt = this.lastStepAt ? (now - this.lastStepAt) / 1000 : 1 / TICK_HZ;
+    this.lastStepAt = now;
+    const me = this.room.state.players?.get(this.room.sessionId);
+    if (!me || now < this.settleUntil) return;
+    if (me.dead) {
+      this.deadSince ??= now;
+      if (now - this.deadSince >= DEATH_MIN_S * 1000 + 300 && now - this.respawnAskedAt >= 1000) {
+        this.respawnAskedAt = now;
+        this.room.send('respawn', {});
+      }
+      return;
+    }
+    this.deadSince = null;
+    if (this.dodgeSentAt !== null) {
+      if (now - this.dodgeSentAt < DODGE_WAIT_MS) return;
+      this.dodgeSentAt = null; // no answer: carry on (the server resyncs a lost one)
+    }
+    if (now < this.busyUntil) return;
+    if (this.diedAt !== null) this.noteProgress(now);
+
+    if (this.zone !== 'greenway') {
+      // Back from a death (or started in the grove): to the east gate, and through it.
+      this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
+      return;
+    }
+
+    const target = this.chooseEnemy();
+    const targetId: number | null = target ? target.eid : null;
+    if (targetId !== this.sentTarget) {
+      this.sentTarget = targetId;
+      this.room.send('target', { id: targetId });
+    }
+    // A `self` sent while the room was being joined can arrive before its handler is set (and the next
+    // comes only when something changes): until one arrives it is a fresh adventurer.
+    const sv = this.agedSelf(now) ?? this.freshSelf(me.weapon);
+    const self: CombatantView & SelfView = {
+      id: me.eid, team: 'adventurer', kind: 'adventurer', x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading,
+      hp: me.hp, maxHp: me.maxHp, alive: !me.dead, shield: me.shield, marks: 0, stagger: 0, maxStagger: 0,
+      targetId: me.target < 0 ? null : me.target, act: (me.act || '') as Act, windup: null, ...sv,
+    };
+    const telegraphs = this.telegraphs(now);
+    for (const t of telegraphs) if (inShape(t.shape, this.body.x, this.body.z)) this.inside.add(t.id);
+    const act = adventurerBrain({ nowS: now / 1000, careful: this.careful, self, target: target ? this.enemyView(target, now) : null, telegraphs }, this.memory);
+    if (sv.charge === null && this.chargeSince !== null && now - this.chargeSince > 1000) this.chargeSince = null;
+    const scale = this.chargeSince !== null || sv.charge !== null || me.act === 'charge' ? CHARGE_WALK_SCALE : 1;
+    this.lastScale = `scale ${scale}, act '${me.act}', charge ${sv.charge}, pressed ${((now - this.pressedAt) / 1000).toFixed(2)} s ago, self ${((now - this.selfAt) / 1000).toFixed(2)} s old`;
+
+    for (const i of act.intents) {
+      if (i.t === 'ability') {
+        if (i.phase === 'press') {
+          this.pressedAt = now;
+          if (sv.slots[i.slot] === 'charged_shot') this.chargeSince = now;
+        } else this.releasedAt = now;
+        this.room.send('ability', { slot: i.slot, phase: i.phase });
+      } else if (i.t === 'dodge') {
+        // from where the body is (its last sent pose), with the latest ack; nothing more until it is answered
+        this.dodgesSent++;
+        this.dodgeSentAt = now;
+        this.room.send('dodge', { x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading, moving: false, ack: this.ack, dx: i.dx, dz: i.dz });
+        return;
+      }
+      // 'target' intents: it sends its own choice above
+    }
+    if (target) {
+      this.route = null;
+      this.campGoal = null;
+      if (act.moveTo) this.walkRoute(act.moveTo, dt, now, scale, false);
+      return;
+    }
+    // Nothing to fight in range: to the nearest camp not visited lately, where it waits a while at a
+    // spot just outside it (clear of every spawn point, so it never holds a respawn up).
+    const camps = greenwayLayout().camps;
+    if (this.campGoal === null) {
+      let best = -1, bestD = Infinity;
+      camps.forEach((c, k) => {
+        const visited = this.campVisited.get(k);
+        if (visited !== undefined && now - visited < CAMP_REVISIT_MS) return;
+        // the first walk spreads the bots over the camps; after that, the nearest
+        // (a hunter: the Mossback camps only, the nearest first)
+        const first = this.hunter ? (eliteCamps().includes(k) ? dist(c, this.body) : Infinity) : k === this.index % camps.length ? 0 : Infinity;
+        const d = this.campVisited.size === 0 || this.hunter ? first : dist(c, this.body);
+        if (d < bestD) { best = k; bestD = d; }
+      });
+      if (best < 0) { this.campVisited.clear(); return; }
+      this.campGoal = best;
+      this.campSpot = this.standOff(camps[best]);
+      this.campWaitFrom = null;
+    }
+    const spot = this.campSpot!;
+    if (dist(spot, this.body) < 1) {
+      this.campWaitFrom ??= now;
+      if (now - this.campWaitFrom >= CAMP_WAIT_MS) {
+        this.campVisited.set(this.campGoal, now);
+        this.campGoal = null;
+        this.route = null;
+      }
+      return;
+    }
+    this.walkRoute(spot, dt, now, 1, false);
+  }
+
+  /** A spot CAMP_STANDOFF_M from the camp's centre that it can stand on, at least RESPAWN_CLEAR_RADIUS + 1 m from every spawn point. */
+  private standOff(c: { x: number; z: number; r: number }): Vec2 {
+    const spawns = zoneDef('greenway').camps;
+    const pass = passableIn('greenway');
+    for (let k = 0; k < 24; k++) {
+      const a = (this.index * 2.39996 + k * 0.7) % (2 * Math.PI);
+      const p = { x: c.x + Math.sin(a) * (c.r + CAMP_STANDOFF_M), z: c.z + Math.cos(a) * (c.r + CAMP_STANDOFF_M) };
+      if (pass(p.x, p.z) && !this.nearExit(p) && spawns.every((sp) => dist(sp, p) >= RESPAWN_CLEAR_RADIUS + 1)) return p;
+    }
+    return { x: c.x, z: c.z };
+  }
+
+  /**
+   * One step toward `goal`: straight at it while that works, along a findPath route over the zone's
+   * ground once it is stuck (or for a walk longer than a few metres). Sends the pose only if the
+   * server's own check would take it (else it stays put). `intoExit`: it may walk into exit circles.
+   */
+  private walkRoute(goal: Vec2, dt: number, now: number, scale: number, intoExit: boolean) {
+    if (this.route && dist(this.route.goal, goal) > 2) this.route = null;
+    if (!this.route && (this.stuckTicks >= STUCK_TICKS || dist(goal, this.body) > 15)) {
+      const points = findPath({ x: this.body.x, z: this.body.z }, goal, passableIn(this.zone), PATH_OPTS);
+      this.route = { goal: { ...goal }, points: points ?? [] };
+      this.stuckTicks = 0;
+    }
+    let to = goal;
+    if (this.route) {
+      while (this.route.points.length > 1 && dist(this.route.points[0], this.body) < 0.5) this.route.points.shift();
+      to = this.route.points.length > 1 ? this.route.points[0] : goal;
+    }
+    const dx = to.x - this.body.x, dz = to.z - this.body.z, d = Math.hypot(dx, dz);
+    if (d < 0.05) return;
+    const speed = Math.min(RUN_SPEED * scale * WALK_SHARE, d / Math.max(dt, 1e-3));
+    const body = { ...this.body };
+    stepFor(body, { vx: (dx / d) * speed, vz: (dz / d) * speed, jump: false }, dt, this.surface);
+    const facing = Math.atan2(dx, dz);
+    const next = { x: body.x, z: body.z, y: body.y, facing, moving: true, ack: this.ack };
+    const air = { ...this.air };
+    const moved = dist(body, this.body);
+    if (moved < speed * Math.min(dt, BODY_STEP_MAX_S) * 0.3 || (!intoExit && this.nearExit(body)) || checkPose(this.body, air, next, Date.now(), Infinity, this.surface).result !== 'ok') {
+      this.stuckTicks++;
+      this.stalledTicks++;
+      this.longestStall = Math.max(this.longestStall, ++this.stallRun);
+      if (this.stuckTicks >= STUCK_TICKS * 4) this.route = null; // the route itself is no good: search again
+      return;
+    }
+    this.stuckTicks = 0;
+    this.stallRun = 0;
+    this.heading = facing;
+    this.body = body;
+    this.air = air;
+    this.room.send('move', next);
+    this.lastSent = next;
+  }
+
+  /** For a bot on its way back after a death: how near the Greenway it is (grove: the gate; travelling counts as progress). */
+  private noteProgress(now: number) {
+    const left = this.zone === 'grove' ? dist(this.body, GROVE_EAST_GATE) : 0;
+    if (left < this.bestProgress - 1) { this.bestProgress = left; this.progressAt = now; }
+  }
+
+  /** Died and is neither back in the Greenway nor getting nearer it (nor still lying dead, nor travelling). */
+  stuckAfterDeath(now: number): boolean {
+    if (this.diedAt === null || this.switching) return false;
+    if (this.dead) return now - this.diedAt > 40_000; // it asks to respawn from 3 s on (the server wakes it at 30 s anyway)
+    return now - this.progressAt > PROGRESS_MS;
+  }
+
   private chat() {
-    if (this.travelled) return;
+    if (this.travelled || this.switching) return;
     this.room.send('chat', { text: `${this.name} says hello at ${new Date().toISOString().slice(11, 19)}` });
   }
 
@@ -312,19 +918,28 @@ try {
 }
 bots.forEach((bot) => bot.start());
 const zones = [...new Set(bots.map((bot) => bot.zone))].join(', ');
-console.log(`All ${count} joined (${zones}); ${stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
+console.log(`All ${count} joined (${zones}); ${fight ? 'fighting' : stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
+if (fight) console.log(`GET /api/zone: ${zoneAsks.answered} answered, ${zoneAsks.limited} rate-limited (took the zone the others were told)`);
 await sleep(warmupMs);
 
 const healthSamples: Health[] = [];
 let nearSum = 0, nearSamples = 0;
+/** Enemies alive that some bot sees, sampled every second (min, max). */
+let aliveMin = Infinity, aliveMax = 0;
 const sampler = setInterval(() => {
   void health().then((h) => healthSamples.push(h), () => {});
-  const live = bots.filter((bot) => !bot.disconnected && !bot.travelled);
+  const live = bots.filter((bot) => !bot.disconnected && !bot.travelled && !bot.switching);
   for (const bot of live) bot.sampleView();
   // How many other bots really are within INTEREST_RADIUS (by their own positions): what a view should hold.
   let pairs = 0;
-  for (const a of live) for (const b of live) if (a !== b && Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) <= INTEREST_RADIUS) pairs++;
+  for (const a of live) for (const b of live) if (a !== b && a.zone === b.zone && Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) <= INTEREST_RADIUS) pairs++;
   if (live.length) { nearSum += pairs / live.length; nearSamples++; }
+  if (fight) {
+    const alive = new Set<number>();
+    for (const bot of live) bot.room.state.enemies?.forEach((e: any) => { if (e.mode !== 'dead') alive.add(e.eid); });
+    aliveMin = Math.min(aliveMin, alive.size);
+    aliveMax = Math.max(aliveMax, alive.size);
+  }
 }, 1000);
 for (const bot of bots) bot.patches = 0;
 const measureStart = performance.now();
@@ -333,36 +948,41 @@ const measured = (performance.now() - measureStart) / 1000;
 const rates = bots.map((bot) => (bot.patches ?? 0) / measured);
 clearInterval(sampler);
 const final = await health();
+const endedAt = performance.now();
 
 const lost = bots.filter((bot) => bot.disconnected);
-const corrections = bots.reduce((n, bot) => n + bot.corrections, 0);
-const chatsHeard = bots.reduce((n, bot) => n + bot.chatsHeard, 0);
-const jumps = bots.reduce((n, bot) => n + bot.jumps, 0);
-const stalledTicks = bots.reduce((n, bot) => n + bot.stalledTicks, 0);
-const airStalls = bots.reduce((n, bot) => n + bot.airStalls, 0);
+const sum = (f: (bot: Bot) => number) => bots.reduce((n, bot) => n + f(bot), 0);
+const corrections = sum((bot) => bot.corrections);
+const chatsHeard = sum((bot) => bot.chatsHeard);
+const jumps = sum((bot) => bot.jumps);
+const stalledTicks = sum((bot) => bot.stalledTicks);
+const airStalls = sum((bot) => bot.airStalls);
 const longestStall = Math.max(...bots.map((bot) => bot.longestStall));
-const hurts = bots.reduce((n, bot) => n + bot.hurts, 0);
-const hurtHp = bots.reduce((n, bot) => n + bot.hurtHp, 0);
+const hurts = sum((bot) => bot.hurts);
+const hurtHp = sum((bot) => bot.hurtHp);
 const byteRates = bots.map((bot) => bot.bytes / measured);
-const displacements = bots.reduce((n, bot) => n + bot.displacements, 0);
-const deaths = bots.reduce((n, bot) => n + bot.deaths, 0);
+const displacements = sum((bot) => bot.displacements);
+const deaths = sum((bot) => bot.deaths);
 const travelled = bots.filter((bot) => bot.travelled).length;
+const stuckAfterDeath = bots.filter((bot) => bot.stuckAfterDeath(endedAt));
 const tickMs = (h: Health) => Math.max(0, ...Object.values(h.zones ?? {}).map((z) => z.tickMs ?? 0));
 const tickSamples = healthSamples.map(tickMs);
 const patchMs = (h: Health) => Math.max(0, ...Object.values(h.zones ?? {}).map((z) => z.patchMs ?? 0));
 const patchSamples = healthSamples.map(patchMs);
+const zoneNow = bots.reduce<Record<string, number>>((n, bot) => ((n[bot.switching ? 'travelling' : bot.zone] = (n[bot.switching ? 'travelling' : bot.zone] ?? 0) + 1), n), {});
 await Promise.all(bots.map((bot) => bot.stop()));
 
 const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
 const min = Math.min(...rates);
 const serverHz = healthSamples.map((h) => h.tickHz);
 const peakRss = Math.max(final.peakRssMb, ...healthSamples.map((h) => h.peakRssMb));
+const maxStepP95 = tickSamples.length ? Math.max(...tickSamples) : tickMs(final);
 
 console.log(`players: ${final.players}`);
 console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFixed(2)} Hz (over ${measured.toFixed(1)} s)`);
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
-if (tickSamples.length) console.log(`server step time p95 (/healthz tickMs, 5 s window): max ${Math.max(...tickSamples)} ms, last ${tickMs(final)} ms`);
+if (tickSamples.length) console.log(`server step time p95 (/healthz tickMs, 5 s window, worst zone): max ${Math.max(...tickSamples)} ms, last ${tickMs(final)} ms`);
 const loopSamples = healthSamples.map((h) => h.eventLoopP99Ms ?? 0);
 if (loopSamples.length) console.log(`server event-loop delay p99 (/healthz eventLoopP99Ms, 5 s window): max ${Math.max(...loopSamples)} ms, last ${final.eventLoopP99Ms ?? 0} ms`);
 if (patchSamples.length) console.log(`server patch time p95 (/healthz patchMs, 5 s window): max ${Math.max(...patchSamples)} ms, last ${patchMs(final)} ms`);
@@ -372,12 +992,30 @@ const sampled = bots.filter((bot) => bot.viewSamples > 0);
 const viewMean = sampled.reduce((n, bot) => n + bot.viewSum / bot.viewSamples, 0) / Math.max(1, sampled.length);
 const onlineMean = sampled.reduce((n, bot) => n + bot.onlineSum / bot.viewSamples, 0) / Math.max(1, sampled.length);
 console.log(`adventurers in each bot's view (itself included): mean ${viewMean.toFixed(1)}; other bots really within ${INTEREST_RADIUS} m: mean ${(nearSum / Math.max(1, nearSamples)).toFixed(1)}; online count it read: mean ${onlineMean.toFixed(1)}`);
-console.log(`displacements: ${displacements}; deaths: ${deaths}; sent on to another zone: ${travelled}`);
+console.log(`displacements: ${displacements}; deaths: ${deaths}; sent on to another zone: ${fight ? sum((bot) => bot.travels) : travelled}`);
 console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}; jumps: ${jumps}`);
 console.log(`falls that hurt: ${hurts} (${hurtHp} hp in all)`);
 console.log(`ticks with no sendable pose: ${stalledTicks} (${airStalls} in the air); longest run: ${longestStall} ticks`);
 for (const line of bots.flatMap((bot) => bot.correctionLog).slice(0, 5)) console.log(`  correction: ${line}`);
 for (const line of bots.flatMap((bot) => bot.airStallLog ?? []).slice(0, 5)) console.log(`  stalled in the air: ${line}`);
+
+const kills = sum((bot) => bot.kills);
+const dodges = sum((bot) => bot.dodgesRolled);
+const knocks = sum((bot) => bot.knocks);
+const returned = sum((bot) => bot.returned);
+if (fight) {
+  const refusals: Record<string, number> = {};
+  for (const bot of bots) for (const [k, v] of Object.entries(bot.refusals)) refusals[k] = (refusals[k] ?? 0) + v;
+  const carelessDeaths = sum((bot) => (bot.careful ? 0 : bot.deaths));
+  console.log(`fight (over the whole run): kills credited ${kills} ${JSON.stringify(killsByKind)} (enemy deaths seen: ${enemyDeaths}); deaths ${deaths} (${carelessDeaths} careless, ${deaths - carelessDeaths} careful)`);
+  console.log(`  dodges sent ${sum((bot) => bot.dodgesSent)}, rolled ${dodges}; knockbacks ${knocks}; resyncs ${sum((bot) => bot.resyncs)}; dodge rollbacks (correct after an engine refusal) ${sum((bot) => bot.rollbacks)}; displacement ends off the bot's own simulation ${sum((bot) => bot.displaceMismatch)}`);
+  console.log(`  telegraphs a bot stood in: ${sum((bot) => bot.inside.size)} (careful bots: ${sum((bot) => (bot.careful ? bot.inside.size : 0))})`);
+  console.log(`  back in the Greenway after a death (respawn at the statue, walk to the east gate, travel): ${returned}; hunters' deaths ${sum((bot) => (bot.hunter ? bot.deaths : 0))}`);
+  console.log(`  travels ${sum((bot) => bot.travels)}; where the bots are at the end: ${JSON.stringify(zoneNow)}; died and not on their way back: ${stuckAfterDeath.length}`);
+  console.log(`  refusals: ${Object.keys(refusals).length ? Object.entries(refusals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') : 'none'}`);
+  console.log(`  enemies alive (seen by some bot, sampled each second): min ${aliveMin === Infinity ? 0 : aliveMin}, max ${aliveMax}; enemies ever seen ${enemyKinds.size}; most in one bot's view ${mostEnemiesInView}`);
+  console.log(`  fx events per bot a second: ${(sum((bot) => bot.fxEvents) / count / Math.max(1, measured + warmupMs / 1000)).toFixed(2)}; lowest hp a bot was seen alive at: ${Math.min(...bots.map((bot) => bot.hpSeenMin))}`);
+}
 
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);
@@ -385,6 +1023,17 @@ if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[
 if (!stand && !(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
 if (corrections) failures.push(`${corrections} legal steps were corrected`);
 if (airStalls) failures.push(`${airStalls} ticks in the air had no pose the server would accept`);
-if (longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
+if (!fight && longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
+if (fight) {
+  if (kills < FIGHT_MIN.kills) failures.push(`${kills} kills credited, fewer than ${FIGHT_MIN.kills}`);
+  if (dodges < FIGHT_MIN.dodges) failures.push(`${dodges} dodges rolled, fewer than ${FIGHT_MIN.dodges}`);
+  if (knocks < FIGHT_MIN.knocks) failures.push(`${knocks} knockbacks, fewer than ${FIGHT_MIN.knocks}`);
+  if (cycle && deaths < CYCLE_MIN.deaths) failures.push(`${deaths} deaths, fewer than ${CYCLE_MIN.deaths}`);
+  if (cycle && returned < CYCLE_MIN.returned) failures.push(`${returned} bots back in the Greenway after a death, fewer than ${CYCLE_MIN.returned}`);
+  if (stuckAfterDeath.length) failures.push(`${stuckAfterDeath.length} bots died and are not on their way back (first: ${stuckAfterDeath[0].name}, in ${stuckAfterDeath[0].zone})`);
+  if (!(maxStepP95 <= MAX_STEP_P95_MS)) failures.push(`zone step p95 reached ${maxStepP95} ms (over ${MAX_STEP_P95_MS})`);
+  if (!(peakRss <= MAX_PEAK_RSS_MB)) failures.push(`peak RSS ${peakRss} MB (over ${MAX_PEAK_RSS_MB})`);
+  if (mostEnemiesInView > MAX_ENEMIES_PER_ZONE || enemyKinds.size > MAX_ENEMIES_PER_ZONE) failures.push(`more than ${MAX_ENEMIES_PER_ZONE} enemies (${Math.max(mostEnemiesInView, enemyKinds.size)})`);
+}
 console.log(failures.length ? `FAIL: ${failures.join('; ')}` : 'PASS');
 process.exit(failures.length ? 1 : 0);

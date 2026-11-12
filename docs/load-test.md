@@ -4,7 +4,8 @@
 legal steps at the server's update rate (15 a second, at running speed, jumping now and then) and say
 a chat line every 20 seconds, then prints what it measured. It exits with status 1 unless every bot
 stayed connected, the mean state-update rate the bots saw was at least 14 a second, and no bot had a
-step corrected. Bots do not fight; a knockback or a respawn only moves them.
+step corrected. Without `--fight` the bots do not fight; a knockback or a respawn only moves them.
+With `--fight` they fight in the Greenway with the shared brain (see "Fighting bots" below).
 
 ## How to run it
 
@@ -44,6 +45,8 @@ step corrected. Bots do not fight; a knockback or a respawn only moves them.
    | `--stand` | off | stand still (still chat); the patch rate is not checked then, since an unchanged state sends no patches |
    | `--warmup <s>` | 2 | wait this long after the last join before measuring: with 40 the bots have spread out over the zone |
    | `--cluster <m>` | none | keep every bot within this many metres of where it joined (all join at the spawn): with 15, all 100 are within 30 m of each other, the worst case for interest management |
+   | `--fight` | off | bots that fight (below); each asks `GET /api/zone` which room to join, so `--zone` is not needed (start the server with `SG2_START_ZONE=greenway`) |
+   | `--cycle` | off | implies `--fight`; also requires deaths and a bot back in the Greenway after one (the death → statue → east gate → Greenway cycle). For a run of 120 s or more |
 
 The bots stand still for a little over a second after joining (a new session starts with only 0.5 m
 of movement banked), then measure for `--seconds` after the warmup. It prints:
@@ -57,6 +60,78 @@ of movement banked), then measure for `--seconds` after the warmup. It prints:
 - how many adventurers each bot's state held (itself included), how many other bots really were
   within the interest radius by their own positions, and the `online` count it read;
 - corrections, disconnections, chat lines heard, jumps, falls, stalls.
+
+## Fighting bots (`--fight`)
+
+```sh
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 SG2_START_ZONE=greenway npm start -w server
+npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 --fight
+npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 120 --cycle
+```
+
+Each bot asks `GET /api/zone` which room to join. That endpoint allows 60 requests a minute per
+address, so with 100 bots on one machine the last 40 are refused and take the zone the others were
+told (the script prints how many). Every 4th bot swaps to the Bow before it fights. Every tick a bot
+in the Greenway:
+
+- picks an enemy:
+  - its current one while it lives within 45 m;
+  - else one that is attacking it;
+  - else the nearest live one within 40 m that fewer than 2 other adventurers in its view are
+    fighting (1 for a Mossback).
+
+  Players spread out like this too. 100 bots on 21 enemies otherwise kill each enemy in about 2 s,
+  before its first telegraph, so there would be no dodging, knockbacks or deaths.
+- with nothing to fight, walks (by `findPath` over the zone's ground) to the nearest camp it has not
+  just left, and waits 20 s at a spot just outside it, clear of every spawn point, so it never holds
+  a respawn up;
+- builds a `BrainInput`:
+  - from the state it sees: its own interest view, and the telegraphs' start from `TelegraphState.at`
+    on the zone `clock`;
+  - and from its last `self`, with the timers counted down since it arrived.
+
+  It then runs the shared `adventurerBrain`, careful for 3 bots in 4 and careless for the 4th. Three
+  careless bots go solo at a Mossback, so deaths happen.
+- walks toward the brain's `moveTo` with the shared controller:
+  - at 95% of run speed, at 0.4× while charging;
+  - only with poses the server's own check takes.
+- sends the brain's intents:
+  - a dodge carries the pose it starts from and the latest ack, and nothing more is sent until its
+  `displaced` or `refused`;
+  - a `displaced` (dodge, knock or resync) gives the new ack, and is played out for as long as the
+    bot's own `simulateDisplacement` of it takes, with no poses meanwhile.
+
+After a death a bot asks to respawn after 3 s, wakes at the grove's statue, walks to the east gate
+and travels back. A `correct` that follows a dodge the engine refused is the protocol's rollback and
+is counted apart. Every other `correct` is a failure.
+
+A fight run passes only if all of these hold:
+- every bot stayed connected;
+- the mean patch rate is at least 14 Hz;
+- 0 corrections;
+- credited kills ≥ 50, dodges ≥ 25 and knockbacks ≥ 1;
+- every bot that died is back in the Greenway or on its way;
+- the zone step p95 ≤ 15 ms;
+- peak RSS ≤ 400 MB;
+- no bot ever saw more than `MAX_ENEMIES_PER_ZONE` enemies.
+
+`--cycle` adds deaths ≥ 1 and at least one bot back in the Greenway after a death.
+
+Why not the plan's "dodges ≥ 100, deaths ≥ 1" in 60 s (coordinator ruling P3-i): the Greenway has 21
+enemies on a 25 s respawn, and its camps are 37–218 m from the entry, so a 60 s run sees about 30
+enemy deaths. A fight puts a bot inside about 2 telegraphs, and careful bots dodge about 90% of them.
+Six tuned runs gave 28–54 dodges, and deaths of 0 or 1. The 60 s run is therefore gated at 25 dodges,
+and deaths are gated on the 120 s `--cycle` run.
+
+It prints, beside the usual numbers:
+- kills credited (by kind) and the enemy deaths seen;
+- deaths (careless and careful), dodges sent and rolled, knockbacks, resyncs and dodge rollbacks;
+- displacements whose end differed from the bot's own simulation;
+- telegraphs a bot stood in;
+- bots back after a death, travels, and where the bots are at the end;
+- refusals by reason;
+- enemies alive (min and max, as some bot sees them);
+- fx events a second.
 
 ## What a client receives (interest management)
 
@@ -80,6 +155,57 @@ must fit within ±500 m and heights −52..180 m (`shared/src/world/limits.ts`; 
 the generator throw otherwise).
 
 ## Results
+
+### 2026-11-12: fighting bots, the smoke test (Plan 3 Task 9)
+
+Run on the development sandbox (4 CPU cores, 16 GB RAM, Node 22), with server and bots on the same
+machine. The server was started with `tsx server/src/index.ts`, `SG2_STORE=memory`,
+`SG2_AUTH_RATE_PER_MIN=1000` and `SG2_START_ZONE=greenway` (the grove run used the default start
+zone), on port 2574, and stopped by its process group. The Greenway has 21 enemies (19 ordinary and
+2 Mossbacks). Every run had 0 corrections and 0 disconnections, the server held 15–15.2 Hz in every
+5 s window, and the step and event-loop figures are the worst 5 s window.
+
+| run | result | bot Hz | KiB/s per bot (mean / p95) | step p95 | patch p95 | event-loop p99 | peak RSS |
+|---|---|---|---|---|---|---|---|
+| `--fight`, 100 bots, 60 s | PASS | 15.17 | 5.3 / 6.3 | 7.45 ms | 3.43 ms | 17.5 ms | 148 MB |
+| `--cycle`, 100 bots, 120 s | PASS | 15.15 | 4.6 / 5.4 | 6.29 ms | 3.35 ms | 14.1 ms | 151 MB |
+| grove, 100 walking bots, 30 s (no `--fight`), 3 runs | PASS ×3 | 15.10–15.13 | 9.0–9.2 / 10.3–10.8 | 3.46–4.61 ms | – | 14.0–15.3 ms | 133–148 MB |
+
+| fight run | kills credited (Thornling / Boar / Archer / Mossback) | enemy deaths seen | deaths | back after a death | dodges | knockbacks | dodge rollbacks | refusals (most) | enemies alive (min–max seen) |
+|---|---|---|---|---|---|---|---|---|---|
+| 60 s | 156 (90 / 36 / 30 / 0) | 30 | 1 (careless) | 0 (still on its way) | 33 | 16 | 0 | ability no-target 42, sight 16 | 2–11 of 21 |
+| 120 s | 490 (229 / 104 / 155 / 2) | 72 | 3 (careless, the Mossback hunters) | 3 | 48 | 19 | 0 | ability no-target 126, cooldown 26 | 2–10 of 21 |
+
+The bots used to step at most 0.25 s per tick, which is stepBody's own cap. A timer that fired late
+therefore left the body behind the clock, and its jump arc ran late against the server's
+wall-clock ceiling: the known flake. The bots now step the whole gap (`stepFor` in bots.ts).
+
+The first grove run after that change still failed, with 1 correction and 1 tick in the air with no
+pose the server would take: a jump 0.13 s old was already 2.1 m up. The most likely cause is a jump
+taken at the start of a tick's whole gap, which puts the first pose in the air further along the arc
+than the server allows: it assumes a take-off at most one send interval before that pose. The bots now
+press a jump at the end of the gap, and all three runs above came after that. This edge case is rare,
+so three clean runs do not prove the fix.
+
+Every displacement's end matched the bot's own `simulateDisplacement` of it. The fighting bots
+receive 4.6–5.3 KiB/s each: half of the walking bots' 9.1, because a bot that fights stands still
+most of the time. Earlier tuning runs (same settings, 60 s) gave 28–54 dodges, 2–25 knockbacks,
+0–1 deaths, step p95 5.6–8.5 ms, event-loop p99 14–21 ms and 147–152 MB peak RSS. Ruling P3-i set
+the gates from these ranges (see "Fighting bots" above).
+
+Browser smoke test: `node server/scripts/smoke.mjs http://localhost:2574 --kill "kill -- -<pid>"`,
+run against a server started with `SG2_START_ZONE=greenway` and `SG2_CLIENT_DIR=client/dist-online`.
+Result: PASS. The combat steps took:
+- 26 s to kill the Thornling (Tab, a tap, walking 35 m into reach);
+- 22 s from standing at the next camp to "Defeated", returning to the statue and being in the
+  grove at 100 hp.
+
+On this machine a starved page can miss the client's 15 s join timeout while three pages build the
+Greenway at once. The script then presses "Continue as" again; one of three pages needed this in 2
+of 3 runs.
+
+
+### 2026-11-12: interest management (Task 10), walking bots
 
 2026-11-12, development sandbox (4 CPU cores, 16 GB RAM), server and bots on the same machine,
 `SG2_STORE=memory`, `SG2_AUTH_RATE_PER_MIN=1000`, port 2571, server run with
