@@ -8,6 +8,8 @@ import { bandR, createGroveWalk, groveTownSurface, roadZ as groveRoadZ } from '.
 import { GREENWAY_RECIPE, generateZone, type CampSpawn } from './recipe';
 import { checkZoneLimits } from './limits';
 import { lampfallLayout } from './dungeon';
+import { GROVE_OBSTACLES } from './obstacles';
+import type { Obstacle } from './layout';
 
 /**
  * What the combat engine needs from a zone (same shape as combat/engine.ts's CombatZone, Task 2;
@@ -205,4 +207,98 @@ export function zoneDef(id: ZoneId): ZoneDef {
 /** The text a join is refused with when the zone's room is full. */
 export function zoneFullReason(id: ZoneId): string {
   return id === 'grove' ? REASON_GROVE_FULL : id === 'greenway' ? 'The Greenway is full, try again soon' : REASON_INSTANCES_FULL;
+}
+
+// ───────── town stalls ─────────
+export type StallId = 'smithy' | 'tailor' | 'barber' | 'lampwright' | 'vault';
+export const STALL_IDS: readonly StallId[] = Object.freeze(['smithy', 'tailor', 'barber', 'lampwright', 'vault']);
+/** Stall operations need the adventurer within this of the stall (m), in the grove. */
+export const STALL_REACH = 3.5;
+
+/**
+ * Where each stall stands, as [angle in degrees, radius in m] from the statue (x = r·cos a, z = r·sin a):
+ * the first spot searchStallSpots() finds for it (zones.test.ts checks they agree, and snapshots them).
+ */
+const STALL_SPOTS: Readonly<Record<StallId, readonly [number, number]>> = Object.freeze({
+  smithy: [30, 17], tailor: [75, 14], barber: [90, 16], lampwright: [90, 20], vault: [150, 14],
+});
+const STALL_NAMES: Readonly<Record<StallId, { name: string; keeper: string }>> = Object.freeze({
+  smithy: { name: 'Kettleworth Smithy', keeper: 'Hob Kettleworth' },
+  tailor: { name: 'Bobbin & Thimble', keeper: 'Wren Bobbin' },
+  barber: { name: 'The Trimmed Hedge', keeper: 'Old Sorrel' },
+  lampwright: { name: 'The Lampwright', keeper: 'Ottilie Brasswick' },
+  vault: { name: 'The Grove Vault', keeper: 'Clerk Amsel' },
+});
+
+/** The five town stalls around the Plaza of the Two, each facing the statue (facing = atan2(dx, dz) towards it). */
+export const TOWN_STALLS: Readonly<Record<StallId, { readonly x: number; readonly z: number; readonly facing: number; readonly name: string; readonly keeper: string }>> =
+  deepFreeze(Object.fromEntries(STALL_IDS.map(id => {
+    const [deg, r] = STALL_SPOTS[id], a = (deg * Math.PI) / 180, x = r * Math.cos(a), z = r * Math.sin(a);
+    return [id, { x, z, facing: Math.atan2(-x, -z), ...STALL_NAMES[id] }];
+  })) as Record<StallId, { x: number; z: number; facing: number; name: string; keeper: string }>);
+
+/** The stall within STALL_REACH of (x, z) in `zone` (the nearest), or null; only the grove has stalls. */
+export function stallAt(zone: ZoneId, x: number, z: number): StallId | null {
+  if (zone !== 'grove' || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+  let best: StallId | null = null, bestD = STALL_REACH;
+  for (const id of STALL_IDS) {
+    const d = Math.hypot(TOWN_STALLS[id].x - x, TOWN_STALLS[id].z - z);
+    if (d <= bestD) { best = id; bestD = d; }
+  }
+  return best;
+}
+
+/** How far (x, z) is from an obstacle's edge (negative inside). */
+function obstacleClearance(o: Obstacle, x: number, z: number): number {
+  const dx = x - o.x, dz = z - o.z;
+  if (o.kind === 'c') return Math.hypot(dx, dz) - o.r;
+  const lx = Math.abs(dx * o.c - dz * o.s) - o.hw, lz = Math.abs(dx * o.s + dz * o.c) - o.hd;
+  return lx <= 0 && lz <= 0 ? Math.max(lx, lz) : Math.hypot(Math.max(lx, 0), Math.max(lz, 0));
+}
+/** The distance from (px, pz) to the segment a–b. */
+export function segmentDistance(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
+  const vx = bx - ax, vz = bz - az, l2 = vx * vx + vz * vz;
+  const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / l2)) : 0;
+  return Math.hypot(px - ax - t * vx, pz - az - t * vz);
+}
+
+/** The placement rule's distances (m). */
+export const STALL_RULE = Object.freeze({ rMin: 12, rMax: 20, clear: 4, offLine: 3, groundR: 1 });
+
+/** Whether (x, z) meets the placement rule against the grove and the stalls already placed. */
+export function stallSpotOk(x: number, z: number, placed: readonly { x: number; z: number }[]): boolean {
+  const grove = zoneDef('grove'), r = Math.hypot(x, z);
+  if (r < STALL_RULE.rMin || r > STALL_RULE.rMax) return false;
+  if (grove.ground(x, z) === null) return false;
+  for (let k = 0; k < 8; k++) {
+    const b = (k * Math.PI) / 4;
+    if (grove.ground(x + STALL_RULE.groundR * Math.cos(b), z + STALL_RULE.groundR * Math.sin(b)) === null) return false;
+  }
+  for (const o of GROVE_OBSTACLES) if (obstacleClearance(o, x, z) < STALL_RULE.clear) return false; // the statue's base is the first obstacle
+  if (Math.hypot(x - GUILD_BOARD.x, z - GUILD_BOARD.z) < STALL_RULE.clear || Math.hypot(x - SPAWN.x, z - SPAWN.z) < STALL_RULE.clear) return false;
+  for (const e of grove.exits) if (segmentDistance(x, z, SPAWN.x, SPAWN.z, e.x, e.z) < STALL_RULE.offLine) return false;
+  for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < STALL_RULE.clear) return false;
+  return true;
+}
+
+/**
+ * The deterministic search behind STALL_SPOTS: for each stall in table order, angles in 15° steps from 30°
+ * (all the way round), radii 12..20 m in whole metres, the first spot meeting stallSpotOk. Slow (tests only).
+ */
+export function searchStallSpots(): Record<StallId, [number, number]> {
+  const placed: { x: number; z: number }[] = [];
+  const out = {} as Record<StallId, [number, number]>;
+  for (const id of STALL_IDS) {
+    search: for (let k = 0; k < 24; k++) {
+      const deg = (30 + 15 * k) % 360, a = (deg * Math.PI) / 180;
+      for (let r = STALL_RULE.rMin; r <= STALL_RULE.rMax; r++) {
+        const x = r * Math.cos(a), z = r * Math.sin(a);
+        if (!stallSpotOk(x, z, placed)) continue;
+        placed.push({ x, z });
+        out[id] = [deg, r];
+        break search;
+      }
+    }
+  }
+  return out;
 }

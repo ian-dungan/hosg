@@ -4,7 +4,7 @@ import { SPAWN } from '../constants';
 import { bandR, roadZ as groveRoadZ } from './layout';
 import { GREENWAY_RECIPE, generateZone, prng } from './recipe';
 import { GROVE_OBSTACLES } from './obstacles';
-import { GROVE_EAST_GATE, GUILD_BOARD, LAMPFALL_MOUTH, REASON_JOB_NOT_HERE, SAVE_ZONE_IDS, ZONE_IDS, isSaveZoneId, isZoneId, jobSwitchAt, zoneDef, zoneFullReason, type ZoneId } from './zones';
+import { GROVE_EAST_GATE, GUILD_BOARD, LAMPFALL_MOUTH, STALL_IDS, STALL_REACH, TOWN_STALLS, searchStallSpots, segmentDistance, stallAt, REASON_JOB_NOT_HERE, SAVE_ZONE_IDS, ZONE_IDS, isSaveZoneId, isZoneId, jobSwitchAt, zoneDef, zoneFullReason, type ZoneId } from './zones';
 import { lampfallLayout } from './dungeon';
 import { REASON_INSTANCES_FULL } from '../instance';
 import { checkZoneLimits } from './limits';
@@ -221,6 +221,53 @@ describe('zone registry', () => {
     const toSpawn = Math.atan2(SPAWN.x - x, SPAWN.z - z);
     expect(Math.abs(Math.atan2(Math.sin(facing - toSpawn), Math.cos(facing - toSpawn)))).toBeLessThan(1e-9);
     expect(Object.isFrozen(GUILD_BOARD)).toBe(true);
+  });
+});
+
+describe('town stalls', () => {
+  it('TOWN_STALLS stand on grove ground 12–20 m from the statue, 4 m clear of each other, the Guild Board and obstacles, off the walking lines to the exits', () => {
+    expect(Object.keys(TOWN_STALLS)).toEqual(['smithy', 'tailor', 'barber', 'lampwright', 'vault']);
+    const spots = searchStallSpots();
+    for (const id of STALL_IDS) {
+      const s = TOWN_STALLS[id];
+      const [deg, r] = spots[id];
+      expect(s.x, id).toBeCloseTo(r * Math.cos((deg * Math.PI) / 180), 9);
+      expect(s.z, id).toBeCloseTo(r * Math.sin((deg * Math.PI) / 180), 9);
+      const d = Math.hypot(s.x, s.z);
+      expect(d).toBeGreaterThanOrEqual(12); expect(d).toBeLessThanOrEqual(20);
+      expect(standable('grove', s.x, s.z)).toBe(true);
+      for (const o of GROVE_OBSTACLES) expect(clearance(o, s.x, s.z), `${id} ${JSON.stringify(o)}`).toBeGreaterThanOrEqual(4);
+      expect(Math.hypot(s.x - GUILD_BOARD.x, s.z - GUILD_BOARD.z)).toBeGreaterThanOrEqual(4);
+      for (const e of zoneDef('grove').exits) expect(segmentDistance(s.x, s.z, SPAWN.x, SPAWN.z, e.x, e.z)).toBeGreaterThanOrEqual(3);
+      for (const other of STALL_IDS) if (other !== id) expect(Math.hypot(s.x - TOWN_STALLS[other].x, s.z - TOWN_STALLS[other].z)).toBeGreaterThanOrEqual(4);
+      // facing the statue
+      const toStatue = Math.atan2(-s.x, -s.z);
+      expect(Math.abs(Math.atan2(Math.sin(s.facing - toStatue), Math.cos(s.facing - toStatue)))).toBeLessThan(1e-9);
+      expect(s.name.length).toBeGreaterThan(3); expect(s.keeper.length).toBeGreaterThan(3);
+    }
+    expect(TOWN_STALLS.smithy).toMatchObject({ name: 'Kettleworth Smithy', keeper: 'Hob Kettleworth' });
+    expect(TOWN_STALLS.vault).toMatchObject({ name: 'The Grove Vault', keeper: 'Clerk Amsel' });
+    expect(Object.isFrozen(TOWN_STALLS.barber)).toBe(true);
+    const round = (v: number) => Math.round(v * 1000) / 1000;
+    expect({ spots, at: Object.fromEntries(STALL_IDS.map(id => [id, { x: round(TOWN_STALLS[id].x), z: round(TOWN_STALLS[id].z), facing: round(TOWN_STALLS[id].facing) }])) }).toMatchSnapshot();
+  });
+
+  it('stallAt finds a stall within STALL_REACH in the grove only', () => {
+    expect(STALL_REACH).toBe(3.5);
+    for (const id of STALL_IDS) {
+      const { x, z } = TOWN_STALLS[id];
+      expect(stallAt('grove', x, z)).toBe(id);
+      expect(stallAt('grove', x + 0.5, z + 0.5)).toBe(id);
+      expect(stallAt('greenway', x, z)).toBeNull();
+      expect(stallAt('lampfall', x, z)).toBeNull();
+    }
+    expect(stallAt('grove', TOWN_STALLS.smithy.x + 3.6, TOWN_STALLS.smithy.z)).toBeNull();
+    expect(stallAt('grove', SPAWN.x, SPAWN.z)).toBeNull();
+    expect(stallAt('grove', NaN, 0)).toBeNull();
+    // between the Barber and the Lampwright (4 m apart), the nearer one answers
+    const b = TOWN_STALLS.barber, l = TOWN_STALLS.lampwright;
+    expect(stallAt('grove', b.x + (l.x - b.x) * 0.4, b.z + (l.z - b.z) * 0.4)).toBe('barber');
+    expect(stallAt('grove', b.x + (l.x - b.x) * 0.6, b.z + (l.z - b.z) * 0.6)).toBe('lampwright');
   });
 });
 

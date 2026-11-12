@@ -1,0 +1,55 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`town stalls > TOWN_STALLS stand on grove ground 12–20 m from the statue, 4 m clear of each other, the Guild Board and obstacles, off the walking lines to the exits 1`] = `
+{
+  "at": {
+    "barber": {
+      "facing": -3.142,
+      "x": 0,
+      "z": 16,
+    },
+    "lampwright": {
+      "facing": -3.142,
+      "x": 0,
+      "z": 20,
+    },
+    "smithy": {
+      "facing": -2.094,
+      "x": 14.722,
+      "z": 8.5,
+    },
+    "tailor": {
+      "facing": -2.88,
+      "x": 3.623,
+      "z": 13.523,
+    },
+    "vault": {
+      "facing": 2.094,
+      "x": -12.124,
+      "z": 7,
+    },
+  },
+  "spots": {
+    "barber": [
+      90,
+      16,
+    ],
+    "lampwright": [
+      90,
+      20,
+    ],
+    "smithy": [
+      30,
+      17,
+    ],
+    "tailor": [
+      75,
+      14,
+    ],
+    "vault": [
+      150,
+      14,
+    ],
+  },
+}
+`;
