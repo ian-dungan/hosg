@@ -144,7 +144,7 @@ export class Overlays {
       const hint = h('div', 'sg-title-hint', box);
       const items = this.isTouch()
         ? [['Left thumb', 'move'], ['Drag', 'look around'], ['Tap', 'walk & talk'], ['Pinch', 'zoom']]
-        : [['WASD', 'move'], ['Drag', 'look around'], ['E', 'talk'], ['Click', 'walk & talk'], ['Wheel', 'zoom']];
+        : [['WASD', 'move'], ['Drag', 'look around'], ['E', 'talk'], ['Click', 'walk & talk'], ['Wheel', 'zoom'], ['O', 'settings']];
       for (const [k, v] of items) { const s = h('span', '', hint); h('b', '', s, k); s.append(' ' + v); }
       const go = () => { off(); this.close(root); resolve(); };
       play.addEventListener('click', go);

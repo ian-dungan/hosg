@@ -7,3 +7,4 @@ export * from './body';
 export * from './messages';
 export * from './world/layout';
 export { GROVE_OBSTACLES } from './world/obstacles';
+export * from './path';

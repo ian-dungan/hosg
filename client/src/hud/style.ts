@@ -398,6 +398,36 @@ const CSS = /* css */ `
   .sg-touch.sg-no-abilities .sg-promptrow{justify-content:flex-end;bottom:calc(var(--sb) + 44px)}
   .sg-touch .sg-prompt-text{font-size:16px}
 }
+
+/* ───────── settings (gear + panel) ───────── */
+.sg-gear{position:absolute;top:calc(var(--st) + var(--g));right:calc(var(--sr) + var(--g));width:40px;height:40px;padding:9px;border:0;border-radius:50%;
+  color:var(--goldl);background:rgba(16,18,42,.5);box-shadow:inset 0 0 0 1px rgba(255,226,160,.35);transition:transform .15s}
+.sg-gear:active{transform:scale(.92)}
+.sg-gear::before{content:"";position:absolute;inset:-6px}
+.sg-settings{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+  padding:calc(var(--st) + 12px) calc(var(--sr) + 12px) calc(var(--sb) + 12px) calc(var(--sl) + 12px);background:rgba(14,14,36,.35)}
+.sg-settings.on{display:flex}
+.sg-settings-card{width:min(380px,100%);padding:14px 18px 18px;border-radius:18px;animation:sg-in .25s ease-out both;
+  background:linear-gradient(180deg,rgba(26,30,64,.94),rgba(16,18,42,.96));box-shadow:0 0 0 1px rgba(255,214,140,.32),0 16px 50px rgba(0,0,0,.4)}
+.sg-settings-head{display:flex;align-items:center;margin-bottom:10px}
+.sg-settings-title{flex:1;font:italic 600 24px var(--serif);color:var(--goldl)}
+.sg-settings-close{position:relative;width:32px;height:32px;padding:6px;border:0;border-radius:50%;color:var(--cream);background:rgba(255,255,255,.12);cursor:pointer}
+.sg-settings-close::before{content:"";position:absolute;inset:-8px}
+.sg-switch-row{display:flex;align-items:center;gap:14px;min-height:56px;padding:10px 12px;border-radius:12px;cursor:pointer;
+  background:rgba(255,246,230,.07);box-shadow:inset 0 0 0 1px rgba(255,226,160,.22)}
+.sg-switch-text{flex:1;display:flex;flex-direction:column;gap:3px}
+.sg-switch-name{font:600 16px var(--sans)}
+.sg-switch-sub{font-size:12.5px;line-height:1.35;opacity:.8}
+.sg-switch-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.sg-switch{flex:none;position:relative;width:50px;height:30px;border-radius:15px;background:rgba(255,246,230,.2);
+  box-shadow:inset 0 0 0 1px rgba(255,226,160,.35);transition:background .2s}
+.sg-switch::after{content:"";position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fffaf0;
+  box-shadow:0 1px 4px rgba(0,0,0,.35);transition:transform .2s}
+.sg-switch-input:checked+.sg-switch{background:linear-gradient(180deg,#ffe49a,#F2B742)}
+.sg-switch-input:checked+.sg-switch::after{transform:translateX(20px)}
+.sg-switch-input:focus-visible+.sg-switch{outline:2px solid var(--goldl);outline-offset:2px}
+/* the gear sits in the top-right corner: wide screens move the quest tracker down below it */
+@media (min-width:701px){ .sg-quest{top:calc(var(--st) + var(--g) + 52px)} }
 `;
 
 let injected = false;

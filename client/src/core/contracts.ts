@@ -247,6 +247,8 @@ export type HudEvent =
   | { type: 'openLoadout' }             // button or L key
   | { type: 'clearTarget' };            // Esc key / tap on target frame close
 export interface HudApi {
+  /** Live player settings (the Settings panel changes them; saved in this browser). */
+  readonly settings: { readonly tapToWalk: boolean };
   /** Call every frame; must be cheap (only touch DOM nodes whose values changed). */
   render(state: HudState): void;
   on(cb: (e: HudEvent) => void): void;

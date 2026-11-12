@@ -8,6 +8,7 @@ import { Joystick } from './joystick';
 import { QuestTracker } from './quest';
 import { FloatText } from './float';
 import { Overlays } from './overlays';
+import { Settings } from './settings';
 
 export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   injectStyles();
@@ -77,6 +78,9 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     if (on) joy.reset();
   }, () => touch);
 
+  // ── settings: gear in the combat layer (hidden with it), panel above everything ──
+  const settings = new Settings(combat, root);
+
   // ── safety: no callouts / context menus / text selection on controls ──
   root.addEventListener('contextmenu', (e) => e.preventDefault());
   root.addEventListener('selectstart', (e) => e.preventDefault());
@@ -89,12 +93,17 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (overlays.active) { if (overlays.handleKey(e)) e.preventDefault(); return; }
     const c = e.code;
+    if (settings.open) {
+      if ((c === 'KeyO' || c === 'Escape') && !e.repeat) { settings.close(); e.preventDefault(); }
+      return;
+    }
     const d = /^(?:Digit|Numpad)([1-5])$/.exec(c);
     if (d) { if (!e.repeat) { const i = +d[1] - 1; abar.flash(i); abar.press(i); } e.preventDefault(); return; }
     if (e.repeat) return;
     if (c === 'KeyE') { if (promptCache) prompt.animate([{ filter: 'brightness(1.5)' }, { filter: 'none' }], { duration: 200 }); emit({ type: 'interact' }); }
     else if (c === 'KeyQ') { abar.flash('swap'); emit({ type: 'swapWeapon' }); }
     else if (c === 'KeyL') { abar.flash('loadout'); emit({ type: 'openLoadout' }); }
+    else if (c === 'KeyO') settings.toggle();
     else if (c === 'Escape') emit({ type: 'clearTarget' });
     else return;
     e.preventDefault();
@@ -103,6 +112,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const cache = { boss: false, combat: false, hasParty: false };
 
   const api: HudApi = {
+    settings: settings.values,
     render(s: HudState) {
       player.update(s.player);
       const mode = target.update(s.target);
@@ -155,7 +165,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     loadout: (pool, current, weapon) => overlays.loadout(pool, current, weapon),
     endScreen: (kind, lines, buttons) => overlays.endScreen(kind, lines, buttons),
     fade: (toOpaque, color, seconds) => overlays.fade(toOpaque, color, seconds),
-    setVisible(on) { toggle(root, 'sg-hidden', !on); if (!on) joy.reset(); },
+    setVisible(on) { toggle(root, 'sg-hidden', !on); if (!on) { joy.reset(); settings.close(); } },
   };
   return api;
 };

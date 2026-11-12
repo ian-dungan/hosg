@@ -40,7 +40,7 @@ const KEEP_TOKEN_ON = new Set([UNREACHABLE, REASON_GROVE_FULL]);
 const ENTER_TIMEOUT_MS = 15_000;
 
 const CSS = /* css */ `
-.sg-online{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
+.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 50px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
   font-size:13px;font-weight:600;background:rgba(16,18,42,.45)}
 .sg-online.away{color:#ffd9a0}
 .sg-online:empty{display:none}

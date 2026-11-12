@@ -5,9 +5,19 @@ import type { HudApi, PlayerRig, Quality, TapInfo, WorldApi } from './core/contr
 import { buildWorld } from './world/index';
 import { createPlayerRig } from './player/rig';
 import { createHud } from './hud/index';
+import { SAFE_FALL, findPath, withClearance, type Vec2 } from '@sg2/shared';
+
+/** How far tap-to-walk routes keep from anything blocked, in m. */
+const CLEARANCE = 0.3;
+/** Distance at which a waypoint counts as reached and the walk heads for the next, in m. */
+const WAYPOINT_REACHED = 0.4;
+/** Distance from the end of the walk at which the adventurer stops, in m. */
+const ARRIVED = 0.35;
+/** A walk that makes no progress for this long is given up, in s. */
+const STUCK_S = 0.8;
 
 export interface GameOpts {
-  /** Handles a tap itself and returns true; otherwise a tap on walkable ground walks there. */
+  /** Handles a tap itself and returns true; otherwise tap-to-walk walks to the tapped point (when the setting is on). */
   onTap?: (tap: TapInfo) => boolean;
   /** True while something holds the adventurer (dialogue, cutscene): tap-to-walk stops and Jump does nothing. */
   busy?: () => boolean;
@@ -22,8 +32,12 @@ export interface Game {
   readonly world: WorldApi;
   readonly hud: HudApi;
   readonly rig: PlayerRig;
-  /** Walk to `p` (null stops). With `arrive`, stop `within` metres of it and call `then`. */
-  walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): void;
+  /**
+   * Tap-to-walk: find a way to `p` and walk it (null stops). With `arrive`, stop `within` metres of it and call
+   * `then`. Does nothing while the "Tap to walk" setting is off; toasts "Can't get there" when there is no way.
+   * True if a walk started.
+   */
+  walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): boolean;
   /** Starts the render loop; `frame(dt)` runs after the rig and world update, before the scene renders. */
   start(frame: (dt: number) => void): void;
 }
@@ -52,9 +66,13 @@ export function bootGame(opts: GameOpts = {}): Game {
   const lockQuality = /[?&]lockq/.test(location.search);   // playtests keep full settings even when slow
   const hud = createHud(hudRoot);
 
-  // ── tap-to-walk: tap the ground (or a person) and the character walks there ──
+  // ── tap-to-walk: tap the ground (or a person) and the character finds a way there round obstacles ──
+  // Routes keep to the ground (no jumps, platforms count as blocked) and stay CLEARANCE m from anything
+  // blocked, so the adventurer does not snag on corners.
+  const passable = withClearance((x, z) => world.groundAt(x, z) !== null, CLEARANCE);
   let rigRef: PlayerRig | null = null;
-  let walkTarget: Vector3 | null = null;
+  let route: Vec2[] = [];                  // waypoints still to reach; the last is where the walk ends
+  let walkGoal: Vector3 | null = null;     // the tapped point or person
   let walkThen: { within: number; then: () => void } | null = null;
   let stuckTime = 0;
   const lastPos = new Vector3();
@@ -65,37 +83,62 @@ export function bootGame(opts: GameOpts = {}): Game {
   marker.material = markerMat;
   marker.isPickable = false;
   marker.setEnabled(false);
-  function walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): void {
-    walkTarget = p ? p.clone() : null;
+  const stopWalk = () => {
+    route = []; walkGoal = null; walkThen = null; stuckTime = 0;
+    marker.setEnabled(false);
+  };
+  function walkTo(p: Vector3 | null, arrive?: { within: number; then: () => void }): boolean {
+    stopWalk();
+    const r = rigRef;
+    if (!p || !r || !hud.settings.tapToWalk) return false;
+    const from = { x: r.position.x, z: r.position.z };
+    // to a person: as near as can be stood within talking range of them
+    const path = findPath(from, { x: p.x, z: p.z }, passable, arrive ? { snap: arrive.within } : undefined);
+    const first = path?.[0];
+    // starting up on something (a bench, the Lookout), the route steps off it: never off a drop that hurts
+    const offY = first && !passable(from.x, from.z) ? world.groundAt(first.x, first.z) : null;
+    if (!path || (offY !== null && r.body.y - offY > SAFE_FALL)) {
+      hud.toast("Can't get there");
+      return false;
+    }
+    route = path;
+    walkGoal = p.clone();
     walkThen = arrive ?? null;
-    stuckTime = 0;
-    marker.setEnabled(!!p && !arrive);
-    if (p) marker.position.set(p.x, (world.groundAt(p.x, p.z) ?? p.y) + 0.08, p.z);
+    lastPos.copyFrom(r.position);
+    const end = path[path.length - 1];
+    marker.setEnabled(!arrive);
+    marker.position.set(end.x, (world.groundAt(end.x, end.z) ?? p.y) + 0.08, end.z);
+    return true;
+  }
+  function arrived(): void {
+    const then = walkThen;
+    stopWalk();
+    then?.then();
   }
   function walkInput(): { x: number; y: number } {
     const j = hud.joystick();
     const r = rigRef;
-    if (!r || !walkTarget) return j;
-    if (busy() || Math.hypot(j.x, j.y) > 0.15) { walkTo(null); return j; }
-    const dx = walkTarget.x - r.position.x, dz = walkTarget.z - r.position.z;
+    if (!r || !walkGoal || route.length === 0) return j;
+    if (busy() || Math.hypot(j.x, j.y) > 0.15) { stopWalk(); return j; }
+    const px = r.position.x, pz = r.position.z;
+    if (walkThen && Math.hypot(walkGoal.x - px, walkGoal.z - pz) <= walkThen.within) { arrived(); return j; }
+    // on to the next waypoint once this one is close
+    while (route.length > 1 && Math.hypot(route[0].x - px, route[0].z - pz) < WAYPOINT_REACHED) route.shift();
+    const wp = route[0];
+    const dx = wp.x - px, dz = wp.z - pz;
     const dist = Math.hypot(dx, dz);
-    const stopAt = walkThen ? walkThen.within : 0.35;
-    if (dist <= stopAt) {
-      const then = walkThen;
-      walkTo(null);
-      then?.then();
-      return j;
-    }
+    const last = route.length === 1;
+    if (last && dist <= ARRIVED) { arrived(); return j; }
     // world direction -> the rig's camera-relative input space
     const a = r.camera.alpha;
     const fx = -Math.cos(a), fz = -Math.sin(a), rx = fz, rz = -fx;
     const ux = dx / dist, uz = dz / dist;
-    const k = Math.min(1, 0.35 + dist / 3);      // ease in on arrival
+    const k = last ? Math.min(1, 0.35 + dist / 3) : 1;   // ease in on arrival
     return { x: (ux * rx + uz * rz) * k, y: (ux * fx + uz * fz) * k };
   }
   // Any movement key cancels a tap-to-walk (not while typing).
   window.addEventListener('keydown', (e) => {
-    if (!isTyping(e) && /^(Key[WASD]|Arrow)/.test(e.code)) walkTo(null);
+    if (!isTyping(e) && /^(Key[WASD]|Arrow)/.test(e.code)) stopWalk();
   });
 
   const rig = createPlayerRig(scene, {
@@ -104,10 +147,8 @@ export function bootGame(opts: GameOpts = {}): Game {
     joystick: () => walkInput(),
     onTap: (tap: TapInfo) => {
       if (opts.onTap?.(tap)) return;
-      if (busy()) return;
-      if (tap.point && world.groundAt(tap.point.x, tap.point.z) !== null) {
-        walkTo(tap.point);                     // tap the ground to walk there
-      }
+      if (busy() || !hud.settings.tapToWalk) return;
+      if (tap.point) walkTo(tap.point);        // tap the ground (or something on it) to walk there
     },
   });
   rigRef = rig;
@@ -134,7 +175,8 @@ export function bootGame(opts: GameOpts = {}): Game {
       let lastFrameMs = last;
       engine.runRenderLoop(() => {
         const now = performance.now();
-        const dt = Math.min(0.05, (now - last) / 1000);
+        // game time follows real time down to 10 fps (the server checks jumps against real time)
+        const dt = Math.min(0.1, (now - last) / 1000);
         last = now;
 
         // If the frame rate stays under ~28 fps for 4 seconds, drop one quality level.
@@ -149,10 +191,10 @@ export function bootGame(opts: GameOpts = {}): Game {
         }
         lastFrameMs = now;
         rig.update(dt);
-        if (walkTarget) {
-          // give up if blocked by an obstacle for a moment
+        if (walkGoal) {
+          // give up if no progress for a moment (pushed against something)
           if (Vector3.Distance(rig.position, lastPos) < 1.2 * dt) stuckTime += dt; else stuckTime = 0;
-          if (stuckTime > 0.6) walkTo(null);
+          if (stuckTime > STUCK_S) stopWalk();
           marker.rotation.y += dt * 2;
         }
         lastPos.copyFrom(rig.position);

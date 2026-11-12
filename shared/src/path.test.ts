@@ -1,0 +1,143 @@
+import { describe, expect, it } from 'vitest';
+import { findPath, withClearance, type Vec2 } from './path';
+import { createGroveWalk, TAVERN, riverX, BEACON_C } from './world/layout';
+import { SPAWN } from './constants';
+
+type Passable = (x: number, z: number) => boolean;
+
+/** Every point along a→b, sampled every 0.1 m, is passable. */
+function segmentClear(a: Vec2, b: Vec2, passable: Passable): boolean {
+  const d = Math.hypot(b.x - a.x, b.z - a.z);
+  const n = Math.max(1, Math.ceil(d / 0.1));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    if (!passable(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t)) return false;
+  }
+  return true;
+}
+function routeClear(from: Vec2, path: Vec2[], passable: Passable): boolean {
+  let p = from;
+  for (const q of path) { if (!segmentClear(p, q, passable)) return false; p = q; }
+  return true;
+}
+function routeLength(from: Vec2, path: Vec2[]): number {
+  let p = from, len = 0;
+  for (const q of path) { len += Math.hypot(q.x - p.x, q.z - p.z); p = q; }
+  return len;
+}
+
+const open: Passable = (x, z) => Math.abs(x) < 50 && Math.abs(z) < 50;
+// A wall along x = 0 from z = -20 to z = 20, with a 2 m gap at z in (8, 10).
+const wallWithGap: Passable = (x, z) => open(x, z) && !(Math.abs(x) < 0.5 && Math.abs(z) < 20 && !(z > 8 && z < 10));
+
+describe('findPath', () => {
+  it('on an open map the path is one straight waypoint, ending exactly at the goal', () => {
+    const path = findPath({ x: -10, z: -5 }, { x: 12, z: 7.3 }, open);
+    expect(path).toEqual([{ x: 12, z: 7.3 }]);
+  });
+
+  it('goes through the gap in a wall, and every leg is walkable along its whole length', () => {
+    const from = { x: -8, z: 0 }, to = { x: 8, z: 0 };
+    const path = findPath(from, to, wallWithGap);
+    expect(path).not.toBeNull();
+    expect(path!.at(-1)).toEqual(to);
+    expect(routeClear(from, path!, wallWithGap)).toBe(true);
+    // it passes through the gap
+    expect(path!.some((p, i) => {
+      const a = i === 0 ? from : path![i - 1];
+      return (a.x < 0) !== (p.x < 0) && Math.min(a.z, p.z) < 10 && Math.max(a.z, p.z) > 8;
+    })).toBe(true);
+    // few waypoints after smoothing (to the gap, through it, to the goal)
+    expect(path!.length).toBeLessThanOrEqual(4);
+  });
+
+  it('a goal inside a blocked region snaps to the nearest passable point within 2 m', () => {
+    // a 3 m blocked square centred at (10, 0): its edge is 1.5 m from the centre
+    const square: Passable = (x, z) => open(x, z) && !(Math.abs(x - 10) < 1.5 && Math.abs(z) < 1.5);
+    const from = { x: 0, z: 0 };
+    const path = findPath(from, { x: 10, z: 0.2 }, square);
+    expect(path).not.toBeNull();
+    const end = path!.at(-1)!;
+    expect(square(end.x, end.z)).toBe(true);
+    expect(Math.hypot(end.x - 10, end.z - 0.2)).toBeLessThanOrEqual(2);
+    expect(end.z).toBeGreaterThanOrEqual(1.5);            // the face nearest the goal point (1.3 m away), not the near side
+    expect(Math.hypot(end.x - 10, end.z - 0.2)).toBeLessThan(1.5);
+    expect(routeClear(from, path!, square)).toBe(true);
+  });
+
+  it('returns null when nothing passable is within 2 m of the goal', () => {
+    const big: Passable = (x, z) => open(x, z) && !(Math.abs(x - 10) < 3 && Math.abs(z) < 3);
+    expect(findPath({ x: 0, z: 0 }, { x: 10, z: 0 }, big)).toBeNull();
+  });
+
+  it('a walled-off goal returns null, stopping within maxNodes, quickly even on a big map', () => {
+    // 400 x 400 cells (200 m square at 0.5 m cells), goal inside a closed ring
+    const ring: Passable = (x, z) => {
+      if (Math.abs(x) >= 100 || Math.abs(z) >= 100) return false;
+      const r = Math.hypot(x - 60, z - 60);
+      return !(r > 5 && r < 6);
+    };
+    let calls = 0;
+    const counted: Passable = (x, z) => { calls++; return ring(x, z); };
+    const t0 = performance.now();
+    expect(findPath({ x: -60, z: -60 }, { x: 60, z: 60 }, counted, { maxNodes: 20000 })).toBeNull();
+    const ms = performance.now() - t0;
+    expect(ms).toBeLessThan(200);
+    // each expanded cell looks at no more than 8 new neighbours
+    expect(calls).toBeLessThan(20000 * 9 + 1000);
+  });
+
+  it('starting on a blocked cell (on top of something) steps off to the nearest passable point first', () => {
+    const square: Passable = (x, z) => open(x, z) && !(Math.abs(x) < 0.6 && Math.abs(z) < 0.6);
+    const path = findPath({ x: 0.1, z: 0 }, { x: 10, z: 0 }, square);
+    expect(path).not.toBeNull();
+    expect(square(path![0].x, path![0].z)).toBe(true);
+    expect(path!.at(-1)).toEqual({ x: 10, z: 0 });
+  });
+
+  it('withClearance keeps a margin from anything blocked', () => {
+    const p = withClearance(wallWithGap, 0.3);
+    expect(p(0.7, 0)).toBe(false);       // 0.2 m from the wall
+    expect(p(0.9, 0)).toBe(true);        // 0.4 m from it
+    expect(p(-5, 9)).toBe(true);
+  });
+});
+
+describe('findPath on the real grove', () => {
+  const walk = createGroveWalk();
+  const ground = withClearance((x, z) => walk.groundAt(x, z) !== null, 0.3);
+  const spawn = { x: SPAWN.x, z: SPAWN.z };
+
+  it('from SPAWN to a point behind the tavern: a clear route, under 1.6 x the straight-line distance', () => {
+    // a point beyond the tavern on the line from spawn, so the tavern stands in the way
+    const dx = TAVERN.x - spawn.x, dz = TAVERN.z - spawn.z, d = Math.hypot(dx, dz);
+    const goal = { x: TAVERN.x + (dx / d) * 7, z: TAVERN.z + (dz / d) * 7 };
+    expect(ground(goal.x, goal.z)).toBe(true);
+    expect(segmentClear(spawn, goal, ground)).toBe(false); // the straight line is blocked
+    const t0 = performance.now();
+    const path = findPath(spawn, goal, ground);
+    const ms = performance.now() - t0;
+    expect(path).not.toBeNull();
+    expect(routeClear(spawn, path!, ground)).toBe(true);
+    expect(path!.at(-1)).toEqual(goal);
+    expect(routeLength(spawn, path!)).toBeLessThan(1.6 * Math.hypot(goal.x - spawn.x, goal.z - spawn.z));
+    expect(ms).toBeLessThan(200);
+  });
+
+  it('from SPAWN to a point across the river: null, within the time bound', () => {
+    const z = 0, goal = { x: riverX(z) - 10, z };
+    expect(walk.surfaceAt(goal.x, goal.z)).toBeNull(); // the far bank is not walkable land at all here
+    const t0 = performance.now();
+    expect(findPath(spawn, goal, ground)).toBeNull();
+    expect(performance.now() - t0).toBeLessThan(400);
+  });
+
+  it('worst case: a standable goal with no route (the out-of-play Beacon clearing) gives up after maxNodes', () => {
+    const goal = { x: BEACON_C.x, z: BEACON_C.z + 10 };
+    expect(ground(goal.x, goal.z)).toBe(true);
+    const t0 = performance.now();
+    expect(findPath(spawn, goal, ground)).toBeNull();
+    const ms = performance.now() - t0;
+    expect(ms).toBeLessThan(400);
+  });
+});
