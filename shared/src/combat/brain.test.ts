@@ -1,8 +1,8 @@
 // The job-aware brain (Plan 3b): the four rules the Task 4 brief names, each on hand-built views.
 import { describe, expect, it } from 'vitest';
 import { slotsFor, type AbilityId } from './abilities';
-import { adventurerBrain, newBrainMemory, type BrainInput, type BrainSelf } from './brain';
-import type { CombatantView, SelfView, TelegraphView } from './engine';
+import { adventurerBrain, dungeonBrain, newBrainMemory, type BrainInput, type BrainSelf, type DungeonBrainInput } from './brain';
+import type { CombatantView, FieldView, SelfView, TelegraphView } from './engine';
 import { JOBS, type JobId } from './jobs';
 import { WEAPONS } from './abilities';
 
@@ -21,7 +21,7 @@ const partner = (o: Partial<CombatantView> = {}): CombatantView => ({
   marks: 0, stagger: 0, maxStagger: 0, targetId: 1, act: '', windup: null, job: 'warrior', buffs: 0, debuffs: 0, cast: null, ...o,
 });
 const input = (o: Partial<BrainInput>): BrainInput => ({ nowS: 10, careful: true, self: self('warrior', JOBS.warrior.picks.solo), target: enemy(), allies: [], telegraphs: [], ...o });
-const ability = (b: BrainInput) => adventurerBrain(b, newBrainMemory()).intents.find((i) => i.t === 'ability');
+const ability = (b: BrainInput) => ('fields' in b ? dungeonBrain(b as DungeonBrainInput, newBrainMemory()) : adventurerBrain(b, newBrainMemory())).intents.find((i) => i.t === 'ability');
 
 describe('the job-aware brain', () => {
   it('a White Mage brain casts Second Dawn on a dead partner before anything else', () => {
@@ -95,5 +95,99 @@ describe('the brain, review round 1', () => {
     expect(run(5)).toBe(run(5));
     expect(run(5) / 200).toBeGreaterThan(0.6);
     expect(run(5) / 200).toBeLessThan(0.8);
+  });
+});
+
+describe('the dungeon brain (Plan 4)', () => {
+  const warden = (o: Partial<CombatantView> = {}): CombatantView => enemy({ id: 1, kind: 'fallen_warden', tier: 'mega', phase: 0, warded: false, enrageIn: 300, hp: 6000, maxHp: 6000, maxStagger: 300, ...o });
+  const shard = (id: number, x: number): CombatantView => enemy({ id, kind: 'lens_shard', tier: 'ordinary', x, z: 0, hp: 420, maxHp: 420, maxStagger: 0, targetId: 2, facing: 0 });
+  const lampfire: FieldView = { id: 1, owner: 1, field: 'lampfire', shape: { kind: 'ring', x: 0, z: 0, dir: 0, inner: 15, r: 40 }, raw: 8, startedAt: 0 };
+  const dIn = (o: Partial<DungeonBrainInput>): DungeonBrainInput => {
+    const base = input(o);
+    return { ...base, fields: [], arena: { x: 0, z: 0, r: 22 }, enemies: base.target ? [base.target] : [], ...o };
+  };
+  const think = (b: DungeonBrainInput, m = newBrainMemory()) => dungeonBrain(b, m);
+
+  it('a careful brain walks out of a field toward the arena centre first, and never into one', () => {
+    const bm = self('black_mage', JOBS.black_mage.picks.duo, { x: 0, z: -18, cd: [9, 9, 9, 9, 9] });
+    const act = think(dIn({ self: bm, target: warden(), fields: [lampfire] }));
+    expect(Math.hypot(act.moveTo!.x, act.moveTo!.z)).toBeLessThan(15);
+    expect(act.moveTo!.z).toBeGreaterThan(-18);
+    // walking up to a target standing on the ring's edge, it stops inside the safe floor
+    const far = self('warrior', JOBS.warrior.picks.duo, { x: 0, z: -2 });
+    const toward = think(dIn({ self: far, target: warden({ x: 0, z: -19 }), fields: [lampfire] }));
+    expect(toward.moveTo === null || Math.hypot(toward.moveTo.x, toward.moveTo.z) < 15).toBe(true);
+    // a careless brain stands in it
+    expect(think(dIn({ careful: false, self: { ...bm, z: -17 }, target: warden(), fields: [lampfire] })).moveTo).toBeNull();
+  });
+
+  it('out of a Cinder Ring it goes inward: it runs when there is time, and dodges inward when there is not', () => {
+    const ring = (left: number): TelegraphView => ({ id: 7, owner: 1, attack: 'cinder_ring', shape: { kind: 'ring', x: 0, z: 0, dir: 0, inner: 3.5, r: 9 }, total: 1.6, left });
+    const hound = enemy({ id: 1, kind: 'wickhound', tier: 'boss', targetId: 2, maxStagger: 220 });
+    const w = self('warrior', JOBS.warrior.picks.duo, { x: 0, z: -5, cd: [9, 9, 9, 9, 9] });
+    const run = think(dIn({ self: w, target: hound, telegraphs: [ring(1.0)], arena: { x: 0, z: 0, r: 16 } }));
+    expect(run.intents.some((i) => i.t === 'dodge')).toBe(false);
+    expect(Math.hypot(run.moveTo!.x, run.moveTo!.z)).toBeLessThan(3.5);
+    const dodge = think(dIn({ self: w, target: hound, telegraphs: [ring(0.4)], arena: { x: 0, z: 0, r: 16 } }));
+    const d = dodge.intents.find((i) => i.t === 'dodge');
+    expect(d).toBeDefined();
+    if (d?.t === 'dodge') expect(d.dz).toBeGreaterThan(0.9); // inward, toward the hound at (0, 0)
+  });
+
+  it('a whole-arena Keeper\'s Toll it cannot escape is dodged for the i-frames just before it lands', () => {
+    const toll = (left: number): TelegraphView => ({ id: 9, owner: 1, attack: 'keepers_toll', shape: { kind: 'circle', x: 0, z: 0, r: 40 }, total: 3, left });
+    const w = self('ranger', JOBS.ranger.picks.duo, { x: 0, z: -10, cd: [9, 9, 9, 9, 9] });
+    const m = newBrainMemory();
+    expect(think(dIn({ self: w, target: warden({ windup: { attack: 'keepers_toll', total: 3, left: 1, interruptible: true } }), telegraphs: [toll(1)] }), m).intents.some((i) => i.t === 'dodge')).toBe(false);
+    expect(think(dIn({ self: w, target: warden(), telegraphs: [toll(0.2)] }), m).intents.some((i) => i.t === 'dodge')).toBe(true);
+  });
+
+  it('while the Warden uses Brass Fall it keeps 4 m from its partner', () => {
+    const w = self('warrior', JOBS.warrior.picks.duo, { x: 0, z: -3.5, cd: [9, 9, 9, 9, 9] });
+    const p = partner({ x: 1, z: -3.6 });
+    const act = think(dIn({ self: w, target: warden({ targetId: 3 }), allies: [p] }));
+    expect(act.moveTo).not.toBeNull();
+    expect(Math.hypot(act.moveTo!.x - p.x, act.moveTo!.z - p.z)).toBeGreaterThanOrEqual(4);
+    // the same spot with a Mossback (no attack on each adventurer): it stays put
+    expect(adventurerBrain(input({ self: w, target: enemy({ targetId: 3 }), allies: [p] }), newBrainMemory()).moveTo).toBeNull();
+  });
+
+  it('switches to a Lens Shard while the Warden is warded: ranged the nearest, melee the one nearest the Warden', () => {
+    const boss = warden({ warded: true, phase: 1 });
+    const enemies = [boss, shard(11, -10), shard(12, 10)];
+    const bm = self('black_mage', JOBS.black_mage.picks.duo, { x: 8, z: -10, targetId: 1 });
+    expect(think(dIn({ self: bm, target: boss, enemies })).intents[0]).toEqual({ t: 'target', id: 12 });
+    const wr = self('warrior', JOBS.warrior.picks.duo, { x: 8, z: -10, targetId: 1 });
+    const near = [warden({ warded: true, phase: 1, x: -3 }), shard(11, -10), shard(12, 10)];
+    expect(think(dIn({ self: wr, target: near[0], enemies: near })).intents[0]).toEqual({ t: 'target', id: 11 });
+    // not warded: the Warden
+    expect(think(dIn({ self: bm, target: warden(), enemies: [warden(), shard(11, -10)] })).intents.find((i) => i.t === 'target')).toBeUndefined();
+  });
+
+  it('holds Sunder for Keeper\'s Toll, and turns from a shard to interrupt it', () => {
+    const w = (o: Partial<BrainSelf> = {}) => self('warrior', JOBS.warrior.picks.duo, { x: 0, z: -3.5, momentum: 60, cd: [9, 0, 9, 9, 9], ...o });
+    const m = newBrainMemory();
+    expect(ability(dIn({ self: w(), target: warden() }))).toBeUndefined(); // ready, but held for the Toll
+    const tolling = warden({ windup: { attack: 'keepers_toll', total: 3, left: 2.5, interruptible: true } });
+    expect(think(dIn({ self: w(), target: tolling }), m).intents).toContainEqual({ t: 'ability', slot: 1, phase: 'press' });
+    // on a shard while the warded Warden tolls next to it
+    const boss = { ...tolling, warded: true, phase: 1 };
+    const s = shard(11, -2);
+    const act = think(dIn({ self: w({ targetId: 11 }), target: boss, enemies: [boss, s] }));
+    const k = act.intents.findIndex((i) => i.t === 'ability');
+    expect(act.intents[k]).toEqual({ t: 'ability', slot: 1, phase: 'press' });
+    expect(act.intents.slice(0, k).at(-1)).toEqual({ t: 'target', id: 1 });
+  });
+
+  it('a ranged adventurer the Warden chases kites out of reach to shed Searing, and stays near its healer or tank', () => {
+    const bm = (o: Partial<BrainSelf> = {}) => self('black_mage', JOBS.black_mage.picks.duo, { x: 0, z: -5, cd: [9, 9, 9, 9, 9], ...o });
+    const boss = warden({ targetId: 2 });
+    const kite = think(dIn({ self: bm({ searing: 3 }), target: boss }));
+    expect(Math.hypot(kite.moveTo!.x, kite.moveTo!.z)).toBeGreaterThanOrEqual(1.8 + 3.2 + 2.5);
+    expect(think(dIn({ self: bm({ searing: 0 }), target: boss })).moveTo).toBeNull();
+    // with a Paladin at the Warden, a Black Mage 16 m out comes within 10 m of it
+    const pal = partner({ job: 'paladin', x: 0, z: -3.5 });
+    const far = think(dIn({ self: bm({ z: -16 }), target: warden({ targetId: 3 }), allies: [pal] }));
+    expect(Math.hypot(far.moveTo!.x - pal.x, far.moveTo!.z - pal.z)).toBeLessThanOrEqual(10);
   });
 });

@@ -80,49 +80,49 @@ export const ENEMY_ATTACKS: Readonly<Record<EnemyAttackId, EnemyAttackData>> = d
   // ───── the Wickhound ─────
   wick_lunge: {
     id: 'wick_lunge', name: 'Wick Lunge', shape: 'line', length: 10, width: 2.2,
-    windup: 1.3, raw: 28, cooldown: 0, firstAt: 0, useRange: 9, parryable: false, interruptible: false,
+    windup: 1.3, raw: 36, cooldown: 0, firstAt: 0, useRange: 9, parryable: false, interruptible: false,
     knock: { speed: 10, seconds: 0.35, vy: 4 }, dashToEnd: true,
   },
   ember_breath: {
     id: 'ember_breath', name: 'Ember Breath', shape: 'cone', r: 9, angle: 60 * DEG,
-    windup: 1.8, raw: 30, cooldown: 0, firstAt: 0, useRange: 8, parryable: false, interruptible: true,
+    windup: 1.8, raw: 39, cooldown: 0, firstAt: 0, useRange: 8, parryable: false, interruptible: true,
   },
   /** Phase 2 only: stand close. */
   cinder_ring: {
     id: 'cinder_ring', name: 'Cinder Ring', shape: 'ring-self', inner: 3.5, r: 9,
-    windup: 1.6, raw: 26, cooldown: 0, firstAt: 0, useRange: 9, parryable: false, interruptible: false,
+    windup: 1.6, raw: 33, cooldown: 0, firstAt: 0, useRange: 9, parryable: false, interruptible: false,
   },
   // ───── the Fallen Warden ─────
   lamp_sweep: {
     id: 'lamp_sweep', name: 'Lamp Sweep', shape: 'cone', r: 12, angle: 100 * DEG,
-    windup: 1.6, raw: 28, cooldown: 0, firstAt: 0, useRange: 12, parryable: false, interruptible: false,
+    windup: 1.6, raw: 36, cooldown: 0, firstAt: 0, useRange: 12, parryable: false, interruptible: false,
   },
   /** A circle on each engaged adventurer: stacked adventurers take every circle they stand in. */
   brass_fall: {
     id: 'brass_fall', name: 'Brass Fall', shape: 'circle-target', r: 3, targets: 'each',
-    windup: 2.0, raw: 24, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
+    windup: 2.0, raw: 31, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
   },
   /** The whole arena. A Break cancels it too. */
   keepers_toll: {
     id: 'keepers_toll', name: "Keeper's Toll", shape: 'circle-self', r: 40,
-    windup: 3.0, raw: 34, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: true,
+    windup: 3.0, raw: 44, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: true,
   },
   /** Knocks into the fire ring. */
   beacon_lance: {
     id: 'beacon_lance', name: 'Beacon Lance', shape: 'line', length: 30, width: 3, aimAt: 'farthest',
-    windup: 1.8, raw: 36, cooldown: 0, firstAt: 0, useRange: 30, parryable: false, interruptible: false,
+    windup: 1.8, raw: 46, cooldown: 0, firstAt: 0, useRange: 30, parryable: false, interruptible: false,
     knock: { speed: 12, seconds: 0.4, vy: 5 },
   },
   /** Eight lines from the Warden in sequence, a full turn. */
   turning_light: {
     id: 'turning_light', name: 'Turning Light', shape: 'line', length: 28, width: 3.5,
-    windup: 1.4, raw: 30, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
+    windup: 1.4, raw: 39, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false,
     repeat: { count: 8, every: 0.6, rotate: Math.PI / 4 },
   },
   /** Enrage only, every 4 s: 15, 20, 25, ... */
   last_light: {
     id: 'last_light', name: 'Last Light', shape: 'circle-self', r: 40,
-    windup: 1.0, raw: 15, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false, ramp: 5,
+    windup: 1.0, raw: 19, cooldown: 0, firstAt: 0, useRange: 40, parryable: false, interruptible: false, ramp: 5,
   },
   // ───── the Lens Shard ─────
   focus_beam: {
@@ -159,14 +159,14 @@ export const ENEMY_KINDS: Readonly<Record<EnemyKindId, EnemyKindData>> = deepFre
   },
   /** The Warden's lamp-hound: a brass hound whose wick-mane still burns. Leash: the Wick Den's r − 2. */
   wickhound: {
-    id: 'wickhound', tier: 'boss', name: 'the Wickhound', elite: true, hp: 2600, defence: 15, radius: 1.4, speed: 4.5,
+    id: 'wickhound', tier: 'boss', name: 'the Wickhound', elite: true, hp: 3200, defence: 15, radius: 1.4, speed: 4.5,
     aggro: 10, leash: 14, respawn: Infinity, stagger: 220,
-    auto: { reach: 3.0, every: 2.2, raw: 10, ranged: false }, attacks: ['wick_lunge', 'ember_breath', 'cinder_ring'],
+    auto: { reach: 3.0, every: 2.2, raw: 7, ranged: false }, attacks: ['wick_lunge', 'ember_breath', 'cinder_ring'],
     weak: 'water', resist: 'fire', boss: BOSSES.wickhound,
   },
   /** The Beacon's fallen keeper. Leash: the Lens Pit's r − 2. Its autos add Searing. */
   fallen_warden: {
-    id: 'fallen_warden', tier: 'mega', name: 'the Fallen Warden', elite: true, hp: 6000, defence: 18, radius: 1.8, speed: 3.5,
+    id: 'fallen_warden', tier: 'mega', name: 'the Fallen Warden', elite: true, hp: 7800, defence: 18, radius: 1.8, speed: 3.5,
     aggro: 10, leash: 20, respawn: Infinity, stagger: 300,
     auto: { reach: 3.2, every: 2.8, raw: 9, ranged: false, afflict: 'searing' },
     attacks: ['lamp_sweep', 'brass_fall', 'keepers_toll', 'beacon_lance', 'turning_light', 'last_light'],

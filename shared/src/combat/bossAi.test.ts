@@ -17,6 +17,10 @@ import { RUN_SPEED, TICK_HZ } from '../constants';
 const BIG: Stats = { power: 10, defence: 10, maxHp: 100000 };
 const WARRIOR: Loadout = { job: 'warrior', picks: ['rallying_roar', 'mend'] }; // slash, sunder, parry, roar, mend
 const DT = 1 / 15;
+// the tuned numbers (Task 5 may change them under the Tuning rule): read from the data, never restated
+const WICK_HP = ENEMY_KINDS.wickhound.hp, WARDEN_HP = ENEMY_KINDS.fallen_warden.hp, SHARD_HP = ENEMY_KINDS.lens_shard.hp;
+const WARDEN_SCALE = BOSSES.fallen_warden.scale, ENRAGE_S = BOSSES.fallen_warden.enrage!.s;
+const LAST_LIGHT = ENEMY_ATTACKS.last_light.raw, RAMP = ENEMY_ATTACKS.last_light.ramp!;
 
 interface Tel { id: number; attack: EnemyAttackId; startedAt: number; endsAt: number; shape: TelegraphState['shape']; owner: number }
 /** A rig that records every telegraph it sees and runs hooks before each tick. */
@@ -91,7 +95,7 @@ describe('the boss script', () => {
 
     // 50%: the floor, a 2 s transition, then phase 2
     hit(r, a, e, 1e9);
-    expect(e.hp).toBe(1300);
+    expect(e.hp).toBe(WICK_HP * 0.5);
     expect(r.fx('phase')).toEqual([{ at: expect.any(Number), t: 'phase', src: e.id, phase: 1 }]);
     const t0 = r.now;
     r.at(t0 + 1.9);
@@ -122,18 +126,18 @@ describe('the boss script', () => {
     r.at(0.5);
     expect(ai(e).wokeAt).not.toBeNull();
     hit(r, a, e, 1e9);
-    expect(e.hp).toBe(4200);
+    expect(e.hp).toBeCloseTo(WARDEN_HP * 0.7, 9);
     expect(e.act).toBe('phase');
     expect(r.c.get(e.id)!.act).toBe('phase');
     const t0 = r.now, hits = r.hits().filter((h) => h.dst === e.id).length;
     hit(r, a, e, 500);
-    expect(e.hp).toBe(4200);
+    expect(e.hp).toBeCloseTo(WARDEN_HP * 0.7, 9);
     expect(r.hits().filter((h) => h.dst === e.id).length).toBe(hits);
     expect(targetFor(r.w, r.w.adventurers.get(a)!, e.id, 40)).toBe('no-target');
     expect([...r.c.telegraphs()]).toEqual([]);
     r.at(t0 + 3.9);
     expect(e.act).toBe('phase');
-    expect(e.hp).toBe(4200);
+    expect(e.hp).toBeCloseTo(WARDEN_HP * 0.7, 9);
     r.at(t0 + 4.1);
     expect(e.act).not.toBe('phase');
     expect(r.c.get(e.id)!.phase).toBe(1);
@@ -147,13 +151,13 @@ describe('the boss script', () => {
     r.at(0.5);
     for (const id of [a, b, c]) hit(r, id, e, 1);
     r.tick();
-    expect(e.maxHp).toBeCloseTo(6000 * 1.45, 9);
+    expect(e.maxHp).toBeCloseTo(WARDEN_HP * WARDEN_SCALE[2], 9);
     toPhase(r, e, a, 1);
     const shards = [...r.w.enemies.values()].filter((o) => o.kind === 'lens_shard');
     expect(shards.map((s) => [s.camp.x, s.camp.z])).toEqual([[-10, 0], [10, 0]]);
     for (const s of shards) {
       expect(s.threat.ids().sort()).toEqual([a, b, c].sort());
-      expect(s.maxHp).toBeCloseTo(420 * 1.45, 9);
+      expect(s.maxHp).toBeCloseTo(SHARD_HP * WARDEN_SCALE[2], 9);
     }
     expect(r.fx('spawn').map((s) => [s.dst, s.src])).toEqual(shards.map((s) => [s.id, e.id]));
     expect(r.c.get(e.id)!.warded).toBe(true);
@@ -316,26 +320,26 @@ describe('the boss script', () => {
     expect(r.hits(e.id).filter((h) => h.by === 'auto' && h.dst === a).length).toBe(na);
   });
 
-  it('enrage at 330 s: Last Light every 4 s, 15 then 20 then 25', () => {
+  it('enrage at enrage.s: Last Light every 4 s, its raw rising by its ramp', () => {
     const r = new BRig([camp('fallen_warden', 0, 0)]);
     const e = r.boss();
     const a = r.adv(0, 3, { stats: { power: 1, defence: 0, maxHp: 1e6 } });
     r.hooks.push(() => r.w.adventurers.get(a)!.afflictions.clear()); // no Searing: raw arrives as is
     r.at(0.5);
     const woke = ai(e).wokeAt!;
-    expect(r.c.get(e.id)!.enrageIn).toBeCloseTo(330 - (r.w.now - woke), 6);
-    r.at(woke + 329.9);
+    expect(r.c.get(e.id)!.enrageIn).toBeCloseTo(ENRAGE_S - (r.w.now - woke), 6);
+    r.at(woke + ENRAGE_S - 0.1);
     expect(r.fx('enrage')).toEqual([]);
     const n0 = r.attacks(e.id).length;
-    r.at(woke + 330.1);
+    r.at(woke + ENRAGE_S + 0.1);
     expect(r.fx('enrage').map((x) => x.src)).toEqual([e.id]);
     expect(r.bossEvents().filter((b) => b.event === 'enrage').length).toBe(1);
     expect(r.c.get(e.id)!.enrageIn).toBe(0);
-    r.at(woke + 343.5);
+    r.at(woke + ENRAGE_S + 13.5);
     const after = r.attacks(e.id).slice(n0);
     expect(after.map((t) => t.attack)).toEqual(['last_light', 'last_light', 'last_light', 'last_light']);
-    for (let k = 0; k < 4; k++) expect(near(after[k].startedAt, woke + 330 + 4 * k, 2 * DT)).toBe(true);
-    expect(r.hits(e.id).filter((h) => h.by === 'last_light').map((h) => h.amount)).toEqual([15, 20, 25, 30]);
+    for (let k = 0; k < 4; k++) expect(near(after[k].startedAt, woke + ENRAGE_S + 4 * k, 2 * DT)).toBe(true);
+    expect(r.hits(e.id).filter((h) => h.by === 'last_light').map((h) => h.amount)).toEqual([0, 1, 2, 3].map((k) => LAST_LIGHT + k * RAMP));
   });
 
   it('Searing from Warden autos only', () => {
@@ -361,28 +365,28 @@ describe('the boss script', () => {
     }
   });
 
-  it('scaling: a third adventurer joining raises max hp ×1.45 keeping the fraction; never down when one dies', () => {
+  it('scaling: a third adventurer joining raises max hp by scale[2] keeping the fraction; never down when one dies', () => {
     const r = new BRig([camp('fallen_warden', 0, 0)]);
     const e = r.boss();
     const a = r.adv(0, 3), b = r.adv(3, 0);
     r.at(0.5);
-    hit(r, a, e, 1); hit(r, b, e, 599);
+    hit(r, a, e, 1); hit(r, b, e, WARDEN_HP * 0.1 - 1);
     r.tick();
-    expect(e.maxHp).toBe(6000);
+    expect(e.maxHp).toBe(WARDEN_HP);
     expect(e.hp / e.maxHp).toBeCloseTo(0.9, 9);
     const c = r.adv(-3, 0);
     hit(r, c, e, 0);
     r.tick();
-    expect(e.maxHp).toBeCloseTo(8700, 9);
-    expect(e.stagger.max).toBeCloseTo(300 * 1.45, 9);
+    expect(e.maxHp).toBeCloseTo(WARDEN_HP * WARDEN_SCALE[2], 9);
+    expect(e.stagger.max).toBeCloseTo(300 * WARDEN_SCALE[2], 9);
     expect(e.hp / e.maxHp).toBeCloseTo(0.9, 9);
     hurtAdventurer(r.w, r.w.adventurers.get(c)!, 1e9, e.id, 'auto', r.now);
     r.tick();
-    expect(e.maxHp).toBeCloseTo(8700, 9);
+    expect(e.maxHp).toBeCloseTo(WARDEN_HP * WARDEN_SCALE[2], 9);
     const d = r.adv(0, -3), f = r.adv(2, 2);
     hit(r, d, e, 0); hit(r, f, e, 0);
     r.tick();
-    expect(e.maxHp).toBeCloseTo(6000 * 1.9, 9);
+    expect(e.maxHp).toBeCloseTo(WARDEN_HP * WARDEN_SCALE[3], 9);
   });
 
   it('a wipe resets: phase 0, adds gone (despawned, no credit), fields gone, enrage clock cleared, full hp at home', () => {
@@ -406,7 +410,7 @@ describe('the boss script', () => {
     expect([v.phase, v.enrageIn, v.warded]).toEqual([0, null, false]);
     r.at(r.now + 15);
     expect(e.act).toBe('');
-    expect([e.hp, e.maxHp, e.x, e.z]).toEqual([6000, 6000, 0, 0]);
+    expect([e.hp, e.maxHp, e.x, e.z]).toEqual([WARDEN_HP, WARDEN_HP, 0, 0]);
     // a fresh fight starts at phase 0 with a fresh clock
     const c = r.adv(0, 4);
     r.at(r.now + 1);
@@ -538,7 +542,7 @@ describe('the boss script', () => {
       const e = r.boss();
       const a = r.adv(0, 3, { hold: false });
       r.at(0.5);
-      if (idx === 'last') { ai(e).wokeAt = r.now - 330; }
+      if (idx === 'last') { ai(e).wokeAt = r.now - ENRAGE_S; }
       else force(r, e, 3);
       for (let n = 0; n < 100 && !e.windup; n++) r.tick();
       const end = e.windup!.endsAt;

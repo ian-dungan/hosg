@@ -7,13 +7,13 @@ import {
 describe('boss and add data', () => {
   it('the three new kinds have the Numbers table values', () => {
     expect(ENEMY_KINDS.wickhound).toMatchObject({
-      id: 'wickhound', name: 'the Wickhound', tier: 'boss', elite: true, hp: 2600, defence: 15, radius: 1.4, speed: 4.5,
+      id: 'wickhound', name: 'the Wickhound', tier: 'boss', elite: true, hp: 3200, defence: 15, radius: 1.4, speed: 4.5,
       aggro: 10, leash: 14, respawn: Infinity, stagger: 220, weak: 'water', resist: 'fire',
-      auto: { reach: 3.0, every: 2.2, raw: 10, ranged: false }, attacks: ['wick_lunge', 'ember_breath', 'cinder_ring'],
+      auto: { reach: 3.0, every: 2.2, raw: 7, ranged: false }, attacks: ['wick_lunge', 'ember_breath', 'cinder_ring'],
     });
     expect(ENEMY_KINDS.wickhound.auto?.afflict).toBeUndefined();
     expect(ENEMY_KINDS.fallen_warden).toMatchObject({
-      id: 'fallen_warden', name: 'the Fallen Warden', tier: 'mega', elite: true, hp: 6000, defence: 18, radius: 1.8, speed: 3.5,
+      id: 'fallen_warden', name: 'the Fallen Warden', tier: 'mega', elite: true, hp: 7800, defence: 18, radius: 1.8, speed: 3.5,
       aggro: 10, leash: 20, respawn: Infinity, stagger: 300, weak: 'water', resist: 'fire',
       auto: { reach: 3.2, every: 2.8, raw: 9, ranged: false, afflict: 'searing' },
       attacks: ['lamp_sweep', 'brass_fall', 'keepers_toll', 'beacon_lance', 'turning_light', 'last_light'],
@@ -32,22 +32,22 @@ describe('boss and add data', () => {
     expect(ENEMY_KINDS.fallen_warden.boss).toBe(BOSSES.fallen_warden);
 
     const A = ENEMY_ATTACKS;
-    expect(A.wick_lunge).toMatchObject({ name: 'Wick Lunge', shape: 'line', length: 10, width: 2.2, windup: 1.3, raw: 28, knock: { speed: 10, seconds: 0.35, vy: 4 }, dashToEnd: true, useRange: 9 });
-    expect(A.ember_breath).toMatchObject({ name: 'Ember Breath', shape: 'cone', r: 9, windup: 1.8, raw: 30, interruptible: true, useRange: 8 });
+    expect(A.wick_lunge).toMatchObject({ name: 'Wick Lunge', shape: 'line', length: 10, width: 2.2, windup: 1.3, raw: 36, knock: { speed: 10, seconds: 0.35, vy: 4 }, dashToEnd: true, useRange: 9 });
+    expect(A.ember_breath).toMatchObject({ name: 'Ember Breath', shape: 'cone', r: 9, windup: 1.8, raw: 39, interruptible: true, useRange: 8 });
     expect(A.ember_breath.angle).toBeCloseTo(Math.PI / 3, 12);
-    expect(A.cinder_ring).toMatchObject({ name: 'Cinder Ring', shape: 'ring-self', inner: 3.5, r: 9, windup: 1.6, raw: 26 });
-    expect(A.lamp_sweep).toMatchObject({ name: 'Lamp Sweep', shape: 'cone', r: 12, windup: 1.6, raw: 28, useRange: 12 });
+    expect(A.cinder_ring).toMatchObject({ name: 'Cinder Ring', shape: 'ring-self', inner: 3.5, r: 9, windup: 1.6, raw: 33 });
+    expect(A.lamp_sweep).toMatchObject({ name: 'Lamp Sweep', shape: 'cone', r: 12, windup: 1.6, raw: 36, useRange: 12 });
     expect(A.lamp_sweep.angle).toBeCloseTo((100 * Math.PI) / 180, 12);
-    expect(A.brass_fall).toMatchObject({ name: 'Brass Fall', shape: 'circle-target', r: 3, windup: 2.0, raw: 24, targets: 'each' });
-    expect(A.keepers_toll).toMatchObject({ name: "Keeper's Toll", shape: 'circle-self', r: 40, windup: 3.0, raw: 34, interruptible: true });
-    expect(A.beacon_lance).toMatchObject({ name: 'Beacon Lance', shape: 'line', length: 30, width: 3, windup: 1.8, raw: 36, aimAt: 'farthest', knock: { speed: 12, seconds: 0.4, vy: 5 } });
-    expect(A.turning_light).toMatchObject({ name: 'Turning Light', shape: 'line', length: 28, width: 3.5, windup: 1.4, raw: 30, repeat: { count: 8, every: 0.6 } });
-    expect(A.last_light).toMatchObject({ name: 'Last Light', shape: 'circle-self', r: 40, windup: 1.0, raw: 15, ramp: 5 });
+    expect(A.brass_fall).toMatchObject({ name: 'Brass Fall', shape: 'circle-target', r: 3, windup: 2.0, raw: 31, targets: 'each' });
+    expect(A.keepers_toll).toMatchObject({ name: "Keeper's Toll", shape: 'circle-self', r: 40, windup: 3.0, raw: 44, interruptible: true });
+    expect(A.beacon_lance).toMatchObject({ name: 'Beacon Lance', shape: 'line', length: 30, width: 3, windup: 1.8, raw: 46, aimAt: 'farthest', knock: { speed: 12, seconds: 0.4, vy: 5 } });
+    expect(A.turning_light).toMatchObject({ name: 'Turning Light', shape: 'line', length: 28, width: 3.5, windup: 1.4, raw: 39, repeat: { count: 8, every: 0.6 } });
+    expect(A.last_light).toMatchObject({ name: 'Last Light', shape: 'circle-self', r: 40, windup: 1.0, raw: 19, ramp: 5 });
     expect(A.focus_beam).toMatchObject({ name: 'Focus Beam', shape: 'line', length: 20, width: 1.6, windup: 1.5, raw: 18, interruptible: true, cooldown: 7, firstAt: 3, aimAt: 'farthest' });
     expect(A.thorn_hail.aimAt).toBe('farthest');
     for (const a of Object.values(A)) if (a.id !== 'thorn_hail' && a.id !== 'beacon_lance' && a.id !== 'focus_beam') expect(a.aimAt).toBeUndefined();
 
-    expect(AFFLICTIONS.searing).toEqual({ id: 'searing', name: 'Searing', maxStacks: 5, s: 8, takenPerStack: 0.10, bit: 1 });
+    expect(AFFLICTIONS.searing).toEqual({ id: 'searing', name: 'Searing', maxStacks: 5, s: 8, takenPerStack: 0.12, bit: 1 });
     expect(afflictionBits({})).toBe(0);
     expect(afflictionBits({ searing: 3 })).toBe(1);
     expect(afflictionBits({ searing: 0 })).toBe(0);
@@ -106,16 +106,16 @@ describe('boss and add data', () => {
       wardMult: 0.4,
     });
     expect(f.phases[2].onEnter).toEqual({ clearFields: true, fields: [{ id: 'lampfire_deep', shape: { kind: 'ring', x: 0, z: 0, dir: 0, inner: 12, r: 40 }, raw: 10 }] });
-    expect([f.transitionS, f.breakS, f.enrage]).toEqual([4, 5, { s: 330, attack: 'last_light', every: 4 }]);
+    expect([f.transitionS, f.breakS, f.enrage]).toEqual([4, 5, { s: 300, attack: 'last_light', every: 4 }]);
     expect(f.lore.victory).toBe("The Warden's lamp steadies, and for a moment its beam points the same way as Ellie's arm.");
     expect([...w.scale]).toEqual([1, 1, 1.5, 2.0]);
-    expect([...f.scale]).toEqual([1, 1, 1.45, 1.9]);
+    expect([...f.scale]).toEqual([1, 1, 1.2, 1.9]);
   });
 
-  it("scaleFactor: Plan 3 elites unchanged; the Warden 1, 1, 1.45, 1.9; never below 1; n above 4 counts as 4", () => {
+  it("scaleFactor: Plan 3 elites unchanged; the Warden 1, 1, 1.2, 1.9; never below 1; n above 4 counts as 4", () => {
     const K = ENEMY_KINDS;
     expect([1, 2, 3, 4, 5].map((n) => scaleFactor(K.mossback, n))).toEqual([1, 1 + ELITE_SCALE_PER, 1 + 2 * ELITE_SCALE_PER, 1 + 3 * ELITE_SCALE_PER, 1 + 3 * ELITE_SCALE_PER]);
-    expect([1, 2, 3, 4, 5, 9].map((n) => scaleFactor(K.fallen_warden, n))).toEqual([1, 1, 1.45, 1.9, 1.9, 1.9]);
+    expect([1, 2, 3, 4, 5, 9].map((n) => scaleFactor(K.fallen_warden, n))).toEqual([1, 1, 1.2, 1.9, 1.9, 1.9]);
     expect([1, 2, 3, 4, 7].map((n) => scaleFactor(K.wickhound, n))).toEqual([1, 1, 1.5, 2.0, 2.0]);
     for (const n of [0, -3, NaN, 0.5]) {
       expect(scaleFactor(K.fallen_warden, n)).toBe(1);
@@ -133,7 +133,7 @@ describe('boss and add data', () => {
     expect(r.rotate).toBeCloseTo(Math.PI / 4, 12);
     expect(r.count * r.rotate).toBeCloseTo(2 * Math.PI, 12);
     expect(ENEMY_ATTACKS.last_light.ramp).toBe(5);
-    expect([0, 1, 2].map((k) => ENEMY_ATTACKS.last_light.raw + k * ENEMY_ATTACKS.last_light.ramp!)).toEqual([15, 20, 25]);
+    expect([0, 1, 2].map((k) => ENEMY_ATTACKS.last_light.raw + k * ENEMY_ATTACKS.last_light.ramp!)).toEqual([19, 24, 29]);
     for (const a of Object.values(ENEMY_ATTACKS)) if (a.id !== 'turning_light') expect(a.repeat).toBeUndefined();
     for (const a of Object.values(ENEMY_ATTACKS)) if (a.id !== 'last_light') expect(a.ramp).toBeUndefined();
   });
