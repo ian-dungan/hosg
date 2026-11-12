@@ -670,9 +670,9 @@ If a band cannot pass within the ranges, report it with the measured table and s
 ### Gold and time to gear (for the owner; not tuned)
 
 - Greenway solo earns about 2 gold and 10 xp per 15–20 s kill: about 6–8 gold a minute.
-- A T1 kit (armour, weapon and off-hand) is about 655 gold, about 90 minutes of Greenway play with drops on top.
+- A T1 kit (armour, weapon and off-hand) is 485 gold by the Smithy prices (435 for the Dark Knight and Ninja, who use no off-hand). Measured in `economy.test.ts` (Task 2; the owner accepted it): about 106 Thornling kills, which is about 30 minutes, keeping or selling drops (88 kills and about 25 minutes without an off-hand).
 - A Lampfall run (about 15 minutes) gives about 640 xp, about 120 gold and about 1.5 T2 pieces.
-- T3 takes about 23 Seals (one a UTC day) minus daily T3 drops: about two to three weeks of daily runs.
+- T3 takes 23 Seals (21 without an off-hand; one a UTC day) minus daily T3 drops. Measured in `economy.test.ts` (Task 2; the owner accepted it): **a full T3 kit is about 9 Warden days**, ranging from 5 to 14 days over 20 accounts per job. That is faster than first estimated, because the guaranteed daily T3 drop arrives alongside each day's Seal.
 - Costumes cost 150–1200 gold. The Barber costs 40 (200 to change people). A respec costs 25 gold per row after the first, which is free.
 - Level 1 to 10 takes about 3180 xp per job: about 2 hours of Greenway play, or 5 Lampfall runs, faster with catch-up.
 
