@@ -17,15 +17,37 @@
 // with an explicit port is there a default, `fuser -k -9 <port>/tcp`; for Docker pass
 // --kill "docker compose kill sg2-server". For any other URL, without --kill the "Connection lost"
 // step is skipped (with a note) and the exit code reflects only the steps that ran.
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { chromium, devices } from 'playwright';
 
-const { values, positionals } = parseArgs({ allowPositionals: true, options: { kill: { type: 'string' }, 'no-combat': { type: 'boolean' } } });
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { kill: { type: 'string' }, 'no-combat': { type: 'boolean' }, shots: { type: 'string' } } });
 if (positionals.length !== 1) {
-  console.error('Usage: node server/scripts/smoke.mjs <url> [--kill "<command>"] [--no-combat]');
+  console.error('Usage: node server/scripts/smoke.mjs <url> [--kill "<command>"] [--no-combat] [--shots <dir>]');
   process.exit(2);
 }
+const serverDir = fileURLToPath(new URL('..', import.meta.url));
+/** Screenshots of the reaction and the revive (and the board) go here, when given. */
+const shots = values.shots ?? null;
+if (shots) mkdirSync(shots, { recursive: true });
+const shot = async (page, name) => { if (shots) await page.screenshot({ path: `${shots}/${name}.png` }); };
+// The shared data the job steps name (read from @sg2/shared, so a rename there needs nothing here).
+// route: a walkable way from the Guild Board to the grove's east gate (findPath over the grove's ground, as the bots
+// walk), as waypoints at most 12 m apart for tap-to-walk.
+const DATA = JSON.parse(execFileSync('npx', ['tsx', '-e', `import { ABILITIES, GROVE_EAST_GATE, GUILD_BOARD, JOBS, REASON_JOB_NOT_HERE, findPath, withClearance, zoneDef } from '@sg2/shared';
+  const ground = zoneDef('grove').ground;
+  const path = findPath({ x: GUILD_BOARD.x, z: GUILD_BOARD.z }, GROVE_EAST_GATE, withClearance((x, z) => ground(x, z) !== null, 0.6), { cell: 1, maxNodes: 60000 }) ?? [GROVE_EAST_GATE];
+  const route = [];
+  let from = { x: GUILD_BOARD.x, z: GUILD_BOARD.z };
+  for (const p of path) {
+    const n = Math.ceil(Math.hypot(p.x - from.x, p.z - from.z) / 12);
+    for (let k = 1; k <= n; k++) route.push({ x: from.x + ((p.x - from.x) * k) / n, z: from.z + ((p.z - from.z) * k) / n });
+    from = p;
+  }
+  console.log(JSON.stringify({ gate: GROVE_EAST_GATE, route, notHere: REASON_JOB_NOT_HERE, whmGlyph: JOBS.white_mage.glyph, ninja: JOBS.ninja.name, whm: JOBS.white_mage.name, quick: ABILITIES[JOBS.white_mage.bar[0]].name }))`], { cwd: serverDir, encoding: 'utf8' }).trim().split('\n').pop());
+const REACTIONS = ['blast', 'conduct', 'steam', 'bedrock'];
 const url = new URL(positionals[0]);
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']); // URL keeps the brackets on IPv6
 // Never a default for a remote host (it would kill whatever holds that port HERE) or for a URL
@@ -39,6 +61,49 @@ const LOAD_MS = 180_000; // the first page load compiles a large bundle under so
 const WAIT_MS = 120_000;
 const KILL_MS = 90_000;
 const DEFEAT_MS = 150_000;
+
+/**
+ * The helper bots (bots.ts --assist): a Black Mage and a White Mage that stay by `name`, fight its target and revive
+ * it. Their output lines are kept (`seen`); `wait` resolves on the first line `test` accepts; `stop` ends them.
+ */
+function startHelpers(name) {
+  const child = spawn('npx', ['tsx', 'scripts/bots.ts', '--url', url.href, '--assist', name, '--seconds', '1200'], { cwd: serverDir, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const seen = [];
+  const waiters = [];
+  let buf = '';
+  const onData = (d) => {
+    buf += d;
+    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line) continue;
+      seen.push(line);
+      for (const w of [...waiters]) if (w.test(line)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(line); }
+    }
+  };
+  child.stdout.setEncoding('utf8').on('data', onData);
+  child.stderr.setEncoding('utf8').on('data', onData);
+  let stopped = false;
+  return {
+    seen,
+    wait(test, ms, why) {
+      const old = seen.find(test);
+      if (old) return Promise.resolve(old);
+      return new Promise((resolve, reject) => {
+        const w = { test, resolve };
+        waiters.push(w);
+        setTimeout(() => { if (waiters.includes(w)) reject(new Error(`${why} (last lines: ${seen.slice(-4).join(' | ')})`)); }, ms);
+      });
+    },
+    /** `hold`: they stop fighting (only follow and revive); `fight`: they fight again. */
+    say(line) { if (!stopped) child.stdin.write(`${line}\n`); },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ }
+    },
+  };
+}
+let helpers = null;
 
 const pageErrors = [];
 const browser = await chromium.launch();
@@ -184,6 +249,36 @@ try {
       throw new Error(`A is in "${zone}": start the server with SG2_START_ZONE=greenway, or pass --no-combat to skip the combat steps`);
     });
   } else {
+    await check('in the Greenway, A\'s job board says jobs change only in a town, and choosing another job is refused there', async () => {
+      await a.page.keyboard.press('KeyJ');
+      await a.page.waitForFunction((t) => document.querySelector('.sg-jb-note')?.textContent === t, DATA.notHere, { timeout: WAIT_MS, polling: 250 });
+      await shot(a.page, 'board-greenway');
+      await a.page.click('.sg-jb-row[data-job="ninja"] .sg-jb-top', { timeout: WAIT_MS });
+      await a.page.click('.sg-jb-row[data-job="ninja"] .sg-jb-go', { timeout: WAIT_MS });
+      await a.page.waitForFunction((t) => [...document.querySelectorAll('.sg-toast')].some((el) => el.textContent?.includes(t)), DATA.notHere, { timeout: WAIT_MS, polling: 250 });
+      await a.page.waitForFunction(() => window.__sg2net.refusals.some((r) => r.action === 'job' && r.reason === 'not-here'), null, { timeout: WAIT_MS, polling: 250 });
+      const job = await a.page.evaluate(() => window.__sg2net.self?.job);
+      if (job !== 'warrior') throw new Error(`A is a ${job} after the refused change, not a warrior`);
+      if (await a.page.$('.sg-jb-panel')) await a.page.keyboard.press('Escape');
+    });
+
+    await check('two helper bots (a Black Mage and a White Mage) take their jobs in the grove and come to A', async () => {
+      helpers = startHelpers(aName);
+      await helpers.wait((line) => line === 'assist: ready', 300_000, 'the helpers never got to the Greenway with their jobs');
+      // pooled spell visuals play at an eighth of their speed on A's page (it renders about 1 frame a second), so a
+      // reaction or a revive is still on screen when it is looked for
+      await a.page.evaluate(() => { const sp = window.__sg2.combat?.debug.spells; if (sp) sp.timeScale = 0.125; });
+    });
+    /** Waits until A's page draws one of `kinds` (its live spell visuals), then screenshots it; returns the kind. */
+    const drawn = async (kinds, name, ms) => {
+      const kind = await a.page.waitForFunction((ks) => {
+        const sp = window.__sg2.combat?.debug.spells;
+        return sp?.kinds().find((k) => ks.includes(k)) ?? null;
+      }, kinds, { timeout: ms, polling: 100 }).then((h) => h.jsonValue());
+      await shot(a.page, `${name}-${kind}`);
+      return kind;
+    };
+
     let thornling;
     await check('A targets the nearest Thornling with Tab, walks into reach by tap-to-walk and kills it within 90 s', async () => {
       // the nearest enemy (Tab picks the nearest first) is a Thornling at the Greenway's first camp
@@ -232,12 +327,25 @@ try {
       }
     });
 
-    await check('A took damage in the fight', async () => {
-      if (!(minHp < 100)) throw new Error(`A's health never went below 100 (lowest ${minHp})`);
+    await check('a reaction from the server (Blast, Conduct, Steam or Bedrock) is drawn on A\'s screen within 180 s', async () => {
+      // A and the helpers fight on (A targets the nearest enemy and presses its skills; the Black Mage reacts on A's
+      // Marked and on its own Dazed), until a reaction's visual is live on A's page
+      const stop = Date.now() + 180_000;
+      let kind = null;
+      while (!kind && Date.now() < stop) {
+        if (!(await a.page.evaluate(() => window.__sg2net.enemies.some((v) => v.eid === window.__sg2net.self?.target && v.mode !== 'dead')))) await a.page.keyboard.press('Tab');
+        await a.page.keyboard.press('Digit2');
+        await a.page.keyboard.press('Digit1');
+        kind = await drawn(REACTIONS, 'reaction', 3000).catch(() => null);
+      }
+      if (!kind) throw new Error(`no reaction was drawn on A's screen (the helpers saw: ${helpers.seen.filter((l) => l.includes('react')).join(' | ') || 'none'})`);
+      console.log(`     drawn: ${kind}${shots ? ` (${shots}/reaction-${kind}.png)` : ''}`);
+      await a.page.keyboard.press('Escape');
     });
 
-    await check('A stands at the next camp until "Defeated" shows (within 150 s), returns to the statue and is in the grove at full health', async () => {
+    await check('A stands at the next camp until "Defeated" shows (within 150 s), is revived by the helper (drawn), falls again, returns to the statue and is in the grove at full health', async () => {
       await a.page.keyboard.press('Escape');
+      helpers.say('hold'); // they follow A and revive it, but fight nothing: A must fall
       // the next camp: the nearest live enemy at least 20 m from the first camp's Thornling. The next camp
       // is beyond this client's view (60 m), so A walks on east (the Greenway runs from its west gate east)
       // 15 m at a time until one comes into view, then walks to it and stands there.
@@ -265,11 +373,65 @@ try {
       if (!goal) throw new Error('no other camp came into view');
       await walkTo(goal);
       await a.page.waitForFunction(() => /Defeated/.test(document.querySelector('.sg-end-title')?.textContent ?? ''), null, { timeout: DEFEAT_MS, polling: 500 });
+      minHp = 0;
+      // the helper White Mage revives A with Second Dawn (drawn on A's screen), then the helpers leave and A falls again
+      await drawn(['revive'], 'revive', 60_000);
+      await a.page.waitForFunction(() => window.__sg2net.self && !window.__sg2net.self.dead && window.__sg2net.self.hp > 0, null, { timeout: WAIT_MS, polling: 250 });
+      console.log(`     revived by the helper's Second Dawn${shots ? ` (${shots}/revive-revive.png)` : ''}`);
+      helpers.stop();
+      await a.page.waitForFunction(() => /Defeated/.test(document.querySelector('.sg-end-title')?.textContent ?? '') && window.__sg2net.self?.dead, null, { timeout: DEFEAT_MS, polling: 500 });
       // the button wakes after DEATH_MIN_S
       await a.page.waitForSelector('.sg-end-btn:not(.waiting):has-text("Return to the statue")', { timeout: WAIT_MS });
       await a.page.click('.sg-end-btn:has-text("Return to the statue")', { timeout: WAIT_MS });
       await a.page.waitForFunction(() => window.__sg2net?.zone === 'grove' && window.__sg2net.self?.hp === 100 && !window.__sg2net.self.dead,
         null, { timeout: WAIT_MS, polling: 500 });
+    });
+
+    await check('A took damage in the fights', async () => {
+      // (the helpers often kill the first Thornling before it lands a hit; A falls at the next camp in any case)
+      if (!(minHp < 100)) throw new Error(`A's health never went below 100 (lowest ${minHp})`);
+    });
+
+    await check('in the grove A taps the Guild Board, walks over and it opens; becoming a White Mage shows its badge and Tidelash on slot 1', async () => {
+      const at = await a.page.waitForFunction(() => {
+        const b = window.__sg2net.guildBoard, pt = window.__sg2.screenOf(b.x, (window.__sg2.world.groundAt(b.x, b.z) ?? 0) + 1.2, b.z);
+        return pt && pt.x > 0 && pt.y > 0 && pt.x < innerWidth && pt.y < innerHeight ? pt : null;
+      }, null, { timeout: WAIT_MS, polling: 500 }).then((h) => h.jsonValue());
+      await a.page.mouse.click(at.x, at.y);
+      await a.page.waitForSelector('.sg-jb-panel', { timeout: WAIT_MS * 2 });
+      if (await a.page.$('.sg-jb-note')) throw new Error('the board in the grove says jobs cannot change here');
+      await a.page.click('.sg-jb-row[data-job="white_mage"] .sg-jb-top', { timeout: WAIT_MS });
+      await a.page.click('.sg-jb-row[data-job="white_mage"] .sg-jb-go', { timeout: WAIT_MS });
+      await a.page.waitForFunction(() => window.__sg2net.self?.job === 'white_mage', null, { timeout: WAIT_MS, polling: 250 });
+      if (await a.page.$('.sg-jb-panel')) await a.page.keyboard.press('Escape');
+      await a.page.waitForFunction((g) => document.querySelector('.sg-pf-job')?.textContent === g, DATA.whmGlyph, { timeout: WAIT_MS, polling: 250 });
+      // slot 1's tooltip (a touch press shows it; the press itself is refused, with no target)
+      await a.page.evaluate(() => {
+        const el = document.querySelectorAll('.sg-ab-skill')[0];
+        const r = el.getBoundingClientRect(), o = { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+        el.dispatchEvent(new PointerEvent('pointerdown', o));
+        setTimeout(() => el.dispatchEvent(new PointerEvent('pointerup', o)), 4000);
+      });
+      await a.page.waitForFunction((n) => document.querySelector('.sg-tip-name')?.textContent === n, DATA.quick, { timeout: WAIT_MS, polling: 100 });
+      await shot(a.page, 'grove-white-mage');
+    });
+
+    await check('A walks to the east gate and into the Greenway, still a White Mage', async () => {
+      await a.page.setViewportSize({ width: 640, height: 400 }); // a smaller page renders faster: the walk is long
+      // along the route (tap-to-walk, a leg at a time), then on through the gate
+      const legs = [...DATA.route, { x: DATA.gate.x + 3, z: DATA.gate.z }];
+      for (const to of legs) {
+        if (await a.page.evaluate(() => window.__sg2net.zone === 'greenway')) break;
+        await a.page.evaluate(({ x, z }) => {
+          const V = window.__sg2.rig.position.constructor;
+          return window.__sg2.game.walkTo(new V(x, window.__sg2.world.groundAt(x, z) ?? 0, z));
+        }, to);
+        await a.page.waitForFunction(() => !window.__sg2.game.walking || window.__sg2net.zone === 'greenway', null, { timeout: WAIT_MS, polling: 500 });
+      }
+      await a.page.waitForFunction(() => window.__sg2net.zone === 'greenway' && !!window.__sg2net.self, null, { timeout: WAIT_MS * 2, polling: 500 });
+      const job = await a.page.evaluate(() => window.__sg2net.self?.job);
+      if (job !== 'white_mage') throw new Error(`A is a ${job} in the Greenway, not a white_mage`);
+      await a.page.setViewportSize(desktop.viewport);
     });
   }
 
@@ -300,6 +462,11 @@ try {
     await joinA2();
     await a.page.waitForFunction(loginError, 'Signed in somewhere else', { timeout: WAIT_MS });
     await a2.page.waitForFunction(onlineIs, 1, { timeout: WAIT_MS });
+    if (!values['no-combat'] && zone === 'greenway') {
+      // the job was saved with the adventurer
+      await a2.page.waitForFunction(() => window.__sg2net.self?.job === 'white_mage', null, { timeout: WAIT_MS, polling: 250 });
+      console.log('     A\'s new sign-in is a White Mage (saved)');
+    }
   });
 
   if (!killCommand) {
@@ -321,5 +488,6 @@ try {
   if (pageErrors.length && step !== 'page errors') console.log(`page errors so far:\n  ${pageErrors.join('\n  ')}`);
   process.exitCode = 1;
 } finally {
+  helpers?.stop();
   await browser.close();
 }

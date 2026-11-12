@@ -45,13 +45,25 @@
 // enemies.
 // --cycle (implies --fight; for a 120 s run): also deaths >= 1 and at least one bot back in the
 // Greenway after one (the whole death -> statue -> east gate -> Greenway cycle).
-//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30] [--fight [--cycle]]
+// --jobs mixed (with --fight; start the server in the grove, its default): bot i is a JOB_IDS[i % 7], takes its job
+// at the Guild Board (and its duo picks with a partner i ^ 1, else its solo picks), walks to the Greenway, has one job
+// change refused 'not-here' there, then fights in duos with the other bots in its view as the brain's allies (heals
+// and revives carry their explicit ally id: no parties here). Hunters with medics, auto-only hunters and the
+// White Mage + Black Mage duos are described at MIXED_MEDICS, AUTO_ONLY_HUNTERS and Bot.toughFirst; the extra
+// pass marks at MIXED_MIN (docs/load-test.md, "Mixed jobs").
+// --assist <name>: the browser smoke test's two helpers for the adventurer called <name> (see `assist` below).
+//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30] [--fight [--cycle] [--jobs mixed]] [--assist <name>]
 // The server's auth limiter allows 10 logins per IP a minute by default: start it with a higher
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
+  ABILITIES,
+  ALLY_VIEW_R,
+  CAST_MOVE_SCALE,
   DEATH_MIN_S,
+  GUILD_BOARD,
+  JOB_IDS,
   DODGE_MIN_GAP_S,
   ENEMY_ATTACKS,
   ENEMY_KINDS,
@@ -160,8 +172,62 @@ const DODGE_WAIT_MS = 1500;
  * Plan 3: with the jobs' traits, two Warriors kill a camp so fast that 60 s saw only 18-22 dodges
  * against the gate of 20; one each gives 23-31, and the 120 s cycle still passes.)
  */
-const FIGHTERS_PER_ENEMY = 1;
-const FIGHTERS_PER_ELITE = 1;
+const FIGHTERS_PER_ENEMY_PLAN3 = 1;
+const FIGHTERS_PER_ELITE_PLAN3 = 1;
+// --jobs mixed
+/**
+ * With --jobs mixed, camps are fought by several adventurers again (two duos on an ordinary enemy, one
+ * duo on an elite), so shared kill credit, threat from several attackers, ally heals and cross-job
+ * reactions all run under load.
+ */
+const FIGHTERS_PER_ENEMY_MIXED = 2;
+const FIGHTERS_PER_ELITE_MIXED = 2;
+/**
+ * The mixed run's pass marks, on top of the fight run's (measured, with headroom: see docs/load-test.md).
+ * dodges replaces FIGHT_MIN.dodges (multi-fighter camps kill faster, so fewer telegraphs come out).
+ * reactions: each of the four kinds at least this often; revives: completed Second Dawns.
+ */
+const MIXED_MIN = { dodges: 20, casts: 50, reactions: 5, eachReaction: 1, revives: 1 };
+/**
+ * MIXED_MIN's dodges, casts and reactions are per 95 s of fighting, which a 120 s run gives: the bots first spend
+ * about MIXED_WALK_S getting their jobs at the Guild Board and walking to the Greenway. Scaled to --seconds by that.
+ */
+const MIXED_WALK_S = 25;
+const perRun = (n: number) => Math.ceil((n * Math.max(0, seconds - MIXED_WALK_S)) / (120 - MIXED_WALK_S));
+/**
+ * With --jobs mixed three careless hunters with a medic share the farther Mossback: a Dark Knight and a Warrior
+ * (picks with no heal, shield or evasion: they hold it in its Ground Slams and fall) and a Black Mage (Stormcage and
+ * Rootbreak: its lightning on the Soaked Mossback is Conduct). Each is followed by a White Mage with Second Dawn, its
+ * medic (hunter -> medic), which only soaks the hunter's target with Tidelash and revives it. Hunters, medics and
+ * their duo partners fight without a partner of their own.
+ */
+const MIXED_MEDICS: Record<number, number> = { 3: 5, 7: 19, 27: 26 };
+/**
+ * Two more hunters, with no medic, only auto-attack (as a player who never presses a button: no skills, no dodges),
+ * at the nearer Mossback, one at a time: a Dark Knight and a Warrior, whose deaths end in the respawn and the walk back.
+ */
+const AUTO_ONLY_HUNTERS = [31, 35];
+const MIXED_HUNTERS = [...new Set([...Object.keys(MIXED_MEDICS).map(Number), ...AUTO_ONLY_HUNTERS])];
+/**
+ * The Greenway has two Mossbacks (90 s respawn): with --jobs mixed each hunter keeps to one camp (by the camp's index in
+ * greenwayLayout): the auto-only hunters to the nearer (their respawn and walk back must fit in a 120 s run), one at
+ * a time (the one with no medic, which falls and walks back); the hunters with a medic to the farther, together.
+ */
+const HUNTER_CAMP: Record<number, number> = { 3: 4, 7: 4, 27: 4, 31: 5, 35: 5 };
+/**
+ * A hunter's picks with --jobs mixed: no heal, shield or evasion of its own (glass cannons), so that careless solo
+ * fights at a Mossback end in deaths often enough for the revive and the respawn cycle to be exercised.
+ */
+const HUNTER_PICKS: Partial<Record<JobId, readonly [AbilityId, AbilityId]>> = {
+  dark_knight: ['dread_howl', 'umbral_brand'], warrior: ['rallying_roar', 'skullringer'], ninja: ['weak_point', 'quickstep'],
+  black_mage: ['stormcage', 'rootbreak'],
+};
+/** A dead hunter whose medic (Second Dawn ready) is within ALLY_VIEW_R waits this long for a revive before it asks to respawn (ms). */
+const REVIVE_WAIT_MS = 20_000;
+/** A medic keeps within this of its hunter (Second Dawn reaches 12 m), in m. */
+const MEDIC_FOLLOW_M = 8;
+/** A follower (the odd bot of a duo) with nothing to fight walks to its leader once it is farther than this, in m. */
+const DUO_FOLLOW_M = 6;
 /** Path search settings for a bot's walks (camps, the grove's east gate): coarse, so cheap. */
 const PATH_OPTS = { cell: 1, maxNodes: 60_000 };
 /** Clearance kept from walls on a walk (as the browser's tap-to-walk). */
@@ -189,8 +255,28 @@ const { values } = parseArgs({
     cluster: { type: 'string' },
     fight: { type: 'boolean', default: false },
     cycle: { type: 'boolean', default: false },
+    jobs: { type: 'string' },
+    assist: { type: 'string' },
   },
 });
+if (values.jobs !== undefined && (values.jobs !== 'mixed' || !(values.fight || values.cycle))) {
+  console.error('--jobs takes only "mixed", and only with --fight (or --cycle)');
+  process.exit(2);
+}
+/**
+ * --assist <name> (for the browser smoke test): two bots, a Black Mage and a White Mage with Second Dawn, take their
+ * jobs in the grove, then stay by the adventurer called <name>, fight its target and revive it when it falls. They print
+ * `assist: ready` once both are by it, and `assist: <fx>` for each reaction and revive they see. No pass marks: it runs
+ * for --seconds, or until it is stopped.
+ */
+const assist = values.assist ?? null;
+/** --assist: `hold` on stdin makes the helpers stop fighting (they only follow and revive), `fight` lets them fight again. */
+let assistHold = false;
+if (assist !== null) { values.fight = true; values.jobs = 'mixed'; values.count = '2'; values.warmup = '0'; }
+const mixed = values.jobs === 'mixed';
+const FIGHTERS_PER_ENEMY = mixed ? FIGHTERS_PER_ENEMY_MIXED : FIGHTERS_PER_ENEMY_PLAN3;
+const FIGHTERS_PER_ELITE = mixed ? FIGHTERS_PER_ELITE_MIXED : FIGHTERS_PER_ELITE_PLAN3;
+const HUNTERS = mixed ? MIXED_HUNTERS : ELITE_HUNTERS;
 if (!isZoneId(values.zone)) {
   console.error('--zone must be grove or greenway');
   process.exit(2);
@@ -277,8 +363,17 @@ const enemyDeathAt = new Map<number, number>();
 let enemyDeaths = 0;
 /** Kill credits by enemy kind. */
 const killsByKind: Record<string, number> = {};
+/** --jobs mixed, counted by each bot from its own events (fx it caused, messages to it), so nothing twice. */
+const mixedStats = {
+  switches: 0, notHere: 0, casts: 0, castBreaks: {} as Record<string, number>, reactions: {} as Record<string, number>,
+  revives: 0, revivedMsgs: 0, allyHeals: 0, allyHealHp: 0, selfHeals: 0, allyShields: 0, gifts: 0,
+  killsByJob: {} as Record<string, number>, xpByJob: {} as Record<string, number>, abilityAlly: 0,
+};
+const bump = (r: Record<string, number>, k: string, n = 1) => { r[k] = (r[k] ?? 0) + n; };
 /** The most enemies one bot's state held at once. */
 let mostEnemiesInView = 0;
+/** `self` messages without the job fields the server always sends (job, dodgeMax, cast). */
+let selfFieldsMissing = 0;
 
 /** The Greenway camps with an elite. */
 let eliteCampList: number[] | null = null;
@@ -291,6 +386,13 @@ function telegraphShape(t: { shape: string; x: number; z: number; dir: number; r
   if (t.shape === 'cone') return { kind: 'cone', x: t.x, z: t.z, dir: t.dir, r: t.r, angle: t.angle };
   if (t.shape === 'line') return { kind: 'line', x: t.x, z: t.z, dir: t.dir, length: t.r, width: t.width };
   return { kind: 'circle', x: t.x, z: t.z, r: t.r };
+}
+
+/** The enemy with engine id `eid` in a room's state (its view), if it holds it. */
+function findEnemy(room: Room<any, any>, eid: number): any {
+  let found: any = null;
+  room.state.enemies?.forEach((e: any) => { if (e.eid === eid) found = e; });
+  return found;
 }
 
 class Bot {
@@ -348,6 +450,8 @@ class Bot {
   readonly hunter: boolean;
   /** Times it was back in the Greenway after a death. */
   returned = 0;
+  /** Times it was revived where it fell (Second Dawn) after a death. */
+  revivedBack = 0;
   private memory: BrainMemory = newBrainMemory();
   private selfView: SelfView | null = null;
   private selfAt = 0;
@@ -413,7 +517,8 @@ class Bot {
   private jobAskedAt = -Infinity;
   /** It runs the job and picks it fights with. */
   private get jobReady(): boolean {
-    return this.jobNow.job === this.loadout.job && this.jobNow.picks[0] === this.loadout.picks[0] && this.jobNow.picks[1] === this.loadout.picks[1];
+    return this.jobNow.job === this.loadout.job && this.jobNow.picks[0] === this.loadout.picks[0] && this.jobNow.picks[1] === this.loadout.picks[1]
+      && (!mixed || this.switchCounted); // mixed: every bot asks for its job at the board, its own included
   }
   /** Sprinting (by the browser's rule: from Sprint's `use` fx) until then (performance.now ms). */
   private sprintUntil = -Infinity;
@@ -429,9 +534,16 @@ class Bot {
   sprintMoves = 0;
   /** What became of early second rolls that were not answered by their own `displaced` (for the log). */
   earlyLost: string[] = [];
+  /** Early second rolls replaced by a knock or a respawn that the server sent first. */
+  earlySuperseded = 0;
   /** Drops the outstanding predictions (the server's displacement or correction wins), noting lost early rolls. */
-  private dropPredictions(why: string) {
-    for (const p of this.predictions) if (p.early) this.earlyLost.push(`${this.name}: ${why}`);
+  private dropPredictions(why: string, superseded = false) {
+    for (const p of this.predictions) {
+      if (!p.early) continue;
+      // a knock (or a respawn) the server sent before it answered the roll replaces it: no false refusal (counted apart)
+      if (superseded) this.earlySuperseded++;
+      else this.earlyLost.push(`${this.name}: ${why}`);
+    }
     this.predictions = [];
     this.secondDodge = null;
   }
@@ -441,14 +553,62 @@ class Bot {
   /** The first time it was stuck for TICK_HZ ticks: where, and where to. */
   stallLog: string | null = null;
 
+  // --jobs mixed
+  /** Its duo partner's index (index ^ 1), or null (none, or a hunter and its medic: see MIXED_HUNTERS). */
+  readonly partner: number | null;
+  /** The White Mage that follows a hunter to revive it (the hunter's index). */
+  readonly medicOf: number | null;
+  /** A White Mage leading a Black Mage: it picks the toughest enemy in reach rather than the nearest, and keeps its Soaked for its partner. */
+  readonly toughFirst: boolean;
+  /** It walked to the Guild Board, its job change was confirmed, its Greenway job change was refused. */
+  private atBoard = false;
+  private switchCounted = false;
+  private notHereSent = false;
+  private notHereCounted = false;
+  /** --assist: in the Greenway with its job. */
+  assistReady = false;
+  /** When it pressed an ability with a cast (it walks at CAST_MOVE_SCALE until that cast ends). */
+  private castSince: number | null = null;
+  private castFor = 0;
+
   constructor(readonly index: number) {
     this.careful = index % 4 !== 3;
-    this.hunter = fight && ELITE_HUNTERS.includes(index);
-    this.sprinter = fight && index % 5 === SPRINTER;
+    this.hunter = fight && HUNTERS.includes(index);
     this.predictor = fight && index % 5 === PREDICTOR;
+    if (assist !== null) {
+      const job: JobId = index === 0 ? 'black_mage' : 'white_mage';
+      this.careful = true; this.hunter = false; this.predictor = false; this.sprinter = false;
+      this.partner = null; this.medicOf = null; this.toughFirst = false;
+      this.loadout = { job, picks: [JOBS[job].picks.duo[0], JOBS[job].picks.duo[1]] };
+      return;
+    }
+    if (mixed) {
+      const job = JOB_IDS[index % JOB_IDS.length];
+      const hunted = MIXED_HUNTERS.find((h) => MIXED_MEDICS[h] === index && h < count);
+      this.medicOf = hunted ?? null;
+      const special = (k: number) => MIXED_HUNTERS.includes(k) || Object.values(MIXED_MEDICS).includes(k);
+      this.partner = special(index) || special(index ^ 1) || (index ^ 1) >= count ? null : index ^ 1;
+      this.sprinter = job === 'ranger' && index % 5 === SPRINTER;
+      const picks = this.sprinter ? SPRINTER_PICKS : this.hunter ? HUNTER_PICKS[job] ?? JOBS[job].picks.solo
+        : this.partner !== null || this.medicOf !== null ? JOBS[job].picks.duo : JOBS[job].picks.solo;
+      this.loadout = { job, picks: [picks[0], picks[1]] };
+      this.toughFirst = job === 'white_mage' && this.partner !== null && JOB_IDS[this.partner % JOB_IDS.length] === 'black_mage';
+      return;
+    }
+    this.partner = null;
+    this.medicOf = null;
+    this.toughFirst = false;
+    this.sprinter = fight && index % 5 === SPRINTER;
     this.loadout = this.sprinter ? { job: 'ranger', picks: SPRINTER_PICKS }
       : fight && index % 4 === 1 ? { job: 'ranger', picks: [JOBS.ranger.picks.solo[0], JOBS.ranger.picks.solo[1]] } : NEW_LOADOUT;
   }
+
+  /** The job it fights as (for kills and xp by job). */
+  get job(): JobId { return this.jobNow.job; }
+  /** The target it last sent (for its partner), and its engine id in its room. */
+  get target(): number | null { return this.sentTarget; }
+  get eid(): number | undefined { return this.room?.state.players?.get(this.room.sessionId)?.eid; }
+  get isDead(): boolean { return this.room ? this.dead : false; }
 
   async join() {
     const res = await fetch(`${url}/api/guest`, { method: 'POST' });
@@ -469,7 +629,7 @@ class Bot {
   private askJob(now: number) {
     if (this.jobReady || now - this.jobAskedAt < JOB_RETRY_MS) return;
     this.jobAskedAt = now;
-    if (this.jobNow.job !== this.loadout.job) this.room.send('job', { job: this.loadout.job });
+    if (mixed ? !this.switchCounted : this.jobNow.job !== this.loadout.job) this.room.send('job', { job: this.loadout.job });
     this.room.send('loadout', { picks: this.loadout.picks });
   }
 
@@ -497,9 +657,23 @@ class Bot {
     };
     room.onMessage('*', () => {});
     room.onMessage('self', (m: S2C['self']) => { this.selfView = m; this.selfAt = performance.now(); });
-    room.onMessage('jobs', (m: S2C['jobs']) => { this.jobNow = { job: m.current, picks: [m.jobs[m.current].picks[0], m.jobs[m.current].picks[1]] }; });
+    room.onMessage('jobs', (m: S2C['jobs']) => {
+      this.jobNow = { job: m.current, picks: [m.jobs[m.current].picks[0], m.jobs[m.current].picks[1]] };
+      // a job change it asked for (at the Guild Board), confirmed: counted once per bot
+      if (mixed && !this.switchCounted && this.jobAskedAt > -Infinity && m.current === this.loadout.job) { this.switchCounted = true; mixedStats.switches++; }
+    });
     room.onMessage('fx', (m: S2C['fx']) => this.onFx(m));
-    room.onMessage('credit', (m: S2C['credit']) => { this.kills++; killsByKind[m.kind] = (killsByKind[m.kind] ?? 0) + 1; });
+    room.onMessage('credit', (m: S2C['credit']) => {
+      this.kills++;
+      killsByKind[m.kind] = (killsByKind[m.kind] ?? 0) + 1;
+      bump(mixedStats.killsByJob, this.jobNow.job);
+    });
+    room.onMessage('jobXp', (m: S2C['jobXp']) => bump(mixedStats.xpByJob, m.job, m.gained));
+    room.onMessage('revived', () => {
+      mixedStats.revivedMsgs++;
+      this.deadSince = null;
+      if (this.diedAt !== null) { this.revivedBack++; this.diedAt = null; } // up again where it fell: not on its way back
+    });
     // A predictor sees what moves it late (a slow downlink), all by the same lag, so in order.
     const lag = this.predictor ? predictorLagMs(this.index) : 0;
     const late = <T,>(fn: (m: T) => void) => (m: T) => {
@@ -519,7 +693,7 @@ class Bot {
       else if (m.kind === 'dodge') this.dodgesRolled++;
       else this.resyncs++;
       const predicted = m.kind === 'dodge' ? this.predictions.shift() : undefined;
-      if (m.kind !== 'dodge') this.dropPredictions(`a ${m.kind} (seq ${m.seq}) came first`); // the server's displacement wins
+      if (m.kind !== 'dodge') this.dropPredictions(`a ${m.kind} (seq ${m.seq}) came first`, m.kind === 'knock'); // the server's displacement wins
       if (predicted) {
         // its own roll, already played: only the ack changes, unless the server's end is elsewhere
         if (predicted.early) this.earlyRolled++;
@@ -541,7 +715,7 @@ class Bot {
         this.busyUntil = performance.now() + sim.seconds * 1000;
       }
     }));
-    room.onMessage('respawned', late((m: S2C['respawned']) => { this.dropPredictions('respawned'); moved(m, m.seq); }));
+    room.onMessage('respawned', late((m: S2C['respawned']) => { this.dropPredictions('respawned', true); moved(m, m.seq); }));
     room.onMessage('travel', (m: S2C['travel']) => {
       if (!fight) { this.travelled = true; return; }
       this.switchingTo = m.zone;
@@ -621,6 +795,7 @@ class Bot {
     this.telegraphSeen.clear();
     this.windupSeen.clear();
     this.memory = newBrainMemory();
+    this.castSince = null;
     this.settleUntil = performance.now() + SETTLE_MS;
     this.lastStepAt = 0;
     if (this.zone === 'greenway' && this.diedAt !== null) { this.returned++; this.diedAt = null; } // back where it fights
@@ -729,6 +904,20 @@ class Bot {
     for (const e of m.events) {
       // the browser's rule: faster from Sprint's `use`, until a little before it ends
       if (e.t === 'use' && e.src === mine && e.ability === 'sprint') { this.sprintUntil = now + (SPRINT_S - SPRINT_EARLY_S) * 1000; this.sprints++; }
+      if (assist !== null && this.index === 0 && (e.t === 'react' || e.t === 'revive')) console.log(`assist: ${JSON.stringify(e)}`);
+      if (mixed && mine !== undefined && 'src' in e && e.src === mine) {
+        if (e.t === 'cast') mixedStats.casts++;
+        else if (e.t === 'castEnd') {
+          this.castSince = null;
+          if (!e.ok) bump(mixedStats.castBreaks, e.reason ?? '?');
+        } else if (e.t === 'react') bump(mixedStats.reactions, e.reaction);
+        else if (e.t === 'revive') mixedStats.revives++;
+        else if (e.t === 'heal') {
+          if (e.dst === mine) mixedStats.selfHeals++;
+          else { mixedStats.allyHeals++; mixedStats.allyHealHp += e.amount; }
+        } else if (e.t === 'shield' && e.dst !== mine) mixedStats.allyShields++;
+        else if (e.t === 'gift' && e.dst !== mine) mixedStats.gifts++;
+      }
       if (e.t !== 'death' || !enemyKinds.has(e.dst)) continue;
       // every bot that sees it gets the event: count it once (an enemy waits at least 5 s to respawn)
       const last = enemyDeathAt.get(e.dst);
@@ -744,6 +933,7 @@ class Bot {
   private onRefused(m: S2C['refused']) {
     const key = `${m.action} ${m.reason}`;
     this.refusals[key] = (this.refusals[key] ?? 0) + 1;
+    if (m.action === 'job' && m.reason === 'not-here' && this.notHereSent && !this.notHereCounted) { this.notHereCounted = true; mixedStats.notHere++; }
     if (m.action !== 'dodge') return;
     this.dodgeSentAt = null;
     // A predicted roll is undone, as the browser does: back where it was sent from (any later prediction
@@ -862,15 +1052,75 @@ class Bot {
       const elite = ENEMY_KINDS[e.kind as EnemyKindId]?.elite === true;
       // an elite a hunter is on is left to it: not kept, not fought back, not picked (it stays solo)
       if (!this.hunter && elite && hunted.has(e.eid)) return;
+      // with --jobs mixed a hunter with no medic also leaves an elite another hunter is on (unless it is attacking this one), so its fight stays solo
+      if (mixed && this.hunter && MIXED_MEDICS[this.index] === undefined && elite && hunted.has(e.eid) && e.eid !== this.sentTarget && e.target !== mine) return;
       const d = dist(e, this.body);
       if (e.eid === this.sentTarget && d <= TARGET_RANGE + 5) current = e;
       if (e.target === mine && d <= TARGET_RANGE) attacker = e;
       // a hunter takes only an elite (whoever else is on it); the others leave elites to one adventurer
       if (this.hunter ? !elite : (claimed.get(e.eid) ?? 0) >= (elite ? FIGHTERS_PER_ELITE : FIGHTERS_PER_ENEMY)) return;
-      if (d <= bestD) { best = e; bestD = d; }
+      // a White Mage leading a Black Mage takes the toughest enemy in reach (its partner needs a fight long enough for
+      // Skyfall Arc on its Soaked: Conduct); everyone else the nearest
+      if (this.toughFirst && elite) return; // (it leaves elites to others)
+      if (this.toughFirst ? !best || e.hp > best.hp || (e.hp === best.hp && d < bestD) : d <= bestD) { best = e; bestD = d; }
     });
     mostEnemiesInView = Math.max(mostEnemiesInView, n);
+    if (assist !== null) {
+      if (assistHold) return null;
+      // the adventurer it assists: its target while that lives near, else whatever attacks the bot
+      const p = this.assisted();
+      const e = p && p.target >= 0 ? findEnemy(this.room, p.target) : null;
+      return e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5 ? e : attacker;
+    }
+    if (this.medicOf !== null) {
+      // a medic soaks its hunter's target (for the hunter's lightning: Conduct), or fights back
+      const h = bots[this.medicOf];
+      const e = h && h.zone === this.zone && !h.isDead && h.target !== null ? findEnemy(this.room, h.target) : null;
+      return e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5 ? e : attacker;
+    }
+    // the odd bot of a duo takes its leader's target (the leader never follows, so they never chase each other's)
+    const leader = this.partner !== null && (this.index & 1) === 1 ? bots[this.partner] : null;
+    if (leader && leader.zone === this.zone && !leader.switching && leader.target !== null) {
+      const e = findEnemy(this.room, leader.target);
+      if (e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5) return e;
+    }
     return current ?? attacker ?? best;
+  }
+
+  /** --assist: the adventurer it assists, as its state holds it (null: not in view, or no --assist). */
+  private assisted(): any {
+    if (assist === null) return null;
+    let found: any = null;
+    this.room.state.players?.forEach((p: any) => { if (typeof p.name === 'string' && p.name.toLowerCase() === assist.toLowerCase()) found = p; });
+    return found;
+  }
+
+  /** The other adventurers its state holds within ALLY_VIEW_R (dead ones included), as the brain wants them. */
+  private alliesInView(mine: number): CombatantView[] {
+    const out: CombatantView[] = [];
+    this.room.state.players?.forEach((p: any) => {
+      if (p.eid === mine || dist(p, this.body) > ALLY_VIEW_R) return;
+      if (assist !== null && !p.dead) return; // --assist: it revives, but never heals or shields (the smoke test's adventurer must fall)
+      out.push({
+        id: p.eid, team: 'adventurer', kind: 'adventurer', x: p.x, z: p.z, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp,
+        alive: !p.dead, shield: p.shield ?? 0, marks: 0, stagger: 0, maxStagger: 0, targetId: p.target < 0 ? null : p.target,
+        act: (p.act || '') as Act, windup: null, job: p.job as JobId, buffs: p.buffs ?? 0,
+      });
+    });
+    return out;
+  }
+
+  /** A live White Mage with Second Dawn ready (by its last `self`), in the room and not travelling. */
+  get reviveReady(): boolean {
+    if (this.switching || this.disconnected || !this.room || this.dead || this.jobNow.job !== 'white_mage') return false;
+    const s = this.agedSelf(performance.now());
+    const slot = s ? s.slots.indexOf('second_dawn') : -1;
+    return s !== null && slot >= 0 && s.cd[slot] <= 0;
+  }
+
+  /** Its medic (a hunter's White Mage) is within ALLY_VIEW_R in its zone and could revive it now. */
+  private mageNear(): boolean {
+    return bots.some((b) => b.medicOf === this.index && b.zone === this.zone && b.reviveReady && dist(b.position, this.body) <= ALLY_VIEW_R);
   }
 
   /** One tick of a fighting bot (see the file comment). */
@@ -883,7 +1133,9 @@ class Bot {
     if (!me || now < this.settleUntil) return;
     if (me.dead) {
       this.deadSince ??= now;
-      if (now - this.deadSince >= DEATH_MIN_S * 1000 + 300 && now - this.respawnAskedAt >= 1000) {
+      // with a White Mage near whose Second Dawn is ready (as far as it can tell), it lies a while for a revive
+      const waitMs = mixed && now - this.deadSince < REVIVE_WAIT_MS && this.mageNear() ? REVIVE_WAIT_MS : DEATH_MIN_S * 1000 + 300;
+      if (now - this.deadSince >= waitMs && now - this.respawnAskedAt >= 1000) {
         this.respawnAskedAt = now;
         this.room.send('respawn', {});
       }
@@ -909,6 +1161,11 @@ class Bot {
     if (this.zone !== 'greenway') {
       // In the grove (a town) it takes its job first, standing; then (back from a death, or started in
       // the grove, or come for its job) to the east gate, and through it.
+      if (mixed && !this.jobReady && !this.atBoard) {
+        // to the Guild Board first, as a player would
+        if (dist(GUILD_BOARD, this.body) > 2) return this.walkRoute(GUILD_BOARD, dt, now, 1, false);
+        this.atBoard = true;
+      }
       if (!this.jobReady) return this.askJob(now);
       this.maybeSprint(dist(GROVE_EAST_GATE, this.body), this.agedSelf(now) ?? this.freshSelf(), now);
       this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
@@ -918,6 +1175,15 @@ class Bot {
       // Its job can only be taken in a town: out through the west gate into the grove first.
       this.walkRoute(greenwayLayout().westGate, dt, now, 1, true);
       return;
+    }
+    if (assist !== null && !this.assistReady && this.jobReady) {
+      this.assistReady = true;
+      if (bots.every((b) => b.assistReady)) console.log('assist: ready');
+    }
+    if (mixed && assist === null && !this.notHereSent) {
+      // once, on its first arrival: the Greenway is no town, so this is refused 'not-here'
+      this.notHereSent = true;
+      this.room.send('job', { job: JOB_IDS[(this.index + 1) % JOB_IDS.length] });
     }
 
     const target = this.chooseEnemy();
@@ -936,12 +1202,29 @@ class Bot {
       targetId: me.target < 0 ? null : me.target, act: (me.act || '') as Act, windup: null, ...sv,
       job, dodgeMax: sv.dodgeMax ?? JOBS[job].dodgeCharges, cast: sv.cast ?? null,
     };
+    // the server's `self` always carries job, dodgeMax and cast (Plan 3b Task 6): one without them is a protocol fault
+    if (this.selfView && (this.selfView.dodgeMax === undefined || this.selfView.job === undefined || this.selfView.cast === undefined)) selfFieldsMissing++;
     const telegraphs = this.telegraphs(now);
     for (const t of telegraphs) if (inShape(t.shape, this.body.x, this.body.z)) this.inside.add(t.id);
-    // (no allies: these bots fight alone, as Plan 3's did; mixed-job bots that help each other are Task 9's)
-    const act = adventurerBrain({ nowS: now / 1000, careful: this.careful, self, allies: [], target: target ? this.enemyView(target, now) : null, telegraphs }, this.memory);
+    // Allies: the other adventurers in its view within ALLY_VIEW_R, dead ones included (Plan 3 bots fight
+    // alone: none). Heals, shields and revives on them carry their id: the engine's automatic pick reaches
+    // party members only (Plan 4), and these bots are in no party, so only an explicit ally id helps them.
+    const allies = mixed ? this.alliesInView(me.eid) : [];
+    const act = adventurerBrain({ nowS: now / 1000, careful: this.careful, self, allies, target: target ? this.enemyView(target, now) : null, telegraphs }, this.memory);
+    // an auto-only hunter presses nothing and never dodges: it walks where the brain goes and lets its autos run
+    if (mixed && assist === null && AUTO_ONLY_HUNTERS.includes(this.index)) act.intents = act.intents.filter((i) => i.t === 'target');
+    if (assistHold) act.intents = act.intents.filter((i) => i.t !== 'ability' || ABILITIES[sv.slots[i.slot]]?.ai === 'revive');
+    // a medic presses only its quick skill (Tidelash: Soaked on the hunter's target) and its revive: no heals or
+    // shields for the hunter, which is there to fall
+    if (this.medicOf !== null) act.intents = act.intents.filter((i) => i.t !== 'ability' || ABILITIES[sv.slots[i.slot]]?.role === 'quick' || ABILITIES[sv.slots[i.slot]]?.ai === 'revive');
+    // a White Mage leading a Black Mage keeps its Soaked for its partner's lightning (Conduct): it never spends it on
+    // its own finisher, Lantern Flare (its other skills as the brain says)
+    if (this.toughFirst) act.intents = act.intents.filter((i) => !(i.t === 'ability' && i.phase === 'press' && ABILITIES[sv.slots[i.slot]]?.role === 'finisher'));
     if (sv.charge === null && this.chargeSince !== null && now - this.chargeSince > 1000) this.chargeSince = null;
-    const scale = this.chargeSince !== null || sv.charge !== null || me.act === 'charge' ? CHARGE_WALK_SCALE : 1;
+    // a cast slows it to CAST_MOVE_SCALE from the press (the server: from CHARGE_SLOW_GRACE_S in) until its castEnd
+    if (this.castSince !== null && now - this.castSince > (this.castFor + 1.5) * 1000) this.castSince = null;
+    const casting = this.castSince !== null || (sv.cast !== null && sv.cast !== undefined) || (me.cast ?? '') !== '';
+    const scale = this.chargeSince !== null || sv.charge !== null || me.act === 'charge' ? CHARGE_WALK_SCALE : casting ? CAST_MOVE_SCALE : 1;
     this.lastScale = `scale ${scale}, act '${me.act}', charge ${sv.charge}, pressed ${((now - this.pressedAt) / 1000).toFixed(2)} s ago, self ${((now - this.selfAt) / 1000).toFixed(2)} s old`;
 
     for (const i of act.intents) {
@@ -949,8 +1232,11 @@ class Bot {
         if (i.phase === 'press') {
           this.pressedAt = now;
           if (sv.slots[i.slot] === 'charged_shot') this.chargeSince = now;
+          const castS = ABILITIES[sv.slots[i.slot]]?.cast ?? 0;
+          if (castS > 0) { this.castSince = now; this.castFor = castS; }
         } else this.releasedAt = now;
-        this.room.send('ability', { slot: i.slot, phase: i.phase });
+        if (i.ally !== undefined) mixedStats.abilityAlly++;
+        this.room.send('ability', i.ally === undefined ? { slot: i.slot, phase: i.phase } : { slot: i.slot, phase: i.phase, ally: i.ally });
       } else if (i.t === 'dodge') {
         if (this.predictor) {
           // rolls at once (predicted), and again from its end after the gap when both charges are there
@@ -975,6 +1261,25 @@ class Bot {
       }
       return;
     }
+    // A medic stays near its hunter; the odd bot of a duo goes where its leader is.
+    const leadBot = this.medicOf !== null ? bots[this.medicOf] : this.partner !== null && (this.index & 1) === 1 ? bots[this.partner] : null;
+    const assisted = this.assisted();
+    const leadAt = assisted ? { x: assisted.x, z: assisted.z }
+      : leadBot && leadBot.zone === this.zone && !leadBot.switching && !leadBot.disconnected ? leadBot.position : null;
+    if (assist !== null && !leadAt) return; // not in view: it waits where it is
+    if (leadAt) {
+      const keep = this.medicOf !== null || (assist !== null && this.index === 1) ? MEDIC_FOLLOW_M : DUO_FOLLOW_M;
+      const d = dist(leadAt, this.body);
+      this.campGoal = null;
+      if (d > keep) {
+        const p = leadAt, k = (keep - 2) / d;
+        let spot = { x: p.x + (this.body.x - p.x) * k, z: p.z + (this.body.z - p.z) * k };
+        if (!passableIn(this.zone)(spot.x, spot.z)) spot = { x: p.x, z: p.z };
+        this.maybeSprint(d, sv, now);
+        this.walkRoute(spot, dt, now, scale, false);
+      } else if (act.moveTo) this.walkRoute(act.moveTo, dt, now, scale, false);
+      return;
+    }
     // Nothing to fight in range: to the nearest camp not visited lately, where it waits a while at a
     // spot just outside it (clear of every spawn point, so it never holds a respawn up).
     const camps = greenwayLayout().camps;
@@ -985,7 +1290,9 @@ class Bot {
         if (visited !== undefined && now - visited < CAMP_REVISIT_MS) return;
         // the first walk spreads the bots over the camps; after that, the nearest
         // (a hunter: the Mossback camps only, the nearest first)
-        const first = this.hunter ? (eliteCamps().includes(k) ? dist(c, this.body) : Infinity) : k === this.index % camps.length ? 0 : Infinity;
+        const mine = mixed ? HUNTER_CAMP[this.index] : undefined;
+        const first = this.hunter ? (mine !== undefined ? (k === mine ? 0 : Infinity) : eliteCamps().includes(k) ? dist(c, this.body) : Infinity)
+          : k === (mixed ? this.index >> 1 : this.index) % camps.length ? 0 : Infinity;
         const d = this.campVisited.size === 0 || this.hunter ? first : dist(c, this.body);
         if (d < bestD) { best = k; bestD = d; }
       });
@@ -1145,6 +1452,15 @@ try {
   process.exit(1);
 }
 bots.forEach((bot) => bot.start());
+if (assist !== null) {
+  // the smoke test stops its helpers with SIGTERM: they leave their rooms first, so they are not left online
+  process.on('SIGTERM', () => { void Promise.all(bots.map((bot) => bot.stop())).finally(() => process.exit(0)); });
+  process.stdin.setEncoding('utf8').on('data', (d: string) => {
+    for (const line of d.split('\n').map((l) => l.trim())) {
+      if (line === 'hold' || line === 'fight') { assistHold = line === 'hold'; console.log(`assist: ${line}`); }
+    }
+  });
+}
 const zones = [...new Set(bots.map((bot) => bot.zone))].join(', ');
 console.log(`All ${count} joined (${zones}); ${fight ? 'fighting' : stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
 await sleep(warmupMs);
@@ -1237,21 +1553,37 @@ for (const bot of bots) for (const [k, v] of Object.entries(bot.rollbacksByReaso
 const falseRollbacks = Object.entries(rollbacksByReason).filter(([k]) => !RACY_ROLLBACKS.includes(k));
 const earlySent = sum((bot) => bot.earlySent);
 const earlyRolled = sum((bot) => bot.earlyRolled);
+const earlySuperseded = sum((bot) => bot.earlySuperseded);
 if (fight) {
   const refusals: Record<string, number> = {};
   for (const bot of bots) for (const [k, v] of Object.entries(bot.refusals)) refusals[k] = (refusals[k] ?? 0) + v;
   const carelessDeaths = sum((bot) => (bot.careful ? 0 : bot.deaths));
   console.log(`fight (over the whole run): kills credited ${kills} ${JSON.stringify(killsByKind)} (enemy deaths seen: ${enemyDeaths}); deaths ${deaths} (${carelessDeaths} careless, ${deaths - carelessDeaths} careful)`);
   console.log(`  dodges sent ${sum((bot) => bot.dodgesSent)}, rolled ${dodges}; knockbacks ${knocks}; resyncs ${sum((bot) => bot.resyncs)}; dodge rollbacks (correct after an engine refusal) ${sum((bot) => bot.rollbacks)} ${JSON.stringify(rollbacksByReason)}; displacement ends off the bot's own simulation ${sum((bot) => bot.displaceMismatch)}`);
-  console.log(`  predictors (${bots.filter((bot) => bot.predictor).length}): second rolls sent before the first's displaced ${earlySent}, rolled ${earlyRolled}; sprinters: ${bots.filter((bot) => bot.sprinter).length} at full speed, ${sum((bot) => bot.sprints)} sprints, ${sum((bot) => bot.sprintMoves)} moves sent sprinting`);
+  console.log(`  predictors (${bots.filter((bot) => bot.predictor).length}): second rolls sent before the first's displaced ${earlySent}, rolled ${earlyRolled}, replaced by a knock ${earlySuperseded}; sprinters: ${bots.filter((bot) => bot.sprinter).length} at full speed, ${sum((bot) => bot.sprints)} sprints, ${sum((bot) => bot.sprintMoves)} moves sent sprinting`);
   console.log(`  telegraphs a bot stood in: ${sum((bot) => bot.inside.size)} (careful bots: ${sum((bot) => (bot.careful ? bot.inside.size : 0))})`);
-  console.log(`  back in the Greenway after a death (respawn at the statue, walk to the east gate, travel): ${returned}; hunters' deaths ${sum((bot) => (bot.hunter ? bot.deaths : 0))}`);
+  console.log(`  back in the Greenway after a death (respawn at the statue, walk to the east gate, travel): ${returned}; revived where they fell ${sum((bot) => bot.revivedBack)}; hunters' deaths ${sum((bot) => (bot.hunter ? bot.deaths : 0))}`);
   console.log(`  travels ${sum((bot) => bot.travels)}; where the bots are at the end: ${JSON.stringify(zoneNow)}; died and not on their way back: ${stuckAfterDeath.length}`);
   console.log(`  refusals: ${Object.keys(refusals).length ? Object.entries(refusals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ') : 'none'}`);
   console.log(`  enemies alive (seen by some bot, sampled each second): min ${aliveMin === Infinity ? 0 : aliveMin}, max ${aliveMax}; enemies ever seen ${enemyKinds.size}; most in one bot's view ${mostEnemiesInView}`);
+  if (mixed) {
+    const m = mixedStats;
+    const jobsOf = bots.reduce<Record<string, number>>((n, bot) => (bump(n, bot.job), n), {});
+    const show = (r: Record<string, number>) => JSON.stringify(Object.fromEntries(Object.entries(r).sort()));
+    console.log(`jobs (--jobs mixed): bots by job ${show(jobsOf)}; duos ${bots.filter((b) => b.partner !== null && (b.index & 1) === 0 && b.partner < count).length}, hunters ${bots.filter((b) => b.hunter).length} with medics ${bots.filter((b) => b.medicOf !== null).length}`);
+    console.log(`  job switches accepted at the Guild Board ${m.switches} of ${count}; Greenway switches refused 'not-here' ${m.notHere} of ${count}`);
+    console.log(`  casts ${m.casts}; cast breaks ${show(m.castBreaks)}; reactions ${show(m.reactions)}; revives ${m.revives} (revived messages ${m.revivedMsgs})`);
+    console.log(`  ally heals ${m.allyHeals} (${m.allyHealHp} hp), self heals ${m.selfHeals}, ally shields ${m.allyShields}, Momentum gifts ${m.gifts}; presses with an explicit ally id ${m.abilityAlly}`);
+    console.log(`  kills by job ${show(m.killsByJob)}; xp gained by job ${show(m.xpByJob)}`);
+  }
   console.log(`  fx events per bot a second: ${(sum((bot) => bot.fxEvents) / count / Math.max(1, measured + warmupMs / 1000)).toFixed(2)}; lowest hp a bot was seen alive at: ${Math.min(...bots.map((bot) => bot.hpSeenMin))}`);
 }
 
+if (assist !== null) {
+  // the smoke test's helpers have no pass marks of their own
+  console.log(lost.length ? `assist: ${lost.length} bots disconnected` : 'assist: done');
+  process.exit(0);
+}
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);
 // (Standing bots too: the state's `clock` changes every step, so a patch goes out every step.)
@@ -1261,12 +1593,31 @@ if (airStalls) failures.push(`${airStalls} ticks in the air had no pose the serv
 if (longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
 if (fight) {
   if (kills < FIGHT_MIN.kills) failures.push(`${kills} kills credited, fewer than ${FIGHT_MIN.kills}`);
-  if (dodges < FIGHT_MIN.dodges) failures.push(`${dodges} dodges rolled, fewer than ${FIGHT_MIN.dodges}`);
+  const minDodges = mixed ? perRun(MIXED_MIN.dodges) : FIGHT_MIN.dodges;
+  if (dodges < minDodges) failures.push(`${dodges} dodges rolled, fewer than ${minDodges}`);
+  if (selfFieldsMissing) failures.push(`${selfFieldsMissing} self messages without job, dodgeMax or cast`);
+  if (mixed) {
+    const m = mixedStats;
+    if (m.switches !== count) failures.push(`${m.switches} of ${count} job switches accepted at the Guild Board`);
+    if (m.notHere !== count) failures.push(`${m.notHere} of ${count} Greenway job switches refused 'not-here'`);
+    const noKills = JOB_IDS.filter((j) => !(m.killsByJob[j] > 0));
+    if (noKills.length) failures.push(`no kills as ${noKills.join(', ')}`);
+    if (m.casts < perRun(MIXED_MIN.casts)) failures.push(`${m.casts} casts, fewer than ${perRun(MIXED_MIN.casts)}`);
+    const reactions = Object.values(m.reactions).reduce((a, b) => a + b, 0);
+    if (reactions < perRun(MIXED_MIN.reactions)) failures.push(`${reactions} reactions, fewer than ${perRun(MIXED_MIN.reactions)}`);
+    if (cycle) {
+      const missing = (['blast', 'conduct', 'steam', 'bedrock'] as const).filter((r) => !((m.reactions[r] ?? 0) >= MIXED_MIN.eachReaction));
+      if (missing.length) failures.push(`no ${missing.join(', ')} reaction`);
+      if (m.revives < MIXED_MIN.revives) failures.push(`${m.revives} revives, fewer than ${MIXED_MIN.revives}`);
+    }
+  }
   if (knocks < FIGHT_MIN.knocks) failures.push(`${knocks} knockbacks, fewer than ${FIGHT_MIN.knocks}`);
   if (falseRollbacks.length) failures.push(`dodge rollbacks for reasons that cannot follow a legal dodge: ${falseRollbacks.map(([k, v]) => `${k} ${v}`).join(', ')}`);
   if (earlySent < FIGHT_MIN.earlyRolls) failures.push(`${earlySent} predicted second rolls sent before the first's displaced, fewer than ${FIGHT_MIN.earlyRolls}`);
   if (sum((bot) => bot.sprintMoves) < 1) failures.push('no move was sent at Sprint speed');
-  if (earlyRolled < earlySent) failures.push(`${earlySent - earlyRolled} of ${earlySent} predicted second rolls were not rolled`);
+  // (a roll sent in the run's last moments has no answer yet when the bots stop: not a failure)
+  const earlyLeft = sum((bot) => bot.predictionsLeft);
+  if (earlyRolled + earlySuperseded + earlyLeft < earlySent) failures.push(`${earlySent - earlyRolled - earlySuperseded - earlyLeft} of ${earlySent} predicted second rolls were not rolled (nor replaced by a knock, nor sent too late to be answered)`);
   if (cycle && deaths < CYCLE_MIN.deaths) failures.push(`${deaths} deaths, fewer than ${CYCLE_MIN.deaths}`);
   if (cycle && returned < CYCLE_MIN.returned) failures.push(`${returned} bots back in the Greenway after a death, fewer than ${CYCLE_MIN.returned}`);
   if (stuckAfterDeath.length) failures.push(`${stuckAfterDeath.length} bots died and are not on their way back (first: ${stuckAfterDeath[0].name}, in ${stuckAfterDeath[0].zone})`);
