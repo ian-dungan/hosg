@@ -185,7 +185,8 @@ describe('kitFor', () => {
     expect(warrior.stats).toEqual({ power: 13, defence: 14, maxHp: 130, focus: 0, flow: 12, guard: 0 });
     expect(warrior.mods).toEqual([...SETS.cinderstep.bonus3, ...SETS.cinderstep.bonus5]);
     const t3 = kitFor({ job: 'warrior', level: 10, gear: full(3, 'warrior'), talents: [] });
-    expect(t3.stats).toMatchObject({ power: 20, defence: 24, maxHp: 180, flow: 20 });
+    // T3 as tuned by Plan 5 Task 5 (was 20 / 24 / 180 / 20)
+    expect(t3.stats).toMatchObject({ power: 17.3, defence: 20, maxHp: 158, flow: 14 });
     expect(t3.mods).toEqual([...SETS.tollwind.bonus3, ...SETS.tollwind.bonus5, ...ITEMS.last_bell!.named!.mods]);
     const pal = kitFor({ job: 'paladin', level: 10, gear: full(2, 'paladin'), talents: [] }).stats;
     expect(pal.defence).toBeCloseTo(8 + 6 * TYPE_MULT.heavy.defence, 9);

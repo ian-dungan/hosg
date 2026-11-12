@@ -3,7 +3,7 @@ import {
   BAG_SLOTS, BANK_SLOTS, DYE_PRICE, GOLD_MAX, INV_TEXT, RECENT_KILLS, RESPEC_PRICE, OPS_NEEDING_ID, addLoot, applyInvOp as applyInvOpRaw, bagUsed, gearItems, gearLookOf, inventoryView,
   newInventory, ownedItems, parseInvOp, parseInventory, wornBy, type InvCtx, type InvOp, type InvRefusal, type InvState, type InventorySave,
 } from './inventory';
-import { COSTUMES, COSTUME_IDS, GEAR_SLOTS, type CostumeId, ITEMS, ITEM_IDS, fits, kitItems, starterFor, starterItems, type GearSlot, type ItemId } from './items';
+import { COSTUMES, COSTUME_IDS, GEAR_SLOTS, type CostumeId, ITEMS, ITEM_IDS, fits, KIT_TABLE, kitItems, starterFor, starterItems, type GearSlot, type ItemId } from './items';
 import { kitFor } from './kit';
 import { JOB_IDS, newJobsSave, type JobId, type JobsSave } from './combat/jobs';
 import { STARTER_STATS } from './combat/stats';
@@ -440,7 +440,7 @@ describe('inventory', () => {
       }
       const gl = gearLookOf(k.inv, job, null);
       expect(decodeGearLook(encodeGearLook(gl))).toEqual(gl);
-      expect(kitFor({ job, level: 10, gear: gearItems(k.inv, job), talents: [] }).stats.power).toBe(20);
+      expect(kitFor({ job, level: 10, gear: gearItems(k.inv, job), talents: [] }).stats.power).toBe(9 + KIT_TABLE[3].power); // T3 power as tuned (Plan 5 Task 5)
     }
   });
 });

@@ -36,7 +36,7 @@ import { addStagger, isBroken, tickStagger } from './stagger';
 import { STARTER_STATS, hitDamage, type Stats } from './stats';
 import { KIT_SHIELD_S, MIN_CREDIT_FRAC, MOD_LIMITS, SPECIAL_CAP } from './constants';
 import {
-  NO_MODS, coefMultOf, dealsDamage, effectiveCooldown, effectiveDuration, effectiveCost, effectiveStagger, indexMods, staggerMultOf, type ModIndex,
+  NO_MODS, coefMultOf, dealsDamage, effectiveCast, effectiveCooldown, effectiveDuration, effectiveCost, effectiveStagger, indexMods, staggerMultOf, type ModIndex,
 } from './kitIndex';
 import { parseMods, type Kit, type MomentumEvent } from '../mods';
 import type { Act, AdventurerState, CampSpawn, Carry, CombatWorld, DisplaceOut, EnemyState, Intent, Refusal, SelfView } from './engine';
@@ -134,7 +134,16 @@ export function selfView(w: CombatWorld, a: AdventurerState, nowS: number): Self
     inCombat: adventurerInCombat(w, a, nowS),
     job: a.job, dodgeMax: dodgeMax(a), cast: castView(a, nowS),
     ...(a.modIndex.finisherCost !== 0 ? { finisherCost: effectiveCost(a, ABILITIES[JOBS[a.job].bar[1]]) } : {}),
+    ...castSOf(a),
   };
+}
+
+/** SelfView.castS: each slot's effective cast time (0: not a cast), only when a cast mod changes one of them. */
+function castSOf(a: AdventurerState): { castS?: number[] } {
+  if (a.modIndex.cast.size === 0) return {};
+  let changed = false;
+  const castS = a.slots.map((id) => { const c = effectiveCast(a, ABILITIES[id]) ?? 0; if (c !== (ABILITIES[id].cast ?? 0)) changed = true; return c; });
+  return changed ? { castS } : {};
 }
 
 const fx = (w: CombatWorld, ev: FxEvent) => { w.out.fx.push(ev); };

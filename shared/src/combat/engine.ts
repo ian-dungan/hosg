@@ -90,6 +90,8 @@ export interface SelfView {
   job?: JobId; dodgeMax?: number; cast?: CastView;
   /** The effective Momentum cost of its finishers (effectiveCost), present only when a mod changes it. */
   finisherCost?: number;
+  /** Per slot, the effective cast time in s (effectiveCast; 0: not a cast), present only when a cast mod changes one. */
+  castS?: number[];
 }
 /** unavoidable: dodge i-frames do not avoid it (ruling P4-f; clients draw it as "cannot be dodged"). */
 export interface TelegraphView { id: number; owner: number; attack: EnemyAttackId; shape: Shape; total: number; left: number; unavoidable?: true }

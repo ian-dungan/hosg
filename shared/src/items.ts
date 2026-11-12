@@ -36,13 +36,13 @@ export const KIT_TABLE: Readonly<Record<Tier, { readonly power: number; readonly
   0: { power: 1, defence: 2, maxHp: 10, special: 0 },
   1: { power: 2.5, defence: 4, maxHp: 22, special: 6 },
   2: { power: 4, defence: 6, maxHp: 40, special: 12 },
-  3: { power: 11, defence: 16, maxHp: 90, special: 20 },
+  3: { power: 8.3, defence: 12, maxHp: 68, special: 14 },
 });
 /** Each armour type's multipliers on its pieces' defence and health. Tunable by Task 5 only. */
 export const TYPE_MULT: Readonly<Record<ArmourType, { readonly defence: number; readonly maxHp: number }>> = deepFreeze({
   heavy: { defence: 1.5, maxHp: 1.2 },
   light: { defence: 1, maxHp: 1 },
-  cloth: { defence: 0.6, maxHp: 0.85 },
+  cloth: { defence: 0.5, maxHp: 0.75 },
   plain: { defence: 1, maxHp: 1 },
 });
 /** How a kit's defence, health and special split over the six armour pieces. */
@@ -90,8 +90,8 @@ export const SETS: Readonly<Record<SetId, SetData>> = deepFreeze({
     [{ k: 'shieldOn', on: 'taunt', amount: 15, s: 6 }], 'Your taunts also shield you for 15 (6 s).',
     [{ k: 'staggerMult', mult: 1.2 }], 'The stagger you deal is 20% greater.'),
   lenslight: S('lenslight', 'Lenslight', 3, 'cloth',
-    [{ k: 'given', mult: 1.15 }], 'Heals and shields you give are 15% stronger.',
-    [{ k: 'finisherCost', add: -10 }], 'Your finishers cost 10 less Momentum.'),
+    [{ k: 'given', mult: 1.105 }], 'Heals and shields you give are 10.5% stronger.',
+    [{ k: 'finisherCost', add: -7 }], 'Your finishers cost 7 less Momentum.'),
   tollwind: S('tollwind', 'Tollwind', 3, 'light',
     [{ k: 'dodge', refillMult: 0.75 }], 'Dodge charges refill 25% faster.',
     [{ k: 'resetOn', on: 'perfectDodge', slot: 'quick' }], "A perfect dodge resets your quick ability's cooldown."),

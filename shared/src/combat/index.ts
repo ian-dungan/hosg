@@ -33,3 +33,4 @@ export {
 } from './enemyAi';
 export * from './brain';
 export * from './sim';
+export * from './simKits';

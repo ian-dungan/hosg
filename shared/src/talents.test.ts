@@ -56,7 +56,8 @@ describe('talents', () => {
   it('SIM_TALENTS names one per row', () => {
     for (const job of JOB_IDS) {
       const ids = SIM_TALENTS[job];
-      expect(ids).toEqual([`${job}_1a`, `${job}_2a`, `${job}_3a`]);
+      // Task 5 chose the letters (they act on the duo picks; sim.talents.test.ts)
+      expect(ids.every((id: TalentId) => id.startsWith(`${job}_`))).toBe(true);
       expect(validTalents(job, 10, ids)).toEqual(ids);
       expect(ids.map((id: TalentId) => TALENTS[id].row)).toEqual([0, 1, 2]);
     }

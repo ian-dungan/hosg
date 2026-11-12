@@ -203,6 +203,10 @@ describe('the dungeon brain (Plan 4)', () => {
 });
 
 describe('the brain reads the kit (Plan 5)', () => {
+  const dIn = (o: Partial<DungeonBrainInput>): DungeonBrainInput => {
+    const base = input(o);
+    return { ...base, fields: [], arena: { x: 0, z: 0, r: 22 }, enemies: base.target ? [base.target] : [], ...o };
+  };
   it('a careful brain spends a finisher at the reduced effectiveCost (SelfView.finisherCost)', () => {
     // a Ranger 10 m from a Mossback that carries a mark Pitch Arrow detonates: only the finisher is ready
     const r = (o: Partial<BrainSelf>) => self('ranger', JOBS.ranger.picks.solo, { momentum: 42, cd: [9, 0, 9, 9, 9], ...o });
@@ -210,5 +214,31 @@ describe('the brain reads the kit (Plan 5)', () => {
     expect(ability(input({ self: r({}), target }))).toBeUndefined();
     expect(ability(input({ self: r({ finisherCost: 40 }), target }))).toEqual({ t: 'ability', slot: 1, phase: 'press' });
     expect(ability(input({ self: r({ finisherCost: 40, momentum: 39 }), target }))).toBeUndefined();
+  });
+
+  it('uses a fourth dodge charge (Fourth Roll): refills toward dodgeMax and still dodges on its last charges', () => {
+    // Quickstep (dodgeRefill) is pressed while below the kit's dodgeMax of 4, not at 4
+    const nj = (o: Partial<BrainSelf>) => self('ninja', ['quickstep', 'ashcloud'], { cd: [9, 9, 9, 0, 9], dodgeMax: 4, ...o });
+    expect(ability(input({ self: nj({ dodgeCharges: 3 }) }))).toEqual({ t: 'ability', slot: 3, phase: 'press' });
+    expect(ability(input({ self: nj({ dodgeCharges: 4 }) }))).toBeUndefined();
+    // four telegraphs in turn: it rolls out of each one with its four charges
+    const m = newBrainMemory();
+    let charges = 4;
+    for (let k = 0; k < 4; k++) {
+      const slam: TelegraphView = { id: 20 + k, owner: 1, attack: 'ground_slam', shape: { kind: 'circle', x: 0, z: 0, r: 12 }, total: 1.6, left: 1 };
+      const act = adventurerBrain(input({ self: nj({ dodgeCharges: charges, cd: [9, 9, 9, 9, 9] }), telegraphs: [slam] }), m);
+      expect(act.intents.some((i) => i.t === 'dodge'), `roll ${k + 1}`).toBe(true);
+      charges--;
+    }
+  });
+
+  it('waits out a shortened cast: a cast that fits before a telegraph lands only at its kit cast time (SelfView.castS)', () => {
+    // a whole-arena Plan 4 hit lands in 2.6 s, with no dodge left: Hearthfall's 2.5 s cast does not fit, its 1.875 s (Ember Lens) does
+    const sweep: TelegraphView = { id: 30, owner: 1, attack: 'lamp_sweep', shape: { kind: 'circle', x: 0, z: 0, r: 40 }, total: 3, left: 2.6 };
+    const warden = enemy({ kind: 'fallen_warden', tier: 'mega', phase: 0, warded: false, enrageIn: 300, hp: 6000, maxHp: 6000, maxStagger: 300, targetId: 3 });
+    const bm = (o: Partial<BrainSelf>) => self('black_mage', JOBS.black_mage.picks.duo, { z: -8, cd: [9, 9, 0, 9, 9], dodgeCharges: 0, ...o });
+    const think = (s: BrainSelf) => dungeonBrain(dIn({ self: s, target: warden, telegraphs: [sweep], allies: [partner({ hp: 100 })] }), newBrainMemory()).intents.find((i) => i.t === 'ability');
+    expect(think(bm({}))).toBeUndefined();
+    expect(think(bm({ castS: [0, 1.2, 1.875, 0, 0] }))).toEqual({ t: 'ability', slot: 2, phase: 'press' });
   });
 });

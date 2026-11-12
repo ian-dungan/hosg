@@ -14,6 +14,9 @@ import { JOBS, type JobId } from './jobs';
 import type { MarkId } from './marks';
 import type { Stats } from './stats';
 import { SEAL_DELAY_S } from '../instance';
+import type { GearSlot, ItemId } from '../items';
+import type { Kit } from '../mods';
+import { simKit, type SimGear } from './simKits';
 
 export interface FightResult { firstHitAt: number | null; killedAt: number | null; ttk: number | null; died: boolean; hpLeft: number; dodges: number }
 /**
@@ -23,7 +26,7 @@ export interface FightResult { firstHitAt: number | null; killedAt: number | nul
  * simulation did.
  */
 export type PartyMember =
-  | { job: JobId; careful: boolean; picks?: [AbilityId, AbilityId]; sloppy?: boolean; weapon?: undefined }
+  | ({ job: JobId; careful: boolean; picks?: [AbilityId, AbilityId]; sloppy?: boolean; weapon?: undefined } & SimKitFields)
   | { weapon: Plan3Loadout['weapon']; careful: boolean; job?: undefined; picks?: undefined; sloppy?: undefined };
 /**
  * died: died at least once; deaths: how often; revived: how often it was brought back; hpLeft: at the
@@ -48,6 +51,23 @@ export interface PartyResult {
   reactions: Record<ReactionId, number>;
   /** Seconds the main enemy spent in its chase surge. */
   surgeS: number;
+}
+
+/**
+ * Plan 5: what a member wears. kit wins; else any of level, gear, talents or items builds one with simKit
+ * (level default 10, gear default the starter kit, talents 'sim' = SIM_TALENTS[job], items: single slots
+ * replaced); else `stats` (an encounter member's gear stand-in); else Plan 4's adventurer (STARTER_STATS,
+ * no mods). The member starts at its kit's max hp.
+ */
+export interface SimKitFields {
+  kit?: Kit; level?: number; gear?: SimGear; talents?: readonly string[] | 'sim';
+  items?: Partial<Record<GearSlot, ItemId | null>>;
+}
+/** The member's kit (see SimKitFields), or null when it gives none. */
+export function memberKit(m: SimKitFields & { job: JobId }): Kit | null {
+  if (m.kit) return m.kit;
+  if (m.level === undefined && m.gear === undefined && m.talents === undefined && m.items === undefined) return null;
+  return simKit({ job: m.job, level: m.level, gear: m.gear, talents: m.talents, items: m.items });
 }
 
 /** The share of telegraphs a sloppy brain misses. */
@@ -131,7 +151,8 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
     const loadout: Plan3Loadout | Loadout = m.weapon !== undefined
       ? { weapon: m.weapon, free: [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]] }
       : { job: m.job, picks: m.picks ? [m.picks[0], m.picks[1]] : [...(n === 1 ? JOBS[m.job].picks.solo : JOBS[m.job].picks.duo)] as [AbilityId, AbilityId] };
-    const id = c.addAdventurer({ x, z, y: 0, facing: angle, hp: 100, loadout }, 0);
+    const kit = m.weapon === undefined ? memberKit(m) : null;
+    const id = c.addAdventurer({ x, z, y: 0, facing: angle, hp: kit ? kit.stats.maxHp : 100, loadout, ...(kit ? { kit } : {}) }, 0);
     c.setParty(id, 'sim'); // one party: every member is every other's ally
     // the slip's own seed: it draws nothing from the shared generator
     const memory: BrainMemory = newBrainMemory(REACTION_S + rng() * 0.2, m.sloppy ? { rate: SLOPPY_MISS, seed: o.seed * 7919 + i * 104729 + 1 } : undefined);
@@ -215,8 +236,9 @@ export function simulateParty(o: { seed: number; party: PartyMember[]; enemy: En
  */
 export function simulateFight(o: {
   seed: number; enemy: EnemyKindId; careful: boolean; maxS?: number;
-} & ({ job: JobId; picks?: [AbilityId, AbilityId]; weapon?: undefined } | { weapon: Plan3Loadout['weapon']; job?: undefined; picks?: undefined })): FightResult {
-  const member: PartyMember = o.weapon !== undefined ? { weapon: o.weapon, careful: o.careful } : { job: o.job, careful: o.careful, picks: o.picks };
+} & (({ job: JobId; picks?: [AbilityId, AbilityId]; weapon?: undefined } & SimKitFields) | { weapon: Plan3Loadout['weapon']; job?: undefined; picks?: undefined })): FightResult {
+  const member: PartyMember = o.weapon !== undefined ? { weapon: o.weapon, careful: o.careful }
+    : { job: o.job, careful: o.careful, picks: o.picks, kit: o.kit, level: o.level, gear: o.gear, talents: o.talents, items: o.items };
   const r = simulateParty({ seed: o.seed, party: [member], enemy: o.enemy, maxS: o.maxS });
   const m = r.members[0];
   return { firstHitAt: r.firstHitAt, killedAt: r.killedAt, ttk: r.ttk, died: m.died, hpLeft: m.hpLeft, dodges: m.dodges };
@@ -339,8 +361,12 @@ class Tally {
  * never dodges, stands in fields.
  */
 export type Skill = 'careful' | 'skilled' | 'sloppy' | 'careless';
-/** picks: default the duo picks in a party, the solo picks alone; stats: default STARTER_STATS (a gear stand-in). */
-export interface EncounterMember { job: JobId; skill: Skill; picks?: [AbilityId, AbilityId]; stats?: Stats }
+/**
+ * picks: default the duo picks in a party, the solo picks alone; stats: default STARTER_STATS (a gear
+ * stand-in, Plan 4); kit, level, gear, talents, items: Plan 5's kit (SimKitFields: the kit wins, then
+ * gear, level, talents and items through simKit, then stats).
+ */
+export interface EncounterMember extends SimKitFields { job: JobId; skill: Skill; picks?: [AbilityId, AbilityId]; stats?: Stats }
 /**
  * won: every enemy of a pack, or the boss, killed; ttk = killedAt − firstHitAt. bossHpFrac: the boss's
  * hp fraction at the end (a pack: its enemies' total), 0 on a win. phaseReached: the boss's highest
@@ -407,7 +433,10 @@ export function simulateEncounter(o: {
   const members = o.party.map((m, i) => {
     const x = n === 1 ? 0 : i % 2 === 0 ? -1.5 : 1.5, z = -R - 2 - 1.5 * i;
     const picks: [AbilityId, AbilityId] = m.picks ? [m.picks[0], m.picks[1]] : [...(n === 1 ? JOBS[m.job].picks.solo : JOBS[m.job].picks.duo)] as [AbilityId, AbilityId];
-    const id = c.addAdventurer({ x, z, y: 0, facing: 0, hp: m.stats?.maxHp ?? 100, loadout: { job: m.job, picks }, ...(m.stats ? { stats: m.stats } : {}) }, 0);
+    const kit = memberKit(m);
+    const id = kit
+      ? c.addAdventurer({ x, z, y: 0, facing: 0, hp: kit.stats.maxHp, loadout: { job: m.job, picks }, kit }, 0)
+      : c.addAdventurer({ x, z, y: 0, facing: 0, hp: m.stats?.maxHp ?? 100, loadout: { job: m.job, picks }, ...(m.stats ? { stats: m.stats } : {}) }, 0);
     c.setParty(id, 'sim');
     const memory = newBrainMemory(REACTION_S + rng() * 0.2, m.skill === 'sloppy' || m.skill === 'skilled'
       ? { rate: m.skill === 'sloppy' ? SLOPPY_MISS : SKILLED_MISS, seed: o.seed * 7919 + i * 104729 + 1 } : undefined);

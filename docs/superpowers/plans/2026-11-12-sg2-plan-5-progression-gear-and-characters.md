@@ -233,12 +233,12 @@ A weapon fits every job whose `JOBS[job].weapon` is its `WeaponId`, so a staff f
 | starter (`plain`) | 1 | everyone owns it | 1 | 2 | 10 | 0 |
 | T1 Greenway | 4 | Greenway drops, the Smithy | 2.5 (tunable ±25%) | 4 (±25%) | 22 (±25%) | 6 (±30%) |
 | T2 Lampfall | 7 | Lampfall packs and the Wickhound | 4 (±25%) | 6 (±25%) | 40 (±25%) | 12 (±30%) |
-| T3 Warden | 10 | the Fallen Warden and the Lampwright (Seals) | 11 (±25%) | 16 (±25%) | 90 (±25%) | 20 (±30%) |
+| T3 Warden | 10 | the Fallen Warden and the Lampwright (Seals) | **8.3** (was 11, ±25%) | **12** (was 16, ±25%) | **68** (was 90, ±25%) | **14** (was 20, ±30%) |
 
 At level 10, a full kit gives these totals:
 - starter: 10 / 10 / 100, which is Plan 3b's `STARTER_STATS`;
 - T2: 13 / 14 / 130, which is Plan 4's G1 mid-tier stand-in;
-- T3: 20 / 24 / 180, which is Plan 4's G1 top-tier stand-in, before set bonuses and specials.
+- T3: 17.3 / 20 / 158 (Task 5 tuning; was 20 / 24 / 180, Plan 4's G1 top-tier stand-in), before set bonuses and specials. At 20 / 24 / 180 sloppy duos killed the Warden in 105–124 s with no deaths and careful solo won 108 of 140; every T3 number is now at the bottom of its range (see Task 5's Outcome).
 
 **Spreading a kit over the pieces:**
 - Power is split between the weapon and the off-hand only, by the off-hand table.
@@ -259,7 +259,7 @@ At level 10, a full kit gives these totals:
   |---|---|---|---|
   | heavy | × 1.5 (tunable 1.3–1.7) | × 1.2 (1.1–1.3) | Guard |
   | light | × 1 | × 1 | Flow |
-  | cloth | × 0.6 (tunable 0.5–0.8) | × 0.85 (0.75–0.95) | Focus |
+  | cloth | × **0.5** (was 0.6; tunable 0.5–0.8) | × **0.75** (was 0.85; 0.75–0.95) | Focus |
   | plain | × 1 | × 1 | none |
 
 - Rounding: power and defence to 0.1, health to a whole number, specials to a whole number. A full kit's sum is within ±0.3 of the table (health and specials ±2).
@@ -276,7 +276,7 @@ At level 10, a full kit gives these totals:
 | `wickthread` | Wickthread | T2 | cloth | a completed cast takes 0.5 s off your other cooldowns | interrupting a wind-up, a cleanse or a revive gives +20 Momentum; the cleanse pays on a cleanse cast (an affliction removed or not) at most once every 10 s (ruling P5-g, `everyS: 10`) (ruling P5-b, was: interrupting only) |
 | `cinderstep` | Cinderstep | T2 | light | a finisher that detonates a mark refunds 10 Momentum | for 2 s after a dodge, your next ability deals ×1.2 |
 | `brassbound` | Brassbound | T2 | heavy | your taunts also shield you for 15 (6 s) | the stagger you deal × 1.2 |
-| `lenslight` | Lenslight | T3 | cloth | heals and shields you give × 1.15 (`given`; ruling P5-b, was: overhealing you give becomes a shield, 30% of the overheal, cap 20, 6 s) | your finishers cost 10 less Momentum |
+| `lenslight` | Lenslight | T3 | cloth | heals and shields you give × **1.105** (Task 5, was × 1.15) (`given`; ruling P5-b, was: overhealing you give becomes a shield, 30% of the overheal, cap 20, 6 s) | your finishers cost **7** less Momentum (Task 5, was 10) |
 | `tollwind` | Tollwind | T3 | light | dodge charges refill 25% faster (ruling P5-b, was: +1 dodge charge, which Fourth Roll could not add to) | a perfect dodge resets your quick ability's cooldown |
 | `beaconstone` | Beaconstone | T3 | heavy | party members within 8 m take × 0.95 enemy damage | once every 90 s, a blow that would kill leaves you at 1 hp with 2 s of i-frames |
 
@@ -496,7 +496,7 @@ Each job has three rows. A row unlocks at its job level (4, 7, 10). The adventur
 - Choosing a talent is free.
 - Retraining (`respec`) clears all three rows: the first time per job is free, then 25 gold per chosen row.
 - `JobRecord.talents` holds the chosen ids. Only ids of that job, one per row, with the row unlocked at the record's level, are kept by `parseJobsSave`; others are dropped (repaired).
-- `SIM_TALENTS[job]` is the simulation's default build: `['<job>_1a', '<job>_2a', '<job>_3a']`. Task 5 may change which letter per row is the default.
+- `SIM_TALENTS[job]` is the simulation's default build, one per row, each acting on the job's bar or duo picks (Task 5; was `['<job>_1a', '<job>_2a', '<job>_3a']`, 7 of which did nothing with the duo picks): warrior 1a 2c 3b; ranger 1a 2b 3b; paladin 1a 2c 3a; dark_knight 1a 2a 3a; ninja 1a 2a 3b; white_mage 1a 2b 3c; black_mage 1a 2b 3a.
 
 ### Mods (`shared/src/mods.ts`), the one vocabulary for sets, named weapons and talents
 
@@ -639,6 +639,15 @@ If p̂ is 0 or 1, use p̂ = 0.5/n (or 1 − 0.5/n). When the headroom is short, 
 | **L2** | elites are an early wall but a mid-level goal: SOLO_JOBS careful vs the Mossback at level 1 starter, and at level 5 in T1 | 140 + 140 | level 1: ≤ 105 of 140; level 5 T1: ≥ 98 of 140 | ≈ 50% and ≈ 90% |
 | **F1** | top gear does not trivialise the Greenway: SOLO_JOBS careful at level 10 in T3 vs a Thornling and vs the Mossback | 20 each | every job: Thornling mean TTK ≥ 4.0 s; Mossback mean TTK ≥ 14 s | ≈ 5.5 s and ≈ 20 s |
 | **F2** | careless play still dies in top gear: GEAR_PAIRS careless in T3 vs the Warden | 80 | ≤ 64 of 80 | ≈ 50% |
+| **G2b** (Task 5) | T2 clearly beats the starter kit: GEAR_PAIRS sloppy, T2 vs starter | 80 + 80 | T2 − starter wins > 3 SD of the difference | — |
+| **G7** (Task 5) | top gear usually wins for an average duo: GEAR_PAIRS sloppy in T3 | 80 | ≥ 64 of 80 | — |
+
+**Tuned by Task 5** (two passes; every value at its new place in the tables above):
+- KIT_TABLE T3: power 11 → 8.3, defence 16 → 12, health 90 → 68, special 20 → 14 (the bottom of each range). At the old values sloppy duos beat the Warden in 105–124 s with no deaths, careful solo won 108 of 140 and a T3 Black Mage or White Mage killed a Thornling in 2–3 s.
+- Cloth `TYPE_MULT`: defence 0.6 → 0.5, health 0.85 → 0.75; Lenslight `given` × 1.15 → × 1.105 and `finisherCost` −10 → −7. Lenslight was the fastest set for every job in every scenario (Focus); it still is for six jobs by about 5% (see Task 5's report: a ruling on Focus is needed).
+- `SIM_TALENTS`: see Talents (every pick now acts on the duo picks).
+- Not met after tuning, `it.skip` with the measured numbers (deferred to live tuning): G2's starter ceiling (51 and 55 of 80, P1 makes it Plan 4's number), G5 sloppy (52 of 140: self-healing jobs win alone sloppy or careful), F1's Thornling floor (the Ranger 2.9 s). Passing with less than 3 SD headroom on seeds 1–20: G2's per-pair floor (Dark Knight + Ranger 12 of 20) and L2's level-1 ceiling (100 of 140; Greenway outcomes are per job, not random).
+- T3 makes the Warden a formality for duos of any skill but careless (80 of 80, 0 deaths, 120–150 s). A harder mode is proposed in Task 5's report, not applied.
 
 The Greenway is **not** scaled down for high levels or gear (F1 accepts the speed-up). A player who outgrows it has the Lampfall.
 

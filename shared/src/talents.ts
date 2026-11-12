@@ -200,11 +200,11 @@ export function talentMods(job: JobId, level: number, ids: readonly string[]): M
 
 /** The simulation's default build per job: one talent per row (Task 5 may change the letters). */
 export const SIM_TALENTS: Readonly<Record<JobId, readonly TalentId[]>> = deepFreeze({
-  warrior: ['warrior_1a', 'warrior_2a', 'warrior_3a'],
-  ranger: ['ranger_1a', 'ranger_2a', 'ranger_3a'],
-  paladin: ['paladin_1a', 'paladin_2a', 'paladin_3a'],
+  warrior: ['warrior_1a', 'warrior_2c', 'warrior_3c'],
+  ranger: ['ranger_1a', 'ranger_2b', 'ranger_3b'],
+  paladin: ['paladin_1a', 'paladin_2c', 'paladin_3a'],
   dark_knight: ['dark_knight_1a', 'dark_knight_2a', 'dark_knight_3a'],
-  ninja: ['ninja_1a', 'ninja_2a', 'ninja_3a'],
-  white_mage: ['white_mage_1a', 'white_mage_2a', 'white_mage_3a'],
-  black_mage: ['black_mage_1a', 'black_mage_2a', 'black_mage_3a'],
+  ninja: ['ninja_1a', 'ninja_2a', 'ninja_3b'],
+  white_mage: ['white_mage_1a', 'white_mage_2b', 'white_mage_3c'],
+  black_mage: ['black_mage_1a', 'black_mage_2b', 'black_mage_3a'],
 });

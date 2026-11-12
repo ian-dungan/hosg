@@ -625,7 +625,12 @@ function castRule(b: DungeonBrainInput, escaping: boolean): (ab: AbilityData) =>
     if (isPlan4(t)) p4Left = Math.min(p4Left, t.left);
     else plan3In = true;
   }
-  return (ab) => !(ab.cast && b.careful && (plan3In || escaping || ab.cast + CAST_SPARE_S > p4Left));
+  // the kit's cast time (SelfView.castS) for a slot's own ability; a caller's stand-in (a draw) as given
+  const castOf = (ab: AbilityData) => {
+    const i = self.castS && ab === ABILITIES[ab.id] ? self.slots.indexOf(ab.id) : -1;
+    return i >= 0 ? self.castS![i] : ab.cast;
+  };
+  return (ab) => { const c = castOf(ab); return !(c && b.careful && (plan3In || escaping || c + CAST_SPARE_S > p4Left)); };
 }
 
 const inArenaWall = (b: DungeonBrainInput, x: number, z: number, margin: number) =>
