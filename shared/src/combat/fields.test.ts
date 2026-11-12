@@ -171,8 +171,9 @@ describe('spawning and despawning', () => {
     r.at(20);
     expect(add.act).not.toBe('return');
     expect(add.threat.ids().length).toBeGreaterThan(0);
-    // killed: credited as usual, never respawns, then pruned
-    damageEnemy(r.w, a, add, 1e6, 'auto', r.now);
+    // killed: credited as usual (both did a real share: minimum-contribution credit, Plan 5), never respawns, then pruned
+    damageEnemy(r.w, b, add, 300, 'auto', r.now);
+    damageEnemy(r.w, a, add, add.hp, 'auto', r.now);
     const out = r.tick();
     expect(out.kills).toEqual([{ enemy: add.id, kind: 'lens_shard', credit: [a, b] }]);
     expect(out.despawned).toEqual([add.id]);

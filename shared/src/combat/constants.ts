@@ -202,3 +202,53 @@ export const TOLL_PARTY_RAW_PER = 1.2;
 export const MIN_CREDIT_FRAC = 0.1;
 /** Focus, Flow and Guard each count up to this many points. */
 export const SPECIAL_CAP = 40;
+/** A cooldown a `cd` mod changes never starts below this (an ability's own cooldown is never raised to it). */
+export const CD_FLOOR_S = 1;
+/** A spell's cast time under `cast` mods never drops below this; instants stay instant. */
+export const CAST_FLOOR_S = 0.3;
+/** A finisher's Momentum cost under `finisherCost` mods never drops below this. */
+export const FINISHER_COST_FLOOR = 30;
+/** How long a kit shield lasts (healShield and lowHpShield; shieldOn has its own). */
+export const KIT_SHIELD_S = 6;
+/**
+ * The clamps on everything mods can push (Plan 5 Task 4), applied when a kit's mods are indexed (and on use
+ * for the ones that depend on an ability): each is a [lo, hi] range on the combined value of a kind, wide
+ * enough for every tuning range (±30%), so that no combination of sets, a named weapon and talents gives
+ * zero cooldowns, permanent safety, endless stagger or runaway Momentum.
+ */
+export const MOD_LIMITS = Object.freeze({
+  /** coef and amount mods (product, per ability; afterDodge included for damage), before Focus. */
+  mult: [0.5, 2.5] as const,
+  /** given (the larger of its sources). */
+  given: [0.5, 1.5] as const,
+  /** hpCost (product). */
+  hpCost: [0, 2] as const,
+  /** stagger add (sum, per ability), and the ability's own stagger plus it never below 0. */
+  staggerAdd: [-50, 50] as const,
+  staggerMult: [0.5, 1.5] as const,
+  /** dodge refillMult (product). */
+  refillMult: [0.5, 2] as const,
+  /** buffS: a duration is at least 0 and at most this many times its own. */
+  buffSMaxMult: 2,
+  /** cdOnCast seconds (the larger applies). */
+  cdOnCast: [0, 1] as const,
+  afterDodgeMult: [1, 1.6] as const,
+  afterDodgeS: [0, 3] as const,
+  /** healShield frac and cap, per kind (normal, overheal only). */
+  healShieldFrac: [0, 0.5] as const,
+  healShieldCap: [0, 30] as const,
+  shieldOnAmount: [0, 40] as const,
+  shieldOnS: [0, 10] as const,
+  lowHpFrac: [0, 0.3] as const,
+  lowHpBelow: [0, 0.6] as const,
+  lowHpEveryS: [10, 3600] as const,
+  auraMult: [0.8, 1] as const,
+  auraR: [0, 12] as const,
+  lastStandEveryS: [30, 3600] as const,
+  lastStandIframesS: [0, 3] as const,
+  /** momentumOn amount (sum per event) and everyS. */
+  momentumOn: [0, 50] as const,
+  momentumOnEveryS: [0, 600] as const,
+  /** hitTaken is always throttled at least this much (an unthrottled one would pay on every field tick). */
+  hitTakenMinEveryS: 0.5,
+});

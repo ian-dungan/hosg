@@ -32,4 +32,8 @@ export type FxEvent =
   | { t: 'afflict'; src: number; dst: number; id: AfflictionId; stacks: number }
   /** A boss's transition begins (phase = the next phase's index). */
   | { t: 'phase'; src: number; phase: number }
-  | { t: 'enrage'; src: number };
+  | { t: 'enrage'; src: number }
+  /** A kit's lastStand caught a killing blow: src is left at 1 hp with a few seconds of plain misses. */
+  | { t: 'lastStand'; src: number }
+  /** A kit shield landed (healShield, lowHpShield, shieldOn), beside its `shield` fx: for the HUD's floating numbers. */
+  | { t: 'kitShield'; src: number; dst: number; amount: number };

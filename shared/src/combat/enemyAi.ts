@@ -20,13 +20,15 @@ import {
 } from './constants';
 import { scaleFactor } from './bosses';
 import { bossAnchored, bossAutoEvery, bossBusy, resetBoss, stepBoss, wakeBoss } from './bossAi';
-import { knockDisplacement } from './displace';
+import { knockDisplacement, knockForGuard } from './displace';
 import { ENEMY_ATTACKS, type EnemyAttackData, type EnemyAttackId, type Knock } from './enemies';
 import type { AdventurerState, CombatWorld, CombatZone, EnemyState, TelegraphState } from './engine';
-import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, TIME_EPS } from './adventurer';
+import { applyStagger, cancelWindup, hurtAdventurer, isInvulnerable, knockAdventurer, modMomentum, TIME_EPS } from './adventurer';
+import { staggerMultOf } from './kitIndex';
+import { JOBS } from './jobs';
 import { acrossArena, applyAffliction, hasBuff, searingMult, hasDebuff, takenMult, threatMult, traitOf } from './effects';
 import { breakCast } from './casting';
-import { gainMomentum } from './momentum';
+import { gainFor } from './momentum';
 import { inShape, type Shape } from './shapes';
 import { lineOfSight } from './sight';
 import { enemyHit } from './stats';
@@ -738,8 +740,13 @@ export function resolveHit(
     const perfect = shape !== undefined && (inShape(shape, a.x, a.z) || dodgedFrom(a, shape, now));
     fxOf(w).push({ t: 'miss', src: e.id, dst: a.id, perfect });
     if (perfect) {
-      a.momentum = gainMomentum(a.momentum, traitOf(a) === 'dusk_slip' ? EVASION_PERFECT_MOMENTUM : PERFECT_DODGE_MOMENTUM);
-      if (e.data.elite) applyStagger(w, e, PERFECT_DODGE_STAGGER, now);
+      gainFor(a, traitOf(a) === 'dusk_slip' ? EVASION_PERFECT_MOMENTUM : PERFECT_DODGE_MOMENTUM);
+      if (e.data.elite) applyStagger(w, e, PERFECT_DODGE_STAGGER * staggerMultOf(a), now);
+      if (!a.modIndex.empty) {
+        modMomentum(a, 'perfectDodge', now);
+        // resetOn perfectDodge quick: the job's quick ability is ready again
+        if (a.modIndex.resetQuickOnPerfect) delete a.readyAt[JOBS[a.job].bar[0]];
+      }
     }
     return;
   }
@@ -753,8 +760,9 @@ export function resolveHit(
   if (parryable && now < a.parryUntil) {
     a.parryUntil = -Infinity;
     fxOf(w).push({ t: 'parry', src: a.id, dst: e.id });
-    a.momentum = gainMomentum(a.momentum, PARRY_MOMENTUM);
-    if (e.data.elite) applyStagger(w, e, PARRY_STAGGER, now);
+    gainFor(a, PARRY_MOMENTUM);
+    modMomentum(a, 'parry', now);
+    if (e.data.elite) applyStagger(w, e, PARRY_STAGGER * staggerMultOf(a), now);
     else stunEnemy(w, e, PARRY_STUN_S, now);
     return;
   }
@@ -776,7 +784,7 @@ export function resolveHit(
   if (e.surging && a.id === e.targetId && landed) { e.surging = false; aiOf(e, now).chanceAt = now; }
   // a telegraph that lands (hp or shield) breaks a cast; autos never do
   if (by !== 'auto' && landed && a.alive) breakCast(w, a, 'interrupt', now);
-  if (knock && a.alive) knockAdventurer(w, a, knockDisplacement({ x: e.x, z: e.z }, a, knock, lineDir), now);
+  if (knock && a.alive) knockAdventurer(w, a, knockDisplacement({ x: e.x, z: e.z }, a, knockForGuard(knock, a.stats.guard), lineDir), now);
 }
 
 /**

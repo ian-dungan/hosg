@@ -17,8 +17,12 @@ export * from './afflictions';
 export * from './encounters';
 export * from './fx';
 export * from './engine';
-export { isInCombat, adventurerInCombat, onAnyThreatTable, spawnEnemy, despawnEnemy } from './adventurer';
-export { RAIN_HEAL, allied, applyAffliction } from './effects';
+export { isInCombat, adventurerInCombat, onAnyThreatTable, spawnEnemy, despawnEnemy, creditOf } from './adventurer';
+export {
+  NO_MODS, indexMods, effectiveCost, effectiveCooldown, effectiveCast, effectiveDuration, effectiveHpCost, effectiveStagger, amountMultOf, coefMultOf,
+  type ModIndex, type HealShieldMod,
+} from './kitIndex';
+export { RAIN_HEAL, allied, applyAffliction, auraTakenOn } from './effects';
 export { addField, removeFieldsOf, tickFields } from './fields';
 export { bossAiStateOf, stepBoss, resetBoss, type BossAi } from './bossAi';
 export type { CastBreak } from './casting';

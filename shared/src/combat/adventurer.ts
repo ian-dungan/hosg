@@ -30,10 +30,15 @@ import { dodgeDisplacement, simulateDisplacement, type Displacement } from './di
 import { ENEMY_ATTACKS, ENEMY_KINDS, type EnemyAttackId } from './enemies';
 import type { FxEvent } from './fx';
 import { applyFinisherMark, applyPrimerMark, liveMarks, MARK_BITS, type MarkId } from './marks';
-import { decayMomentum, gainMomentum } from './momentum';
+import { decayMomentum, gainFor, gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
 import { addStagger, isBroken, tickStagger } from './stagger';
 import { STARTER_STATS, hitDamage, type Stats } from './stats';
+import { KIT_SHIELD_S, MIN_CREDIT_FRAC, MOD_LIMITS, SPECIAL_CAP } from './constants';
+import {
+  NO_MODS, coefMultOf, dealsDamage, effectiveCooldown, effectiveDuration, effectiveCost, effectiveStagger, indexMods, staggerMultOf, type ModIndex,
+} from './kitIndex';
+import { parseMods, type Kit, type MomentumEvent } from '../mods';
 import type { Act, AdventurerState, CampSpawn, Carry, CombatWorld, DisplaceOut, EnemyState, Intent, Refusal, SelfView } from './engine';
 
 /** What a `hit` fx may be `by`. */
@@ -89,9 +94,13 @@ export function debuffBits(e: EnemyState, nowS: number): number {
   for (const [id, d] of Object.entries(e.debuffs) as [DebuffId, { until: number }][]) if (d.until > nowS) bits |= DEBUFF_BITS[id];
   return bits;
 }
-/** The job's dodge charges. */
+/** The job's dodge charges, plus the kit's (at most +1). */
 export function dodgeMax(a: AdventurerState): number {
-  return JOBS[a.job].dodgeCharges;
+  return JOBS[a.job].dodgeCharges + a.modIndex.dodgeCharges;
+}
+/** Seconds a dodge charge takes to refill: DODGE_REFILL_S × the kit's refill mult. */
+export function dodgeRefillS(a: AdventurerState): number {
+  return a.modIndex.dodgeRefillMult === 1 ? DODGE_REFILL_S : DODGE_REFILL_S * a.modIndex.dodgeRefillMult;
 }
 export function liveShield(a: AdventurerState, nowS: number): number {
   return a.shield > 0 && nowS < a.shieldUntil ? a.shield : 0;
@@ -124,6 +133,7 @@ export function selfView(w: CombatWorld, a: AdventurerState, nowS: number): Self
     charge: a.charge ? Math.max(0, nowS - a.charge.startedAt) : null,
     inCombat: adventurerInCombat(w, a, nowS),
     job: a.job, dodgeMax: dodgeMax(a), cast: castView(a, nowS),
+    ...(a.modIndex.finisherCost !== 0 ? { finisherCost: effectiveCost(a, ABILITIES[JOBS[a.job].bar[1]]) } : {}),
   };
 }
 
@@ -150,14 +160,30 @@ export function plan3LoadoutState(a: AdventurerState): Plan3Loadout {
 export function parseStats(v: unknown): Stats {
   const o = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
   const pick = (k: 'power' | 'defence' | 'maxHp', ok: (n: number) => boolean) => (finite(o[k]) && ok(o[k] as number) ? (o[k] as number) : STARTER_STATS[k]);
-  return { power: pick('power', (n) => n > 0), defence: pick('defence', (n) => n >= 0), maxHp: pick('maxHp', (n) => n >= 1) };
+  const out: Stats = { power: pick('power', (n) => n > 0), defence: pick('defence', (n) => n >= 0), maxHp: pick('maxHp', (n) => n >= 1) };
+  // the specials (absent = 0): kept only when given, finite, 0 to SPECIAL_CAP
+  for (const k of ['focus', 'flow', 'guard'] as const) if (finite(o[k])) out[k] = Math.min(SPECIAL_CAP, Math.max(0, o[k] as number));
+  return out;
 }
 
+/** A kit as the engine runs it: its stats parsed (parseStats) and its mods parsed again (parseMods) and indexed. */
+function readKit(kit: unknown): { kit: Kit; stats: Stats; modIndex: ModIndex } | null {
+  if (typeof kit !== 'object' || kit === null) return null;
+  const k = kit as { stats?: unknown; mods?: unknown };
+  const stats = parseStats(k.stats);
+  const mods = Object.freeze(parseMods(k.mods));
+  return { kit: Object.freeze({ stats: { ...stats }, mods }), stats, modIndex: mods.length ? indexMods(mods) : NO_MODS };
+}
+const freshModTimers = (): AdventurerState['modTimers'] => ({ lastStandAt: -Infinity, lowHpAt: -Infinity, hitTakenAt: -Infinity, afterDodgeUntil: -Infinity, momentumAt: {} });
+
 export function newAdventurer(
-  id: number, s: { x: number; z: number; y: number; facing: number; hp: number; loadout: unknown; stats?: unknown; party?: string | null }, nowS: number,
+  id: number, s: { x: number; z: number; y: number; facing: number; hp: number; loadout: unknown; stats?: unknown; party?: string | null; kit?: unknown; level?: unknown }, nowS: number,
 ): AdventurerState {
   const { loadout, slots, plan3 } = runLoadout(s.loadout);
-  const stats = s.stats === undefined ? { ...STARTER_STATS } : parseStats(s.stats);
+  // the kit wins over stats when both are given
+  const k = s.kit === undefined ? null : readKit(s.kit);
+  const stats = k ? k.stats : s.stats === undefined ? { ...STARTER_STATS } : parseStats(s.stats);
+  const modIndex = k ? k.modIndex : NO_MODS;
   const a: AdventurerState = {
     id, team: 'adventurer', x: finite(s.x) ? s.x : 0, z: finite(s.z) ? s.z : 0, y: finite(s.y) ? s.y : 0, facing: finite(s.facing) ? s.facing : 0,
     stats, hp: finite(s.hp) ? Math.min(stats.maxHp, Math.max(1, s.hp)) : stats.maxHp, alive: true, diedAt: -Infinity,
@@ -166,9 +192,11 @@ export function newAdventurer(
     lastDealtAt: -Infinity, lastCombatAt: -Infinity, lastHurtAt: -Infinity,
     readyAt: {}, gcdUntil: -Infinity, swapReadyAt: -Infinity, targetId: null, nextAutoAt: -Infinity,
     shield: 0, shieldUntil: -Infinity, sprintUntil: -Infinity, parryUntil: -Infinity, iframeUntil: -Infinity, reviveSafeUntil: -Infinity,
-    dodgeCharges: JOBS[loadout.job].dodgeCharges, dodgeRefillAt: null, lastDodgeAt: -Infinity, lastDodgeFrom: null, charge: null,
+    dodgeCharges: JOBS[loadout.job].dodgeCharges + modIndex.dodgeCharges, dodgeRefillAt: null, lastDodgeAt: -Infinity, lastDodgeFrom: null, charge: null,
     cast: null, buffs: {}, afflictions: new Map(), autoWaiting: false,
+    kit: k ? k.kit : null, modIndex, modTimers: freshModTimers(),
   };
+  if (Number.isInteger(s.level) && (s.level as number) >= 1 && (s.level as number) <= 99) a.level = s.level as number;
   void nowS;
   return a;
 }
@@ -177,13 +205,20 @@ const clamp = (v: unknown, lo: number, hi: number, dflt: number) => (finite(v) ?
 const ALL_ABILITIES = Object.keys(ABILITIES) as AbilityId[];
 /** The largest shield any effect gives, and the longest. */
 let shieldMax: { amount: number; s: number } | null = null;
-function maxShield(): { amount: number; s: number } {
+function maxShield(a?: AdventurerState): { amount: number; s: number } {
   if (!shieldMax) {
     let amount = BEDROCK_SHIELD, s = BEDROCK_S;
     for (const ab of Object.values(ABILITIES)) for (const e of ab.effects) if (e.k === 'shield') { amount = Math.max(amount, e.amount); s = Math.max(s, e.s); }
     shieldMax = { amount, s };
   }
-  return shieldMax;
+  if (!a || (a.modIndex.empty && !a.stats.focus)) return shieldMax;
+  // a kit: the largest any ability shield can be under Focus and mods, or a kit shield
+  const focus = 1 + Math.min(SPECIAL_CAP, Math.max(0, a.stats.focus ?? 0)) / 100;
+  const kitShield = Math.max(MOD_LIMITS.healShieldCap[1] * 2, MOD_LIMITS.shieldOnAmount[1], MOD_LIMITS.lowHpFrac[1] * a.stats.maxHp);
+  return {
+    amount: Math.max(shieldMax.amount * MOD_LIMITS.mult[1] * focus, kitShield),
+    s: Math.max(shieldMax.s * MOD_LIMITS.buffSMaxMult, KIT_SHIELD_S, MOD_LIMITS.shieldOnS[1]),
+  };
 }
 
 /** The relog snapshot: seconds remaining on each cooldown still running, the GCD, dodge charges, Momentum. */
@@ -210,14 +245,14 @@ export function applyCarry(a: AdventurerState, c: Carry, nowS: number): void {
   if (typeof c !== 'object' || c === null) return;
   const cds = typeof c.cooldowns === 'object' && c.cooldowns !== null ? c.cooldowns : {};
   for (const id of ALL_ABILITIES) {
-    const r = clamp((cds as Record<string, unknown>)[id], 0, ABILITIES[id].cooldown, 0);
+    const r = clamp((cds as Record<string, unknown>)[id], 0, Math.max(ABILITIES[id].cooldown, effectiveCooldown(a, ABILITIES[id])), 0);
     if (r > 0) a.readyAt[id] = nowS + r;
   }
   const gcd = clamp(c.gcd, 0, GCD_S, 0);
   if (gcd > 0) a.gcdUntil = nowS + gcd;
   const max = dodgeMax(a);
   a.dodgeCharges = Math.floor(clamp(c.dodgeCharges, 0, max, max));
-  a.dodgeRefillAt = a.dodgeCharges < max ? nowS + clamp(c.dodgeRefillIn, 0, DODGE_REFILL_S, DODGE_REFILL_S) : null;
+  a.dodgeRefillAt = a.dodgeCharges < max ? nowS + clamp(c.dodgeRefillIn, 0, dodgeRefillS(a), dodgeRefillS(a)) : null;
   a.momentum = clamp(c.momentum, 0, MOMENTUM_MAX, 0);
   // the optional extras: absent = fresh; present but nonsense = the most restrictive value
   const since = (v: unknown) => nowS - clamp(v, 0, SINCE_CAP, 0);
@@ -226,12 +261,12 @@ export function applyCarry(a: AdventurerState, c: Carry, nowS: number): void {
   if (c.sinceDealt !== undefined) a.lastDealtAt = since(c.sinceDealt);
   if (c.swapCd !== undefined && a.plan3) a.swapReadyAt = nowS + clamp(c.swapCd, 0, SWAP_COOLDOWN_S, SWAP_COOLDOWN_S);
   if (c.shield !== undefined && c.shieldLeft !== undefined) {
-    const m = maxShield();
+    const m = maxShield(a);
     const amount = clamp(c.shield, 0, m.amount, 0), left = clamp(c.shieldLeft, 0, m.s, 0);
     if (amount > 0 && left > 0) { a.shield = amount; a.shieldUntil = nowS + left; }
   }
   if (c.sprintLeft !== undefined) {
-    const left = clamp(c.sprintLeft, 0, SPRINT_S, 0);
+    const left = clamp(c.sprintLeft, 0, Math.max(SPRINT_S, effectiveDuration(a, 'sprint', SPRINT_S)), 0);
     if (left > 0) a.sprintUntil = nowS + left;
   }
 }
@@ -241,7 +276,32 @@ const SINCE_CAP = 1e6;
 /** revive: full hp at `at`, Momentum 0, cooldowns, charges, timers and afflictions reset, out of combat; stats and party kept. */
 export function resetAdventurer(w: CombatWorld, a: AdventurerState, at: { x: number; z: number; y: number }, nowS: number): void {
   removeFromThreat(w, a.id);
+  const kit = a.kit, modIndex = a.modIndex, level = a.level;
   Object.assign(a, newAdventurer(a.id, { ...at, facing: a.facing, hp: a.stats.maxHp, loadout: a.plan3 ?? a.loadout, stats: a.stats, party: a.party }, nowS));
+  // the kit (already read and indexed) stays; its dodge charges too
+  if (kit) { a.kit = kit; a.modIndex = modIndex; a.dodgeCharges = dodgeMax(a); }
+  if (level !== undefined) a.level = level;
+}
+
+/**
+ * setKit: the kit's stats and mods (parsed and indexed once here). The hp fraction is kept (rounded, at least
+ * 1 when alive; the dead stay at 0), the shield is clamped to the largest the new kit allows, cooldowns and
+ * Momentum are kept, and dodge charges are clamped to the new maximum (refilling toward it). A malformed
+ * kit changes nothing.
+ */
+export function setKitState(a: AdventurerState, kit: unknown, nowS: number, level?: unknown): void {
+  const k = readKit(kit);
+  if (!k) return;
+  const frac = a.stats.maxHp > 0 ? a.hp / a.stats.maxHp : 1;
+  refillDodges(a, nowS);
+  a.kit = k.kit; a.stats = k.stats; a.modIndex = k.modIndex;
+  if (a.alive) a.hp = Math.min(a.stats.maxHp, Math.max(1, Math.round(frac * a.stats.maxHp)));
+  if (a.shield > 0) a.shield = Math.min(a.shield, maxShield(a).amount);
+  const max = dodgeMax(a);
+  a.dodgeCharges = Math.min(a.dodgeCharges, max);
+  if (a.dodgeCharges >= max) a.dodgeRefillAt = null;
+  else a.dodgeRefillAt ??= nowS + dodgeRefillS(a);
+  if (Number.isInteger(level) && (level as number) >= 1 && (level as number) <= 99) a.level = level as number;
 }
 
 /**
@@ -363,15 +423,32 @@ export function cancelWindup(w: CombatWorld, e: EnemyState): void {
   e.windup = null;
 }
 
-/** An interrupting hit: cancels an interruptible wind-up (`interrupt` fx, +INTERRUPT_STAGGER unless `stagger` is false, its cooldown restarts). */
-export function interruptWindup(w: CombatWorld, e: EnemyState, nowS: number, stagger = true): boolean {
+/**
+ * An interrupting hit: cancels an interruptible wind-up (`interrupt` fx, +INTERRUPT_STAGGER unless `stagger` is
+ * false, its cooldown restarts). `by`: the adventurer whose hit it was (its staggerMult, and its momentumOn
+ * interrupt).
+ */
+export function interruptWindup(w: CombatWorld, e: EnemyState, nowS: number, stagger = true, by?: AdventurerState): boolean {
   if (!e.alive || !e.windup || !e.windup.interruptible) return false;
   const attack: EnemyAttackId = e.windup.attack;
   cancelWindup(w, e);
   e.attackReadyAt[attack] = nowS + ENEMY_ATTACKS[attack].cooldown;
   fx(w, { t: 'interrupt', dst: e.id });
-  if (stagger) applyStagger(w, e, INTERRUPT_STAGGER, nowS);
+  if (stagger) applyStagger(w, e, by ? INTERRUPT_STAGGER * staggerMultOf(by) : INTERRUPT_STAGGER, nowS);
+  if (by) modMomentum(by, 'interrupt', nowS);
   return true;
+}
+
+/** A momentumOn mod for `ev` pays (through Flow), unless its everyS has not passed since it last paid. */
+export function modMomentum(a: AdventurerState, ev: MomentumEvent, nowS: number): void {
+  const m = a.modIndex.momentumOn.get(ev);
+  if (!m || !a.alive) return;
+  if (m.everyS > 0) {
+    const last = ev === 'hitTaken' ? a.modTimers.hitTakenAt : a.modTimers.momentumAt[ev] ?? -Infinity;
+    if (nowS - last < m.everyS - TIME_EPS) return;
+    if (ev === 'hitTaken') a.modTimers.hitTakenAt = nowS; else a.modTimers.momentumAt[ev] = nowS;
+  }
+  gainFor(a, m.amount);
 }
 
 /**
@@ -410,10 +487,22 @@ export function damageEnemy(
   else if (e.hp <= 0) killEnemy(w, e, nowS);
 }
 
-/** An enemy at 0 hp: `death` fx, a kill credited to its threat table, targets dropped, respawn scheduled. */
+/**
+ * Kill credit (minimum contribution): the live adventurers on the enemy's threat table whose threat is at
+ * least MIN_CREDIT_FRAC × the largest live threat on it, in table order. The top always qualifies; a
+ * tagger with a sliver of the threat does not. (Plan 4's party share is the server's, added afterwards.)
+ */
+export function creditOf(w: CombatWorld, e: EnemyState): number[] {
+  const live = e.threat.ids().filter((id) => w.adventurers.get(id)?.alive === true);
+  let top = 0;
+  for (const id of live) top = Math.max(top, e.threat.get(id)!);
+  return live.filter((id) => e.threat.get(id)! >= MIN_CREDIT_FRAC * top - 1e-9);
+}
+
+/** An enemy at 0 hp: `death` fx, a kill credited to its threat table (creditOf), targets dropped, respawn scheduled. */
 export function killEnemy(w: CombatWorld, e: EnemyState, nowS: number): void {
   if (!e.alive) return; // idempotent
-  const credit = e.threat.ids().filter((id) => w.adventurers.get(id)?.alive === true);
+  const credit = creditOf(w, e);
   cancelWindup(w, e);
   e.alive = false; e.hp = 0; e.act = 'dead'; e.actUntil = -Infinity; e.targetId = null;
   e.diedAt = nowS; e.respawnAt = e.spawned ? Infinity : nowS + e.data.respawn;
@@ -476,6 +565,7 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
   const reaction = reactionFor(s.element, liveMarks(e.marks, nowS), s.mark);
   if (reaction) {
     fx(w, { t: 'react', src: a.id, dst: e.id, reaction });
+    modMomentum(a, 'react', nowS);
     consumeMark(w, e, REACTIONS[s.element!].mark);
     const extra = hitDamage(reaction === 'blast' ? BLAST_COEF : COMBO_COEF, power, def, mult);
     amount += extra;
@@ -509,8 +599,11 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
       e.burning = hadBurning && e.burning ? { src: a.id, power, nextAt: e.burning.nextAt } : { src: a.id, power, nextAt: nowS + 1 };
     } else if (combo?.includes('burning')) e.burning = null;
   }
+  // a finisher that detonated a mark (reactions included)
+  if ((combo?.length || reaction) && s.by !== 'auto' && ABILITIES[s.by].role === 'finisher') modMomentum(a, 'detonate', nowS);
+  if (behind) modMomentum(a, 'behind', nowS);
   // 4. Momentum, the hit, stagger and the interrupt
-  if (s.momentum) a.momentum = gainMomentum(a.momentum, s.momentum);
+  if (s.momentum) gainFor(a, s.momentum);
   damageEnemy(w, a.id, e, amount, s.by, nowS, combo, true, { element: s.element, behind });
   let total = amount;
   // the reaction's effects around the target land even when the hit killed it
@@ -531,12 +624,12 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
   if (!e.alive) return { plain, total };
   if (reaction === 'conduct') {
     // the reaction interrupts; INTERRUPT_STAGGER only when the hit itself interrupts
-    if (e.data.elite) interruptWindup(w, e, nowS, s.interrupts === true);
+    if (e.data.elite) interruptWindup(w, e, nowS, s.interrupts === true, a);
     else stunEnemy(w, e, CONDUCT_STUN_S, nowS);
   }
   if (s.mark && !rootBlocked) fx(w, { t: 'mark', dst: e.id, mark: s.mark, on: true });
-  applyStagger(w, e, stagger, nowS);
-  if (s.interrupts) interruptWindup(w, e, nowS);
+  applyStagger(w, e, stagger * staggerMultOf(a), nowS);
+  if (s.interrupts) interruptWindup(w, e, nowS, true, a);
   return { plain, total };
 }
 
@@ -566,15 +659,39 @@ export function hurtAdventurer(
   const shield = liveShield(a, nowS);
   const absorbed = Math.min(shield, amount);
   a.shield = shield - absorbed;
-  const taken = Math.min(a.hp, amount - absorbed);
+  const before = a.hp;
+  let taken = Math.min(a.hp, amount - absorbed);
+  const mi = a.modIndex;
+  // lastStand: a blow that would kill leaves 1 hp and a few seconds of plain misses (fields included)
+  const stand = mi.lastStand !== null && a.hp - taken <= 0 && nowS - a.modTimers.lastStandAt >= mi.lastStand.everyS - TIME_EPS;
+  if (stand) taken = Math.max(0, a.hp - 1);
   a.hp -= taken;
   a.lastHurtAt = nowS;
   a.lastCombatAt = nowS;
   fx(w, { t: 'hit', src, dst: a.id, amount: amount - absorbed, absorbed, by });
-  if (a.hp <= 0) killAdventurer(w, a, nowS);
-  // a field tick is no hit to block or bleed from: no Momentum
-  else if (by !== 'field') onDamageTaken(w, a, taken, absorbed, src, nowS, redirected);
+  if (stand) {
+    a.modTimers.lastStandAt = nowS;
+    a.reviveSafeUntil = Math.max(a.reviveSafeUntil, nowS + mi.lastStand!.iframesS);
+    fx(w, { t: 'lastStand', src: a.id });
+  }
+  if (a.hp <= 0) { killAdventurer(w, a, nowS); return { taken, absorbed }; }
+  // a field tick is no hit to block or bleed from: no trait Momentum
+  if (by !== 'field') onDamageTaken(w, a, taken, absorbed, src, nowS, redirected);
+  if (mi.empty) return { taken, absorbed };
+  // the kit's: an enemy hit or field tick that landed (hp or shield; a Shelter share is no hit on the Paladin)
+  if (!redirected && w.enemies.has(src) && taken + absorbed > 0) modMomentum(a, 'hitTaken', nowS);
+  const low = mi.lowHpShield;
+  if (low && before >= low.below * a.stats.maxHp && a.hp < low.below * a.stats.maxHp && nowS - a.modTimers.lowHpAt >= low.everyS - TIME_EPS) {
+    a.modTimers.lowHpAt = nowS;
+    kitShield(w, a, a, Math.floor(low.frac * a.stats.maxHp), KIT_SHIELD_S, nowS);
+  }
   return { taken, absorbed };
+}
+
+/** A kit shield (healShield, lowHpShield, shieldOn): applyShield's replace rule, and a `kitShield` fx when it lands. */
+export function kitShield(w: CombatWorld, src: AdventurerState, dst: AdventurerState, amount: number, s: number, nowS: number): void {
+  if (!(amount > 0) || !(s > 0)) return;
+  if (applyShield(w, src, dst, amount, s, nowS)) fx(w, { t: 'kitShield', src: src.id, dst: dst.id, amount });
 }
 
 /** Death from combat damage: a cast cancelled, `died`, `death` fx, act 'dead', buffs and afflictions gone, dropped from every threat table. */
@@ -661,16 +778,17 @@ export function abilityIntent(w: CombatWorld, a: AdventurerState, slot: unknown,
   const charges = ab.effects.some((e) => e.k === 'charge');
   if (phase === 'release') return charges && a.charge ? releaseCharge(w, a, id, nowS) : 'invalid';
   if (nowS < a.gcdUntil - TIME_EPS || nowS < (a.readyAt[id] ?? -Infinity) - TIME_EPS) return 'cooldown';
-  if (ab.cost !== undefined && a.momentum < ab.cost) return 'momentum';
+  const cost = effectiveCost(a, ab);
+  if (cost !== undefined && a.momentum < cost) return 'momentum';
   const subject = resolveAim(w, a, ab, a.targetId, ally);
   if (typeof subject === 'string') return subject;
   a.gcdUntil = nowS + GCD_S;
   if (charges) { a.charge = { startedAt: nowS }; return null; }
   if (ab.cast) { startCast(w, a, slot as number, id, subject, nowS); return null; }
-  a.readyAt[id] = nowS + ab.cooldown;
+  a.readyAt[id] = nowS + effectiveCooldown(a, ab);
   const dst = subject.enemy?.id ?? (subject.ally !== a ? subject.ally?.id : undefined);
   fx(w, dst === undefined ? { t: 'use', src: a.id, ability: id } : { t: 'use', src: a.id, ability: id, dst });
-  if (ab.cost !== undefined) a.momentum = gainMomentum(a.momentum, -ab.cost);
+  if (cost !== undefined) a.momentum = gainMomentum(a.momentum, -cost);
   applyEffects(w, a, id, subject, nowS);
   return null;
 }
@@ -683,10 +801,20 @@ function releaseCharge(w: CombatWorld, a: AdventurerState, id: AbilityId, nowS: 
   const t = targetFor(w, a, a.targetId, ab.range);
   if (typeof t === 'string') return t;
   const cs = chargedShot(held);
-  a.readyAt[id] = nowS + ab.cooldown;
+  a.readyAt[id] = nowS + effectiveCooldown(a, ab);
   fx(w, { t: 'use', src: a.id, ability: id, dst: t.id, frac: cs.frac });
-  strike(w, a, t, { coef: cs.coef, by: id, momentum: cs.momentum, stagger: cs.stagger, interrupts: cs.interrupts }, nowS);
+  // Focus, its coef mods (Drawn Breath, Longwatch) and afterDodge ride on chargedShot()'s coef; its stagger mods on its stagger
+  const coef = a.modIndex.empty && !a.stats.focus ? cs.coef : cs.coef * coefMultOf(a, id, takeAfterDodge(a, id, nowS));
+  strike(w, a, t, { coef, by: id, momentum: cs.momentum, stagger: effectiveStagger(a, id, cs.stagger), interrupts: cs.interrupts }, nowS);
   return null;
+}
+
+/** The afterDodge bonus for ability `id` used now: its mult when live and the ability deals damage (then consumed), else 1. */
+export function takeAfterDodge(a: AdventurerState, id: AbilityId, nowS: number): number {
+  const ad = a.modIndex.afterDodge;
+  if (!ad || nowS >= a.modTimers.afterDodgeUntil - TIME_EPS || !dealsDamage(id)) return 1;
+  a.modTimers.afterDodgeUntil = -Infinity;
+  return ad.mult;
 }
 
 /**
@@ -708,7 +836,7 @@ export function jobIntent(w: CombatWorld, a: AdventurerState, job: unknown, pick
   const max = dodgeMax(a);
   a.dodgeCharges = Math.min(a.dodgeCharges, max);
   if (a.dodgeCharges >= max) a.dodgeRefillAt = null;
-  else a.dodgeRefillAt ??= nowS + DODGE_REFILL_S;
+  else a.dodgeRefillAt ??= nowS + dodgeRefillS(a);
   return null;
 }
 
@@ -753,7 +881,7 @@ export function refillDodges(a: AdventurerState, nowS: number): void {
   const max = dodgeMax(a);
   while (a.dodgeRefillAt !== null && nowS >= a.dodgeRefillAt - TIME_EPS) {
     a.dodgeCharges = Math.min(max, a.dodgeCharges + 1);
-    a.dodgeRefillAt = a.dodgeCharges < max ? a.dodgeRefillAt + DODGE_REFILL_S : null;
+    a.dodgeRefillAt = a.dodgeCharges < max ? a.dodgeRefillAt + dodgeRefillS(a) : null;
   }
 }
 
@@ -780,8 +908,9 @@ export function dodgeIntent(w: CombatWorld, a: AdventurerState, i: Extract<Inten
   a.actUntil = nowS + result.seconds;
   a.iframeUntil = nowS + DODGE_IFRAME_S;
   a.dodgeCharges--;
-  if (a.dodgeRefillAt === null) a.dodgeRefillAt = nowS + DODGE_REFILL_S;
+  if (a.dodgeRefillAt === null) a.dodgeRefillAt = nowS + dodgeRefillS(a);
   a.lastDodgeAt = nowS;
+  if (a.modIndex.afterDodge) a.modTimers.afterDodgeUntil = nowS + a.modIndex.afterDodge.s;
   a.lastDodgeFrom = { x: start.x, z: start.z };
   fx(w, { t: 'dodge', src: a.id });
   w.out.displaced.push({ id: a.id, kind: 'dodge', from: start, d, result });

@@ -6,18 +6,22 @@ import { ABILITIES, type AbilityId } from './abilities';
 import { CAST_BREAK_LOCK_S, CAST_RANGE_SLACK, OVERFLOW_CAST_MOMENTUM } from './constants';
 import type { AdventurerState, CombatWorld } from './engine';
 import { applyEffects, resolveAim, traitOf, type Subject } from './effects';
-import { TIME_EPS } from './adventurer';
-import { gainMomentum } from './momentum';
+import { TIME_EPS, modMomentum } from './adventurer';
+import { gainFor, gainMomentum } from './momentum';
+import { effectiveCast, effectiveCooldown, effectiveCost } from './kitIndex';
 
-/** targetId: the enemy the cast was aimed at (a `target` intent mid-cast does not change it); allyId: the adventurer. */
-export interface CastState { id: AbilityId; slot: number; startedAt: number; endsAt: number; targetId: number | null; allyId: number | null }
+/**
+ * targetId: the enemy the cast was aimed at (a `target` intent mid-cast does not change it); allyId: the
+ * adventurer; total: its length (the ability's cast under the kit's cast mods).
+ */
+export interface CastState { id: AbilityId; slot: number; startedAt: number; endsAt: number; targetId: number | null; allyId: number | null; total: number }
 export type CastBreak = 'dodge' | 'interrupt' | 'cancel';
 
 /** Starts the cast of slot `slot` on `subject` (already checked; the caller started the GCD). */
 export function startCast(w: CombatWorld, a: AdventurerState, slot: number, id: AbilityId, subject: Subject, nowS: number): void {
-  const total = ABILITIES[id].cast!;
+  const total = effectiveCast(a, ABILITIES[id])!;
   const dst = subject.enemy?.id ?? (subject.ally !== a ? subject.ally?.id : undefined);
-  a.cast = { id, slot, startedAt: nowS, endsAt: nowS + total, targetId: subject.enemy?.id ?? null, allyId: subject.ally ? subject.ally.id : null };
+  a.cast = { id, slot, startedAt: nowS, endsAt: nowS + total, targetId: subject.enemy?.id ?? null, allyId: subject.ally ? subject.ally.id : null, total };
   w.out.fx.push(dst === undefined ? { t: 'cast', src: a.id, ability: id, total } : { t: 'cast', src: a.id, ability: id, dst, total });
 }
 
@@ -46,14 +50,24 @@ export function tickCast(w: CombatWorld, a: AdventurerState, nowS: number): bool
     w.out.fx.push({ t: 'castEnd', src: a.id, ability: c.id, ok: false, reason: 'fizzle' });
     return true;
   }
-  if (ab.cost !== undefined) a.momentum = gainMomentum(a.momentum, -ab.cost);
-  a.readyAt[c.id] = nowS + ab.cooldown;
+  const cost = effectiveCost(a, ab);
+  if (cost !== undefined) a.momentum = gainMomentum(a.momentum, -cost);
+  a.readyAt[c.id] = nowS + effectiveCooldown(a, ab);
   const dst = subject.enemy?.id ?? (subject.ally !== a ? subject.ally?.id : undefined);
   w.out.fx.push(dst === undefined ? { t: 'use', src: a.id, ability: c.id } : { t: 'use', src: a.id, ability: c.id, dst });
   applyEffects(w, a, c.id, subject, nowS);
   // Overflow: a Black Mage's finished cast builds OVERFLOW_CAST_MOMENTUM
-  if (a.alive && traitOf(a) === 'overflow') a.momentum = gainMomentum(a.momentum, OVERFLOW_CAST_MOMENTUM);
+  if (a.alive && traitOf(a) === 'overflow') gainFor(a, OVERFLOW_CAST_MOMENTUM);
   w.out.fx.push({ t: 'castEnd', src: a.id, ability: c.id, ok: true });
+  if (a.alive && !a.modIndex.empty) {
+    modMomentum(a, 'castDone', nowS);
+    // cdOnCast: every other running cooldown drops by s (not below 0)
+    const cut = a.modIndex.cdOnCast;
+    if (cut > 0) for (const id of Object.keys(a.readyAt) as AbilityId[]) {
+      const r = a.readyAt[id]!;
+      if (id !== c.id && r > nowS) a.readyAt[id] = Math.max(nowS, r - cut);
+    }
+  }
   return true;
 }
 
@@ -61,6 +75,6 @@ export function tickCast(w: CombatWorld, a: AdventurerState, nowS: number): bool
 export function castView(a: AdventurerState, nowS: number): { ability: AbilityId; total: number; left: number } | null {
   const c = a.cast;
   if (!c) return null;
-  const total = ABILITIES[c.id].cast!;
+  const total = c.total;
   return { ability: c.id, total, left: Math.max(0, total - (nowS - c.startedAt)) };
 }

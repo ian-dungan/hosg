@@ -231,3 +231,12 @@ export function knockDisplacement(from: { x: number; z: number }, at: { x: numbe
   }
   return { vx: ux * k.speed, vz: uz * k.speed, vy: Math.min(k.vy, KNOCK_MAX_VY), seconds: k.seconds };
 }
+
+/**
+ * Guard on a knock taken: speed × (1 − min(0.5, guard/100)); the knock's time and lift are unchanged. No
+ * Guard (absent, 0 or not finite) gives `k` itself.
+ */
+export function knockForGuard(k: Knock, guard: number | undefined): Knock {
+  if (typeof guard !== 'number' || !Number.isFinite(guard) || guard <= 0) return k;
+  return { ...k, speed: k.speed * (1 - Math.min(0.5, guard / 100)) };
+}

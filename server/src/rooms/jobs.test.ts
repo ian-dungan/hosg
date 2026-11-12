@@ -346,6 +346,8 @@ describe('job xp', () => {
     // both on its threat table, then it is one hit from death
     const e = [...worldOf(serverRoom(a.room).combat).enemies.values()].find((x) => x.kind === 'thornling')!;
     await waitFor(() => e.threat.has(me(a.room).eid) && e.threat.has(me(b.room).eid), 4000);
+    // both did a real share (Plan 5's minimum-contribution credit needs 10% of the top threat)
+    for (const id of [me(a.room).eid, me(b.room).eid]) e.threat.set(id, 50);
     e.hp = 1;
     await waitFor(() => credits.length > 0 && jobXp.length > 0 && bJobXp.length > 0, 4000);
     const gain = KILL_XP.thornling;

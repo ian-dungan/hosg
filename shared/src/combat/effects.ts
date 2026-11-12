@@ -12,9 +12,13 @@ import {
 import { AFFLICTIONS, type AfflictionId } from './afflictions';
 import { elementMult, type ElementId } from './elements';
 import type { AdventurerState, CombatWorld, EnemyState, Refusal } from './engine';
-import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, splashDamage, strikeFull, TIME_EPS, type Strike } from './adventurer';
+import {
+  damageEnemy, dodgeMax, enemyInvulnerable, healAdventurer, kitShield, modMomentum, reach, refillDodges, splashDamage, strikeFull, takeAfterDodge, TIME_EPS, type Strike,
+} from './adventurer';
+import { amountMultOf, coefMultOf, effectiveDuration, effectiveHpCost, effectiveStagger, hasTaunt, special } from './kitIndex';
+import { KIT_SHIELD_S } from './constants';
 import type { FxEvent } from './fx';
-import { gainMomentum } from './momentum';
+import { gainFor } from './momentum';
 import { lineOfSight } from './sight';
 import { JOBS, type TraitId } from './jobs';
 import { inArena } from './enemyAi';
@@ -67,11 +71,25 @@ export function outgoingMult(w: CombatWorld, a: AdventurerState, e: EnemyState, 
  * aegis and aegis_ally (never both), then × (1 + takenPerStack × stacks) for live Searing.
  */
 export function takenMult(w: CombatWorld, a: AdventurerState, e: EnemyState | null, nowS: number): number {
-  void w; void e;
+  void e;
   let m = traitOf(a) === 'steadfast' ? STEADFAST_TAKEN : 1;
   if (hasBuff(a, 'aegis', nowS)) m *= AEGIS_TAKEN;
   else if (hasBuff(a, 'aegis_ally', nowS)) m *= AEGIS_ALLY_TAKEN;
+  if (w.auras.size) m *= auraTakenOn(w, a);
   return m * searingMult(a, nowS);
+}
+/**
+ * auraTaken: × the strongest aura (the lowest mult) of a live allied wearer (self excluded) within its r,
+ * not across an awake arena's edge; 1 when none reaches `a`.
+ */
+export function auraTakenOn(w: CombatWorld, a: AdventurerState): number {
+  let best = 1;
+  for (const b of w.auras) {
+    const au = b.modIndex.aura;
+    if (!au || b === a || !b.alive || au.mult >= best || !allied(a, b) || dist(a, b) > au.r || acrossArena(w, a, b)) continue;
+    best = au.mult;
+  }
+  return best;
 }
 /** (1 + takenPerStack × stacks) for live Searing, else 1. */
 export function searingMult(a: AdventurerState, nowS: number): number {
@@ -142,13 +160,30 @@ export function threatMult(w: CombatWorld, src: number, heal = false): number {
   const a = w.adventurers.get(src);
   if (!a) return 1;
   const trait = traitOf(a);
-  return (trait === 'steadfast' ? STEADFAST_THREAT : 1) * (heal && trait === 'font' ? FONT_THREAT_MULT : 1);
+  const m = (trait === 'steadfast' ? STEADFAST_THREAT : 1) * (heal && trait === 'font' ? FONT_THREAT_MULT : 1);
+  // Guard: +1% per point on all threat it adds
+  const g = special(a.stats, 'guard');
+  return g > 0 ? m * (1 + g / 100) : m;
+}
+
+/**
+ * healShield (ruling P5-c: after an ABILITY heal `src` gives, to an ally or itself, Bloodbond's shared heal
+ * included; never lifesteal, regen or a reaction): the healed get floor(frac × healed) of the normal kind
+ * (cap) plus floor(frac × overheal) of the overheal-only kind (cap), as one shield for KIT_SHIELD_S.
+ */
+export function kitHealShield(w: CombatWorld, src: AdventurerState | undefined, dst: AdventurerState, requested: number, healed: number, nowS: number): void {
+  if (!src || !src.alive || !dst.alive || src.modIndex.empty) return;
+  const n = src.modIndex.healShield, o = src.modIndex.overhealShield;
+  if (!n && !o) return;
+  const over = Math.max(0, requested - healed);
+  const amount = (n ? Math.min(n.cap, Math.floor(n.frac * healed + 1e-9)) : 0) + (o ? Math.min(o.cap, Math.floor(o.frac * over + 1e-9)) : 0);
+  kitShield(w, src, dst, amount, KIT_SHIELD_S, nowS);
 }
 /** After `src` healed `dst` by `healed`: Font's Momentum (FONT_MOMENTUM_PER_HP, at most FONT_MOMENTUM_CAP per heal), for a live healer only. */
 export function onHealDone(w: CombatWorld, src: AdventurerState | undefined, dst: AdventurerState, healed: number, nowS: number): void {
   void w; void dst; void nowS;
   if (!src || !src.alive || !(healed > 0) || traitOf(src) !== 'font') return;
-  src.momentum = gainMomentum(src.momentum, Math.min(FONT_MOMENTUM_CAP, healed * FONT_MOMENTUM_PER_HP));
+  gainFor(src, Math.min(FONT_MOMENTUM_CAP, healed * FONT_MOMENTUM_PER_HP));
 }
 /**
  * After an enemy hit landed on an adventurer (hp or shield): Steadfast's BLOCK_MOMENTUM per hit and
@@ -159,8 +194,8 @@ export function onDamageTaken(w: CombatWorld, a: AdventurerState, taken: number,
   void nowS;
   if (redirected || !w.enemies.has(src) || !(taken + absorbed > 0)) return;
   const trait = traitOf(a);
-  if (trait === 'steadfast') a.momentum = gainMomentum(a.momentum, BLOCK_MOMENTUM);
-  else if (trait === 'crimson_tithe') a.momentum = gainMomentum(a.momentum, Math.floor(taken * BLOOD_MOMENTUM_PER_HP + 1e-9));
+  if (trait === 'steadfast') gainFor(a, BLOCK_MOMENTUM);
+  else if (trait === 'crimson_tithe') gainFor(a, Math.floor(taken * BLOOD_MOMENTUM_PER_HP + 1e-9));
 }
 /**
  * Crimson Tithe: BLOOD_LIFESTEAL of an ability's damage dealt heals the Dark Knight (× PACT_LIFESTEAL_MULT
@@ -172,7 +207,7 @@ export function lifesteal(w: CombatWorld, a: AdventurerState, dealt: number, now
   healAdventurer(w, a, amount, a.id, nowS);
   if (!hasBuff(a, 'bloodbond', nowS)) return;
   const b = pickAlly(w, a, undefined, BLOODBOND_R, false);
-  if (b) healAdventurer(w, b, amount, a.id, nowS);
+  if (b) kitHealShield(w, a, b, amount, healAdventurer(w, b, amount, a.id, nowS), nowS);
 }
 
 // ───────── aims ─────────
@@ -300,8 +335,10 @@ export function tickBuffs(w: CombatWorld, a: AdventurerState, nowS: number): voi
       const src = rain.orphan ? undefined : w.adventurers.get(rain.src);
       // an orphan rain whose caster has left cannot be checked against the arena edge: it stops inside an awake arena
       if (!w.adventurers.has(rain.src) && insideAwakeArena(w, a)) { rain.until = nowS; break; }
-      const healed = healAdventurer(w, a, RAIN_HEAL * (src ? healMult(src, a) : 1), rain.src, nowS, src !== undefined);
+      const want = RAIN_HEAL * (src ? healMult(src, a) : 1);
+      const healed = healAdventurer(w, a, want, rain.src, nowS, src !== undefined);
       onHealDone(w, src, a, healed, nowS);
+      kitHealShield(w, src, a, want, healed, nowS);
       k++;
     }
   }
@@ -326,6 +363,7 @@ export function reviveAdventurer(w: CombatWorld, by: AdventurerState, a: Adventu
   a.reviveSafeUntil = nowS + REVIVE_IFRAMES_S;
   fx(w, { t: 'revive', src: by.id, dst: a.id, hp });
   (w.out.revived ??= []).push({ id: a.id, by: by.id, hp });
+  modMomentum(by, 'revive', nowS);
 }
 /** min(amount, hp − 1) from the caster: never kills, adds no threat, and is not combat damage. */
 export function payHp(a: AdventurerState, amount: number): number {
@@ -353,31 +391,41 @@ function enemiesNear(w: CombatWorld, p: { x: number; z: number }, r: number, by:
  */
 export function applyEffects(w: CombatWorld, a: AdventurerState, id: AbilityId, subject: Subject, nowS: number): void {
   const ab = ABILITIES[id];
+  // the kit, once per use: × on its damage coefs (Focus, coef mods, a live afterDodge, consumed here) and on its heal and shield amounts
+  const kitted = !a.modIndex.empty || special(a.stats, 'focus') > 0;
+  const k: UseMult = kitted ? { coef: coefMultOf(a, id, takeAfterDodge(a, id, nowS)), amount: amountMultOf(a, id) } : NO_USE_MULT;
   let struck = false;
   for (const ef of ab.effects) {
     if (!a.alive && ef.k !== 'damage') break;
-    applyEffect(w, a, ab, ef, subject, nowS, struck);
+    applyEffect(w, a, ab, ef, subject, nowS, struck, k);
     if (ef.k === 'damage') struck = true;
   }
+  // shieldOn taunt: any ability with a taunt effect (Taunt, Dread Howl) shields its user
+  const so = a.modIndex.shieldOnTaunt;
+  if (so && a.alive && hasTaunt(id)) kitShield(w, a, a, so.amount, so.s, nowS);
 }
+interface UseMult { coef: number; amount: number }
+const NO_USE_MULT: UseMult = Object.freeze({ coef: 1, amount: 1 });
 
-function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Effect, subject: Subject, nowS: number, struck: boolean): void {
+function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Effect, subject: Subject, nowS: number, struck: boolean, k: UseMult): void {
   const aim = subject.ally ?? a;
+  const dur = (sec: number) => (k === NO_USE_MULT ? sec : effectiveDuration(a, ab.id, sec));
   switch (ef.k) {
     case 'damage': {
       const e = subject.enemy;
       if (!e) return;
       const tag = { element: ab.element, behind: ef.behind };
-      const s: Strike = struck ? { coef: ef.coef, by: ab.id, ...tag } : {
-        coef: ef.coef, by: ab.id, momentum: ab.momentum, mark: ab.mark, primer: ab.primer, finisher: ab.role === 'finisher',
-        stagger: ab.stagger, interrupts: ab.interrupts, ...tag,
+      const coef = k.coef === 1 ? ef.coef : ef.coef * k.coef;
+      const s: Strike = struck ? { coef, by: ab.id, ...tag } : {
+        coef, by: ab.id, momentum: ab.momentum, mark: ab.mark, primer: ab.primer, finisher: ab.role === 'finisher',
+        stagger: k === NO_USE_MULT ? ab.stagger : effectiveStagger(a, ab.id, ab.stagger), interrupts: ab.interrupts, ...tag,
       };
       const near = ef.splash ? enemiesNear(w, e, ef.splash.r, a, e) : [];
       const { plain, total } = strikeFull(w, a, e, s, nowS);
       let dealt = total;
       if (ef.splash && plain > 0) {
         // per enemy (ruling P3b-d): its own defence, break and weakness
-        const sp: Strike = { coef: ef.coef * ef.splash.frac, by: ab.id, ...tag };
+        const sp: Strike = { coef: coef * ef.splash.frac, by: ab.id, ...tag };
         for (const o of near) if (o.alive) { const part = splashDamage(w, a, o, sp.coef, sp, nowS); splashHit(w, a, o, part, ab.id, nowS, ab.element); dealt += part; }
       }
       lifesteal(w, a, dealt, nowS);
@@ -385,29 +433,33 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
     }
     case 'heal': {
       const dst = ef.on === 'self' ? a : ef.on === 'aim' ? aim : pickAlly(w, a, undefined, ALLY_RANGE, true) ?? a;
-      const healed = healAdventurer(w, dst, ef.amount * healMult(a, dst), a.id, nowS);
+      const want = k.amount === 1 ? ef.amount * healMult(a, dst) : ef.amount * k.amount * healMult(a, dst);
+      const healed = healAdventurer(w, dst, want, a.id, nowS);
       onHealDone(w, a, dst, healed, nowS);
+      if (k !== NO_USE_MULT) kitHealShield(w, a, dst, want, healed, nowS);
       return;
     }
     case 'shield': {
       const dsts = ef.on === 'area' ? adventurersNear(w, a, ef.r) : [ef.on === 'self' ? a : aim];
-      for (const d of dsts) applyShield(w, a, d, ef.amount, ef.s, nowS);
+      const amount = k.amount === 1 ? ef.amount : Math.round(ef.amount * k.amount);
+      for (const d of dsts) applyShield(w, a, d, amount, dur(ef.s), nowS);
       return;
     }
     case 'buff': {
       const dsts = ef.on === 'area' || ef.on === 'others' ? adventurersNear(w, a, ef.r).filter((b) => ef.on === 'area' || b !== a) : [ef.on === 'self' ? a : aim];
-      for (const d of dsts) applyBuff(w, a, d, ef.buff, ef.s, nowS);
+      for (const d of dsts) applyBuff(w, a, d, ef.buff, dur(ef.s), nowS);
       return;
     }
     case 'debuff': {
       const dsts = ef.on === 'area' ? enemiesNear(w, a, ef.r, a) : subject.enemy ? [subject.enemy] : [];
-      for (const e of dsts) applyDebuff(w, a, e, ef.debuff, ef.s, nowS);
+      for (const e of dsts) applyDebuff(w, a, e, ef.debuff, dur(ef.s), nowS);
       return;
     }
     case 'momentum': {
       const dst = ef.on === 'self' ? a : aim;
       if (!dst.alive) return;
-      dst.momentum = gainMomentum(dst.momentum, ef.amount);
+      // a gift received goes through the receiver's Flow
+      gainFor(dst, ef.amount);
       fx(w, { t: 'gift', src: a.id, dst: dst.id, amount: ef.amount });
       return;
     }
@@ -422,18 +474,18 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
       for (const e of enemiesNear(w, a, ef.r, a)) if (e.threat.has(a.id)) e.threat.set(a.id, 0);
       return;
     case 'revive': if (subject.ally && subject.ally !== a) reviveAdventurer(w, a, subject.ally, ef.frac, nowS); return;
-    case 'hp-cost': payHp(a, ef.amount); return;
+    case 'hp-cost': payHp(a, k === NO_USE_MULT ? ef.amount : effectiveHpCost(a, ab.id, ef.amount)); return;
     case 'dodge-refill': {
-      const max = JOBS[a.job].dodgeCharges;
+      const max = dodgeMax(a);
       refillDodges(a, nowS);
       a.dodgeCharges = Math.min(max, a.dodgeCharges + ef.charges);
       if (a.dodgeCharges >= max) a.dodgeRefillAt = null;
       return;
     }
     case 'parry': a.parryUntil = nowS + ef.s; return;
-    case 'sprint': a.sprintUntil = nowS + ef.s; return;
+    case 'sprint': a.sprintUntil = nowS + dur(ef.s); return;
     case 'charge': return; // pressed and released through the charge (adventurer.ts)
-    case 'cleanse': clearAfflictions(w, aim, a.id); return;
+    case 'cleanse': clearAfflictions(w, aim, a.id); modMomentum(a, 'cleanse', nowS); return;
   }
 }
 

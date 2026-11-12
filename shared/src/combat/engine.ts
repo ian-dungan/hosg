@@ -15,6 +15,8 @@ import { markBits } from './marks';
 import type { Shape } from './shapes';
 import { staggerImmuneLeft, type StaggerBar } from './stagger';
 import type { Stats } from './stats';
+import type { Kit, MomentumEvent } from '../mods';
+import type { ModIndex } from './kitIndex';
 import type { ThreatTable } from './threat';
 import { sendHome, stepEnemies } from './enemyAi';
 import { ENEMY_ATTACKS } from './enemies';
@@ -22,7 +24,7 @@ import { bossEnrageIn, bossPhase, bossWarded } from './bossAi';
 import type { Displacement, DisplaceResult } from './displace';
 import {
   abilityIntent, applyCarry, buffBits, carryOfState, currentAct, debuffBits, dodgeIntent, fallDamageTaken, jobIntent, liveShield, loadoutIntent,
-  newAdventurer, newEnemyState, plan3LoadoutState, removeFromThreat, resetAdventurer, searingStacks, selfView, speedScaleOf, swapIntent, targetIntent,
+  newAdventurer, newEnemyState, plan3LoadoutState, removeFromThreat, resetAdventurer, searingStacks, selfView, setKitState, speedScaleOf, swapIntent, targetIntent,
   tickAdventurer, tickEnemyStatus,
 } from './adventurer';
 import { tickFields } from './fields';
@@ -70,6 +72,8 @@ export interface CombatantView {
    * enraged), null for a boss asleep or without one and for non-bosses.
    */
   tier?: EnemyTier; phase?: number; warded?: boolean; enrageIn?: number | null;
+  /** Adventurers: the job level the room gave with the kit (addAdventurer or setKit); absent when it gave none. */
+  level?: number;
 }
 /** A boss's fight events: woke (first engaged), a transition began (phase = the next index), enraged, reset (went home). */
 export interface BossEvent { enemy: number; kind: EnemyKindId; event: 'wake' | 'phase' | 'enrage' | 'reset'; phase?: number; atS: number }
@@ -84,6 +88,8 @@ export interface SelfView {
   momentum: number; weapon: WeaponId; slots: AbilityId[]; cd: number[]; gcd: number; swapCd: number; swapLock: number;
   dodgeCharges: number; dodgeNextIn: number; charge: number | null; inCombat: boolean;
   job?: JobId; dodgeMax?: number; cast?: CastView;
+  /** The effective Momentum cost of its finishers (effectiveCost), present only when a mod changes it. */
+  finisherCost?: number;
 }
 /** unavoidable: dodge i-frames do not avoid it (ruling P4-f; clients draw it as "cannot be dodged"). */
 export interface TelegraphView { id: number; owner: number; attack: EnemyAttackId; shape: Shape; total: number; left: number; unavoidable?: true }
@@ -144,7 +150,15 @@ export interface Combat {
    * loadout: a job Loadout; anything else reads as DEFAULT_LOADOUT, except (deprecated, until Tasks
    * 5–7) a Plan 3 loadout, which runs as its job (Blade → Warrior, Bow → Ranger) with its Plan 3 slots.
    */
-  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Plan3Loadout | Loadout; carry?: Carry; stats?: Stats }, nowS: number): number;
+  addAdventurer(a: { x: number; z: number; y: number; facing: number; hp: number; loadout: Plan3Loadout | Loadout; carry?: Carry; stats?: Stats; kit?: Kit; level?: number }, nowS: number): number;
+  /**
+   * The adventurer's stats and mods (kitFor), and its job level for views when given. Allowed any time (a
+   * level-up mid-fight): keeps the hp fraction (rounded, at least 1 when alive), clamps the shield to the
+   * largest the new kit allows, keeps cooldowns and Momentum, and clamps dodge charges to the new maximum
+   * (refilling toward it). The server calls it on join, job change, equip, talent and level-up; never from
+   * a client value. The mods are parsed again (parseMods) and indexed once here.
+   */
+  setKit(id: number, kit: Kit, level?: number): void;
   /**
    * Party membership, set only by the room (the engine never takes it from an intent): adventurers with
    * the same non-null party are allies; anything but a string is no party. Live buffs (Shelter included)
@@ -218,6 +232,14 @@ export interface AdventurerState {
   afflictions: Map<AfflictionId, { stacks: number; until: number; src: number }>;
   /** A swing came due on a tick that could not swing: the next one counts from when it lands. */
   autoWaiting: boolean;
+  /** The kit (setKit, addAdventurer's kit), or null: no kit data (STARTER_STATS or the given stats, no mods). */
+  kit: Kit | null;
+  /** The kit's mods, indexed and clamped (NO_MODS without a kit). */
+  modIndex: ModIndex;
+  /** When each mod effect last fired (-Infinity: never); afterDodgeUntil: the after-dodge bonus is live until then. */
+  modTimers: { lastStandAt: number; lowHpAt: number; hitTakenAt: number; afterDodgeUntil: number; momentumAt: Partial<Record<MomentumEvent, number>> };
+  /** The job level the room gave (views only). */
+  level?: number;
 }
 export interface EnemyWindup { attack: EnemyAttackId; startedAt: number; endsAt: number; interruptible: boolean; telegraphId: number | null }
 export interface EnemyState {
@@ -262,6 +284,8 @@ export interface CombatWorld {
   fields: Map<number, FieldState>; nextFieldId: number;
   /** What the next tick returns: events from intents land here too. */
   out: TickOut;
+  /** Adventurers whose kit has an auraTaken (kept by addAdventurer, setKit and removeAdventurer). */
+  auras: Set<AdventurerState>;
 }
 
 // Per-tick enemy behaviour (enemyAi.ts) runs after the adventurers and before enemy status (marks,
@@ -301,7 +325,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
   const start = finite(opts.nowS) ? opts.nowS : 0;
   const w: CombatWorld = {
     zone, rng: mulberry32(opts.seed), now: start, lastTick: start, nextId: 1, nextTelegraphId: 1,
-    adventurers: new Map(), enemies: new Map(), telegraphs: new Map(), fields: new Map(), nextFieldId: 1, out: emptyOut(),
+    adventurers: new Map(), enemies: new Map(), telegraphs: new Map(), fields: new Map(), nextFieldId: 1, out: emptyOut(), auras: new Set(),
   };
   for (const c of zone.camps) { const e = newEnemyState(w, c); w.enemies.set(e.id, e); }
   // the clock never runs backwards: a stale or non-finite nowS is the latest time seen
@@ -321,6 +345,7 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
     hp: a.hp, maxHp: a.stats.maxHp, alive: a.alive, shield: liveShield(a, w.now), marks: 0, stagger: 0, maxStagger: 0,
     targetId: a.targetId, act: currentAct(a, w.now), windup: null,
     job: a.job, buffs: buffBits(a, w.now), debuffs: 0, cast: castView(a, w.now), searing: searingStacks(a, w.now),
+    ...(a.level !== undefined ? { level: a.level } : {}),
   });
 
   const combat: Combat = {
@@ -332,7 +357,14 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       const s = newAdventurer(w.nextId++, input, t);
       if (a.carry) applyCarry(s, a.carry, t);
       w.adventurers.set(s.id, s);
+      if (s.modIndex.aura) w.auras.add(s);
       return s.id;
+    },
+    setKit(id, kit, level) {
+      const a = w.adventurers.get(id);
+      if (!a) return;
+      setKitState(a, kit, w.now, level);
+      if (a.modIndex.aura) w.auras.add(a); else w.auras.delete(a);
     },
     setParty(id, party) {
       const a = w.adventurers.get(id);
@@ -346,7 +378,9 @@ export function createCombat(zone: CombatZone, opts: { seed: number; nowS: numbe
       return a ? carryOfState(a, w.now) : undefined;
     },
     removeAdventurer(id) {
-      if (!w.adventurers.delete(id)) return;
+      const a = w.adventurers.get(id);
+      if (!a || !w.adventurers.delete(id)) return;
+      w.auras.delete(a);
       removeFromThreat(w, id);
     },
     resetEnemy(id, nowS) {
