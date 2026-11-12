@@ -15,7 +15,7 @@ const CSS = /* css */ `
 .sg-oh{position:absolute;left:0;top:0;display:none;flex-direction:column;align-items:center;gap:2px;will-change:transform;pointer-events:none}
 .sg-oh.on{display:flex}
 .sg-oh-name{font:700 12px/1.1 var(--sans);color:#fff2e6;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.85),0 0 4px rgba(0,0,0,.5)}
-.sg-oh.tgt .sg-oh-name{color:#ffd9a0}
+.sg-oh.tgt .sg-oh-name{display:none} /* the target frame names it already */
 .sg-oh-row{display:flex;align-items:center;gap:3px}
 .sg-oh-hp,.sg-oh-st{position:relative;width:64px;height:7px;border-radius:4px;overflow:hidden;background:rgba(14,12,30,.7);box-shadow:0 0 0 1px rgba(0,0,0,.45)}
 .sg-oh.elite .sg-oh-hp{width:96px;height:9px}

@@ -10,7 +10,12 @@ import { h, toggle, ICONS } from './dom';
 export const CLUSTER_ARC: [number, number][] = [[-96, 0], [-68, -68], [0, -96], [-162, -59], [-99, -141], [-196, 6], [0, 0], [0, -178], [-62, -214]];
 /** Phones in landscape: three short rows (the screen is low and wide). */
 export const CLUSTER_ROWS: [number, number][] = [[-92, 0], [-86, -84], [0, -90], [-172, -80], [-86, -168], [-178, 0], [0, 0], [0, -170], [-164, -160]];
-export const CLUSTER_COLUMNS: [number, number][] = [[0, -92], [-94, -92], [0, -180], [-94, -180], [0, -266], [-94, 0], [0, 0], [-94, -262], [-94, -336]];
+/**
+ * Narrow portrait phones: two columns, with swap at the top of the right-hand column (the screen's edge), never
+ * in the middle of the screen over the adventurer and the fight. The loadout's entry here is unused: style.ts puts
+ * it in the top row, left of the gear.
+ */
+export const CLUSTER_COLUMNS: [number, number][] = [[0, -92], [-94, -92], [0, -180], [-94, -180], [0, -266], [-94, 0], [0, 0], [0, -350], [0, -420]];
 const KIND_C: Record<AbilityDef['kind'], string> = { damage: '#EC6A4C', heal: '#8FD16A', defence: '#479AF2', utility: '#3FB0A6' };
 
 interface Slot { el: HTMLElement; glyph: HTMLElement; name: HTMLElement; sec: HTMLElement; id: string; cd: number; sTxt: string; usable: boolean; def: AbilityDef | null }

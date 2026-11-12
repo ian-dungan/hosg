@@ -143,8 +143,9 @@ export function createEffects(o: EffectsOpts): Effects {
               const n = String(Math.round(ev.amount));
               if (onMe) float(dst, `−${n}`, 'hurt');
               else if (mine && ev.combo?.length) float(dst, `Combo! ${n}`, 'combo', 1.15);
-              else if (mine) float(dst, n, 'damage');
-              else float(dst, n, 'other');
+              // beside the body, not on the name and bar above it (the HUD floats them out to the side)
+              else if (mine) float(dst, n, 'damage', 0.6);
+              else float(dst, n, 'other', 0.6);
             }
             if (ev.absorbed > 0 && (onMe || mine)) float(dst, `Shield ${Math.round(ev.absorbed)}`, 'info', 1.25);
             // enemy telegraph hits strike their release (in case the wind-up's end was not seen)

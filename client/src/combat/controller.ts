@@ -10,7 +10,7 @@
 // - A knockback (or a resync) replays the server's displacement from its `from`; a held dodge it dropped is
 //   forgotten. A respawn stands the body at the statue. Each adopts the new seq.
 // - Key auto-repeat never sends anything again (the server allows 20 intents a second).
-import { Vector3 } from '@babylonjs/core';
+import { Color3, MeshBuilder, StandardMaterial, Vector3 } from '@babylonjs/core';
 import {
   ABILITIES, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, DEATH_MIN_S, AUTO_RESPAWN_S, DODGE_CHARGES, DODGE_MIN_GAP_S, DODGE_REFILL_S,
   ENEMY_ATTACKS, ENEMY_KINDS, FREE_POOL, MARK_BITS, SPRINT_S, SPRINT_SCALE, TARGET_RANGE, TELEGRAPH_LEAD_S, WEAPONS,
@@ -241,6 +241,12 @@ export function createCombat(o: CombatOpts): CombatController {
   const telegraphs: Telegraphs = createTelegraphs(game.scene, game.world, room);
   const overheads: Overheads = createOverheads(game.scene, room, o.enemies);
   const effects: Effects = createEffects({ game, hud, room, remotes: o.remotes, enemies: o.enemies });
+  // A soft ring on the ground under this adventurer, so it reads at a glance in a crowd of enemies and trees.
+  const ringMat = new StandardMaterial('selfRingMat', game.scene);
+  ringMat.disableLighting = true; ringMat.emissiveColor = new Color3(1, 0.93, 0.72); ringMat.alpha = 0.55; ringMat.zOffset = -2;
+  const selfRing = MeshBuilder.CreateTorus('selfRing', { diameter: 1.15, thickness: 0.06, tessellation: 40 }, game.scene);
+  selfRing.scaling.y = 0.2; selfRing.position.y = 0.05; selfRing.isPickable = false; selfRing.material = ringMat;
+  selfRing.parent = game.rig.view.root;
 
   // ── helpers ──
   const myEid = () => meState()?.eid ?? -1;
@@ -506,6 +512,7 @@ export function createCombat(o: CombatOpts): CombatController {
     const p = state.player;
     if (me) { p.hp = me.hp; p.maxHp = me.maxHp; }
     p.dead = dead;
+    if (selfRing.isEnabled() === dead) selfRing.setEnabled(!dead);
     p.weapon = weapon();
     p.momentum = self ? self.momentum : 0;
     p.swapLocked = !!self?.inCombat;
@@ -593,6 +600,7 @@ export function createCombat(o: CombatOpts): CombatController {
       if (target !== null) o.enemies.get(target)?.view.setTargeted(false);
       telegraphs.dispose();
       overheads.dispose();
+      selfRing.dispose(); ringMat.dispose();
       effects.dispose();
       if (deathScreen) hud.dismissEndScreen();
       hud.danger('off');

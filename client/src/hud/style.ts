@@ -236,7 +236,7 @@ const CSS = /* css */ `
 .sg-ab-pips i.on{background:#7ff0ff;box-shadow:0 0 6px rgba(127,240,255,.9)}
 .sg-ab-dodge .sg-ab-glyph{margin-top:-8px}
 .sg-danger{position:absolute;inset:0;opacity:0;pointer-events:none;
-  background:radial-gradient(ellipse at center,transparent 45%,rgba(232,36,28,.62));box-shadow:inset 0 0 0 6px rgba(255,60,40,.95),inset 0 0 60px rgba(255,30,20,.75)}
+  background:radial-gradient(ellipse at center,transparent 64%,rgba(232,36,28,.3) 84%,rgba(232,36,28,.66));box-shadow:inset 0 0 0 5px rgba(255,60,40,.95),inset 0 0 48px rgba(255,30,20,.7)}
 .sg-danger.on{animation:sg-danger .45s ease-in-out infinite alternate}
 @keyframes sg-danger{from{opacity:.55}to{opacity:1}}
 .sg-boss.immune .sg-stag{filter:grayscale(1);opacity:.55}
@@ -438,12 +438,19 @@ const CSS = /* css */ `
   .sg-touch .sg-ab{transform:translate(-50%,-50%) translate(calc(var(--cx,0) * var(--k) * 1px),calc(var(--cy,0) * var(--k) * 1px))}
   .sg-touch .sg-castslot{left:calc(var(--sl) + var(--g));transform:none;width:min(180px,42vw);top:auto;bottom:calc(var(--sb) + min(52vh,420px) + 14px)}
   /* the target frame takes the second row, under the player frame (the right column keeps the gear and Chat) */
-  .sg-tf{left:calc(var(--sl) + var(--g));right:auto;top:calc(var(--st) + var(--g) + 72px);width:calc(100% - 2 * var(--g) - 62px)}
+  .sg-tf{left:calc(var(--sl) + var(--g));right:auto;top:calc(var(--st) + var(--g) + 72px);width:calc(100% - 2 * var(--g) - 84px)}
+  /* swap tops the right-hand column (CLUSTER_COLUMNS); the loadout (out of combat only) sits in the top row, left of the gear */
+  .sg-touch .sg-ab-loadout{transform:translate(-50%,-50%) translate(-46px,calc(var(--st) + var(--sb) + 2 * var(--g) + 66px - 100vh));
+    transform:translate(-50%,-50%) translate(-46px,calc(var(--st) + var(--sb) + 2 * var(--g) + 66px - 100dvh))}
   .sg-boss{top:calc(var(--st) + var(--g) + 80px)}
   .sg-has-boss .sg-quest{top:calc(var(--st) + var(--g) + 210px)}
-  .sg-touch:not(.sg-no-abilities) .sg-promptrow{bottom:calc(var(--sb) + 440px)}
+  /* with the ability cluster up the right edge, the prompt sits near the top, under the frames (never over the cluster or mid-screen) */
+  .sg-touch:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 168px);bottom:auto;justify-content:flex-start}
+  .sg-touch.sg-has-boss:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 214px)}
   .sg-touch.sg-no-abilities .sg-promptrow{justify-content:flex-end;bottom:calc(var(--sb) + 132px)}
   .sg-touch .sg-prompt-text{font-size:16px}
+  /* the joystick's (invisible) touch zone stays in the bottom third: a tap on an enemy mid-screen is never taken by it */
+  .sg-joyzone{height:33vh}
 }
 
 /* ───────── settings (gear + panel) ───────── */

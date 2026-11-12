@@ -4,11 +4,15 @@ import { h } from './dom';
 
 type Kind = Parameters<HudApi['floatText']>[3];
 const POOL = 40;
+/** How far to the side of the point a damage number starts, in px. */
+const SIDE_PX = 38;
 
 export class FloatText {
   readonly el: HTMLElement;
   private pool: HTMLElement[] = [];
   private next = 0;
+  /** The side the last damage number went (1 right, -1 left). */
+  private side = 1;
   private vignette: HTMLElement;
   constructor(parent: HTMLElement) {
     this.el = h('div', 'sg-floats', parent);
@@ -44,9 +48,13 @@ export class FloatText {
       case 'info':
         frames = [{ transform: at(0, 0, 0.9), opacity: 0 }, { transform: at(0, -8, 1), opacity: 1, offset: 0.2 }, { transform: at(0, -36, 1), opacity: 0 }];
         dur = 1400; break;
-      default:
-        frames = [{ transform: at(jx, 0, 1.5), opacity: 0 }, { transform: at(jx, -12, 1), opacity: 1, offset: 0.15 }, { transform: at(jx, -52, 0.9), opacity: 0 }];
-        dur = 900;
+      default: {
+        // damage on an enemy: out to one side (alternating) and up, clear of its name and bar above it
+        const side = (this.side = -this.side) * (SIDE_PX + Math.random() * 14);
+        frames = [{ transform: at(side * 0.5, 0, 1.4), opacity: 0 }, { transform: at(side, -10, 1), opacity: 1, offset: 0.15 },
+          { transform: at(side * 1.35, -46, 0.9), opacity: 0 }];
+        dur = 950;
+      }
     }
     el.animate(frames, { duration: dur, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' });
   }

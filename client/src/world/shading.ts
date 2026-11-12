@@ -85,8 +85,10 @@ if (wfxTarget.w > 0.0) {
   if (wL2 < 1700.0) {
     float wt = dot(vPositionW - wCam, wD) / wL2;
     float wDist = length(vPositionW - (wCam + wD * wt));
+    // anything on the line from the lens to the adventurer (the target is 1.8 m above its feet): a trunk or a
+    // bough between them fades however low it is, down to knee height, so the adventurer is never hidden
     float wA = (1.0 - smoothstep(wfxTarget.w * 0.5, wfxTarget.w, wDist)) * (1.0 - smoothstep(0.8, 0.93, wt)) * step(0.0, wt)
-             * smoothstep(wfxTarget.y + 0.6, wfxTarget.y + 2.0, vPositionW.y);
+             * smoothstep(wfxTarget.y - 1.6, wfxTarget.y - 1.2, vPositionW.y);
     // and whatever stands right in front of the lens (a pine beside the camera filling half the view)
     float wNear = 1.0 - smoothstep(5.0, 10.0, length(vPositionW - wCam));
     wA = max(wA, wNear * 0.85);
