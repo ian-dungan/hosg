@@ -10,15 +10,25 @@ import { GREENWAY_RECIPE, generateZone, type CampSpawn } from './recipe';
  * What the combat engine needs from a zone (same shape as combat/engine.ts's CombatZone, Task 2;
  * restated so the world registry does not depend on the combat package).
  */
-export interface CombatZone { surface: Surface; ground: Surface; sight: (x: number, z: number) => boolean; camps: readonly CampSpawn[] }
+export interface CombatZone { readonly surface: Surface; readonly ground: Surface; readonly sight: (x: number, z: number) => boolean; readonly camps: readonly CampSpawn[] }
 
 export type ZoneId = 'grove' | 'greenway';
 export const ZONE_IDS: readonly ZoneId[] = ['grove', 'greenway'];
 export function isZoneId(v: unknown): v is ZoneId { return typeof v === 'string' && (ZONE_IDS as readonly string[]).includes(v); }
 
 /** Walking into the circle (x, z, r) takes an adventurer to zone `to`, standing at `arrive`. Closed exits do nothing. */
-export interface ZoneExit { to: ZoneId; x: number; z: number; r: number; arrive: { x: number; z: number; facing: number }; open: boolean }
-export interface ZoneDef extends CombatZone { id: ZoneId; name: string; banner: [string, string]; spawn: { x: number; z: number; facing: number }; exits: ZoneExit[] }
+export interface ZoneExit {
+  readonly to: ZoneId; readonly x: number; readonly z: number; readonly r: number;
+  readonly arrive: { readonly x: number; readonly z: number; readonly facing: number };
+  /** Whether the exit works by default. Defs are frozen: a gate opened at run time lives in server state, not here. */
+  readonly open: boolean;
+}
+/** Deeply frozen and shared by every caller (zoneDef caches it). */
+export interface ZoneDef extends CombatZone {
+  readonly id: ZoneId; readonly name: string; readonly banner: readonly [string, string];
+  readonly spawn: { readonly x: number; readonly z: number; readonly facing: number };
+  readonly exits: readonly ZoneExit[];
+}
 
 /** The farm gate across Shady Grove's east road, where the walkable band ends (the loop countryside.ts used to run itself). */
 export const GROVE_EAST_GATE: { x: number; z: number } = (() => {
@@ -51,7 +61,7 @@ function buildGreenway(): ZoneDef {
   return {
     id: 'greenway', name: 'The Greenway', banner: ['The Greenway', 'Beyond the east gate'],
     surface, ground: (x, z) => layout.walk.groundAt(x, z), sight: (x, z) => surface(x, z) !== null,
-    camps: layout.camps.flatMap(c => c.spawns),
+    camps: layout.camps.flatMap(c => c.spawns.map(sp => ({ ...sp }))), // copies: freezing the def leaves the layout alone
     spawn: { ...layout.entry },
     exits: [{ to: 'grove', x: layout.westGate.x, z: layout.westGate.z, r: EXIT_R, arrive: { x: ax, z: groveRoadZ(ax), facing: -Math.PI / 2 }, open: true }],
   };
@@ -61,11 +71,20 @@ let greenway: ReturnType<typeof generateZone> | null = null;
 /** generateZone(GREENWAY_RECIPE), generated once (the layout behind zoneDef('greenway')). */
 export function greenwayLayout() { return (greenway ??= generateZone(GREENWAY_RECIPE)); }
 
+/** Freezes o and everything reachable from it (functions are left as they are). */
+function deepFreeze<T>(o: T): T {
+  if (o !== null && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+}
+
 const defs = new Map<ZoneId, ZoneDef>();
 /** The zone's definition, built on first use and cached. */
 export function zoneDef(id: ZoneId): ZoneDef {
   let d = defs.get(id);
-  if (!d) { d = id === 'grove' ? buildGrove() : buildGreenway(); defs.set(id, d); }
+  if (!d) { d = deepFreeze(id === 'grove' ? buildGrove() : buildGreenway()); defs.set(id, d); }
   return d;
 }
 

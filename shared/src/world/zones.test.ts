@@ -93,6 +93,16 @@ describe('zone registry', () => {
     }
   });
 
+  it('zone definitions are deeply frozen (a later "open the gate" cannot change the cached def)', () => {
+    for (const id of ZONE_IDS) {
+      const d = zoneDef(id);
+      for (const o of [d, d.exits, d.exits[0], d.exits[0].arrive, d.spawn, d.banner, d.camps, ...d.camps]) expect(Object.isFrozen(o)).toBe(true);
+      expect(() => { (d.exits[0] as { open: boolean }).open = !d.exits[0].open; }).toThrow(TypeError);
+      expect(() => { (d.exits as unknown as unknown[]).push({}); }).toThrow(TypeError);
+    }
+    expect(zoneDef('grove').exits[0].open).toBe(false);
+  });
+
   it('zoneFullReason', () => {
     expect(zoneFullReason('grove')).toBe(REASON_GROVE_FULL);
     expect(zoneFullReason('greenway')).toBe('The Greenway is full, try again soon');

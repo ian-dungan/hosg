@@ -98,7 +98,8 @@ const ROAD_STEP = 26;
 const ROAD_TAB = 0.5;
 // Road flattening: full within this distance of the centre line, none beyond ROAD_FLAT_OUT.
 const ROAD_FLAT_IN = 3, ROAD_FLAT_OUT = 13;
-// Terrain rises BOUND_RISE m over the last BOUND_RAMP m to each bound.
+// Terrain rises BOUND_RISE m over the last BOUND_RAMP m to the east, north and south bounds. Not the
+// west bound: the road starts there and the west gate stays at road level.
 const BOUND_RISE = 4, BOUND_RAMP = 14;
 const CAMP_REROLLS = 20, CAMP_GAP = 34, CAMP_ENTRY_GAP = 35, CAMP_BOUND_GAP = 15;
 // A camp's centre is re-rolled if the (bending) road passes closer than radius + this (not in the brief's list; see the report).
@@ -152,7 +153,7 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
       if (d2 < out * out) f = Math.min(f, smooth(c.r, out, Math.sqrt(d2)));
     }
     h *= f;
-    const edge = Math.min(x, width - x, z + halfD, halfD - z);
+    const edge = Math.min(width - x, z + halfD, halfD - z);
     if (edge < BOUND_RAMP) h += BOUND_RISE * smooth(0, 1, (BOUND_RAMP - edge) / BOUND_RAMP);
     return h;
   };
@@ -171,8 +172,8 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
     const base = deep ? width * 0.55 : 40 + (nOrdinary > 1 ? (width - 70) * ordinary / (nOrdinary - 1) : 0);
     if (!deep) ordinary++;
     const [o0, o1] = deep ? r.camps.deepOffset : r.camps.offset;
-    let x = 0, z = 0, side = 1;
-    for (let attempt = 0; attempt <= CAMP_REROLLS; attempt++) {
+    let x = 0, z = 0, side = 1, found = false;
+    for (let attempt = 0; attempt <= CAMP_REROLLS && !found; attempt++) {
       x = base + (2 * rng() - 1) * (deep ? 10 : 8);
       side = rng() < 0.5 ? -1 : 1;
       z = roadZ(x) + side * (o0 + (o1 - o0) * rng());
@@ -180,8 +181,10 @@ export function generateZone(r: ZoneRecipe): ZoneLayout {
         && dist(x, z, entry.x, entry.z) >= CAMP_ENTRY_GAP
         && x >= CAMP_BOUND_GAP && x <= width - CAMP_BOUND_GAP && z >= -halfD + CAMP_BOUND_GAP && z <= halfD - CAMP_BOUND_GAP
         && roadDist(x, z, campR + CAMP_ROAD_GAP) >= campR + CAMP_ROAD_GAP;
-      if (ok) break;
+      found = ok;
     }
+    // never a silently broken layout: a recipe with no room for its camps is refused (deterministically)
+    if (!found) throw new Error(`generateZone(${r.id}): no valid site for camp ${gi}`);
     camps.push({ x, z, r: campR, side, spawns: [] });
   }
   // spawns: elites at the centre, the rest rejection-sampled within radius − 1, spacing apart; all face the road

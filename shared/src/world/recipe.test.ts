@@ -59,16 +59,27 @@ describe('generateZone(GREENWAY_RECIPE)', () => {
     expect(digest(zone)).toMatchSnapshot();
   });
 
-  it('source scan: no inexact maths and no ** in recipe.ts or zoneWalk.ts', async () => {
+  it('source scan: every generator module (and every non-data module they import) is free of inexact maths and **', async () => {
     // shared/ has no Node typings: a string-typed specifier keeps tsc out of node:fs
     const fs: { readFileSync(p: string, enc: 'utf8'): string } = await import('node:fs' as string);
     const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
     const bad = /Math\.(sin|cos|tan|asin|acos|atan2?|exp|expm1|log\w*|pow|hypot|cbrt|random)\b|\*\*/;
-    for (const f of ['recipe.ts', 'zoneWalk.ts']) {
-      const src = fs.readFileSync(here + f, 'utf8');
-      expect(src.length, f).toBeGreaterThan(1000);
-      expect(src.match(bad)?.[0] ?? null, f).toBeNull();
+    /** The generator's modules, relative to this folder. */
+    const GENERATOR = ['./recipe', './zoneWalk'];
+    /** Pure data tables the generator may read (no arithmetic that shapes the layout). */
+    const DATA_TABLES = ['../combat/enemies'];
+    let imports = 0;
+    for (const m of GENERATOR) {
+      const src = fs.readFileSync(here + m + '.ts', 'utf8');
+      expect(src.length, m).toBeGreaterThan(1000);
+      expect(src.match(bad)?.[0] ?? null, m).toBeNull();
+      // a value import must be scanned too, or be a known data table (type-only imports carry no code)
+      for (const [, spec] of src.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)) {
+        expect([...GENERATOR, ...DATA_TABLES], `${m} imports ${spec}`).toContain(spec);
+        imports++;
+      }
     }
+    expect(imports).toBeGreaterThanOrEqual(2); // recipe → zoneWalk and the enemy table: the import check really runs
   });
 
   it('counts: trees, rocks, and six camps whose spawns match the groups exactly', () => {
@@ -194,6 +205,39 @@ describe('generateZone(GREENWAY_RECIPE)', () => {
     // the terrain is flat on the road and rises at the bounds
     expect(Math.abs(zone.height(130, zone.roadZ(130)))).toBeLessThan(1e-9);
     expect(zone.height(130, R.depth / 2)).toBeGreaterThan(2);
+  });
+
+  it('the west gate is at road level: entry and gate within 0.5 m of each other, the first 15 m of road nearly flat', () => {
+    expect(Math.abs(zone.height(zone.entry.x, zone.entry.z) - zone.height(zone.westGate.x, zone.westGate.z))).toBeLessThan(0.5);
+    for (let x = 0.5; x < 15; x += 0.5) {
+      const z0 = zone.roadZ(x), z1 = zone.roadZ(x + 0.5);
+      const run = Math.sqrt(0.25 + (z1 - z0) * (z1 - z0));
+      expect(Math.abs(zone.height(x + 0.5, z1) - zone.height(x, z0)) / run, `x ${x}`).toBeLessThan(0.15);
+    }
+  });
+
+  it('other recipes: either every camp invariant holds or generateZone throws (never a silent bad layout); the Greenway never throws', () => {
+    expect(() => generateZone(GREENWAY_RECIPE)).not.toThrow();
+    let threw = 0, held = 0;
+    for (const width of [140, 160, 200, 260]) for (let seed = 1; seed <= 12; seed++) {
+      const rec = { ...GREENWAY_RECIPE, seed, width };
+      let z: ZoneLayout;
+      try { z = generateZone(rec); } catch (e) {
+        expect(String((e as Error).message)).toMatch(/^generateZone\(greenway\): no (valid site for camp \d+|room for a \w+ in camp \d+)$/);
+        threw++; continue;
+      }
+      held++;
+      const d = (ax: number, az: number, bx: number, bz: number) => Math.sqrt((ax - bx) * (ax - bx) + (az - bz) * (az - bz));
+      z.camps.forEach((c, i) => {
+        for (let j = 0; j < i; j++) expect(d(c.x, c.z, z.camps[j].x, z.camps[j].z)).toBeGreaterThanOrEqual(34);
+        expect(d(c.x, c.z, z.entry.x, z.entry.z)).toBeGreaterThanOrEqual(35);
+        expect(c.x).toBeGreaterThanOrEqual(15); expect(c.x).toBeLessThanOrEqual(width - 15);
+        expect(Math.abs(c.z)).toBeLessThanOrEqual(rec.depth / 2 - 15);
+        for (let x = c.x - 13; x <= c.x + 13; x += 0.5) expect(d(c.x, c.z, x, z.roadZ(x))).toBeGreaterThan(c.r + 4 - 0.1);
+      });
+    }
+    expect(threw).toBeGreaterThan(0); // the narrow widths really do run out of room
+    expect(held).toBeGreaterThan(0);
   });
 
   it('speed: generateZone finishes in under 500 ms', () => {
