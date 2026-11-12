@@ -3,7 +3,7 @@ import type { Loadout } from './abilities';
 import { RUN_SPEED } from '../constants';
 import {
   BEDROCK_S, BEDROCK_SHIELD, BLAST_COEF, BLAST_SPLASH_FRAC, COMBO_COEF, CONDUCT_STUN_S, ELEMENT_RESIST_MULT, ELEMENT_WEAK_MULT,
-  OVERFLOW_MULT, ROOTED_SPEED_SCALE, STEAM_HEAL,
+  FONT_HEAL_MULT, OVERFLOW_MULT, ROOTED_SPEED_SCALE, STEAM_HEAL,
 } from './constants';
 import type { EnemyState } from './engine';
 import { SURGE_SCALE } from './enemyAi';
@@ -107,7 +107,7 @@ describe('primers and reactions', () => {
     expect(en().marks.marked).toBeUndefined();
   });
 
-  it('Tidelash on Burning: steam heals adventurers within 6 m by 12, ends the Burning DoT', () => {
+  it('Tidelash on Burning: steam heals adventurers within 6 m by 12 (× Font on others), ends the Burning DoT', () => {
     const { r, e, en } = setup();
     const wm = r.add(0, -10, WHITE, 50), close = r.add(0, -3, undefined, 50), away = r.add(0, -8, undefined, 50);
     aim(r, wm, e);
@@ -116,8 +116,8 @@ describe('primers and reactions', () => {
     expect(r.press(wm, 0)).toBeNull();
     expect(r.hits(wm)[0].amount).toBe(th(1.4, ELEMENT_RESIST_MULT) + th(COMBO_COEF, ELEMENT_RESIST_MULT));
     expect(r.fx('react').map((x) => x.reaction)).toEqual(['steam']);
-    expect(r.fx('heal').map((h) => [h.src, h.dst, h.amount])).toEqual([[wm, close, STEAM_HEAL]]);
-    expect([r.c.get(close)!.hp, r.c.get(away)!.hp, r.c.get(wm)!.hp]).toEqual([62, 50, 50]);
+    expect(r.fx('heal').map((h) => [h.src, h.dst, h.amount])).toEqual([[wm, close, STEAM_HEAL * FONT_HEAL_MULT]]);
+    expect([r.c.get(close)!.hp, r.c.get(away)!.hp, r.c.get(wm)!.hp]).toEqual([50 + STEAM_HEAL * FONT_HEAL_MULT, 50, 50]);
     expect(en().burning).toBeNull();
     r.at(4);
     expect(r.fx('hit').filter((h) => h.by === 'burning')).toEqual([]);

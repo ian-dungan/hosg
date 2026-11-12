@@ -10,13 +10,13 @@ import {
 import {
   AUTO_MOMENTUM, BEDROCK_R, BEDROCK_S, BEDROCK_SHIELD, BLAST_COEF, BLAST_SPLASH_FRAC, BLAST_SPLASH_R, BREAK_DAMAGE_MULT, CONDUCT_STAGGER, CONDUCT_STUN_S,
   RHYTHM_AUTO_MOMENTUM, STEAM_HEAL, STEAM_R, BURNING_COEF_PER_S, CAST_MOVE_SCALE, CHARGE_SLOW_GRACE_S, COMBAT_TIMEOUT_S,
-  COMBO_COEF, COMBO_STAGGER, DODGE_IFRAME_S, MOMENTUM_MAX, DODGE_MIN_GAP_S, DODGE_REFILL_S, GCD_S, INTERRUPT_STAGGER,
+  COMBO_COEF, COMBO_STAGGER, DODGE_IFRAME_S, ELITE_ROOT_MULT, MARK_S, ROOT_IMMUNE_S, MOMENTUM_MAX, DODGE_MIN_GAP_S, DODGE_REFILL_S, GCD_S, INTERRUPT_STAGGER,
   KNOCK_RECOVER_S, RESPAWN_CLEAR_RADIUS, SPEED_GRACE_S, SWAP_COOLDOWN_S, TARGET_DROP_RANGE, TARGET_RANGE, THREAT_PER_DAMAGE,
   THREAT_PER_HEAL,
 } from './constants';
 import { breakCast, castView, startCast, tickCast } from './casting';
 import {
-  applyEffects, applyShield, onDamageTaken, outgoingMult, resolveAim, strikesFromBehind, targetFor, threatMult, tickBuffs, tickDebuffs, traitOf,
+  applyEffects, applyShield, healMult, onDamageTaken, onHealDone, outgoingMult, resolveAim, strikesFromBehind, targetFor, threatMult, tickBuffs, tickDebuffs, traitOf,
 } from './effects';
 import { REACTIONS, reactionFor, type ElementId } from './elements';
 import { stunEnemy } from './enemyAi';
@@ -145,7 +145,7 @@ export function newAdventurer(id: number, s: { x: number; z: number; y: number; 
     act: '', actUntil: -Infinity, job: loadout.job, loadout, slots, plan3, momentum: 0,
     lastDealtAt: -Infinity, lastCombatAt: -Infinity, lastHurtAt: -Infinity,
     readyAt: {}, gcdUntil: -Infinity, swapReadyAt: -Infinity, targetId: null, nextAutoAt: -Infinity,
-    shield: 0, shieldUntil: -Infinity, sprintUntil: -Infinity, parryUntil: -Infinity, iframeUntil: -Infinity,
+    shield: 0, shieldUntil: -Infinity, sprintUntil: -Infinity, parryUntil: -Infinity, iframeUntil: -Infinity, reviveSafeUntil: -Infinity,
     dodgeCharges: JOBS[loadout.job].dodgeCharges, dodgeRefillAt: null, lastDodgeAt: -Infinity, lastDodgeFrom: null, charge: null,
     cast: null, buffs: {}, afflictions: new Set(), autoWaiting: false,
   };
@@ -263,7 +263,7 @@ export function spawnEnemyState(w: CombatWorld, e: EnemyState): void {
   e.maxHp = e.data.hp; e.hp = e.maxHp; e.alive = true; e.act = ''; e.actUntil = -Infinity; e.targetId = null; e.surging = false;
   e.threat.clear(); e.stagger = { value: 0, max: e.data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity };
   e.marks = {}; e.markBy = {}; e.burning = null; e.windup = null; e.attackReadyAt = {}; e.debuffs = {};
-  e.respawnAt = Infinity; e.lastDamagedAt = -Infinity;
+  e.respawnAt = Infinity; e.lastDamagedAt = -Infinity; e.rootImmuneUntil = -Infinity;
 }
 
 /**
@@ -287,14 +287,14 @@ export function cancelWindup(w: CombatWorld, e: EnemyState): void {
   e.windup = null;
 }
 
-/** An interrupting hit: cancels an interruptible wind-up (`interrupt` fx, +INTERRUPT_STAGGER, its cooldown restarts). */
-export function interruptWindup(w: CombatWorld, e: EnemyState, nowS: number): boolean {
+/** An interrupting hit: cancels an interruptible wind-up (`interrupt` fx, +INTERRUPT_STAGGER unless `stagger` is false, its cooldown restarts). */
+export function interruptWindup(w: CombatWorld, e: EnemyState, nowS: number, stagger = true): boolean {
   if (!e.alive || !e.windup || !e.windup.interruptible) return false;
   const attack: EnemyAttackId = e.windup.attack;
   cancelWindup(w, e);
   e.attackReadyAt[attack] = nowS + ENEMY_ATTACKS[attack].cooldown;
   fx(w, { t: 'interrupt', dst: e.id });
-  applyStagger(w, e, INTERRUPT_STAGGER, nowS);
+  if (stagger) applyStagger(w, e, INTERRUPT_STAGGER, nowS);
   return true;
 }
 
@@ -348,6 +348,17 @@ export interface Strike {
   element?: ElementId; behind?: boolean; stagger?: number; interrupts?: boolean;
 }
 
+/** Rooted ended (at `at`): the enemy cannot be Rooted again until at + ROOT_IMMUNE_S. */
+function endRooted(e: EnemyState, at: number): void {
+  e.rootImmuneUntil = Math.max(e.rootImmuneUntil, at + ROOT_IMMUNE_S);
+}
+
+/** A splash or area hit of `coef` on enemy `o`, from its own defence, break and multipliers (ruling P3b-d). */
+export function splashDamage(w: CombatWorld, a: AdventurerState, o: EnemyState, coef: number, s: Strike, nowS: number): number {
+  const mult = (isBroken(o.stagger, nowS) ? BREAK_DAMAGE_MULT : 1) * outgoingMult(w, a, o, s, nowS);
+  return hitDamage(coef, a.stats.power, o.data.defence, mult);
+}
+
 /** Drops a live mark (and who set it); Burning's DoT ends with its mark. */
 function consumeMark(w: CombatWorld, e: EnemyState, m: MarkId): void {
   delete e.marks[m]; delete e.markBy[m];
@@ -373,20 +384,23 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
   let stagger = s.stagger ?? 0;
   // 1. the reaction: an elemental hit on a live reacting mark (not its own) consumes it
   const reaction = reactionFor(s.element, liveMarks(e.marks, nowS), s.mark);
-  let blast = 0;
   if (reaction) {
     fx(w, { t: 'react', src: a.id, dst: e.id, reaction });
     consumeMark(w, e, REACTIONS[s.element!].mark);
     const extra = hitDamage(reaction === 'blast' ? BLAST_COEF : COMBO_COEF, power, def, mult);
     amount += extra;
-    if (reaction === 'blast') blast = extra;
     stagger += COMBO_STAGGER + (reaction === 'conduct' && e.data.elite ? CONDUCT_STAGGER : 0);
   }
   // 2. a finisher's plain detonations, 3. its own mark (finisher or primer)
   let combo: MarkId[] | undefined;
+  // Rooted (ruling P3b-c): never refreshed while it lives, and not set again for ROOT_IMMUNE_S after it ends
+  const rootWas = e.marks.rooted, rootLive = (rootWas ?? -Infinity) > nowS;
+  if (rootWas !== undefined && !rootLive) endRooted(e, rootWas); // expired, not yet swept by the tick
+  const rootBlocked = s.mark === 'rooted' && (rootLive || nowS < e.rootImmuneUntil - TIME_EPS);
   if (s.mark) {
     const hadBurning = e.burning !== null && (e.marks.burning ?? -Infinity) > nowS;
     if (s.finisher ?? !s.primer) {
+      if (s.mark !== 'rooted' && rootWas !== undefined) endRooted(e, Math.min(nowS, rootWas));
       combo = applyFinisherMark(e.marks, s.mark, nowS);
       for (const m of Object.keys(e.markBy) as MarkId[]) if (m !== s.mark) delete e.markBy[m];
       for (const m of combo) {
@@ -395,7 +409,12 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
         fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
       }
     } else applyPrimerMark(e.marks, s.mark, nowS);
-    e.markBy[s.mark] = a.id;
+    if (s.mark === 'rooted') {
+      if (rootBlocked && rootLive) e.marks.rooted = rootWas;
+      else if (rootBlocked) delete e.marks.rooted;
+      else if (e.data.elite) e.marks.rooted = nowS + MARK_S * ELITE_ROOT_MULT;
+    }
+    if (!rootBlocked) e.markBy[s.mark] = a.id;
     if (s.mark === 'burning') {
       e.burning = hadBurning && e.burning ? { src: a.id, power, nextAt: e.burning.nextAt } : { src: a.id, power, nextAt: nowS + 1 };
     } else if (combo?.includes('burning')) e.burning = null;
@@ -406,23 +425,26 @@ export function strikeFull(w: CombatWorld, a: AdventurerState, e: EnemyState, s:
   let total = amount;
   // the reaction's effects around the target land even when the hit killed it
   if (reaction === 'blast') {
-    const part = Math.round(blast * BLAST_SPLASH_FRAC);
+    // per enemy (ruling P3b-d): its own defence, break and weakness
     for (const o of w.enemies.values()) {
       if (o === e || !o.alive || enemyInvulnerable(o) || Math.hypot(o.x - e.x, o.z - e.z) - o.data.radius > BLAST_SPLASH_R) continue;
+      const part = splashDamage(w, a, o, BLAST_COEF * BLAST_SPLASH_FRAC, s, nowS);
       damageEnemy(w, a.id, o, part, s.by, nowS, undefined, true, { element: s.element });
       total += part;
     }
   } else if (reaction === 'steam') {
-    for (const b of adventurersAround(w, e, STEAM_R)) healAdventurer(w, b, STEAM_HEAL, a.id, nowS);
+    // the hitter's heal: Font applies
+    for (const b of adventurersAround(w, e, STEAM_R)) onHealDone(w, a, b, healAdventurer(w, b, STEAM_HEAL * healMult(a, b), a.id, nowS), nowS);
   } else if (reaction === 'bedrock') {
     for (const b of adventurersAround(w, e, BEDROCK_R)) applyShield(w, a, b, BEDROCK_SHIELD, BEDROCK_S, nowS);
   }
   if (!e.alive) return { plain, total };
   if (reaction === 'conduct') {
-    if (e.data.elite) interruptWindup(w, e, nowS);
+    // the reaction interrupts; INTERRUPT_STAGGER only when the hit itself interrupts
+    if (e.data.elite) interruptWindup(w, e, nowS, s.interrupts === true);
     else stunEnemy(w, e, CONDUCT_STUN_S, nowS);
   }
-  if (s.mark) fx(w, { t: 'mark', dst: e.id, mark: s.mark, on: true });
+  if (s.mark && !rootBlocked) fx(w, { t: 'mark', dst: e.id, mark: s.mark, on: true });
   applyStagger(w, e, stagger, nowS);
   if (s.interrupts) interruptWindup(w, e, nowS);
   return { plain, total };
@@ -734,6 +756,7 @@ export function tickEnemyStatus(w: CombatWorld, e: EnemyState, nowS: number, dt:
     if (until !== undefined && until <= nowS + TIME_EPS) {
       delete e.marks[m]; delete e.markBy[m];
       if (m === 'burning') e.burning = null;
+      if (m === 'rooted') endRooted(e, until);
       fx(w, { t: 'mark', dst: e.id, mark: m, on: false });
     }
   }

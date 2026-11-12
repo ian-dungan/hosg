@@ -127,6 +127,10 @@ export const ALLY_RANGE = 18;
 export const REVIVE_IFRAMES_S = 2;
 /** An enemy carrying Rooted moves at this scale. */
 export const ROOTED_SPEED_SCALE = 0.6;
+/** After Rooted ends on an enemy, it cannot be Rooted again for this long (ruling P3b-c). */
+export const ROOT_IMMUNE_S = 6;
+/** Rooted on an elite lasts MARK_S × this. */
+export const ELITE_ROOT_MULT = 0.5;
 /** Elemental damage against a weakness, and against a resistance. */
 export const ELEMENT_WEAK_MULT = 1.25;
 export const ELEMENT_RESIST_MULT = 0.75;

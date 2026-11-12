@@ -9,7 +9,7 @@ import {
 } from './constants';
 import { elementMult, type ElementId } from './elements';
 import type { AdventurerState, CombatWorld, EnemyState, Refusal } from './engine';
-import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, strikeFull, TIME_EPS, type Strike } from './adventurer';
+import { damageEnemy, enemyInvulnerable, healAdventurer, reach, refillDodges, splashDamage, strikeFull, TIME_EPS, type Strike } from './adventurer';
 import type { FxEvent } from './fx';
 import { gainMomentum } from './momentum';
 import { lineOfSight } from './sight';
@@ -240,13 +240,13 @@ export function tickDebuffs(w: CombatWorld, e: EnemyState, nowS: number): void {
 }
 
 // ───────── revive, hp cost ─────────
-/** A dead adventurer back where it lies: round(frac × maxHp) hp, Momentum 0, act '', REVIVE_IFRAMES_S of i-frames, cooldowns kept; `revive` fx and out.revived. */
+/** A dead adventurer back where it lies: round(frac × maxHp) hp, Momentum 0, act '', REVIVE_IFRAMES_S of revive safety (plain misses), cooldowns kept; `revive` fx and out.revived. */
 export function reviveAdventurer(w: CombatWorld, by: AdventurerState, a: AdventurerState, frac: number, nowS: number): void {
   if (a.alive) return;
   const hp = Math.max(1, Math.round(frac * a.stats.maxHp));
   a.alive = true; a.hp = hp; a.momentum = 0; a.act = ''; a.actUntil = -Infinity;
   a.lastHurtAt = nowS; a.nextAutoAt = -Infinity; a.autoWaiting = false;
-  a.iframeUntil = nowS + REVIVE_IFRAMES_S;
+  a.reviveSafeUntil = nowS + REVIVE_IFRAMES_S;
   fx(w, { t: 'revive', src: by.id, dst: a.id, hp });
   (w.out.revived ??= []).push({ id: a.id, by: by.id, hp });
 }
@@ -299,8 +299,9 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
       const { plain, total } = strikeFull(w, a, e, s, nowS);
       let dealt = total;
       if (ef.splash && plain > 0) {
-        const part = Math.max(1, Math.round(plain * ef.splash.frac));
-        for (const o of near) if (o.alive) { splashHit(w, a, o, part, ab.id, nowS, ab.element); dealt += part; }
+        // per enemy (ruling P3b-d): its own defence, break and weakness
+        const sp: Strike = { coef: ef.coef * ef.splash.frac, by: ab.id, ...tag };
+        for (const o of near) if (o.alive) { const part = splashDamage(w, a, o, sp.coef, sp, nowS); splashHit(w, a, o, part, ab.id, nowS, ab.element); dealt += part; }
       }
       lifesteal(w, a, dealt, nowS);
       return;
@@ -335,7 +336,9 @@ function applyEffect(w: CombatWorld, a: AdventurerState, ab: AbilityData, ef: Ef
     }
     case 'taunt': {
       const dsts = ef.on === 'area' ? enemiesNear(w, a, ef.r) : subject.enemy ? [subject.enemy] : [];
-      for (const e of dsts) e.threat.taunt(a.id, nowS);
+      // Plan 3's taunt formula, then × the taunter's threat multiplier (Steadfast)
+      const tm = threatMult(w, a.id);
+      for (const e of dsts) { e.threat.taunt(a.id, nowS); if (tm !== 1) e.threat.set(a.id, e.threat.get(a.id)! * tm); }
       return;
     }
     case 'threat-drop':

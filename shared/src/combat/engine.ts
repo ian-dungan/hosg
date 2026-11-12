@@ -161,6 +161,8 @@ export interface AdventurerState {
   readyAt: Partial<Record<AbilityId, number>>; gcdUntil: number; swapReadyAt: number;
   targetId: number | null; nextAutoAt: number;
   shield: number; shieldUntil: number; sprintUntil: number; parryUntil: number; iframeUntil: number;
+  /** After a revive: enemy hits miss (plainly: never a perfect dodge) until then. */
+  reviveSafeUntil: number;
   dodgeCharges: number; dodgeRefillAt: number | null; lastDodgeAt: number; lastDodgeFrom: { x: number; z: number } | null;
   charge: { startedAt: number } | null;
   cast: CastState | null;
@@ -191,6 +193,8 @@ export interface EnemyState {
   /** The chase surge (enemyAi): faster until it next starts an attack. */
   surging: boolean;
   debuffs: Partial<Record<DebuffId, BuffState>>;
+  /** Rooted cannot be set again before this (ROOT_IMMUNE_S after it last ended). */
+  rootImmuneUntil: number;
 }
 export interface TelegraphState { id: number; owner: number; attack: EnemyAttackId; shape: Shape; startedAt: number; endsAt: number }
 export interface CombatWorld {
@@ -227,7 +231,7 @@ function newEnemy(w: CombatWorld, c: CampSpawn, nowS: number): EnemyState {
     id: w.nextId++, team: 'enemy', kind: c.kind, data, camp: { ...c },
     x: 0, z: 0, y: 0, facing: 0, hp: data.hp, maxHp: data.hp, alive: true, act: '', actUntil: -Infinity, targetId: null,
     threat: new ThreatTable(), stagger: { value: 0, max: data.stagger, brokenUntil: -Infinity, lastGainAt: -Infinity }, marks: {}, markBy: {},
-    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false, debuffs: {},
+    burning: null, windup: null, attackReadyAt: {}, diedAt: -Infinity, respawnAt: Infinity, lastDamagedAt: -Infinity, surging: false, debuffs: {}, rootImmuneUntil: -Infinity,
   };
   spawnEnemyState(w, e);
   void nowS;

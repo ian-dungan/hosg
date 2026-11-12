@@ -195,7 +195,7 @@ Instant abilities (`cast` absent or 0) behave exactly as in Plan 3.
 
 - `ElementId = 'fire' | 'water' | 'lightning' | 'earth'`. Only Staff spells carry an element. White Mage's Light spells carry none (`school: 'light'`, cosmetic only).
 - `MarkId` adds `'rooted'` and `'dazed'`. `MARK_BITS` becomes soaked 1, burning 2, marked 4, rooted 8, dazed 16.
-  - **Rooted:** while it lives, the enemy moves at `ROOTED_SPEED_SCALE = 0.6`.
+  - **Rooted:** while it lives, the enemy moves at `ROOTED_SPEED_SCALE = 0.6`. Ruling P3b-c (no perma-kite): Rooted is never refreshed while it lives; once it ends (expiry or detonation) the enemy cannot be Rooted again for `ROOT_IMMUNE_S = 6`; on an elite it lasts `MARK_S × ELITE_ROOT_MULT` (`ELITE_ROOT_MULT = 0.5`). A Rooted hit on a blocked enemy still deals its damage, with no mark.
   - **Dazed:** no effect of its own; it exists to be detonated or reacted with.
 - **Primers** (`primer: true`): a non-finisher that sets or refreshes its mark **without** detonating anything. Only finishers detonate (Plan 3 rule).
 - **Weakness:**
@@ -205,9 +205,9 @@ Instant abilities (`cast` absent or 0) behave exactly as in Plan 3.
 
 | element of the hit | on mark | reaction (`ReactionId`) | effect |
 |---|---|---|---|
-| fire | marked | `blast` | `hitDamage(BLAST_COEF = 4.5)` on the target, plus `BLAST_SPLASH_FRAC = 0.5` of it to other live enemies within `BLAST_SPLASH_R = 3` m; +`COMBO_STAGGER` |
-| lightning | soaked | `conduct` | ordinary enemy: stunned `CONDUCT_STUN_S = 1.5` (cancels its wind-up), as Plan 3's parry stun, with the same `PARRY_STUN_IMMUNE_S` immunity. Elite: +`CONDUCT_STAGGER = 20` on top of `COMBO_STAGGER`, and an interruptible wind-up is interrupted. Damage `hitDamage(COMBO_COEF)` |
-| water | burning | `steam` | `hitDamage(COMBO_COEF)`; the Burning DoT ends; every live adventurer within `STEAM_R = 6` m of the target heals `STEAM_HEAL = 12` (from the hitter; heal threat as usual) |
+| fire | marked | `blast` | `hitDamage(BLAST_COEF = 4.5)` on the target, plus `hitDamage(BLAST_COEF × BLAST_SPLASH_FRAC = 0.5)` to other live enemies within `BLAST_SPLASH_R = 3` m (each with its own defence, break and multipliers: ruling P3b-d); +`COMBO_STAGGER` |
+| lightning | soaked | `conduct` | ordinary enemy: stunned `CONDUCT_STUN_S = 1.5` (cancels its wind-up), as Plan 3's parry stun, with the same `PARRY_STUN_IMMUNE_S` immunity. Elite: +`CONDUCT_STAGGER = 20` on top of `COMBO_STAGGER`, and an interruptible wind-up is interrupted (with `INTERRUPT_STAGGER` only when the hit itself interrupts). Damage `hitDamage(COMBO_COEF)` |
+| water | burning | `steam` | `hitDamage(COMBO_COEF)`; the Burning DoT ends; every live adventurer within `STEAM_R = 6` m of the target heals `STEAM_HEAL = 12` (a heal by the hitter: `healMult` and Font apply, heal threat as usual) |
 | earth | dazed | `bedrock` | `hitDamage(COMBO_COEF)`; every live adventurer within `BEDROCK_R = 6` m of the target gets a `BEDROCK_SHIELD = 15` shield for `BEDROCK_S = 6` s |
 
 Order inside one hit:
@@ -217,6 +217,8 @@ Order inside one hit:
 4. Momentum, stagger and interrupt (Plan 3).
 
 Each reaction sends `react` fx, and a `mark … on: false` for the consumed mark.
+
+Every reaction adds `COMBO_STAGGER` (it replaces the plain combo for its mark). Splash and area damage (Hearthfall, Barbed Rain, blast) is computed per enemy hit: each enemy's own defence, Break state and weakness or resistance, never the primary target's multiplier (ruling P3b-d).
 
 **Buffs and debuffs**
 
@@ -246,7 +248,7 @@ Each reaction sends `react` fx, and a `mark … on: false` for the consumed mark
 |---|---|---|
 | Warrior | **Battle Rhythm**: autos build more Momentum | `RHYTHM_AUTO_MOMENTUM = 15` (instead of `AUTO_MOMENTUM`) |
 | Ranger | **Pinpoint**: stronger against a target that is attacking someone else | `PINPOINT_MULT = 1.1` |
-| Paladin | **Steadfast**: takes less damage, draws more attention; Momentum from blocking | `STEADFAST_TAKEN = 0.85`, `STEADFAST_THREAT = 1.5` (× all threat it adds), `BLOCK_MOMENTUM = 5` per enemy hit landing on it (hp or shield) |
+| Paladin | **Steadfast**: takes less damage, draws more attention; Momentum from blocking | `STEADFAST_TAKEN = 0.85`, `STEADFAST_THREAT = 1.5` (× all threat it adds; a taunt is Plan 3's formula, then × 1.5), `BLOCK_MOMENTUM = 5` per enemy hit landing on it (hp or shield) |
 | Dark Knight | **Crimson Tithe**: ability damage heals; pain builds Momentum | `BLOOD_LIFESTEAL = 0.2` of ability damage dealt (not autos, not Burning) heals it; `BLOOD_MOMENTUM_PER_HP = 1/3` of enemy damage taken (after shields), floored per hit |
 | Ninja | **Dusk Slip**: an extra dodge, strikes from behind, Momentum from close calls | `NINJA_DODGE_CHARGES = 3`; `BEHIND_MULT = 1.25` on autos and abilities; `EVASION_PERFECT_MOMENTUM = 25` per perfect dodge (instead of `PERFECT_DODGE_MOMENTUM`) |
 | Black Mage | **Overflow**: elemental damage up; finished casts build Momentum | `OVERFLOW_MULT = 1.1`; `OVERFLOW_CAST_MOMENTUM = 10` per completed cast |

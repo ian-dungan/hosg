@@ -642,6 +642,8 @@ export function resolveHit(
     }
     return;
   }
+  // revive safety: a plain miss (never perfect: no Momentum, no stagger)
+  if (now < a.reviveSafeUntil) { fxOf(w).push({ t: 'miss', src: e.id, dst: a.id, perfect: false }); return; }
   // autos only: Mist Form on the adventurer, or a Blinded enemy, misses (telegraphs still hit)
   if (by === 'auto') {
     const why = hasBuff(a, 'mist', now) ? 'mist' : hasDebuff(e, 'blinded', now) ? 'blind' : null;

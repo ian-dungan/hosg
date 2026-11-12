@@ -404,14 +404,15 @@ describe('Task 2 review round 1', () => {
     expect(r2.press(wm2, 3, b2)).toBe('no-ally');
   });
 
-  it('a revive gives REVIVE_IFRAMES_S of i-frames', () => {
+  it('a revive gives REVIVE_IFRAMES_S of revive safety (not dodge i-frames: review 3)', () => {
     const r = new Rig([]);
     const wm = r.add(0, 0, WM), b = r.add(5, 0);
     kill(r, b);
     expect(r.press(wm, 3, b)).toBeNull();
     r.until('revive');
     const at = r.now - 1 / 15;
-    expect(r.w.adventurers.get(b)!.iframeUntil).toBeCloseTo(at + REVIVE_IFRAMES_S, 6);
+    expect(r.w.adventurers.get(b)!.reviveSafeUntil).toBeCloseTo(at + REVIVE_IFRAMES_S, 6);
+    expect(r.w.adventurers.get(b)!.iframeUntil).toBe(-Infinity);
   });
 
   it('no heal fx with amount 0', () => {
