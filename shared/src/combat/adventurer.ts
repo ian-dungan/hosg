@@ -149,7 +149,7 @@ export function plan3LoadoutState(a: AdventurerState): Plan3Loadout {
 /** Stats for addAdventurer (simulation and tests): each field finite and in range, else the starter's. */
 export function parseStats(v: unknown): Stats {
   const o = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
-  const pick = (k: keyof Stats, ok: (n: number) => boolean) => (finite(o[k]) && ok(o[k] as number) ? (o[k] as number) : STARTER_STATS[k]);
+  const pick = (k: 'power' | 'defence' | 'maxHp', ok: (n: number) => boolean) => (finite(o[k]) && ok(o[k] as number) ? (o[k] as number) : STARTER_STATS[k]);
   return { power: pick('power', (n) => n > 0), defence: pick('defence', (n) => n >= 0), maxHp: pick('maxHp', (n) => n >= 1) };
 }
 

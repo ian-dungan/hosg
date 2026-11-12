@@ -103,10 +103,17 @@ export const FUTURE_JOBS: Readonly<Record<FutureJobId, FutureJobData>> = deepFre
 const isFutureJobId = (v: unknown): v is FutureJobId => own(FUTURE_JOBS, v);
 
 // ───────── the per-job save ─────────
+/** A costume id (items.ts, Plan 5 Task 2, replaces this local alias). */
+type CostumeId = string;
+/** A job's outfit: the costume worn in each costume slot (ownership is checked by the server against the wardrobe), and whether the head piece is hidden. */
+export interface JobOutfit { body: CostumeId | null; head: CostumeId | null; back: CostumeId | null; hideHead: boolean }
 /** level is derived from xp (levelForXp), never trusted. talents and outfit are Plan 5 hooks. */
-export interface JobRecord { level: number; xp: number; picks: [AbilityId, AbilityId]; talents: string[]; outfit: null }
-/** A record under a future job id is kept as it is, but such an id can never be `current`. */
-export interface JobsSave { current: JobId; jobs: Partial<Record<JobId | FutureJobId, JobRecord>> }
+export interface JobRecord { level: number; xp: number; picks: [AbilityId, AbilityId]; talents: string[]; outfit: JobOutfit | null }
+/**
+ * A record under a future job id is kept as it is, but such an id can never be `current`. curve: the xp
+ * curve the records are on (XP_CURVE_VERSION); absent means Plan 3b's stub.
+ */
+export interface JobsSave { current: JobId; jobs: Partial<Record<JobId | FutureJobId, JobRecord>>; curve?: 2 }
 
 const freshRecord = (job: JobId): JobRecord => ({ level: 1, xp: 0, picks: [JOBS[job].picks.solo[0], JOBS[job].picks.solo[1]], talents: [], outfit: null });
 

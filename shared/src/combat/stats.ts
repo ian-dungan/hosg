@@ -1,8 +1,13 @@
 // Stats and the damage formula.
 import { DEFENCE_K } from './constants';
 
-export interface Stats { power: number; defence: number; maxHp: number }
-/** Every adventurer's stats until gear arrives (Plan 5). */
+/**
+ * An adventurer's stats. The specials come from armour (absent means 0, each capped at SPECIAL_CAP):
+ * focus (cloth) +1% to ability damage coefficients, heal and shield amounts; flow (light) +1% to every
+ * positive Momentum gain; guard (heavy) +1% to threat added and −1% to knockback speed taken.
+ */
+export interface Stats { power: number; defence: number; maxHp: number; focus?: number; flow?: number; guard?: number }
+/** The stats of a level-10 adventurer in the starter kit (baseStats(10) plus the kit): no specials. */
 export const STARTER_STATS: Stats = { power: 10, defence: 10, maxHp: 100 };
 
 /** The share of a hit that gets through `defence`: DEFENCE_K / (DEFENCE_K + defence), with a defence not above 0 (or NaN) as none. */
