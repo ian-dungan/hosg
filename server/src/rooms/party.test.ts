@@ -190,18 +190,26 @@ describe('parties in the rooms', () => {
     await partyUp(a.room, c.room, 'Carol');
     await sleep(700);
     const views = collect(b.room, 'party'), here = collect(c.room, 'party');
+    const lines = collect(b.room, 'partyStatus'), hereLines = collect(c.room, 'partyStatus');
     await sleep(1200);
     expect(views.length).toBe(0); // nothing changed
     expect(here.length).toBe(0);
+    expect(lines.length).toBe(0);
     const room = serverRoom(a.room);
     const eid = me(a.room).eid;
     const hurt = setInterval(() => room.combat.damage(eid, 1, worldOf(room.combat).now, 'fall'), 50);
     await sleep(2000);
     clearInterval(hurt);
-    expect(views.length).toBeGreaterThanOrEqual(2);
-    expect(views.length).toBeLessThanOrEqual(5); // 2 a second, plus one at the edges
-    expect(views.at(-1).party.members[0].hp).toBeLessThan(100);
+    // status changes come as compact partyStatus lines (only the member that changed), not whole views
+    expect(views.length).toBe(0);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(lines.length).toBeLessThanOrEqual(5); // 2 a second, plus one at the edges
+    expect(lines.every((l) => l.m.length === 1 && l.m[0].i === 0)).toBe(true);
+    expect(Object.keys(lines.at(-1).m[0]).sort()).toEqual(['hp', 'i']); // only what changed
+    expect(lines.at(-1).m[0].hp).toBeLessThan(100);
+    expect(Buffer.byteLength(JSON.stringify(lines.at(-1)))).toBeLessThan(40);
     expect(here.length).toBe(0);
+    expect(hereLines.length).toBe(0);
     expect(c.room.state.players.get(a.room.sessionId).hp).toBeLessThan(100);
   });
 
@@ -244,6 +252,35 @@ describe('parties in the rooms', () => {
     await waitFor(async () => (await store.getOrCreateAdventurer(b.accountId)).zone === 'grove', 3000);
     const b3 = await joinZone(url, b.token, 'grove');
     expect(engineParty(b3.room)).toBe(partyId);
+  }, 15000);
+
+  it('Task 6 review: an invite reaches an adventurer mid-travel (re-sent on its join), and again on a reconnect', async () => {
+    const exit: ZoneExit = { to: 'greenway', x: 0, z: -15, r: 1.5, arrive: { ...zoneDef('greenway').spawn }, open: true };
+    server = await startServer({ combatSeed: 5, reconnectSeconds: 30, zones: { grove: { exits: [exit] }, greenway: flatZone([]) } });
+    const { url, store } = server;
+    const a = await joinAt(url, store, 'Alice', SPAWN.x + 2, SPAWN.z);
+    const b = await joinAt(url, store, 'Bob', SPAWN.x, SPAWN.z);
+    const refusals = collect(a.room, 'partyRefused');
+    await walk(b.room, SPAWN, { x: 0, z: -13.6 }, groveTownSurface);
+    await waitFor(async () => (await store.getOrCreateAdventurer(b.accountId)).zone === 'greenway', 3000);
+    await sleep(200); // Bob is between rooms now: still online and findable by name
+    a.room.send('party', { op: 'invite', name: 'bob' });
+    await sleep(300);
+    expect(refusals).toEqual([]);
+    const b2 = await joinZone(url, b.token, 'greenway');
+    const invites = collectFromJoin(b2.room, 'partyInvite');
+    await waitFor(() => invites.length === 1);
+    expect(invites[0]).toMatchObject({ from: 'Alice', size: 1 });
+    // a drop and a reconnect: the open invite comes again
+    b2.room.connection.close();
+    await sleep(300);
+    const back = await b2.client.reconnect(b2.room.reconnectionToken);
+    const again: any[] = [];
+    back.onMessage('partyInvite', (m: any) => again.push(m));
+    await waitFor(() => again.length === 1);
+    back.send('party', { op: 'accept', partyId: again[0].partyId });
+    const views = collect(back, 'party');
+    await waitFor(() => lastParty(views)?.members.length === 2);
   }, 15000);
 
   it('junk party messages are dropped; 30 invites a second end in rate', async () => {

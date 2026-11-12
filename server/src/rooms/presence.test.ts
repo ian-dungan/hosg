@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Presence } from './presence';
 import type { ZoneRoom } from './ZoneRoom';
 
@@ -54,5 +54,34 @@ describe('Presence', () => {
     expect(presence.names.size).toBe(0);
     expect(presence.nameOf('A')).toBeUndefined();
     expect(seen).toEqual([['A', true], ['A', false]]);
+  });
+
+  it('Task 6 review: a travel release keeps the account online and named until the next claim (or the window ends); a throwing listener leaks nothing', () => {
+    let t = 0;
+    const seen: [string, boolean][] = [];
+    const presence = new Presence({ onOnline: (id, online) => seen.push([id, online]), now: () => t });
+    presence.claim('A', grove, 's1');
+    presence.named('A', 'Alice');
+    presence.release('A', 's1', 30_000);
+    expect(presence.get('A')).toBeUndefined();
+    expect(presence.isTravelling('A')).toBe(true);
+    expect(presence.names.get('alice')).toBe('A');
+    presence.claim('A', greenway, 's2'); // arrived: never offline
+    expect(presence.isTravelling('A')).toBe(false);
+    expect(seen).toEqual([['A', true]]);
+    presence.release('A', 's2', 30_000);
+    t = 31_000;
+    presence.sweep(); // never arrived
+    expect(presence.names.size).toBe(0);
+    expect(presence.travelling).toBe(0);
+    expect(seen).toEqual([['A', true], ['A', false]]);
+    const bad = new Presence({ onOnline: () => { throw new Error('boom'); } });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => bad.claim('B', grove, 's')).not.toThrow();
+    expect(bad.get('B')?.sessionId).toBe('s');
+    expect(() => bad.release('B', 's')).not.toThrow();
+    expect(bad.size).toBe(0);
+    expect(err).toHaveBeenCalledTimes(1);
+    err.mockRestore();
   });
 });

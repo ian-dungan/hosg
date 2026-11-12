@@ -88,7 +88,20 @@ export function createApp(opts: AppOptions): App {
   parties.onChange((_partyId, accountIds) => {
     for (const accountId of accountIds) presence.get(accountId)?.room.partyChanged(accountId);
   });
-  const partySweep = setInterval(() => parties.sweep(), PARTY_SWEEP_MS);
+  // A throw in a sweep (or in a listener it calls) is logged at most once a minute; the server carries on.
+  let sweepLoggedAt = -Infinity;
+  const partySweep = setInterval(() => {
+    try {
+      parties.sweep();
+      presence.sweep();
+    } catch (err) {
+      const now = Date.now();
+      if (now - sweepLoggedAt >= 60_000) {
+        sweepLoggedAt = now;
+        console.error('The party sweep failed (logged at most once a minute):', err);
+      }
+    }
+  }, PARTY_SWEEP_MS);
   partySweep.unref();
   // One shared room per saved zone; the Lampfall's rooms are instances (Plan 4 Task 7), never made here.
   const zones = new Map<ZoneId, ZoneDef>(SAVE_ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));

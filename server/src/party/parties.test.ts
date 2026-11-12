@@ -1,7 +1,7 @@
 // The party registry on its own (a fake clock): invites and answers, leaders, kicks and promotions,
 // refusals, expiry, the invite rate, offline members and leaders, status changes and change events.
 import { describe, expect, it } from 'vitest';
-import { PARTY_INVITE_S, PARTY_INVITES_PER_MIN, PARTY_LEADER_AWAY_S, PARTY_MAX, PARTY_OFFLINE_KEEP_S } from '@sg2/shared';
+import { PARTY_INVITE_S, PARTY_INVITES_PER_MIN, PARTY_LEADER_AWAY_S, PARTY_MAX, PARTY_OFFLINE_KEEP_S, PARTY_REINVITE_S } from '@sg2/shared';
 import { Parties, type MemberStatus, type Party } from './parties';
 
 function setup() {
@@ -110,7 +110,7 @@ describe('Parties', () => {
     expect(parties.invite(who('a'), who('z'))).not.toBeTypeOf('string');
     advance(120);
     parties.sweep();
-    expect(parties.counts()).toEqual({ parties: 0, invites: 0, rates: 0, members: 0 });
+    expect(parties.counts()).toMatchObject({ parties: 0, invites: 0, rates: 0, members: 0 });
   });
 
   it('the leader leaving hands the lead to the longest-standing member; a party of one dissolves', () => {
@@ -179,7 +179,7 @@ describe('Parties', () => {
     advance(PARTY_OFFLINE_KEEP_S + 1);
     parties.sweep();
     expect(parties.size).toBe(0);
-    expect(parties.counts()).toEqual({ parties: 0, invites: 0, rates: 0, members: 0 });
+    expect(parties.counts()).toMatchObject({ parties: 0, invites: 0, rates: 0, members: 0 });
   });
 
   it('setStatus reports a change only when something changed; view gives eids only for the room asked about', () => {
@@ -229,5 +229,66 @@ describe('Parties', () => {
     pair(parties, 'x', 'a');
     expect(parties.accept('b', who('b').name, mine.partyId)).toBe('expired');
     expect(parties.partyOf('b')).toBeUndefined();
+  });
+
+  it('Task 6 review: no ghost leader: an invite from someone who signed out cannot be accepted (solo or leading)', () => {
+    const { parties } = setup();
+    const { partyId } = ok(parties.invite(who('a'), who('b')));
+    parties.setOnline('a', false); // a solo inviter signs out: its invites go
+    expect(parties.invitesFor('b')).toEqual([]);
+    expect(parties.accept('b', who('b').name, partyId)).toBe('expired');
+    expect(parties.size).toBe(0);
+    expect(parties.partyOf('b')).toBeUndefined();
+    // a leader who signs out: its party's invites can no longer be accepted either
+    parties.setOnline('a', true);
+    const id = pair(parties, 'a', 'b');
+    ok(parties.invite(who('a'), who('c')));
+    parties.setOnline('a', false);
+    expect(parties.accept('c', who('c').name, id)).toBe('expired');
+    expect(ids(parties.partyOf('a'))).toEqual(['a', 'b']);
+    parties.setOnline('a', true);
+    ok(parties.invite(who('a'), who('c')));
+    expect(parties.accept('c', who('c').name, id)).not.toBeTypeOf('string');
+  });
+
+  it('Task 6 review: a listener that throws never stops the others or the change, and is logged', () => {
+    const logged: string[] = [];
+    const parties = new Parties({ log: (what) => logged.push(what) });
+    const heard: string[] = [];
+    parties.onChange(() => { throw new Error('boom'); });
+    parties.onChange((partyId) => heard.push(partyId));
+    const id = pair(parties, 'a', 'b');
+    expect(heard).toEqual([id]);
+    expect(parties.partyOf('b')?.id).toBe(id);
+    expect(() => parties.leave('b')).not.toThrow();
+    expect(heard).toEqual([id, id]);
+    expect(logged.length).toBe(1); // throttled
+  });
+
+  it(`P4-d: after a decline the same inviter cannot invite again for PARTY_REINVITE_S (rate); others can; invites are listed`, () => {
+    const { parties, advance } = setup();
+    const { partyId } = ok(parties.invite(who('a'), who('b')));
+    expect(parties.invitesFor('b')).toEqual([{ partyId, from: 'Aname', fromAccountId: 'a', size: 1 }]);
+    expect(parties.inviterOf(partyId, 'b')).toBe('a');
+    parties.decline('b', partyId);
+    expect(parties.invitesFor('b')).toEqual([]);
+    expect(parties.invite(who('a'), who('b'))).toBe('rate');
+    ok(parties.invite(who('c'), who('b')));
+    advance(PARTY_REINVITE_S + 1);
+    ok(parties.invite(who('a'), who('b')));
+    parties.sweep();
+    expect(parties.counts().declined).toBe(0);
+  });
+
+  it('leave and kick events name the account taken out', () => {
+    const { parties } = setup();
+    const lefts: (string | undefined)[] = [];
+    parties.onChange((_p, _a, left) => lefts.push(left));
+    const id = pair(parties, 'a', 'b');
+    ok(parties.invite(who('a'), who('c')));
+    parties.accept('c', who('c').name, id);
+    parties.kick('a', 'Cname');
+    parties.leave('b'); // dissolves
+    expect(lefts).toEqual([undefined, undefined, 'c', 'b']);
   });
 });

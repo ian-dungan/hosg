@@ -9,6 +9,7 @@ import {
   PARTY_LEADER_AWAY_S,
   PARTY_MAX,
   PARTY_OFFLINE_KEEP_S,
+  PARTY_REINVITE_S,
   type JobId,
   type PartyRefusal,
   type PartyView,
@@ -47,10 +48,18 @@ export class Parties {
   private readonly soloIds = new Map<string, string>();
   /** When each adventurer's invites in the last minute were sent (ms), oldest first, at most PARTY_INVITES_PER_MIN. */
   private readonly rates = new Map<string, number[]>();
-  private readonly listeners: ((partyId: string, accountIds: readonly string[]) => void)[] = [];
+  private readonly listeners: ((partyId: string, accountIds: readonly string[], left?: string) => void)[] = [];
+  /** Accounts that went offline (no session anywhere), and since when (ms): an invite from one is no longer open. */
+  private readonly offline = new Map<string, number>();
+  /** `${from} ${to}` -> until (ms): `to` declined `from`'s invite, and `from` may not invite it again before then (P4-d). */
+  private readonly declined = new Map<string, number>();
+  /** A listener that throws is logged (at most once a minute) and the others still run. */
+  private loggedAt = -Infinity;
+  private readonly log: (what: string, err: unknown) => void;
 
-  constructor(opts: { now?: () => number } = {}) {
+  constructor(opts: { now?: () => number; log?: (what: string, err: unknown) => void } = {}) {
     this.now = opts.now ?? Date.now;
+    this.log = opts.log ?? ((what, err) => console.error(what, err));
   }
 
   /** Parties now (for /healthz). */
@@ -59,8 +68,33 @@ export class Parties {
   }
 
   /** The sizes of every map (tests and health: nothing grows without bound). */
-  counts(): { parties: number; invites: number; rates: number; members: number } {
-    return { parties: this.parties.size, invites: this.invites.size, rates: this.rates.size, members: this.byAccount.size };
+  counts(): { parties: number; invites: number; rates: number; members: number; offline: number; declined: number } {
+    return {
+      parties: this.parties.size, invites: this.invites.size, rates: this.rates.size, members: this.byAccount.size,
+      offline: this.offline.size, declined: this.declined.size,
+    };
+  }
+
+  /** The open invites to an account (re-sent when it joins a room or reconnects). */
+  invitesFor(accountId: string): { partyId: string; from: string; fromAccountId: string; size: number }[] {
+    const now = this.now();
+    const out: { partyId: string; from: string; fromAccountId: string; size: number }[] = [];
+    for (const inv of this.invites.values()) {
+      if (inv.to !== accountId || inv.until <= now) continue;
+      out.push({ partyId: inv.partyId, from: inv.fromName, fromAccountId: inv.from, size: this.parties.get(inv.partyId)?.members.length ?? 1 });
+    }
+    return out;
+  }
+
+  /** Who sent the open invite of `partyId` to `to` (its account), if one is open. */
+  inviterOf(partyId: string, to: string): string | undefined {
+    const inv = this.invites.get(`${partyId} ${to}`);
+    return inv && inv.until > this.now() ? inv.from : undefined;
+  }
+
+  /** A party by id. */
+  get(partyId: string): Party | undefined {
+    return this.parties.get(partyId);
   }
 
   partyOf(accountId: string): Party | undefined {
@@ -68,8 +102,11 @@ export class Parties {
     return id === undefined ? undefined : this.parties.get(id);
   }
 
-  /** Called with every member of the party before and after each change of its members, leader or online flags. */
-  onChange(cb: (partyId: string, accountIds: readonly string[]) => void): void {
+  /**
+   * Called with every member of the party before and after each change of its members, leader or online
+   * flags; `left` is the account that was taken out (left, kicked or dropped offline), if one was.
+   */
+  onChange(cb: (partyId: string, accountIds: readonly string[], left?: string) => void): void {
     this.listeners.push(cb);
   }
 
@@ -85,6 +122,8 @@ export class Parties {
     if (party && party.leader !== from.accountId) return 'not-leader';
     if (this.byAccount.has(to.accountId)) return 'in-party';
     if (party && party.members.length >= PARTY_MAX) return 'full';
+    // P4-d: declined lately by the same adventurer (refused as 'rate': "wait a moment")
+    if ((this.declined.get(`${from.accountId} ${to.accountId}`) ?? -Infinity) > this.now()) return 'rate';
     let partyId = party?.id;
     if (partyId === undefined) {
       partyId = this.soloIds.get(from.accountId) ?? this.newId();
@@ -104,7 +143,8 @@ export class Parties {
     if (this.byAccount.has(accountId)) return 'in-party';
     const key = `${partyId} ${accountId}`;
     const invite = this.invites.get(key);
-    if (!invite || invite.until <= this.now()) {
+    // an invite from an adventurer who has since signed out is no longer open (no absent leader)
+    if (!invite || invite.until <= this.now() || this.offline.has(invite.from)) {
       if (invite) this.invites.delete(key);
       return 'expired';
     }
@@ -131,8 +171,13 @@ export class Parties {
     return party;
   }
 
+  /** Drops the invite; its sender may not invite this adventurer again for PARTY_REINVITE_S (P4-d). */
   decline(accountId: string, partyId: string): void {
-    this.invites.delete(`${partyId} ${accountId}`);
+    const key = `${partyId} ${accountId}`;
+    const inv = this.invites.get(key);
+    if (!inv) return;
+    this.invites.delete(key);
+    this.declined.set(`${inv.from} ${accountId}`, this.now() + PARTY_REINVITE_S * 1000);
   }
 
   /** Out of its party: the party as it is after, or undefined (no party, or it dissolved). */
@@ -180,6 +225,13 @@ export class Parties {
 
   /** The account is online somewhere (a session in any room, or inside a reconnect window), or not. */
   setOnline(accountId: string, online: boolean): void {
+    if (online) this.offline.delete(accountId);
+    else {
+      this.offline.set(accountId, this.now());
+      // gone with no party: the invites it sent as a solo adventurer are no longer open (a party would
+      // otherwise be made around an absent leader)
+      if (!this.byAccount.has(accountId)) this.dropSoloInvites(accountId);
+    }
     const party = this.partyOf(accountId);
     const m = party && this.memberOf(accountId);
     if (!party || !m || (m.offlineSince === null) === online) return;
@@ -192,6 +244,9 @@ export class Parties {
     const now = this.now();
     for (const [k, inv] of this.invites) if (inv.until <= now) this.invites.delete(k);
     for (const [id, times] of this.rates) if (times.length === 0 || times[times.length - 1] <= now - RATE_WINDOW_MS) this.rates.delete(id);
+    for (const [k, until] of this.declined) if (until <= now) this.declined.delete(k);
+    // an offline account's invites are long expired, and a party member's offline time is on the member
+    for (const [id, since] of this.offline) if (now - since >= PARTY_INVITE_S * 1000) this.offline.delete(id);
     const carried = new Set<string>();
     for (const inv of this.invites.values()) carried.add(inv.partyId);
     for (const [id, partyId] of this.soloIds) if (!carried.has(partyId)) this.soloIds.delete(id);
@@ -281,20 +336,31 @@ export class Parties {
       party.members = [];
       this.parties.delete(party.id);
       for (const [k, inv] of this.invites) if (inv.partyId === party.id) this.invites.delete(k);
-      this.emit(party.id, before);
+      this.emit(party.id, before, accountId);
       return undefined;
     }
-    this.changed(party, before);
+    this.changed(party, before, accountId);
     return party;
   }
 
-  private changed(party: Party, before: readonly string[]) {
+  private changed(party: Party, before: readonly string[], left?: string) {
     const all = new Set(before);
     for (const m of party.members) all.add(m.accountId);
-    this.emit(party.id, [...all]);
+    this.emit(party.id, [...all], left);
   }
 
-  private emit(partyId: string, accountIds: readonly string[]) {
-    for (const cb of this.listeners) cb(partyId, accountIds);
+  /** Tells every listener; one that throws is logged (throttled) and never stops the others or the caller. */
+  private emit(partyId: string, accountIds: readonly string[], left?: string) {
+    for (const cb of this.listeners) {
+      try {
+        cb(partyId, accountIds, left);
+      } catch (err) {
+        const now = Date.now();
+        if (now - this.loggedAt >= 60_000) {
+          this.loggedAt = now;
+          this.log('A party change listener failed (logged at most once a minute):', err);
+        }
+      }
+    }
   }
 }

@@ -72,6 +72,7 @@ import {
   type JobsView,
   type Loadout,
   type PartyRefusal,
+  type PartyView,
   type Pose,
   type Refusal,
   type S2C,
@@ -167,6 +168,14 @@ const CARRY_KEEP_MS = (Math.max(...Object.values(ABILITIES).map((a) => a.cooldow
 
 /** A member's status is read, and a `party` view sent to one client for status changes, at most this often (ms). */
 const PARTY_STATUS_MS = 1000 / PARTY_STATUS_HZ;
+
+/**
+ * S2C `partyStatus { m: PartyStatusLine[] }` (Task 6 review): the members whose numbers changed since the
+ * client last heard, at most PARTY_STATUS_HZ. `i` is the member's index in the last `party` view; only the
+ * fields that changed are present (hp, maxHp, dead, searing, job, level). A change of members, leader,
+ * online flag, zone or eid comes as a whole `party` view instead. (Not in shared S2C yet: Task 8 adds it.)
+ */
+export interface PartyStatusLine { i: number; hp?: number; maxHp?: number; dead?: boolean; searing?: number; job?: JobId; level?: number }
 
 /** A measured time (ms) and when it was taken (wall ms). */
 interface Timing { at: number; ms: number }
@@ -333,8 +342,10 @@ interface Session {
   pins: PlayerState[];
   /** A member's status changed: a `party` view is due (sent at most every PARTY_STATUS_MS). */
   partyDue: boolean;
-  /** When its last `party` view was sent, and its own status last read (wall ms). */
+  /** When its last `party` view or `partyStatus` was sent, and its own status last read (wall ms). */
   partySentAt: number;
+  /** The party as this client last heard it (a full view, with every `partyStatus` since applied), or null. */
+  partySent: PartyView | null;
   statusAt: number;
 }
 
@@ -430,6 +441,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** The view cap: at most `max` other adventurers, leaving past rank max + slack. */
   private viewCap = { max: INTEREST_MAX_ADVENTURERS, slack: INTEREST_RANK_HYSTERESIS };
   private parties!: Parties;
+  /** How long a traveller stays online and named between this room and the next (ms). */
+  private travelKeepMs = 30_000;
 
   onCreate(options: ZoneRoomOptions) {
     // Never a second room for a zone (Colyseus would open one if it ever saw this one as full).
@@ -441,6 +454,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // a second one): leave room for an account's new session joining before its old one is kicked.
     this.maxClients = options.maxPlayers * 2;
     this.reconnectSeconds = options.reconnectSeconds;
+    this.travelKeepMs = options.reconnectSeconds * 1000;
     this.accounts = options.presence;
     this.rooms = options.rooms;
     this.isExitOpen = options.isExitOpen;
@@ -581,6 +595,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       pins: [],
       partyDue: false,
       partySentAt: -Infinity,
+      partySent: null,
       statusAt: -Infinity,
     };
     this.sessions.set(sessionId, session);
@@ -597,6 +612,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.parties.setStatus(accountId, this.statusOf(session));
     session.statusAt = this.wallMs();
     this.partyMoved(accountId);
+    this.sendInvites(session); // invites sent while it was between rooms or away
     this.refreshView(session);
     // A save the store had to repair (a Plan 3 one, or one with bad parts) is written back repaired.
     if (adventurer.jobsRepaired) this.saveJobs(session);
@@ -624,7 +640,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.missedRevive = undefined;
     session.lastSelf = '';
     session.jobsDue = true;
+    session.partySent = null;
     this.sendParty(session); // its party may have changed while it was away
+    this.sendInvites(session);
+  }
+
+  /** The account's open invites, again (a join or a reconnect: one sent meanwhile never reached it). */
+  private sendInvites(session: Session) {
+    for (const inv of this.parties.invitesFor(session.accountId)) {
+      this.sendTo(session.client, 'partyInvite', { partyId: inv.partyId, from: inv.from, size: inv.size });
+    }
   }
 
   async onLeave(client: Client) {
@@ -1084,7 +1109,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         } else {
           const accountId = this.accounts.names.get(op.name.toLowerCase());
           const name = accountId === undefined ? undefined : this.accounts.nameOf(accountId);
-          if (accountId !== undefined && name !== undefined && this.accounts.get(accountId)) to = { accountId, name };
+          // online in a room, or between two (a travel)
+          if (accountId !== undefined && name !== undefined && (this.accounts.get(accountId) || this.accounts.isTravelling(accountId))) to = { accountId, name };
         }
         if (!to) {
           refusal = this.parties.inviteUnknown(session.accountId);
@@ -1183,7 +1209,41 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const party = this.parties.partyOf(session.accountId);
     session.partyDue = false;
     session.partySentAt = this.wallMs();
-    this.sendTo(session.client, 'party', { party: party ? this.parties.view(party, this.roomId) : null });
+    const view = party ? this.parties.view(party, this.roomId) : null;
+    session.partySent = view;
+    this.sendTo(session.client, 'party', { party: view });
+  }
+
+  /**
+   * A due status update: only the members whose numbers changed, as compact `partyStatus` lines (about
+   * 30 B each), when the members, leader, online flags, zones and eids are as the client last heard;
+   * otherwise the whole view.
+   */
+  private sendPartyStatus(session: Session) {
+    const party = this.parties.partyOf(session.accountId);
+    const last = session.partySent;
+    const view = party ? this.parties.view(party, this.roomId) : null;
+    const sameShape = last !== null && view !== null && last.id === view.id && last.members.length === view.members.length
+      && last.members.every((m, i) => {
+        const n = view.members[i];
+        return m.name === n.name && m.leader === n.leader && m.online === n.online && m.eid === n.eid && m.zone === n.zone;
+      });
+    if (!sameShape || session.reconnection) return this.sendParty(session);
+    session.partyDue = false;
+    session.partySentAt = this.wallMs();
+    const lines: PartyStatusLine[] = [];
+    view.members.forEach((n, i) => {
+      const m = last.members[i], line: PartyStatusLine = { i };
+      if (m.hp !== n.hp) line.hp = n.hp;
+      if (m.maxHp !== n.maxHp) line.maxHp = n.maxHp;
+      if (m.dead !== n.dead) line.dead = n.dead;
+      if (m.searing !== n.searing) line.searing = n.searing;
+      if (m.job !== n.job) line.job = n.job;
+      if (m.level !== n.level) line.level = n.level;
+      if (Object.keys(line).length > 1) lines.push(line);
+    });
+    if (lines.length > 0) session.client.send('partyStatus', { m: lines });
+    session.partySent = view;
   }
 
   /** What the party is told of this member. */
@@ -1219,7 +1279,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           }
         }
       }
-      if (session.partyDue && !session.reconnection && wall - session.partySentAt >= PARTY_STATUS_MS) this.sendParty(session);
+      if (session.partyDue && !session.reconnection && wall - session.partySentAt >= PARTY_STATUS_MS) this.sendPartyStatus(session);
     }
   }
 
@@ -1271,7 +1331,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (session.travelling) {
       // The account stays held until the travel's save settles, so a sign-in meanwhile (anywhere)
       // kicks this claim and waits for that save, then loads the adventurer where it really is.
-      const release = () => this.accounts.release(session.accountId, sessionId);
+      // (a travel that went through keeps it online and named until the next room's join claims it)
+      const release = () => this.accounts.release(session.accountId, sessionId, this.travelKeepMs);
       void session.travelling.then(release, release);
       return;
     }

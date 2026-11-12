@@ -16,6 +16,8 @@ export const PARTY_OFFLINE_KEEP_S = 300;
 export const PARTY_LEADER_AWAY_S = 60;
 /** Member status (hp, zone, job, dead) is relayed at most this often (Hz), only when it changed. */
 export const PARTY_STATUS_HZ = 2;
+/** After a decline, the same inviter may not invite the same adventurer again for this long (s; refused 'rate'). Ruling P4-d. */
+export const PARTY_REINVITE_S = 60;
 /** Party members in the same room within this (m) of a kill share its credit. */
 export const PARTY_SHARE_R = 60;
 

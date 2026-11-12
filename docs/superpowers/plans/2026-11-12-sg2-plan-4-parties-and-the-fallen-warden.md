@@ -128,6 +128,7 @@ New combat constants live in `shared/src/combat/constants.ts` in a section heade
 |---|---|---|
 | `PARTY_MAX` | 4 | members, the leader included |
 | `PARTY_INVITE_S` | 60 | an invite expires after this |
+| `PARTY_REINVITE_S` | 60 | after a decline, the same inviter cannot invite the same adventurer again for this long (refused `'rate'`; ruling P4-d) |
 | `PARTY_INVITES_PER_MIN` | 10 | invites one adventurer may send per minute (more → `'rate'`) |
 | `PARTY_OFFLINE_KEEP_S` | 300 | a member signed out (no session anywhere) stays in the party this long |
 | `PARTY_LEADER_AWAY_S` | 60 | an offline leader hands the lead on after this (to the longest-standing online member) |

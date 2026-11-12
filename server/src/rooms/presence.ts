@@ -31,9 +31,50 @@ export class Presence {
   private nameOfAccount = new Map<string, string>();
   /** Told when an account comes online (its first claim) and goes offline everywhere (its last release). */
   private readonly onOnline?: (accountId: string, online: boolean) => void;
+  /**
+   * Accounts between rooms (a travel: released by the room it left, not claimed yet by the next), and
+   * until when (ms): still online and findable by name meanwhile.
+   */
+  private readonly travellers = new Map<string, number>();
+  private loggedAt = -Infinity;
+  private readonly now: () => number;
 
-  constructor(opts: { onOnline?: (accountId: string, online: boolean) => void } = {}) {
+  constructor(opts: { onOnline?: (accountId: string, online: boolean) => void; now?: () => number } = {}) {
     this.onOnline = opts.onOnline;
+    this.now = opts.now ?? Date.now;
+  }
+
+  /** Tells onOnline; a throw there is logged (throttled) and never leaves a claim half made or released. */
+  private tell(accountId: string, online: boolean) {
+    try {
+      this.onOnline?.(accountId, online);
+    } catch (err) {
+      const now = Date.now();
+      if (now - this.loggedAt >= 60_000) {
+        this.loggedAt = now;
+        console.error('An online listener failed (logged at most once a minute):', err);
+      }
+    }
+  }
+
+  /** The account is between rooms (travelling): released, but still online and named. */
+  isTravelling(accountId: string): boolean {
+    return (this.travellers.get(accountId) ?? -Infinity) > this.now();
+  }
+
+  /** Travellers that never arrived go offline (called every few seconds). */
+  sweep(): void {
+    const now = this.now();
+    for (const [accountId, until] of this.travellers) {
+      if (until > now) continue;
+      this.travellers.delete(accountId);
+      if (!this.claims.has(accountId)) this.gone(accountId);
+    }
+  }
+
+  /** Accounts between rooms now (tests and health). */
+  get travelling(): number {
+    return this.travellers.size;
   }
   /** Movement allowances by account id, shared by every room (see Allowance). */
   readonly allowances = new Map<string, Allowance>();
@@ -60,13 +101,14 @@ export class Presence {
   claim(accountId: string, room: ZoneRoom, sessionId: string): Claim | undefined {
     const previous = this.claims.get(accountId);
     this.claims.set(accountId, { room, sessionId });
-    if (!previous) this.onOnline?.(accountId, true);
+    const arriving = this.travellers.delete(accountId);
+    if (!previous && !arriving) this.tell(accountId, true);
     return previous;
   }
 
   /** The account's adventurer is called `name` (a join, once the name is loaded): findable by it while online. */
   named(accountId: string, name: string): void {
-    if (!this.claims.has(accountId)) return;
+    if (!this.claims.has(accountId) && !this.travellers.has(accountId)) return;
     const old = this.nameOfAccount.get(accountId);
     if (old !== undefined && this.names.get(old.toLowerCase()) === accountId) this.names.delete(old.toLowerCase());
     this.nameOfAccount.set(accountId, name);
@@ -78,14 +120,27 @@ export class Presence {
     return this.nameOfAccount.get(accountId);
   }
 
-  /** Frees the account, but only if this session still holds it (a stale release does nothing). */
-  release(accountId: string, sessionId: string): void {
+  /**
+   * Frees the account, but only if this session still holds it (a stale release does nothing). With
+   * `travelMs`, the account is travelling: it stays online and named for that long, until its next claim.
+   */
+  release(accountId: string, sessionId: string, travelMs?: number): void {
     if (this.claims.get(accountId)?.sessionId !== sessionId) return;
     this.claims.delete(accountId);
+    if (travelMs !== undefined && travelMs > 0) {
+      this.travellers.set(accountId, this.now() + travelMs);
+      return;
+    }
+    this.gone(accountId);
+  }
+
+  /** Offline everywhere: no name, and onOnline hears. */
+  private gone(accountId: string) {
+    this.travellers.delete(accountId);
     const name = this.nameOfAccount.get(accountId);
     this.nameOfAccount.delete(accountId);
     if (name !== undefined && this.names.get(name.toLowerCase()) === accountId) this.names.delete(name.toLowerCase());
-    this.onOnline?.(accountId, false);
+    this.tell(accountId, false);
   }
 
   /** Accounts online (joining, in a room, or inside a reconnect window). */
