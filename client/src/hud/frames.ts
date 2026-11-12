@@ -1,6 +1,8 @@
 // Unit frames: player, target (+ boss bar), party. Every update() diffs against a cache.
+import type { JobId } from '@sg2/shared';
 import type { HudBar, HudState, StatusId, WeaponId } from '../core/contracts';
 import { h, toggle, ICONS } from './dom';
+import { JOB_COLOR } from './jobs';
 
 const STATUS: Record<StatusId, { g: string; label: string; c: string }> = {
   soaked: { g: '≈', label: 'Soaked', c: '#3FB0A6' },
@@ -11,6 +13,19 @@ const STATUS: Record<StatusId, { g: string; label: string; c: string }> = {
   guard: { g: '◆', label: 'Guard', c: '#479AF2' },
   regen: { g: '+', label: 'Regen', c: '#8FD16A' },
   slowed: { g: '↓', label: 'Slowed', c: '#9aa6c8' },
+  // marks and debuffs on enemies
+  rooted: { g: '⤓', label: 'Rooted', c: '#8FD16A' },
+  dazed: { g: '⊛', label: 'Dazed', c: '#c9a6ff' },
+  blinded: { g: '◑', label: 'Blinded', c: '#b8b4c8' },
+  weakpoint: { g: '⊙', label: 'Weak Point', c: '#ff8a6a' },
+  // buffs on adventurers
+  roar: { g: '⇑', label: 'Roar', c: '#EC6A4C' },
+  aegis: { g: '⬡', label: 'Aegis', c: '#479AF2' },
+  sheltered: { g: '⌂', label: 'Sheltered', c: '#7fb8ff' },
+  rain: { g: '⁘', label: 'Soft Rain', c: '#5fd0c4' },
+  pact: { g: '⊗', label: 'Pact', c: '#c0605a' },
+  mist: { g: '░', label: 'Mist', c: '#c8d6f0' },
+  bloodbond: { g: '∞', label: 'Bloodbond', c: '#e8728a' },
 };
 
 export class Bar {
@@ -58,6 +73,7 @@ export class Chips {
       const c = h('span', 'sg-chip', this.el);
       c.style.setProperty('--c', s.c);
       c.title = s.label;
+      c.dataset.status = id;
       h('b', '', c, s.g);
       if (this.labels) h('span', '', c, s.label);
     }
@@ -107,10 +123,13 @@ export class PlayerFrame {
   private mom: Bar;
   private chips: Chips;
   readonly cast: CastBar;
-  private c = { name: '', level: -1, hp: -1, max: -1, weapon: '' as WeaponId | '', low: false, mom: -1, momOn: false, momState: '' };
+  private em: HTMLElement;
+  private jobGlyph: HTMLElement;
+  private c = { name: '', level: -1, hp: -1, max: -1, weapon: '' as WeaponId | '', low: false, mom: -1, momOn: false, momState: '', job: '', jobLevel: -1 };
   constructor(parent: HTMLElement, castParent: HTMLElement) {
     this.el = h('div', 'sg-pf', parent);
-    const em = h('div', 'sg-pf-emblem', this.el);
+    const em = this.em = h('div', 'sg-pf-emblem', this.el);
+    this.jobGlyph = h('b', 'sg-pf-job', em);
     this.lvl = h('span', '', em);
     const main = h('div', 'sg-pf-main', this.el);
     const top = h('div', 'sg-pf-top', main);
@@ -126,8 +145,24 @@ export class PlayerFrame {
   update(p: HudState['player']): void {
     const c = this.c;
     if (p.name !== c.name) { c.name = p.name; this.nameEl.textContent = p.name; }
-    if (p.level !== c.level) { c.level = p.level; this.lvl.textContent = String(p.level); }
-    if (p.weapon !== c.weapon) { c.weapon = p.weapon; this.weaponEl.innerHTML = ICONS[p.weapon] ?? ''; this.weaponEl.title = p.weapon; }
+    // the job badge: its glyph on the job's colour, with its level (the offline demo: the level alone)
+    const job = p.job?.id ?? '';
+    if (job !== c.job) {
+      c.job = job;
+      toggle(this.el, 'has-job', !!p.job);
+      this.jobGlyph.textContent = p.job?.glyph ?? '';
+      this.em.title = p.job?.name ?? '';
+      const col = job ? JOB_COLOR[job as JobId] : null;
+      this.em.style.setProperty('--jb', col?.bg ?? '');
+      this.em.style.setProperty('--jf', col?.fg ?? '');
+      c.jobLevel = p.job?.level ?? -1;
+    } else if (p.job && p.job.level !== c.jobLevel) {
+      if (p.job.level > c.jobLevel && c.jobLevel > 0) this.em.animate([{ transform: 'scale(1)', filter: 'brightness(1)' }, { transform: 'scale(1.35)', filter: 'brightness(2.2)', offset: 0.3 }, { transform: 'scale(1)', filter: 'brightness(1)' }], { duration: 900, easing: 'ease-out' });
+      c.jobLevel = p.job.level;
+    }
+    const level = p.job?.level ?? p.level;
+    if (level !== c.level) { c.level = level; this.lvl.textContent = String(level); }
+    if (p.weapon !== c.weapon) { c.weapon = p.weapon; this.weaponEl.innerHTML = (ICONS as Record<string, string>)[p.weapon] ?? ''; this.weaponEl.title = p.weapon; }
     if (p.hp !== c.hp || p.maxHp !== c.max) {
       c.hp = p.hp; c.max = p.maxHp;
       const f = p.maxHp > 0 ? p.hp / p.maxHp : 0;
@@ -259,5 +294,61 @@ export class PartyFrames {
       if (r.hp !== m.hp || r.max !== m.maxHp) { r.hp = m.hp; r.max = m.maxHp; r.bar.set(m.maxHp > 0 ? m.hp / m.maxHp : 0); }
       r.chips.set(m.statuses);
     });
+  }
+}
+
+/**
+ * The focused ally (a tap on another adventurer): job glyph, name, health, buffs, their cast, and a close
+ * button. Greyed while out of reach of ally abilities; "Down" while dead (a revive prompt shows near them).
+ */
+export class FocusFrame {
+  readonly el: HTMLElement;
+  private glyph: HTMLElement;
+  private nameEl: HTMLElement;
+  private tag: HTMLElement;
+  private hp: Bar;
+  private chips: Chips;
+  private cast: CastBar;
+  private act: HTMLElement;
+  private actText = '';
+  private c = { on: false, name: '', glyph: '', hp: -1, max: -1, dead: false, far: false };
+  constructor(parent: HTMLElement, onClose: () => void, onAct: () => void) {
+    this.el = h('div', 'sg-af', parent);
+    const head = h('div', 'sg-af-head', this.el);
+    this.glyph = h('b', 'sg-af-glyph', head);
+    this.nameEl = h('div', 'sg-af-name', head);
+    this.tag = h('span', 'sg-af-tag', head);
+    const x = h('div', 'sg-af-close sg-ctl', head);
+    x.innerHTML = ICONS.close;
+    x.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); onClose(); });
+    this.hp = new Bar(this.el, 'sg-hp-ally', false);
+    this.chips = new Chips(this.el, false);
+    this.cast = new CastBar(this.el, 'sg-cast-ally');
+    // on portrait phones the context prompt (a revive) shows here instead of under the frames
+    this.act = h('div', 'sg-af-act sg-ctl', this.el);
+    this.act.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); onAct(); });
+  }
+  /** The context prompt's text, shown as this frame's button on portrait phones (null hides it). */
+  prompt(text: string | null): void {
+    if ((text ?? '') === this.actText) return;
+    this.actText = text ?? '';
+    this.act.textContent = this.actText;
+    toggle(this.act, 'on', !!text);
+  }
+  update(a: HudState['ally']): void {
+    const c = this.c, on = !!a;
+    if (on !== c.on) { c.on = on; toggle(this.el, 'on', on); }
+    if (!a) return;
+    if (a.name !== c.name) { c.name = a.name; this.nameEl.textContent = a.name; }
+    if (a.glyph !== c.glyph) { c.glyph = a.glyph; this.glyph.textContent = a.glyph; }
+    if (a.hp !== c.hp || a.maxHp !== c.max) { c.hp = a.hp; c.max = a.maxHp; this.hp.set(a.maxHp > 0 ? a.hp / a.maxHp : 0); }
+    const far = !a.inRange;
+    if (a.dead !== c.dead || far !== c.far) {
+      c.dead = a.dead; c.far = far;
+      toggle(this.el, 'dead', a.dead); toggle(this.el, 'far', far);
+      this.tag.textContent = a.dead ? 'Down' : far ? 'Too far' : 'Focus';
+    }
+    this.chips.set(a.statuses);
+    this.cast.set(a.cast);
   }
 }

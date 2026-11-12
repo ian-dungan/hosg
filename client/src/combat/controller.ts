@@ -10,12 +10,19 @@
 // - A knockback (or a resync) replays the server's displacement from its `from`; a held dodge it dropped is
 //   forgotten. A respawn stands the body at the statue. Each adopts the new seq.
 // - Key auto-repeat never sends anything again (the server allows 20 intents a second).
+//
+// Jobs (Plan 3b): the bar is the current job's five slots (from `self`); the job board (the Guild Board, J, the
+// Jobs button) sends `job`, the picks chooser (L) `loadout { picks }`; the server says yes with `jobs`, or why
+// not with `refused`. Ally-aimed abilities carry the focused adventurer (a tap on them, F) as `ally`; without
+// one the server picks (the lowest health in range). A spell's cast slows the adventurer from the press (never
+// faster than the server allows) and fills the cast bar from the server's cast.
 import { Color3, MeshBuilder, StandardMaterial, Vector3 } from '@babylonjs/core';
 import {
-  ABILITIES, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, DEATH_MIN_S, AUTO_RESPAWN_S, DODGE_CHARGES, DODGE_MIN_GAP_S, DODGE_REFILL_S,
-  ENEMY_ATTACKS, ENEMY_KINDS, PLAN3_FREE_POOL, MARK_BITS, SPRINT_S, SPRINT_SCALE, TARGET_RANGE, TELEGRAPH_LEAD_S, WEAPONS,
-  dodgeDisplacement, simulateDisplacement,
-  type AbilityId, type C2S, type EnemyAttackId, type EnemyKindId, type FxEvent, type MarkId, type S2C, type SelfView, type WeaponId,
+  ABILITIES, BUFF_BITS, CAST_MOVE_SCALE, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, CHARGE_MOVE_SCALE, DEATH_MIN_S, AUTO_RESPAWN_S, DEBUFF_BITS, DODGE_CHARGES,
+  DODGE_MIN_GAP_S, DODGE_REFILL_S, ENEMY_ATTACKS, ENEMY_KINDS, GUILD_BOARD, JOBS, MARK_BITS, RANGE_FUZZ, REASON_JOB_NOT_HERE, SPRINT_S, SPRINT_SCALE, TARGET_RANGE,
+  TELEGRAPH_LEAD_S, TICK_HZ, WEAPONS, dodgeDisplacement, isJobId, simulateDisplacement,
+  type AbilityId, type BuffId, type C2S, type CastView, type DebuffId, type EnemyAttackId, type EnemyKindId, type FxEvent, type JobId, type JobsView,
+  type MarkId, type S2C, type SelfView, type ZoneId,
 } from '@sg2/shared';
 import type { HudApi, HudEvent, HudState, StatusId, TapInfo } from '../core/contracts';
 import type { Game } from '../boot';
@@ -23,6 +30,9 @@ import type { Enemies } from '../net/enemies';
 import type { Remotes } from '../net/remotes';
 import { windupElapsedS, type EnemyStateView, type PlayerView, type ZoneRoom } from '../net/session';
 import { ABILITY_DEFS } from './abilityDefs';
+import { FOCUS_RANGE, aimHint, createAllyFocus, createFocusRing, type AllyPos } from './allyFocus';
+import { article, jobBoardView, roleLabel } from '../hud/jobs';
+import { GUILD_BOARD_EID, GUILD_BOARD_REACH } from '../world/guildBoard';
 import { createTelegraphs, type Telegraphs } from './telegraphs';
 import { createOverheads, type Overheads } from './overheads';
 import { createEffects, type Effects } from './effects';
@@ -51,15 +61,18 @@ export function tapAction(
  * The five ability slots as the HUD shows them, timers counted down from when `self` arrived. Written into
  * `out` (its entries reused, so nothing is allocated per frame) and returned.
  */
-export function slotView(self: SelfSnap | null, nowMs: number, dead = false, out: HudState['slots'] = []): HudState['slots'] {
+export function slotView(
+  self: SelfSnap | null, nowMs: number, dead = false, out: HudState['slots'] = [], casting: AbilityId | null = self?.cast ? self.cast.ability : null,
+): HudState['slots'] {
   if (!self) { out.length = 0; return out; }
   const el = Math.max(0, (nowMs - self.at) / 1000);
   const gcd = Math.max(0, self.gcd - el); // shown only while the slot also cools
+  // a cast in progress (`casting`): every other button waits for it (the server answers 'busy')
   out.length = Math.min(out.length, self.slots.length);
   for (let i = 0; i < self.slots.length; i++) {
     const id = self.slots[i], a = ABILITIES[id];
     const cd = Math.max(0, (self.cd[i] ?? 0) - el);
-    const usable = !dead && !(a.cost !== undefined && self.momentum < a.cost);
+    const usable = !dead && !(a.cost !== undefined && self.momentum < a.cost) && (casting === null || casting === id);
     // the global cooldown only shows on a slot whose own cooldown is shorter, as the sweep's last part
     const s = (out[i] ??= { ability: ABILITY_DEFS[id], cdRemaining: 0, usable: true });
     s.ability = ABILITY_DEFS[id]; s.cdRemaining = cd > 0 ? Math.max(cd, gcd) : 0; s.usable = usable;
@@ -90,14 +103,28 @@ export function screenToWorld(dir: { x: number; y: number } | null, alpha: numbe
   return { x: wx / l, z: wz / l };
 }
 
-const GUARDED: StatusId[] = ['guard'], UNGUARDED: StatusId[] = [];
-/** The Plan 3 marks the HUD has statuses for (Rooted and Dazed get theirs in Task 7). */
-const MARK_IDS: readonly Extract<MarkId, StatusId>[] = ['marked', 'burning', 'soaked'];
+/** The marks, in the order the HUD shows them. */
+const MARK_IDS: readonly Extract<MarkId, StatusId>[] = ['marked', 'burning', 'soaked', 'rooted', 'dazed'];
 /** The marks set in `bits` as HUD status ids, written into `out` (emptied first) and returned. */
 export function markStatuses(bits: number, out: StatusId[] = []): StatusId[] {
   out.length = 0;
   for (const m of MARK_IDS) if (bits & MARK_BITS[m]) out.push(m);
   return out;
+}
+/** Adventurer buffs (aegis and aegis_ally share a bit: one icon) and enemy debuffs, as HUD status ids. */
+const BUFF_IDS: readonly Extract<BuffId, StatusId>[] = ['roar', 'aegis', 'sheltered', 'rain', 'pact', 'mist', 'bloodbond'];
+const DEBUFF_IDS: readonly Extract<DebuffId, StatusId>[] = ['blinded', 'weakpoint'];
+/** The buffs (an adventurer's BUFF_BITS) or debuffs (an enemy's DEBUFF_BITS) set in `bits`, appended to `out` and returned. */
+export function buffStatuses(bits: number, on: 'adventurer' | 'enemy', out: StatusId[] = []): StatusId[] {
+  if (on === 'adventurer') { for (const b of BUFF_IDS) if (bits & BUFF_BITS[b]) out.push(b); } else for (const d of DEBUFF_IDS) if (bits & DEBUFF_BITS[d]) out.push(d);
+  return out;
+}
+
+/** How far along the server's cast is (0..1), counted on from when the `self` carrying it arrived (`at`, ms). */
+export function castFrac(cast: NonNullable<CastView>, at: number, nowMs: number): number {
+  if (!(cast.total > 0)) return 1;
+  const left = cast.left - Math.max(0, (nowMs - at) / 1000);
+  return Math.max(0, Math.min(1, 1 - left / cast.total));
 }
 
 /**
@@ -176,10 +203,17 @@ export const DODGE_QUEUE_MS = 400;
 
 const REFUSAL_TEXT: Record<string, string> = {
   range: 'Out of range', cooldown: 'Not ready', momentum: 'Not enough Momentum', sight: "Can't see the target", 'no-target': 'No target',
-  charges: 'No dodges left', air: "Can't dodge in the air", 'in-combat': 'Not during a fight',
+  charges: 'No dodges left', air: "Can't dodge in the air", 'in-combat': 'Not during a fight', 'no-ally': 'Nobody to help here',
+  'not-here': REASON_JOB_NOT_HERE,
 };
-/** The toast for a refusal, or null for the silent ones (stale, rate, dead, busy, invalid). */
-export function refusalText(reason: string): string | null { return REFUSAL_TEXT[reason] ?? null; }
+/**
+ * The toast for a refusal of `action`, or null for the silent ones (stale, rate, dead, invalid; busy, except
+ * for a job change, which says to finish first: a press during a cast is silent).
+ */
+export function refusalText(reason: string, action?: string): string | null {
+  if (action === 'job' && reason === 'busy') return 'Finish what you are doing first';
+  return REFUSAL_TEXT[reason] ?? null;
+}
 
 // ───────────────────────── the controller ─────────────────────────
 
@@ -189,15 +223,21 @@ const DODGE_WAIT_MS = 1000;
 const DODGE_SNAP_M = 0.05;
 /** Tap-to-walk keeps this much inside the weapon's range, in m. */
 const RANGE_MARGIN = 0.5;
-/** Charging slows the adventurer to this (the server's CHARGE_MOVE_SCALE). */
-const CHARGE_SCALE = 0.4;
+/** Charging slows the adventurer to this (the server's own). */
+const CHARGE_SCALE = CHARGE_MOVE_SCALE;
 /** After a release, keep the charge slow this long unless the server says the charge is over, in ms. */
 const RELEASE_SLOW_MS = 400;
 /** Sprint ends this much earlier on the client than on the server (never faster than allowed), in s. */
 const SPRINT_EARLY_S = 0.15;
 
 export interface CombatDebug {
-  self: { hp: number; momentum: number; dead: boolean; target: number | null } | null;
+  self: { hp: number; momentum: number; dead: boolean; target: number | null; job: JobId | null; cast: CastView } | null;
+  /** The last `jobs` (null before it arrives). */
+  jobs: JobsView | null;
+  /** The last 20 refusals. */
+  refused: { action: string; reason: string }[];
+  /** The focused adventurer's engine id (null: none). */
+  allyFocus: number | null;
   fxSeen: number;
   ack: number;
   dodges: number; refusals: string[]; corrections: number; displaced: number;
@@ -210,7 +250,7 @@ export interface CombatDebug {
 }
 
 /** The room messages the controller handles. */
-export const COMBAT_MESSAGES = ['self', 'displaced', 'respawned', 'refused', 'fx', 'credit'] as const;
+export const COMBAT_MESSAGES = ['self', 'displaced', 'respawned', 'refused', 'fx', 'credit', 'jobs', 'jobXp', 'revived'] as const;
 export type CombatMessage = typeof COMBAT_MESSAGES[number];
 
 export interface CombatController {
@@ -242,6 +282,8 @@ export interface CombatOpts {
   remotes: Remotes;
   enemies: Enemies;
   send: <K extends keyof C2S>(type: K, message: C2S[K]) => void;
+  /** The zone this room is (the job board's note; the Guild Board stands in the grove). */
+  zone: ZoneId;
 }
 
 const isKind = (k: string): k is EnemyKindId => Object.prototype.hasOwnProperty.call(ENEMY_KINDS, k);
@@ -251,7 +293,9 @@ export function createCombat(o: CombatOpts): CombatController {
   const { game, hud, room, state } = o;
   const rig = () => game.rig;
   const meState = (): PlayerView | undefined => room.state.players?.get(room.sessionId);
-  const debug: CombatDebug = { self: null, fxSeen: 0, ack: 0, dodges: 0, refusals: [], corrections: 0, displaced: 0, telegraphs: 0, inDanger: false, log: [], chasing: null };
+  const debug: CombatDebug = {
+    self: null, jobs: null, refused: [], allyFocus: null, fxSeen: 0, ack: 0, dodges: 0, refusals: [], corrections: 0, displaced: 0, telegraphs: 0, inDanger: false, log: [], chasing: null,
+  };
   const note = (e: unknown) => { debug.log.push({ t: performance.now(), e }); if (debug.log.length > 200) debug.log.splice(0, 50); };
 
   let ack = 0;
@@ -290,6 +334,24 @@ export function createCombat(o: CombatOpts): CombatController {
   const tapIds = new Set<number>();
   let disposed = false;
   const myCast = { name: 'Charged Shot', frac: 0, mark: CHARGE_INTERRUPT_FRAC };
+  const spellCast = { name: '', frac: 0 };
+  /** The last `jobs`; a job change seen in it is announced. */
+  let jobs: JobsView | null = null;
+  const jobBadge = { id: 'warrior' as JobId, name: '', glyph: '', level: 1 };
+  /** A spell this client pressed (slowed from the press until the server's `self` shows the cast over). */
+  let castPress: { slot: number; at: number; seenAt: number | null } | null = null;
+  /** This adventurer's cast from its `cast` fx (the bar starts at once, before `self` shows it). */
+  let castFx: { ability: AbilityId; total: number; at: number } | null = null;
+  /** When `revived` arrived: the state may still show the adventurer dead for a moment. */
+  let revivedAt = -Infinity;
+  let boardOpen = false;
+  const focus = createAllyFocus();
+  const focusRing = createFocusRing(game.scene);
+  const allyView: NonNullable<HudState['ally']> = { name: '', hp: 0, maxHp: 1, statuses: [], dead: false, inRange: true, glyph: '', cast: null };
+  const allyCast = { name: '', frac: 0 };
+  const selfStatuses: StatusId[] = [];
+  /** What the context prompt does now (E or its button). */
+  let promptAction: { kind: 'revive'; eid: number; slot: number } | { kind: 'board' } | null = null;
 
   const telegraphs: Telegraphs = createTelegraphs(game.scene, game.world, room);
   const overheads: Overheads = createOverheads(game.scene, room, o.enemies);
@@ -303,9 +365,32 @@ export function createCombat(o: CombatOpts): CombatController {
 
   // ── helpers ──
   const myEid = () => meState()?.eid ?? -1;
-  // Until Task 7 the HUD knows only the Plan 3 weapons: anything but the Bow shows as the Blade.
-  const weapon = (): 'blade' | 'bow' => ((self?.weapon ?? (meState()?.weapon as WeaponId | undefined)) === 'bow' ? 'bow' : 'blade');
+  /** The current job: the server's `self`, else the state's, else the last `jobs`. */
+  const job = (): JobId => {
+    const j = self?.job ?? meState()?.job ?? jobs?.current;
+    return isJobId(j) ? j : 'warrior';
+  };
+  const weapon = () => JOBS[job()].weapon;
   const range = () => WEAPONS[weapon()].autoRange;
+  /** Every other adventurer in view, as the aim hint and F see them. */
+  const others = (): AllyPos[] => {
+    const list: AllyPos[] = [];
+    room.state.players?.forEach((p, sid) => {
+      if (sid === room.sessionId || p.eid === undefined || p.eid < 0) return;
+      list.push({ id: p.eid, x: p.x, z: p.z, hp: p.hp, maxHp: Math.max(1, p.maxHp), alive: !p.dead });
+    });
+    return list;
+  };
+  const meAlly = (): AllyPos => {
+    const m = meState(), r = rig().position;
+    return { id: myEid(), x: r.x, z: r.z, hp: m?.hp ?? 1, maxHp: Math.max(1, m?.maxHp ?? 1), alive: !m?.dead };
+  };
+  const playerByEid = (eid: number) => {
+    let found: { sid: string; p: PlayerView } | null = null;
+    room.state.players?.forEach((p, sid) => { if (!found && sid !== room.sessionId && p.eid === eid) found = { sid, p }; });
+    return found as { sid: string; p: PlayerView } | null;
+  };
+  const setFocus = (id: number | null) => { o.remotes.setFocus(id); debug.allyFocus = id; };
   const isDead = () => !!meState()?.dead;
   const enemyView = (eid: number) => room.state.enemies?.get(String(eid));
   const toast = (t: string | null) => { if (t) hud.toast(t); };
@@ -368,19 +453,55 @@ export function createCombat(o: CombatOpts): CombatController {
     rig().place(new Vector3(to.x, to.y, to.z));
   };
 
+  // ── abilities, the job board and the picks ──
+  /** Presses slot `slot`, aimed at `ally` (else the focus, for an ally-aimed ability). */
+  const press = (slot: number, ally?: number) => {
+    if (isDead()) return;
+    const id = self?.slots[slot];
+    const now = performance.now();
+    if (id === 'charged_shot' && !charge.press(slot, now)) return;
+    lastPress = { slot, at: now };
+    const a = id ? ABILITIES[id] : null;
+    const allyAimed = !!a && (a.aim === 'ally' || a.aim === 'other-ally' || a.aim === 'dead-ally');
+    const to = ally ?? (allyAimed && focus.id !== null ? focus.id : undefined);
+    if (to !== undefined) focus.use(now);
+    o.send('ability', to === undefined ? { slot, phase: 'press' } : { slot, phase: 'press', ally: to });
+    // who it will most likely land on: their name label flashes (the server decides)
+    if (a && allyAimed) {
+      const hint = aimHint(a, to ?? null, meAlly(), others());
+      if (hint !== null && hint !== myEid()) o.remotes.pulse(hint);
+    }
+    // a spell: slowed from the press (the server slows from a moment into the cast), never faster than allowed
+    if (a && (a.cast ?? 0) > 0 && !self?.cast && !castPress) castPress = { slot, at: now, seenAt: null };
+  };
+  const openLoadout = () => {
+    if (!self || isDead()) return;
+    if (self.inCombat) { toast(refusalText('in-combat')); return; }
+    const j = job(), current = self.slots.slice(3, 5);
+    void hud.loadout(JOBS[j].pool.map((id) => ABILITY_DEFS[id]), current, JOBS[j].name, 2).then((ids) => {
+      if (disposed || ids.length !== 2 || (ids[0] === current[0] && ids[1] === current[1])) return;
+      o.send('loadout', { picks: [ids[0] as AbilityId, ids[1] as AbilityId] });
+    });
+  };
+  const openJobs = () => {
+    if (boardOpen) return;
+    boardOpen = true;
+    const r = rig().position;
+    const view = jobBoardView(jobs, o.zone, { current: job(), pos: { x: r.x, z: r.z } });
+    if (!view.note && self?.inCombat) view.note = refusalText('in-combat', 'job');
+    void hud.jobs(view).then((id) => {
+      boardOpen = false;
+      if (disposed || !id) return;
+      if (id === job()) { openLoadout(); return; } // "Change picks" on the current job
+      o.send('job', { job: id });
+    });
+  };
+
   // ── HUD events ──
   const onHud = (e: HudEvent) => {
     if (disposed) return;
     switch (e.type) {
-      case 'ability': {
-        if (isDead()) return;
-        const id = self?.slots[e.slot];
-        const now = performance.now();
-        if (id === 'charged_shot' && !charge.press(e.slot, now)) return;
-        lastPress = { slot: e.slot, at: now };
-        o.send('ability', { slot: e.slot, phase: 'press' });
-        break;
-      }
+      case 'ability': press(e.slot); break;
       case 'abilityUp': {
         // the slot it was pressed on, even if a swap or a loadout change has put something else there since
         if (charge.up(e.slot)) {
@@ -399,15 +520,19 @@ export function createCombat(o: CombatOpts): CombatController {
       }
       case 'clearTarget': setTarget(null); followEid = null; chase = null; break;
       case 'respawn': if (isDead()) o.send('respawn', {} as Record<string, never>); break;
-      case 'swapWeapon': if (!isDead()) o.send('swap', {} as Record<string, never>); break;
-      case 'openLoadout': {
-        if (!self || isDead()) return;
-        if (self.inCombat) { toast(refusalText('in-combat')); return; }
-        const current = self.slots.slice(3, 5);
-        void hud.loadout(PLAN3_FREE_POOL.map((id) => ABILITY_DEFS[id]), current, weapon(), 2).then((ids) => {
-          if (disposed || ids.length !== 2 || (ids[0] === current[0] && ids[1] === current[1])) return;
-          o.send('loadout', { free: [ids[0] as AbilityId, ids[1] as AbilityId] });
-        });
+      case 'openJobs': openJobs(); break;
+      case 'openLoadout': openLoadout(); break;
+      case 'cycleAlly': {
+        const id = focus.cycle(rig().position, others(), performance.now());
+        setFocus(id);
+        if (id === null) toast('Nobody near to focus');
+        break;
+      }
+      case 'clearAlly': focus.clear(); setFocus(null); break;
+      case 'interact': {
+        const a = promptAction;
+        if (a?.kind === 'revive') press(a.slot, a.eid);
+        else if (a?.kind === 'board') openJobs();
         break;
       }
       default: break;
@@ -422,6 +547,31 @@ export function createCombat(o: CombatOpts): CombatController {
     if (now - chargesSetAt > 500 || m.dodgeCharges < charges) charges = m.dodgeCharges;
     charge.onSelf(m.charge, now);
     if (m.charge === null && charge.pressedAt === null) releasedAt = -Infinity;
+    if (castPress && m.cast && castPress.seenAt === null) castPress.seenAt = now;
+    if (!m.cast && castFx && now - castFx.at > 400) castFx = null; // its castEnd was missed (a reconnect)
+  };
+  const onJobs = (m: S2C['jobs']) => {
+    const was = jobs?.current;
+    jobs = m;
+    debug.jobs = m;
+    if (was !== undefined && was !== m.current && isJobId(m.current)) {
+      const j = JOBS[m.current];
+      hud.toast(`You are now ${article(j.name)}`);
+      hud.banner(j.name, `${roleLabel(j.role)} · ${WEAPONS[j.weapon].name}`);
+      castPress = null; castFx = null;
+    }
+  };
+  const onJobXp = (m: S2C['jobXp']) => {
+    note({ t: 'jobXp', ...m });
+    if (jobs && isJobId(m.job)) jobs = { ...jobs, jobs: { ...jobs.jobs, [m.job]: { ...jobs.jobs[m.job], xp: m.xp, level: m.level } } };
+    if (m.levelUp && isJobId(m.job)) hud.toast(`${JOBS[m.job].name} reached level ${m.level}`);
+  };
+  const onRevived = (m: S2C['revived']) => {
+    note({ t: 'revived', ...m });
+    revivedAt = performance.now();
+    deadSince = null;
+    if (deathScreen) { hud.dismissEndScreen(); deathScreen = false; }
+    hud.toast('Back on your feet');
   };
   const onDisplaced = (m: S2C['displaced']) => {
     if (!isNewSeq(ack, m.seq)) return; // sent again after a reconnect: already applied
@@ -454,8 +604,12 @@ export function createCombat(o: CombatOpts): CombatController {
   };
   const onRefused = (m: S2C['refused']) => {
     debug.refusals.push(`${m.action}:${m.reason}`);
+    debug.refused.push({ action: m.action, reason: m.reason });
+    if (debug.refused.length > 20) debug.refused.shift();
     note({ t: 'refused', ...m });
     if (debug.refusals.length > 50) debug.refusals.shift();
+    // a refused spell press: not slowed any more (a press during a cast is refused 'busy' and changes nothing)
+    if (m.action === 'ability' && m.reason !== 'busy' && castPress && lastPress?.slot === castPress.slot && castPress.seenAt === null) castPress = null;
     if (m.action === 'dodge') {
       if (pending) { rollBack(pending.from); pending = null; }
       if (m.reason === 'charges') charges = 0;
@@ -465,7 +619,7 @@ export function createCombat(o: CombatOpts): CombatController {
     if (m.action === 'respawn' && deathScreen) { hud.dismissEndScreen(); deathScreen = false; }
     if (m.action === 'target' && target !== null) setTarget(null, false);
     // an ability pressed while it cools shakes its button already: no "Not ready" toast for it
-    if (!(m.action === 'ability' && m.reason === 'cooldown')) toast(refusalText(m.reason));
+    if (!(m.action === 'ability' && m.reason === 'cooldown')) toast(refusalText(m.reason, m.action));
   };
   const onFx = (m: S2C['fx']) => {
     debug.fxSeen += m.events.length;
@@ -475,6 +629,12 @@ export function createCombat(o: CombatOpts): CombatController {
       if (ev.t === 'hit' && ev.dst === me && target === null && room.state.enemies?.get(String(ev.src))) setTarget(ev.src);
       if (ev.t === 'use' && ev.src === me && ev.ability === 'sprint') sprintUntil = performance.now() + (SPRINT_S - SPRINT_EARLY_S) * 1000;
       if (ev.t === 'hit' && room.state.enemies?.get(String(ev.dst))) hurtAt.set(ev.dst, performance.now());
+      if (ev.t === 'cast' && ev.src === me) castFx = { ability: ev.ability, total: ev.total, at: performance.now() };
+      if (ev.t === 'castEnd' && ev.src === me) {
+        castFx = null; castPress = null;
+        if (!ev.ok && ev.reason === 'interrupt') toast(`${ABILITIES[ev.ability].name} interrupted`);
+        else if (!ev.ok && ev.reason === 'fizzle') toast(`${ABILITIES[ev.ability].name} fizzled: out of reach or sight`);
+      }
     }
     effects.handle(m.events as FxEvent[], me);
   };
@@ -493,9 +653,12 @@ export function createCombat(o: CombatOpts): CombatController {
     if (queuedDodge && !pending && !r.displacing) { const q = queuedDodge; queuedDodge = null; if (now - q.at <= DODGE_QUEUE_MS) dodge(q.dir); }
     // a charge the server says is over (released, auto-released, cancelled) is not held here either, whatever the key did
     charge.update(self, now);
+    // a spell press the server says is over (or never started) is not slowed any more
+    if (castPress && !chargeStillHeld(castPress.at, castPress.seenAt, self ? { at: self.at, charge: self.cast ? 1 : null } : null, now)) castPress = null;
 
     // charges refill on the client's own clock between `self`s
-    if (self && charges < DODGE_CHARGES && self.dodgeNextIn > 0 && now - self.at > self.dodgeNextIn * 1000 && charges === self.dodgeCharges) charges++;
+    const maxDodges = self?.dodgeMax ?? DODGE_CHARGES;
+    if (self && charges < maxDodges && self.dodgeNextIn > 0 && now - self.at > self.dodgeNextIn * 1000 && charges === self.dodgeCharges) charges++;
 
     // the server's target is the truth: it drops dead or far targets, and refuses bad ones
     const serverTarget = me?.target ?? -1;
@@ -509,17 +672,19 @@ export function createCombat(o: CombatOpts): CombatController {
     else if (charging) scale = CHARGE_SCALE;
     else if (now < sprintUntil) scale = SPRINT_SCALE;
     if (charging && now < sprintUntil) scale = CHARGE_SCALE * SPRINT_SCALE;
+    // casting (the server's view, or a spell just pressed): CAST_MOVE_SCALE on top
+    if (!dead && (castPress !== null || !!self?.cast || castFx !== null)) scale *= CAST_MOVE_SCALE;
     if (!room.reconnection.isReconnecting && !travelling) r.setMoveScale(scale); // a travel holds the adventurer still
 
     // death
-    if (dead && deadSince === null) {
+    if (dead && deadSince === null && now - revivedAt > 2000) {
       deadSince = now;
       pending = null;
       game.walkTo(null); followEid = null;
       charge.cancel();
     }
     if (!dead && deadSince !== null) { deadSince = null; if (deathScreen) { hud.dismissEndScreen(); deathScreen = false; } }
-    if (dead && !deathScreen && deadSince !== null) {
+    if (dead && !deathScreen && deadSince !== null && now - revivedAt > 2000) {
       deathScreen = true;
       const since = (now - deadSince) / 1000;
       void hud.endScreen('defeat', ['You were defeated.', 'You will wake by the statue in Shady Grove.'], ['Return to the statue'], {
@@ -571,17 +736,29 @@ export function createCombat(o: CombatOpts): CombatController {
     if (selfRing.isEnabled() === dead) selfRing.setEnabled(!dead);
     p.weapon = weapon();
     p.momentum = self ? self.momentum : 0;
-    p.swapLocked = !!self?.inCombat;
-    p.statuses = (me?.shield ?? 0) > 0 ? GUARDED : UNGUARDED;
+    p.jobLocked = !!self?.inCombat;
+    const j = job();
+    jobBadge.id = j; jobBadge.name = JOBS[j].name; jobBadge.glyph = JOBS[j].glyph; jobBadge.level = jobs?.jobs[j]?.level ?? 1;
+    p.job = jobBadge;
+    selfStatuses.length = 0;
+    if ((me?.shield ?? 0) > 0) selfStatuses.push('guard');
+    p.statuses = buffStatuses(me?.buffs ?? 0, 'adventurer', selfStatuses);
     if (self) {
       const el = (now - self.at) / 1000;
-      const refill = charges >= DODGE_CHARGES ? 1 : Math.max(0, Math.min(1, 1 - (self.dodgeNextIn - el) / DODGE_REFILL_S));
-      const pd = (p.dodge ??= { charges: 0, max: DODGE_CHARGES, refill: 1 }); // reused: no per-frame objects
-      pd.charges = Math.max(0, charges); pd.max = DODGE_CHARGES; pd.refill = refill;
+      const refill = charges >= maxDodges ? 1 : Math.max(0, Math.min(1, 1 - (self.dodgeNextIn - el) / DODGE_REFILL_S));
+      const pd = (p.dodge ??= { charges: 0, max: maxDodges, refill: 1 }); // reused: no per-frame objects
+      pd.charges = Math.max(0, charges); pd.max = maxDodges; pd.refill = refill;
       const held = charge.pressedAt !== null ? (now - charge.pressedAt) / 1000 : self.charge !== null ? self.charge + el : null;
-      if (held !== null && !dead) { myCast.frac = Math.min(1, held / CHARGE_FULL_S); p.cast = myCast; } else p.cast = null;
+      if (held !== null && !dead) { myCast.frac = Math.min(1, held / CHARGE_FULL_S); p.cast = myCast; }
+      else if (!dead && (castFx || self.cast)) {
+        // a spell: from its `cast` fx at once, else from the server's `self`
+        const id = castFx?.ability ?? self.cast!.ability;
+        spellCast.name = ABILITIES[id].name;
+        spellCast.frac = castFx ? Math.min(1, (now - castFx.at) / 1000 / Math.max(0.05, castFx.total)) : castFrac(self.cast!, self.at, now);
+        p.cast = spellCast;
+      } else p.cast = null;
     }
-    state.slots = slotView(self, now, dead, slotsOut);
+    state.slots = slotView(self, now, dead, slotsOut, castFx?.ability ?? self?.cast?.ability ?? null);
     state.inCombat = !!self?.inCombat;
 
     // HUD: the target (kept from its last sight while briefly out of view)
@@ -593,7 +770,7 @@ export function createCombat(o: CombatOpts): CombatController {
     if (t && isKind(t.kind)) {
       const k = ENEMY_KINDS[t.kind];
       const w = windupSince.get(t.eid);
-      const statuses = markStatuses(t.marks ?? 0, targetStatuses);
+      const statuses = buffStatuses(t.debuffs ?? 0, 'enemy', markStatuses(t.marks ?? 0, targetStatuses));
       if (t.mode === 'stunned') statuses.push('stunned');
       state.target = {
         name: k.name, hp: t.hp, maxHp: t.maxHp, statuses,
@@ -606,12 +783,51 @@ export function createCombat(o: CombatOpts): CombatController {
       };
     } else state.target = null;
 
+    // ally focus: dropped when they leave the view or go unused; the ring under them and their frame
+    focus.update((eid) => playerByEid(eid) !== null, now);
+    if (focus.id !== debug.allyFocus) setFocus(focus.id);
+    const fp = focus.id !== null ? playerByEid(focus.id) : null;
+    focusRing.attach(fp ? o.remotes.viewOfEid(focus.id!)?.root ?? null : null);
+    focusRing.update(dt);
+    if (fp) {
+      const a = allyView, pv = fp.p;
+      a.name = pv.name; a.hp = pv.hp; a.maxHp = pv.maxHp; a.dead = !!pv.dead;
+      a.glyph = isJobId(pv.job) ? JOBS[pv.job].glyph : '';
+      a.inRange = Math.hypot(pv.x - r.position.x, pv.z - r.position.z) <= FOCUS_RANGE + RANGE_FUZZ;
+      a.statuses.length = 0;
+      if ((pv.shield ?? 0) > 0) a.statuses.push('guard');
+      buffStatuses(pv.buffs ?? 0, 'adventurer', a.statuses);
+      const c = pv.cast ?? '';
+      if (c && Object.prototype.hasOwnProperty.call(ABILITIES, c)) {
+        allyCast.name = ABILITIES[c as AbilityId].name;
+        const total = Math.max(0.1, pv.castTotal ?? 1), clock = room.state.clock;
+        allyCast.frac = typeof clock === 'number' && typeof pv.castAt === 'number' ? Math.max(0, Math.min(1, (clock - pv.castAt) / TICK_HZ / total)) : 0;
+        a.cast = allyCast;
+      } else a.cast = null;
+      state.ally = a;
+    } else state.ally = null;
+
+    // the context prompt: revive a fallen adventurer in reach (Second Dawn on the bar), or the Guild Board
+    promptAction = null;
+    let promptText: string | null = null;
+    const reviveSlot = self ? self.slots.findIndex((id) => ABILITIES[id].aim === 'dead-ally') : -1;
+    if (!dead && reviveSlot >= 0 && self) {
+      const ab = ABILITIES[self.slots[reviveSlot]];
+      const want = aimHint(ab, focus.id, meAlly(), others());
+      const who = want !== null ? playerByEid(want) : null;
+      if (who && want !== null) { promptAction = { kind: 'revive', eid: want, slot: reviveSlot }; promptText = `${ab.name} · Revive ${who.p.name}`; }
+    }
+    if (!promptAction && o.zone === 'grove' && Math.hypot(GUILD_BOARD.x - r.position.x, GUILD_BOARD.z - r.position.z) <= GUILD_BOARD_REACH) {
+      promptAction = { kind: 'board' }; promptText = 'Guild Board · Jobs';
+    }
+    state.prompt = promptText;
+
     overheads.update({ target, hurtAt, now, me: myEid() });
     effects.update(dt);
 
     debug.ack = ack;
     debug.chasing = chase?.eid ?? null;
-    debug.self = me ? { hp: me.hp, momentum: self?.momentum ?? 0, dead, target } : null;
+    debug.self = me ? { hp: me.hp, momentum: self?.momentum ?? 0, dead, target, job: job(), cast: self?.cast ?? null } : null;
   };
   return {
     get ack() { return ack; },
@@ -625,11 +841,29 @@ export function createCombat(o: CombatOpts): CombatController {
         case 'refused': onRefused(m as S2C['refused']); break;
         case 'fx': onFx(m as S2C['fx']); break;
         case 'credit': note({ t: 'credit', ...(m as S2C['credit']) }); break; // a kill is shown by the enemy's death; logged for playtests
+        case 'jobs': onJobs(m as S2C['jobs']); break;
+        case 'jobXp': onJobXp(m as S2C['jobXp']); break;
+        case 'revived': onRevived(m as S2C['revived']); break;
         default: break;
       }
     },
     canSendPose: () => !pending && !rig().displacing && !isDead(),
     onTap(tap) {
+      // the Guild Board: walk over (tap-to-walk) and open the job board, like talking to someone
+      if (tap.entityId === GUILD_BOARD_EID) {
+        const pos = rig().position;
+        followEid = null; chase = null;
+        if (Math.hypot(GUILD_BOARD.x - pos.x, GUILD_BOARD.z - pos.z) <= GUILD_BOARD_REACH || !hud.settings.tapToWalk || isDead()) { game.walkTo(null); openJobs(); return true; }
+        const y = game.world.groundAt(GUILD_BOARD.x, GUILD_BOARD.z) ?? pos.y;
+        if (!game.walkTo(new Vector3(GUILD_BOARD.x, y, GUILD_BOARD.z), { within: GUILD_BOARD_REACH - 0.3, then: () => { if (!disposed) openJobs(); } })) openJobs();
+        return true;
+      }
+      // another adventurer: focus them for ally abilities (again: clear it); never a walk to them
+      if (tap.entityId !== null && tap.entityId !== myEid() && playerByEid(tap.entityId)) {
+        const id = focus.tap(tap.entityId, performance.now());
+        setFocus(id);
+        return true;
+      }
       if (isDead()) return true;
       const ids = tapIds; ids.clear();
       room.state.enemies?.forEach((e) => { if (e.mode !== 'dead') ids.add(e.eid); });
@@ -658,6 +892,8 @@ export function createCombat(o: CombatOpts): CombatController {
       telegraphs.dispose();
       overheads.dispose();
       selfRing.dispose(); ringMat.dispose();
+      focusRing.dispose(); o.remotes.setFocus(null);
+      state.prompt = null; state.ally = null;
       effects.dispose();
       if (deathScreen) hud.dismissEndScreen();
       hud.danger('off');

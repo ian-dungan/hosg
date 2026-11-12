@@ -1,8 +1,10 @@
 // What combat looks like, from the server's fx events, for everyone in view: floating numbers (your damage, combos,
 // damage to you, heals, other adventurers' hits, "Dodged", "Parried"), hit flashes and flinches, the attacker's
-// pose, arrows flying at 40 m/s and short blade-arc trails. Poses for others' charging and deaths come from state.
+// pose, arrows flying at 40 m/s and short blade-arc trails; casts (the cast pose, how one ended), heals, shields,
+// revives and reactions as words. Poses for others' charging and deaths come from state.
+// Placeholders until Task 8: every ranged weapon and spell shoots the arrow, every melee one the blade arc.
 import { Color3, Matrix, Mesh, MeshBuilder, StandardMaterial, Vector3, VertexData, type Scene } from '@babylonjs/core';
-import { ABILITIES, ENEMY_ATTACKS, type AbilityId, type FxEvent } from '@sg2/shared';
+import { ABILITIES, ENEMY_ATTACKS, MELEE_REACH, WEAPONS, type AbilityId, type FxEvent, type WeaponId } from '@sg2/shared';
 import type { CharacterView, HudApi, Pose } from '../core/contracts';
 import type { Game } from '../boot';
 import type { EnemyView } from './enemies';
@@ -25,6 +27,12 @@ export interface Effects {
 }
 
 export interface EffectsOpts { game: Game; hud: HudApi; room: ZoneRoom; remotes: Remotes; enemies: Enemies }
+
+const isWeapon = (w: string): w is WeaponId => Object.prototype.hasOwnProperty.call(WEAPONS, w);
+/** A weapon whose autos fly (the Bow, the Staff). */
+const ranged = (w: string) => isWeapon(w) && WEAPONS[w].autoRange > MELEE_REACH;
+const CAST_END: Record<string, string> = { fizzle: 'Fizzled', dodge: 'Cancelled', interrupt: 'Interrupted!', cancel: 'Cancelled' };
+const word = (id: string) => id.charAt(0).toUpperCase() + id.slice(1) + '!';
 
 const isAbility = (b: string): b is AbilityId => Object.prototype.hasOwnProperty.call(ABILITIES, b);
 
@@ -117,11 +125,11 @@ export function createEffects(o: EffectsOpts): Effects {
   };
 
   const pose = (w: Who | null, p: Pose) => { if (w && w.kind !== 'enemy') w.view.setPose(p); };
-  const attackFx = (src: Who | null, dst: Who | null, big: boolean) => {
+  const attackFx = (src: Who | null, dst: Who | null, big: boolean, flies?: boolean) => {
     if (!src || src.kind === 'enemy') return;
     pose(src, 'attack');
     if (dst) src.view.root.rotation.y = Math.atan2(dst.x - src.x, dst.z - src.z) || src.view.root.rotation.y;
-    if (src.weapon === 'bow') { if (dst) shoot(src, dst, big); } else slash(src, big);
+    if (flies ?? ranged(src.weapon)) { if (dst) shoot(src, dst, big); } else slash(src, big);
   };
 
   // ── per-frame state poses: others charging or dead ──
@@ -152,13 +160,29 @@ export function createEffects(o: EffectsOpts): Effects {
             if (ev.by in ENEMY_ATTACKS) { const s = who(ev.src); if (s?.kind === 'enemy') s.view.strike(); }
             break;
           }
-          case 'heal': if (ev.amount > 0) float(who(ev.dst), `+${Math.round(ev.amount)}`, 'heal'); break;
+          case 'heal': {
+            if (ev.amount <= 0) break;
+            float(who(ev.dst), `+${Math.round(ev.amount)}`, 'heal');
+            if (ev.src === me && ev.dst !== me) o.remotes.pulse(ev.dst); // who this adventurer's heal landed on
+            break;
+          }
+          case 'shield': {
+            if (ev.src === me || ev.dst === me) float(who(ev.dst), `Shield ${Math.round(ev.amount)}`, 'info', 1.25);
+            if (ev.src === me && ev.dst !== me) o.remotes.pulse(ev.dst);
+            break;
+          }
+          case 'buff': if (ev.on && ev.src === me && ev.dst !== me) o.remotes.pulse(ev.dst); break;
+          case 'gift': if (ev.dst === me || ev.src === me) float(who(ev.dst), `+${Math.round(ev.amount)} Momentum`, 'info', 1.25); break;
+          case 'revive': float(who(ev.dst), 'Revived!', 'combo', 1.2); if (ev.src === me) o.remotes.pulse(ev.dst); break;
+          case 'react': float(who(ev.dst), word(ev.reaction), 'combo', 1.3); break;
+          case 'cast': pose(who(ev.src), 'cast'); break;
+          case 'castEnd': if (!ev.ok) float(who(ev.src), CAST_END[ev.reason ?? 'cancel'] ?? 'Cancelled', 'info', 1.25); break;
           case 'use': {
             const src = who(ev.src), dst = ev.dst !== undefined ? who(ev.dst) : null;
             const a = isAbility(ev.ability) ? ABILITIES[ev.ability] : null;
             if (!a) break;
             if (ev.ability === 'parry') pose(src, 'parry');
-            else if (a.kind === 'damage') attackFx(src, dst, a.role !== 'quick' || (ev.frac ?? 0) > 0.5);
+            else if (a.kind === 'damage') attackFx(src, dst, a.role !== 'quick' || (ev.frac ?? 0) > 0.5, a.range > MELEE_REACH);
             else pose(src, 'cast');
             break;
           }

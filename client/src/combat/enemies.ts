@@ -493,7 +493,11 @@ const DUMMY: KindDef = {
   },
 };
 
-const KINDS: Record<EnemyKindId, KindDef> = { thornling: THORNLING, boar: BOAR, archer: ARCHER, mossback: MOSSBACK, dummy: DUMMY };
+const KINDS: Record<EnemyKindId, KindDef> = {
+  thornling: THORNLING, boar: BOAR, archer: ARCHER, mossback: MOSSBACK, dummy: DUMMY,
+  // placeholders until Plan 4 Task 9 builds their models
+  wickhound: MOSSBACK, fallen_warden: MOSSBACK, lens_shard: MOSSBACK,
+};
 
 // ───────────────────────── shared per scene ─────────────────────────
 interface Shared { blob: Mesh; ring: StandardMaterial }

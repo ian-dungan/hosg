@@ -1,6 +1,8 @@
 // Modal overlays: dialogue, title screen, loadout picker, end screen, fade.
-import type { AbilityDef, WeaponId } from '../core/contracts';
+import type { JobId } from '@sg2/shared';
+import type { AbilityDef, JobBoardView } from '../core/contracts';
 import { h } from './dom';
+import { abilityMeta, openJobBoard } from './jobs';
 
 type KeyHandler = (e: KeyboardEvent) => boolean;
 
@@ -155,14 +157,14 @@ export class Overlays {
   }
 
   // ───────────── loadout ─────────────
-  loadout(pool: AbilityDef[], current: string[], weapon: WeaponId, count = 5): Promise<string[]> {
+  loadout(pool: AbilityDef[], current: string[], title: string, count = 5): Promise<string[]> {
     return new Promise((resolve) => {
       const chosen = current.filter((id) => pool.some((a) => a.id === id)).slice(0, count);
       const root = h('div', 'sg-modal sg-ctl', this.layer);
       const panel = h('div', 'sg-panel sg-loadout', root);
       const head = h('div', 'sg-panel-head', panel);
-      h('div', 'sg-panel-title', head, 'Loadout');
-      h('div', 'sg-panel-sub', head, `Choose ${count === 5 ? 'five' : count === 2 ? 'two' : count} abilities · wielding ${weapon === 'blade' ? 'Blade' : 'Bow'}`);
+      h('div', 'sg-panel-title', head, `${title} · Picks`);
+      h('div', 'sg-panel-sub', head, `Choose ${count === 5 ? 'five' : count === 2 ? 'two' : count} abilities for buttons ${count === 2 ? '4 and 5' : '1–5'}`);
       const grid = h('div', 'sg-lo-grid', panel);
       const foot = h('div', 'sg-panel-foot', panel);
       const countEl = h('div', 'sg-lo-count', foot);
@@ -174,13 +176,9 @@ export class Overlays {
         g.dataset.kind = a.kind;
         const body = h('div', 'sg-lo-body', c);
         h('div', 'sg-lo-name', body, a.name);
-        const tags = h('div', 'sg-lo-tags', body);
-        const mismatch = a.weapon !== 'any' && a.weapon !== weapon;
-        h('span', 'sg-tag' + (mismatch ? ' bad' : ''), tags, a.weapon === 'any' ? 'Any weapon' : mismatch ? `${a.weapon === 'blade' ? 'Blade' : 'Bow'} only` : a.weapon === 'blade' ? 'Blade' : 'Bow');
-        h('span', 'sg-tag', tags, `${a.cooldown}s`);
+        h('div', 'sg-lo-meta', body, abilityMeta(a));
         h('div', 'sg-lo-desc', body, a.desc);
         const badge = h('div', 'sg-lo-slot', c);
-        if (mismatch) c.classList.add('mismatch');
         c.addEventListener('click', () => {
           const i = chosen.indexOf(a.id);
           if (i >= 0) chosen.splice(i, 1);
@@ -211,6 +209,11 @@ export class Overlays {
       refresh();
       this.show(root);
     });
+  }
+
+  // ───────────── job board ─────────────
+  jobs(view: JobBoardView): Promise<JobId | null> {
+    return openJobBoard(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el));
   }
 
   // ───────────── end screen ─────────────

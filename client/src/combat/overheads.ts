@@ -1,9 +1,9 @@
 // Bars over enemies' heads: name and health while engaged or hurt in the last 5 s (for the current target only its
 // marks: its frame shows the rest), always for elites, which also get a stagger bar, greyed while it cannot fill;
-// the marks on them as icons, and a chevron while
+// the marks (Soaked, Burning, Marked, Rooted, Dazed) and debuffs (Blinded, Weak Point) on them as icons, and a chevron while
 // they surge. DOM, projected each frame; elements are kept per enemy and hidden when not needed.
 import { Matrix, Vector3, type Scene } from '@babylonjs/core';
-import { ENEMY_KINDS, MARK_BITS, type EnemyKindId, type MarkId } from '@sg2/shared';
+import { DEBUFF_BITS, ENEMY_KINDS, MARK_BITS, type DebuffId, type EnemyKindId, type MarkId } from '@sg2/shared';
 import type { Enemies } from '../net/enemies';
 import type { ZoneRoom } from '../net/session';
 
@@ -27,16 +27,20 @@ const CSS = /* css */ `
 .sg-oh-st.immune i{background:#8a8796}
 .sg-oh-st.immune{box-shadow:0 0 0 1px rgba(190,190,210,.6)}
 .sg-oh-marks{display:flex;gap:2px}
-.sg-oh-marks b{display:grid;place-items:center;width:15px;height:15px;border-radius:50%;font:800 10px/1 var(--sans);color:#1a1020;text-shadow:none}
+.sg-oh-marks b{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;font:800 10px/1 var(--sans);font-variant-emoji:text;color:#1a1020;text-shadow:none;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+.sg-oh-marks b.debuff{border-radius:4px;color:#fff6e6;box-shadow:0 0 0 1px rgba(255,255,255,.5)}
 .sg-oh-surge{display:none;font:900 12px/1 var(--sans);color:#7ff0ff;text-shadow:0 0 6px rgba(80,220,255,.9),0 1px 2px #000;letter-spacing:-2px}
 .sg-oh.surge .sg-oh-surge{display:block;animation:sg-oh-surge .35s linear infinite}
 @keyframes sg-oh-surge{50%{transform:translateX(3px);opacity:.6}}
 `;
 
-const MARK_ICON: Record<MarkId, { g: string; c: string }> = {
-  marked: { g: '◎', c: '#F2B742' }, burning: { g: '✷', c: '#ff8a4c' }, soaked: { g: '≈', c: '#5fd0c4' },
-  // placeholders until Task 7 styles them (nothing sets these marks before Task 3)
-  rooted: { g: '⤓', c: '#8fcf6a' }, dazed: { g: '⊛', c: '#c9a6ff' },
+const MARK_ICON: Record<MarkId, { g: string; c: string; label: string }> = {
+  marked: { g: '◎', c: '#F2B742', label: 'Marked' }, burning: { g: '✷', c: '#ff8a4c', label: 'Burning' }, soaked: { g: '≈', c: '#5fd0c4', label: 'Soaked' },
+  rooted: { g: '⤓', c: '#8FD16A', label: 'Rooted' }, dazed: { g: '⊛', c: '#c9a6ff', label: 'Dazed' },
+};
+const MARK_ORDER: readonly MarkId[] = ['marked', 'burning', 'soaked', 'rooted', 'dazed'];
+const DEBUFF_ICON: Record<DebuffId, { g: string; c: string; label: string }> = {
+  blinded: { g: '◑', c: '#6d6886', label: 'Blinded' }, weakpoint: { g: '⊙', c: '#c84a32', label: 'Weak Point' },
 };
 
 interface El { root: HTMLElement; name: HTMLElement; hp: HTMLElement; st: HTMLElement; stFill: HTMLElement; marks: HTMLElement; k: { hp: number; st: number; marks: number; immune: boolean; on: boolean; tgt: boolean; surge: boolean } }
@@ -111,13 +115,19 @@ export function createOverheads(scene: Scene, room: ZoneRoom, enemies: Enemies):
         }
         const surge = !!e.surging;
         if (surge !== k.surge) { k.surge = surge; el.root.classList.toggle('surge', surge); }
-        const bits = e.marks ?? 0;
+        // marks in the low byte, debuffs above them (both unset until their first: read as 0)
+        const bits = (e.marks ?? 0) | ((e.debuffs ?? 0) << 8);
         if (bits !== k.marks) {
           k.marks = bits;
           el.marks.textContent = '';
-          for (const m of ['marked', 'burning', 'soaked'] as MarkId[]) {
+          for (const m of MARK_ORDER) {
             if (!(bits & MARK_BITS[m])) continue;
-            const b = document.createElement('b'); b.textContent = MARK_ICON[m].g; b.style.background = MARK_ICON[m].c; b.title = m;
+            const b = document.createElement('b'); b.textContent = MARK_ICON[m].g; b.style.background = MARK_ICON[m].c; b.title = MARK_ICON[m].label;
+            el.marks.appendChild(b);
+          }
+          for (const d of Object.keys(DEBUFF_ICON) as DebuffId[]) {
+            if (!((bits >> 8) & DEBUFF_BITS[d])) continue;
+            const b = document.createElement('b'); b.className = 'debuff'; b.textContent = DEBUFF_ICON[d].g; b.style.background = DEBUFF_ICON[d].c; b.title = DEBUFF_ICON[d].label;
             el.marks.appendChild(b);
           }
         }

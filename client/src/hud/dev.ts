@@ -1,20 +1,21 @@
 // Dev harness for the HUD (dev/hud.html). Not part of the game build.
 import type { AbilityDef, HudEvent, HudState, StatusId, WeaponId } from '../core/contracts';
 import { createHud } from './index';
+import { jobBoardView } from './jobs';
 
 const ABILITIES: AbilityDef[] = [
-  { id: 'cleave', name: 'Tide Cleave', glyph: '⟋', desc: 'A wide slash that Soaks foes; Soaked foes take bonus lightning.', cooldown: 6, range: 3, castTime: 0, weapon: 'blade', kind: 'damage' },
-  { id: 'parry', name: 'Riposte', glyph: '◈', desc: 'Parry the next hit within 1 s and strike back, filling stagger.', cooldown: 8, range: 0, castTime: 0, weapon: 'blade', kind: 'defence' },
-  { id: 'ember', name: 'Ember Edge', glyph: '✷', desc: 'Ignite your blade; hits set foes Burning. Burning + Soaked bursts into steam.', cooldown: 12, range: 0, castTime: 0.6, weapon: 'blade', kind: 'damage' },
-  { id: 'mark', name: "Hunter's Mark", glyph: '◎', desc: 'Mark a foe; your next charged shot on it crits.', cooldown: 10, range: 20, castTime: 0, weapon: 'bow', kind: 'utility' },
-  { id: 'volley', name: 'Gale Volley', glyph: '⇶', desc: 'Rain arrows in an area; Marked foes are stunned.', cooldown: 14, range: 18, castTime: 1.2, weapon: 'bow', kind: 'damage' },
-  { id: 'mend', name: 'Lantern Mend', glyph: '+', desc: 'Heal yourself or an ally over time.', cooldown: 9, range: 15, castTime: 1, weapon: 'any', kind: 'heal' },
-  { id: 'ward', name: 'Stone Ward', glyph: '◆', desc: 'Gain Guard, halving the next three hits.', cooldown: 20, range: 0, castTime: 0, weapon: 'any', kind: 'defence' },
-  { id: 'dash', name: 'Skystep', glyph: '»', desc: 'Dash a few metres, slipping through telegraphs.', cooldown: 5, range: 0, castTime: 0, weapon: 'any', kind: 'utility' },
-  { id: 'surge', name: 'Spray Shot', glyph: '≈', desc: 'A water arrow that Soaks; pairs with Ember Edge.', cooldown: 7, range: 18, castTime: 0, weapon: 'bow', kind: 'damage' },
-  { id: 'bash', name: 'Pommel Bash', glyph: '✦', desc: 'Interrupts a cast and adds heavy stagger.', cooldown: 11, range: 3, castTime: 0, weapon: 'blade', kind: 'utility' },
-  { id: 'bloom', name: 'Meadow Bloom', glyph: '❀', desc: 'Heal everyone near you a little, and grant Regen.', cooldown: 18, range: 0, castTime: 1.5, weapon: 'any', kind: 'heal' },
-  { id: 'pin', name: 'Pinning Arrow', glyph: '↧', desc: 'Slows a foe; Slowed + Marked roots them.', cooldown: 9, range: 20, castTime: 0, weapon: 'bow', kind: 'utility' },
+  { id: 'cleave', name: 'Tide Cleave', glyph: '⟋', desc: 'A wide slash that Soaks foes; Soaked foes take bonus lightning.', cooldown: 6, range: 3, castTime: 0, job: 'warrior', support: false, kind: 'damage' },
+  { id: 'parry', name: 'Riposte', glyph: '◈', desc: 'Parry the next hit within 1 s and strike back, filling stagger.', cooldown: 8, range: 0, castTime: 0, job: 'warrior', support: false, kind: 'defence' },
+  { id: 'ember', name: 'Ember Edge', glyph: '✷', desc: 'Ignite your blade; hits set foes Burning. Burning + Soaked bursts into steam.', cooldown: 12, range: 0, castTime: 0.6, job: 'warrior', support: false, kind: 'damage' },
+  { id: 'mark', name: "Hunter's Mark", glyph: '◎', desc: 'Mark a foe; your next charged shot on it crits.', cooldown: 10, range: 20, castTime: 0, job: 'ranger', support: false, kind: 'utility' },
+  { id: 'volley', name: 'Gale Volley', glyph: '⇶', desc: 'Rain arrows in an area; Marked foes are stunned.', cooldown: 14, range: 18, castTime: 1.2, job: 'ranger', support: false, kind: 'damage' },
+  { id: 'mend', name: 'Lantern Mend', glyph: '+', desc: 'Heal yourself or an ally over time.', cooldown: 9, range: 15, castTime: 1, job: 'white_mage', support: true, kind: 'heal' },
+  { id: 'ward', name: 'Stone Ward', glyph: '◆', desc: 'Gain Guard, halving the next three hits.', cooldown: 20, range: 0, castTime: 0, job: 'white_mage', support: true, kind: 'defence' },
+  { id: 'dash', name: 'Skystep', glyph: '»', desc: 'Dash a few metres, slipping through telegraphs.', cooldown: 5, range: 0, castTime: 0, job: 'white_mage', support: true, kind: 'utility' },
+  { id: 'surge', name: 'Spray Shot', glyph: '≈', desc: 'A water arrow that Soaks; pairs with Ember Edge.', cooldown: 7, range: 18, castTime: 0, job: 'ranger', support: false, kind: 'damage' },
+  { id: 'bash', name: 'Pommel Bash', glyph: '✦', desc: 'Interrupts a cast and adds heavy stagger.', cooldown: 11, range: 3, castTime: 0, job: 'warrior', support: false, kind: 'utility' },
+  { id: 'bloom', name: 'Meadow Bloom', glyph: '❀', desc: 'Heal everyone near you a little, and grant Regen.', cooldown: 18, range: 0, castTime: 1.5, job: 'white_mage', support: true, kind: 'heal' },
+  { id: 'pin', name: 'Pinning Arrow', glyph: '↧', desc: 'Slows a foe; Slowed + Marked roots them.', cooldown: 9, range: 20, castTime: 0, job: 'ranger', support: false, kind: 'utility' },
 ];
 
 // ───────── fake 3D view ─────────
@@ -60,7 +61,7 @@ if (params.has('clean')) document.body.classList.add('clean');
 let scene = params.get('scene') ?? 'town'; // town | combat | boss
 
 let loadout = ['cleave', 'parry', 'ember', 'mend', 'ward'];
-let weapon: WeaponId = 'blade';
+const weapon: WeaponId = 'blade';
 const cds = [0, 0, 0, 0, 0];
 let quest: HudState['quest'] = { title: 'The Solstice Crossing', steps: [{ text: 'Speak with Old Marrow', done: false }, { text: 'Find where the Two are pointing', done: false }] };
 let prompt: string | null = params.has('noprompt') ? null : 'Talk · Old Marrow';
@@ -73,8 +74,8 @@ hud.on((e) => {
     const a = ABILITIES.find((x) => x.id === loadout[e.slot]);
     if (a && cds[e.slot] <= 0) { cds[e.slot] = a.cooldown; if (a.castTime) castT = 0; }
     else hud.toast('Not ready yet');
-  } else if (e.type === 'swapWeapon') { weapon = weapon === 'blade' ? 'bow' : 'blade'; }
-  else if (e.type === 'openLoadout') { void hud.loadout(ABILITIES, loadout, weapon).then((ids) => { loadout = ids; }); }
+  } else if (e.type === 'openJobs') { void dev.jobs(); }
+  else if (e.type === 'openLoadout') { void dev.loadout(); }
   else if (e.type === 'interact') { void demoDialogue(); }
   else if (e.type === 'clearTarget') { if (scene !== 'town') scene = 'town'; }
 });
@@ -124,7 +125,7 @@ function frame(now: number): void {
     party: party ? [{ name: 'Pim', hp: 700 + 200 * Math.sin(t), maxHp: 900, statuses: ['regen'] }, { name: 'Ash', hp: 300, maxHp: 800, statuses: [] }] : [],
     slots: combat || params.has('slots') ? loadout.map((id, i) => {
       const a = ABILITIES.find((x) => x.id === id)!;
-      return { ability: a, cdRemaining: cds[i], usable: a.weapon === 'any' || a.weapon === weapon };
+      return { ability: a, cdRemaining: cds[i], usable: true };
     }) : [],
     quest,
     prompt: combat ? null : prompt,
@@ -157,7 +158,8 @@ const dev = {
   completeStep(i: number) { if (quest) quest = { ...quest, steps: quest.steps.map((s, j) => (j === i ? { ...s, done: true } : s)) }; },
   dialogue: demoDialogue,
   title: () => hud.titleScreen(),
-  loadout: () => hud.loadout(ABILITIES, loadout, weapon).then((ids) => { loadout = ids; return ids; }),
+  loadout: () => hud.loadout(ABILITIES, loadout, 'Wren', 5).then((ids) => { loadout = ids; return ids; }),
+  jobs: () => hud.jobs(jobBoardView(null, params.has('greenway') ? 'greenway' : 'grove')),
   victory: () => hud.endScreen('victory', ['The Warden falls silent. The lamp burns clear.', 'Solo · 6:42'], ['Return to Shady Grove', 'Fight again']),
   defeat: () => hud.endScreen('defeat', ['The tide took you this time.'], ['Retry', 'Return to the statue']),
   banner: () => hud.banner('The Plaza of the Two', 'Shady Grove'),
@@ -175,7 +177,7 @@ const btns: [string, () => unknown][] = [
   ['Title', dev.title], ['Dialogue', dev.dialogue], ['Banner', dev.banner], ['Toast', dev.toast], ['Fade', dev.fade],
   ['Hide/show HUD', () => dev.toggleHud()], ['Town', () => dev.setScene('town')], ['Combat', () => dev.setScene('combat')], ['Boss', () => dev.setScene('boss')], ['Elite', () => dev.setScene('elite')],
   ['Party', () => { party = !party; }], ['Prompt', () => { prompt = prompt ? null : 'Talk · Old Marrow'; }], ['Step done', () => dev.completeStep(1)],
-  ['Floats', burst], ['Loadout', dev.loadout], ['Victory', dev.victory], ['Defeat', dev.defeat],
+  ['Floats', burst], ['Loadout', dev.loadout], ['Jobs', dev.jobs], ['Victory', dev.victory], ['Defeat', dev.defeat],
 ];
 for (const [label, fn] of btns) {
   const b = document.createElement('button'); b.textContent = label;

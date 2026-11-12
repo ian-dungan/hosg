@@ -6,6 +6,7 @@
 import { Matrix, Vector3 } from '@babylonjs/core';
 import {
   CLIENT_RECONNECTION,
+  GUILD_BOARD,
   REASON_ELSEWHERE,
   REASON_NAME_FIRST,
   RECONNECT_SECONDS,
@@ -13,6 +14,9 @@ import {
   zoneDef,
   zoneFullReason,
   type C2S,
+  type CastView,
+  type JobId,
+  type JobsView,
   type S2C,
   type ZoneId,
 } from '@sg2/shared';
@@ -25,6 +29,7 @@ import { LeaveNameScreen, showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
 import { createEnemies, type Enemies } from './net/enemies';
 import { COMBAT_MESSAGES, createCombat, type CombatController, type CombatDebug } from './combat/controller';
+import { createGuildBoard } from './world/guildBoard';
 import {
   UNREACHABLE,
   connect,
@@ -60,6 +65,7 @@ const CSS = /* css */ `
 .sg-online.away{color:#ffd9a0}
 @media (max-width:700px) and (orientation:portrait){ .sg-online{right:auto;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--sb) + 4px);font-size:11px;padding:2px 8px;background:none} }
 .sg-online:empty{display:none}
+.sg-modal-open ~ .sg-hud .sg-online,.sg-modal-open ~ div .sg-chat-btn{opacity:0;pointer-events:none}
 .sg-net-off{display:none}
 .sg-travel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;pointer-events:none;
   font:600 18px/1.3 var(--sans,system-ui,sans-serif);color:#fff6e6;letter-spacing:.04em;text-shadow:0 1px 6px rgba(0,0,0,.6);
@@ -78,8 +84,16 @@ interface NetDebug {
   lastTravelMs: number;
   /** How long building the last zone took (ms, wall clock). */
   lastLoadMs: number;
-  /** This adventurer's combat numbers as the server states them (null before entering). */
-  self: { hp: number; momentum: number; dead: boolean; target: number | null } | null;
+  /** This adventurer's combat numbers as the server states them (null before entering), with its job and cast. */
+  self: { hp: number; momentum: number; dead: boolean; target: number | null; job: JobId | null; cast: CastView } | null;
+  /** The last `jobs` (null before it arrives). */
+  jobs: JobsView | null;
+  /** The last 20 refusals, oldest first. */
+  refusals: { action: string; reason: string }[];
+  /** The focused adventurer's engine id (null: none). */
+  allyFocus: number | null;
+  /** Where the Guild Board stands in the grove. */
+  guildBoard: { x: number; z: number };
   /** Combat fx events received so far. */
   fxSeen: number;
   /** The controller's counters (dodges, refusals, corrections, ...). */
@@ -98,6 +112,10 @@ function boot(): void {
 
   const game = bootGame({ busy: () => !room, onTap: (tap) => combat?.onTap(tap) ?? false });
   const { hud, hudRoot } = game;
+  // the Guild Board stands in the grove's Plaza (online only: the offline demo has no jobs)
+  // (its meshes go with the scene on a zone change)
+  if (game.zone === 'grove') createGuildBoard(game.scene, game.world);
+  game.onZoneLoaded((z) => { if (z === 'grove') createGuildBoard(game.scene, game.world); });
   game.rig.setMoveScale(0);
   game.onZoneLoaded(() => game.rig.setMoveScale(0)); // a new zone's adventurer waits for its room
   hud.setVisible(false);
@@ -111,7 +129,10 @@ function boot(): void {
   const chat = createChat(netUi, (text) => room && send(room, 'chat', { text }));
   const travelLabel = h('div', 'sg-travel', document.body);
 
-  const net: NetDebug = { remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0 };
+  const net: NetDebug = {
+    remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0,
+    jobs: null, refusals: [], allyFocus: null, guildBoard: { x: GUILD_BOARD.x, z: GUILD_BOARD.z },
+  };
   hud.on((e) => combat?.onHud(e));
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
   // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
@@ -148,7 +169,10 @@ function boot(): void {
     remotes?.update(dt);
     enemies?.update(dt);
     combat?.update(dt);
-    if (combat) { net.self = combat.debug.self; net.fxSeen = combat.debug.fxSeen; }
+    if (combat) {
+      const d = combat.debug;
+      net.self = d.self; net.fxSeen = d.fxSeen; net.jobs = d.jobs; net.refusals = d.refused; net.allyFocus = d.allyFocus;
+    }
     let text = connecting ? CONNECTING : '';
     if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.online ?? room.state.players?.size ?? 0}`;
     if (text !== statusText) {
@@ -263,7 +287,7 @@ function boot(): void {
         room = r;
         remotes = createRemotes(game.scene, game.world, r, r.sessionId);
         enemies = createEnemies(game.scene, game.world, r);
-        combat = createCombat({ game, hud, room: r, state, remotes, enemies, send: (type, message) => send(r, type, message) });
+        combat = createCombat({ game, hud, room: r, state, remotes, enemies, zone, send: (type, message) => send(r, type, message) });
         net.combat = combat.debug;
         for (const [type, m] of early.splice(0)) combat.message(type, m);
         rig.setMoveScale(1);

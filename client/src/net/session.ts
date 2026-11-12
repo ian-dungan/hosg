@@ -27,6 +27,16 @@ export interface PlayerView {
   /** '' | 'charge' | 'dodge' | 'knock' | 'dead'. */
   readonly act?: string;
   readonly shield?: number;
+  /** Jobs (Plan 3b): the current job (a JobId). */
+  readonly job?: string;
+  /**
+   * The ability being cast ('' none), its full cast time in s and when it began on the state's `clock`. Like
+   * `buffs` (BUFF_BITS), unset until the adventurer's first cast (or buff): read them as '' and 0.
+   */
+  readonly cast?: string;
+  readonly castTotal?: number;
+  readonly castAt?: number;
+  readonly buffs?: number;
 }
 
 /** One enemy as the room state shows it (the server's EnemyState, from Task 6). */
@@ -54,6 +64,8 @@ export interface EnemyStateView {
   readonly surging?: boolean;
   /** Seconds until its stagger bar can fill again (0 = it can). */
   readonly staggerImmune?: number;
+  /** Live debuffs as bits (DEBUFF_BITS); unset until its first debuff (read as 0). */
+  readonly debuffs?: number;
 }
 
 /** A telegraph on the ground (the server's TelegraphState): immutable, deleted when it resolves or is cancelled. */

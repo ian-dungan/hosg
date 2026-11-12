@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ABILITIES, FINISHER_COST, TELEGRAPH_LEAD_S, type SelfView } from '@sg2/shared';
-import { ABILITY_DEFS, plan3WeaponOf } from './abilityDefs';
-import { CHARGE_CONFIRM_MS, chargeStillHeld, createChargeHold, cycleTarget, isNewSeq, keepFollowing, markStatuses, refusalIsForCharge, screenToWorld, slotView, tapAction, telegraphFill, type SelfSnap } from './controller';
+import { ABILITIES, BUFF_BITS, CHARGE_FULL_S, DEBUFF_BITS, FINISHER_COST, JOBS, JOB_IDS, MARK_BITS, REASON_JOB_NOT_HERE, TELEGRAPH_LEAD_S, slotsFor, type SelfView } from '@sg2/shared';
+import { ABILITY_DEFS } from './abilityDefs';
+import {
+  CHARGE_CONFIRM_MS, buffStatuses, castFrac, chargeStillHeld, createChargeHold, cycleTarget, isNewSeq, keepFollowing, markStatuses, refusalIsForCharge, refusalText, screenToWorld, slotView, tapAction, telegraphFill,
+  type SelfSnap,
+} from './controller';
 
 const P = { x: 1, y: 0, z: 2 };
 
@@ -22,15 +25,19 @@ describe('tapAction', () => {
 });
 
 describe('abilityDefs', () => {
-  it('maps every ability with its glyph, cooldown and kind', () => {
+  it('maps every ability with its glyph, cooldown, cast time, job and kind', () => {
     const ids = Object.keys(ABILITIES);
     expect(ids).toHaveLength(49);
     for (const id of ids) {
       const a = ABILITIES[id as keyof typeof ABILITIES], d = ABILITY_DEFS[id as keyof typeof ABILITIES];
-      expect(d).toMatchObject({ id, name: a.name, glyph: a.glyph, cooldown: a.cooldown, kind: a.kind, weapon: plan3WeaponOf(a.id), range: a.range, desc: a.desc });
+      expect(d).toMatchObject({ id, name: a.name, glyph: a.glyph, cooldown: a.cooldown, kind: a.kind, job: a.job, range: a.range, desc: a.desc, support: !!a.support });
+      expect(d.element).toBe(a.element);
+      expect(d.castTime).toBe(a.id === 'charged_shot' ? CHARGE_FULL_S : a.cast ?? 0);
+      expect('weapon' in d).toBe(false);
     }
-    expect(ABILITY_DEFS.charged_shot.castTime).toBe(1.5);
+    expect(ABILITY_DEFS.charged_shot.castTime).toBe(CHARGE_FULL_S);
     expect(ABILITY_DEFS.slash.castTime).toBe(0);
+    expect(ABILITY_DEFS.skyfall_arc.castTime).toBe(ABILITIES.skyfall_arc.cast);
   });
 });
 
@@ -43,6 +50,22 @@ describe('slotView', () => {
   it('five slots in order, with their definitions', () => {
     const v = slotView(self(), 0);
     expect(v.map((s) => s.ability.id)).toEqual(['slash', 'sunder', 'parry', 'mend', 'bulwark']);
+  });
+  it('every job: its five slots (bar, then picks), the finisher unusable below 50', () => {
+    for (const job of JOB_IDS) {
+      const slots = slotsFor({ job, picks: [JOBS[job].pool[0], JOBS[job].pool[1]] });
+      const v = slotView(self({ job, slots, momentum: FINISHER_COST - 1, weapon: JOBS[job].weapon }), 0);
+      expect(v.map((s) => s.ability.id)).toEqual(slots);
+      expect(v.map((s) => s.ability.job)).toEqual(slots.map(() => job));
+      expect(v[1].usable).toBe(false);
+      expect(slotView(self({ job, slots, momentum: FINISHER_COST }), 0)[1].usable).toBe(true);
+    }
+  });
+  it('a cast in progress makes the other slots unusable; the cast one keeps its state', () => {
+    const slots = slotsFor({ job: 'black_mage', picks: [...JOBS.black_mage.picks.solo] });
+    const v = slotView(self({ job: 'black_mage', slots, momentum: 100, cast: { ability: 'hearthfall', total: 2.5, left: 1 } }), 0);
+    expect(v.map((s) => s.usable)).toEqual([false, false, true, false, false]);
+    expect(slotView(self({ job: 'black_mage', slots, momentum: 100, cast: null }), 0).every((s) => s.usable)).toBe(true);
   });
   it('the finisher is unusable below 50 Momentum, usable from 50', () => {
     expect(slotView(self({ momentum: FINISHER_COST - 1 }), 0)[1].usable).toBe(false);
@@ -159,5 +182,28 @@ describe('Task 8 review round 1', () => {
     const marks = ['stunned'] as ReturnType<typeof markStatuses>;
     expect(markStatuses(0, marks)).toBe(marks);
     expect(marks).toEqual([]);
+  });
+});
+
+describe('casts, refusals and status icons', () => {
+  it('the cast bar fills from the server cast, counted on from when self arrived', () => {
+    expect(castFrac({ ability: 'hearthfall', total: 2.5, left: 2.5 }, 1000, 1000)).toBe(0);
+    expect(castFrac({ ability: 'hearthfall', total: 2.5, left: 1.5 }, 1000, 1500)).toBeCloseTo(0.6);
+    expect(castFrac({ ability: 'hearthfall', total: 2.5, left: 0.2 }, 1000, 9000)).toBe(1);
+  });
+  it('refusal toasts: job refusals say why; ally aims say nobody is there; busy and dead are silent', () => {
+    expect(refusalText('not-here', 'job')).toBe(REASON_JOB_NOT_HERE);
+    expect(refusalText('in-combat', 'job')).toBe('Not during a fight');
+    expect(refusalText('busy', 'job')).toBe('Finish what you are doing first');
+    expect(refusalText('no-ally', 'ability')).toBe('Nobody to help here');
+    expect(refusalText('busy', 'ability')).toBeNull();
+    expect(refusalText('dead', 'job')).toBeNull();
+    expect(refusalText('range', 'ability')).toBe('Out of range');
+  });
+  it('marks include Rooted and Dazed; enemy debuffs and adventurer buffs come from their bits', () => {
+    expect(markStatuses(MARK_BITS.rooted | MARK_BITS.dazed | MARK_BITS.soaked)).toEqual(['soaked', 'rooted', 'dazed']);
+    expect(buffStatuses(DEBUFF_BITS.blinded | DEBUFF_BITS.weakpoint, 'enemy')).toEqual(['blinded', 'weakpoint']);
+    expect(buffStatuses(BUFF_BITS.roar | BUFF_BITS.aegis | BUFF_BITS.mist, 'adventurer')).toEqual(['roar', 'aegis', 'mist']);
+    expect(buffStatuses(0, 'adventurer')).toEqual([]);
   });
 });

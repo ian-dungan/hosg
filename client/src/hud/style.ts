@@ -1,4 +1,6 @@
 // All HUD CSS, injected once as a <style> so the build stays a single file.
+import { JOBS_CSS } from './jobs';
+
 const CSS = /* css */ `
 .sg-hud{
   --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"DejaVu Serif",serif;
@@ -51,6 +53,29 @@ const CSS = /* css */ `
 .sg-pf-emblem{flex:none;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;
   background:radial-gradient(circle at 35% 30%,#3b3f7a,#1c1f45);box-shadow:inset 0 0 0 2px var(--gold),0 0 0 3px rgba(242,183,66,.25),0 2px 8px rgba(0,0,0,.3)}
 .sg-pf-emblem span{font:700 19px/1 var(--serif);color:var(--goldl)}
+.sg-pf-emblem{position:relative}
+.sg-pf-job{display:none}
+.sg-pf.has-job .sg-pf-emblem{background:var(--jb);box-shadow:inset 0 0 0 2px rgba(255,255,255,.4),0 0 0 3px rgba(242,183,66,.35),0 2px 8px rgba(0,0,0,.3)}
+.sg-pf.has-job .sg-pf-job{display:block;font:700 22px/1 var(--serif);font-variant-emoji:text;color:var(--jf);text-shadow:none}
+.sg-pf.has-job .sg-pf-emblem span{position:absolute;right:-5px;bottom:-4px;min-width:19px;height:19px;padding:0 4px;border-radius:10px;display:grid;place-items:center;
+  font:800 11px/1 var(--sans);color:#3a2508;text-shadow:none;background:var(--gold2);box-shadow:0 1px 3px rgba(0,0,0,.4)}
+/* the focused ally: under the player frame */
+.sg-af{display:none;flex-direction:column;gap:4px;width:min(240px,100%);margin-left:14px;padding:6px 8px 7px 10px;border-radius:12px;
+  background:linear-gradient(90deg,rgba(20,52,30,.62),rgba(18,22,48,.3));box-shadow:inset 0 0 0 1.5px rgba(143,209,106,.7)}
+.sg-af.on{display:flex}
+.sg-af.far{box-shadow:inset 0 0 0 1px rgba(143,209,106,.3);opacity:.75}
+.sg-af.dead{box-shadow:inset 0 0 0 1.5px rgba(236,106,76,.8)}
+.sg-af-head{display:flex;align-items:center;gap:6px}
+.sg-af-glyph{flex:none;font:700 15px/1 var(--serif);font-variant-emoji:text;color:#cfeec0}
+.sg-af-name{flex:1;min-width:0;font:600 14px var(--serif);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sg-af-tag{flex:none;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#cfeec0;opacity:.85}
+.sg-af.dead .sg-af-tag{color:#ffb8a8}
+.sg-af-close{position:relative;flex:none;width:24px;height:24px;padding:4px;border-radius:50%;color:var(--cream);background:rgba(255,255,255,.12)}
+.sg-af-close::before{content:"";position:absolute;inset:-12px}
+.sg-hp-ally{height:7px;--bar:linear-gradient(90deg,#5fb84a,#8FD16A)}
+.sg-cast-ally .sg-cast-name{font-size:10px}
+.sg-af-act{display:none;align-items:center;justify-content:center;min-height:48px;margin-top:2px;padding:0 14px;border-radius:24px;font:600 14px var(--sans);
+  color:#3a2508;text-shadow:none;background:linear-gradient(180deg,#ffe49a,#F2B742 60%,#dc9a2c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sg-pf-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
 .sg-pf-top{display:flex;align-items:center;gap:8px}
 .sg-pf-name{flex:1;min-width:0;font:600 17px/1.1 var(--serif);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -160,9 +185,12 @@ const CSS = /* css */ `
 .sg-ab.cooling .sg-ab-name{visibility:hidden} /* the cooldown number shows instead: never over the label */
 .sg-ab.cooling .sg-ab-glyph{opacity:.35}
 .sg-key{position:absolute;top:3px;left:5px;font-size:10px;font-weight:800;color:var(--goldl);opacity:.85}
-.sg-ab-swap,.sg-ab-loadout{width:56px;height:56px;border-radius:14px;--kc:rgba(255,226,160,.55)}
-.sg-ab-swapmark{position:absolute;right:3px;bottom:3px;width:13px;height:13px;color:var(--goldl);opacity:.7}
-.sg-ab-swap .sg-ab-swapmark{display:none}
+.sg-ab-jobs,.sg-ab-loadout{width:56px;height:56px;border-radius:14px;--kc:rgba(255,226,160,.55)}
+.sg-ab-jobglyph{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;font:700 16px/1 var(--serif);font-variant-emoji:text;text-shadow:none;
+  color:var(--jf,#fff6e6);background:var(--jb,#3b3f7a);box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.4)}
+.sg-ab-skill .sg-ab-glyph{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;font-variant-emoji:text;font-size:21px;text-shadow:none;
+  color:var(--jf,#fff6e6);background:var(--jb,rgba(255,255,255,.08));box-shadow:inset 0 0 0 2px var(--kc,rgba(255,226,160,.6)),0 1px 4px rgba(0,0,0,.35)}
+.sg-ab.casting{filter:none;box-shadow:inset 0 0 0 3px #ffe08a,0 0 16px rgba(255,214,110,.75)}
 .sg-tip{position:absolute;transform:translateY(-100%);padding:10px 12px;border-radius:12px;background:var(--ink2);
   box-shadow:0 0 0 1px rgba(255,226,160,.3),0 6px 20px rgba(0,0,0,.3);opacity:0;transition:opacity .15s;z-index:5}
 .sg-tip.on{opacity:1}
@@ -195,9 +223,8 @@ const CSS = /* css */ `
 .sg-touch .sg-ab{position:absolute;left:0;top:0;width:64px;height:64px;border-radius:50%;
   transform:translate(-50%,-50%) translate(calc(var(--ax,0) * var(--k) * 1px),calc(var(--ay,0) * var(--k) * 1px))}
 .sg-touch .sg-ab-skill .sg-ab-name{font-size:8.5px;max-width:50px}
-.sg-touch .sg-ab-swap{width:60px;height:60px}
-.sg-touch .sg-ab-swap .sg-ab-name{display:none}
-.sg-touch .sg-ab-swap .sg-ab-swapmark{display:block;right:6px;bottom:6px}
+.sg-touch .sg-ab-jobs{width:60px;height:60px}
+.sg-touch .sg-ab-skill .sg-ab-glyph{width:32px;height:32px;font-size:18px}
 .sg-touch .sg-ab-loadout{width:56px;height:56px}
 .sg-touch .sg-ab-jump{width:72px;height:72px;--kc:rgba(255,240,200,.85);background:radial-gradient(circle at 40% 30%,#ffe9a8,#F2B742 70%,#d99a24)}
 .sg-touch .sg-ab-jump .sg-ab-name{font:700 15px var(--sans);color:#3a2a08;text-shadow:none;max-width:none}
@@ -351,16 +378,17 @@ const CSS = /* css */ `
 .sg-panel-title{font:italic 600 26px var(--serif);color:var(--goldl)}
 .sg-panel-sub{font-size:13px;opacity:.75}
 .sg-lo-grid{flex:1;min-height:0;overflow:auto;touch-action:pan-y;padding:6px 16px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
-.sg-lo-card{position:relative;display:flex;gap:10px;padding:10px 12px;border-radius:12px;cursor:pointer;background:rgba(255,246,230,.06);box-shadow:inset 0 0 0 1px rgba(255,226,160,.18)}
+.sg-lo-card{position:relative;display:flex;gap:10px;min-height:56px;padding:10px 12px;border-radius:12px;cursor:pointer;background:rgba(255,246,230,.06);box-shadow:inset 0 0 0 1px rgba(255,226,160,.18)}
 .sg-lo-card.sel{background:rgba(242,183,66,.16);box-shadow:inset 0 0 0 2px var(--gold2)}
 .sg-lo-card.mismatch .sg-lo-glyph{filter:grayscale(.7);opacity:.6}
-.sg-lo-glyph{flex:none;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font:700 20px var(--serif);
+.sg-lo-glyph{flex:none;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font:700 20px var(--serif);font-variant-emoji:text;
   background:rgba(24,26,58,.9);box-shadow:inset 0 0 0 2px #F2B742}
 .sg-lo-glyph[data-kind=damage]{box-shadow:inset 0 0 0 2px #EC6A4C}.sg-lo-glyph[data-kind=heal]{box-shadow:inset 0 0 0 2px #8FD16A}
 .sg-lo-glyph[data-kind=defence]{box-shadow:inset 0 0 0 2px #479AF2}.sg-lo-glyph[data-kind=utility]{box-shadow:inset 0 0 0 2px #3FB0A6}
 .sg-lo-body{min-width:0}
 .sg-lo-name{font:600 16px var(--serif)}
 .sg-lo-tags{display:flex;gap:5px;margin:3px 0}
+.sg-lo-meta{font-size:11px;opacity:.65;margin:2px 0 3px}
 .sg-tag{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:6px;background:rgba(255,246,230,.12)}
 .sg-tag.bad{background:rgba(236,106,76,.3);color:#ffd2c6}
 .sg-lo-desc{font-size:12.5px;line-height:1.35;opacity:.85}
@@ -441,14 +469,21 @@ const CSS = /* css */ `
   .sg-touch .sg-castslot{left:calc(var(--sl) + var(--g));transform:none;width:min(180px,42vw);top:auto;bottom:calc(var(--sb) + min(52vh,420px) + 14px)}
   /* the target frame takes the second row, under the player frame (the right column keeps the gear and Chat) */
   .sg-tf{left:calc(var(--sl) + var(--g));right:auto;top:calc(var(--st) + var(--g) + 72px);width:calc(100% - 2 * var(--g) - 84px)}
-  /* swap tops the right-hand column (CLUSTER_COLUMNS); the loadout (out of combat only) sits in the top row, left of the gear */
+  /* Jobs tops the right-hand column (CLUSTER_COLUMNS); the loadout (out of combat only) sits in the top row, left of the gear */
   .sg-touch .sg-ab-loadout{transform:translate(-50%,-50%) translate(-46px,calc(var(--st) + var(--sb) + 2 * var(--g) + 66px - 100vh));
     transform:translate(-50%,-50%) translate(-46px,calc(var(--st) + var(--sb) + 2 * var(--g) + 66px - 100dvh))}
   .sg-boss{top:calc(var(--st) + var(--g) + 80px)}
   .sg-has-boss .sg-quest{top:calc(var(--st) + var(--g) + 210px)}
   /* with the ability cluster up the right edge, the prompt sits near the top, under the frames (never over the cluster or mid-screen) */
-  .sg-touch:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 168px);bottom:auto;justify-content:flex-start}
+  .sg-touch:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 150px);bottom:auto;justify-content:flex-start;padding-right:96px}
+  .sg-touch:not(.sg-no-abilities) .sg-prompt{height:48px;border-radius:24px}
+  .sg-touch:not(.sg-no-abilities) .sg-prompt-key{width:38px;height:38px;padding:8px}
   .sg-touch.sg-has-boss:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 214px)}
+  /* the focused ally: under the target frame's row, in the top third; it carries the prompt (a revive) itself */
+  .sg-touch .sg-af{position:absolute;left:0;top:150px;margin:0;width:min(230px,calc(100vw - 2 * var(--g) - 96px))}
+  .sg-touch .sg-af .sg-chips,.sg-touch .sg-af .sg-cast{display:none}
+  .sg-touch.sg-has-ally:not(.sg-no-abilities) .sg-promptrow{display:none}
+  .sg-touch.sg-has-ally .sg-af-act.on{display:flex}
   .sg-touch.sg-no-abilities .sg-promptrow{justify-content:flex-end;bottom:calc(var(--sb) + 132px)}
   .sg-touch .sg-prompt-text{font-size:16px}
   /* the joystick's (invisible) touch zone stays in the bottom third: a tap on an enemy mid-screen is never taken by it */
@@ -492,6 +527,6 @@ export function injectStyles(): void {
   injected = true;
   const s = document.createElement('style');
   s.id = 'sg-hud-css';
-  s.textContent = CSS;
+  s.textContent = CSS + JOBS_CSS;
   document.head.appendChild(s);
 }

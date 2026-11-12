@@ -4,15 +4,20 @@
 // Units: metres, seconds, radians. Babylon left-handed, Y up. Ground plane is X/Z.
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
-import type { Body, Displacement } from '@sg2/shared';
+import type { Body, Displacement, ElementId, FutureJobId, JobId, WeaponId as SharedWeaponId } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
-export type ZoneId = 'grove' | 'beacon' | 'arena' | 'greenway';
+/** 'lampfall' (Plan 4's dungeon) has no client look yet: loadZone refuses it (Plan 4 Task 9 builds it). */
+export type ZoneId = 'grove' | 'beacon' | 'arena' | 'greenway' | 'lampfall';
 export type Quality = 'low' | 'med' | 'high';
-export type WeaponId = 'blade' | 'bow';
+/** The shared weapons (one per job; the Staff is both mages'). */
+export type WeaponId = SharedWeaponId;
 export type EntityKind = 'player' | 'companion' | 'grunt' | 'archer' | 'brute' | 'warden';
-export type StatusId = 'soaked' | 'burning' | 'marked' | 'stunned' | 'staggered' | 'guard' | 'regen' | 'slowed';
+export type StatusId = 'soaked' | 'burning' | 'marked' | 'stunned' | 'staggered' | 'guard' | 'regen' | 'slowed'
+  // marks on enemies (Plan 3b), enemy debuffs, adventurer buffs (from the state's bits)
+  | 'rooted' | 'dazed' | 'blinded' | 'weakpoint'
+  | 'roar' | 'aegis' | 'sheltered' | 'rain' | 'pact' | 'mist' | 'bloodbond';
 
 /** Palette from concepts/02-skybound/ART.md. Use these, not new colours. */
 export const PALETTE = {
@@ -182,8 +187,12 @@ export interface AbilityDef {
   desc: string;          // one short sentence incl. its combo
   cooldown: number;
   range: number;         // 0 = self
-  castTime: number;      // 0 = instant
-  weapon: WeaponId | 'any';
+  castTime: number;      // 0 = instant (Charged Shot: the time to a full charge)
+  /** The job it belongs to (tooltips show JOBS[job].name). */
+  job: JobId;
+  element?: ElementId;
+  /** Reaches other adventurers (a heal, a shield, a buff). */
+  support: boolean;
   kind: 'damage' | 'heal' | 'defence' | 'utility';
 }
 export type SimEvent =
@@ -252,8 +261,10 @@ export interface HudState {
     /** Dodge charges, and the next charge's refill progress 0..1 (undefined hides the dodge button). */
     dodge?: { charges: number; max: number; refill: number };
     dead?: boolean;
-    /** Weapon swap and loadout are refused in a fight: their buttons grey out. */
-    swapLocked?: boolean;
+    /** Job changes and picks are refused in a fight: their buttons grey out. */
+    jobLocked?: boolean;
+    /** The current job (undefined: the offline demo, no badge). */
+    job?: { id: JobId; name: string; glyph: string; level: number };
   };
   target: (HudBar & {
     stagger: number; maxStagger: number; isBoss: boolean; cast: { name: string; frac: number; interruptible: boolean } | null;
@@ -263,6 +274,8 @@ export interface HudState {
     surging?: boolean;
   }) | null;
   party: HudBar[];                       // companions (empty when solo)
+  /** The adventurer focused for ally-aimed abilities (a tap on them), or null. */
+  ally?: (HudBar & { dead: boolean; inRange: boolean; glyph: string; cast: { name: string; frac: number } | null }) | null;
   slots: { ability: AbilityDef; cdRemaining: number; usable: boolean }[];   // 5 entries
   quest: { title: string; steps: { text: string; done: boolean }[] } | null;
   /** Context action near the player, e.g. "Talk to Old Marrow". null hides the button. */
@@ -277,8 +290,10 @@ export type HudEvent =
   | { type: 'respawn' }                 // the death screen's button
   | { type: 'jump' }                    // the touch Jump button (Space is the rig's own)
   | { type: 'interact' }                // prompt button or E key
-  | { type: 'swapWeapon' }              // button or Q key
+  | { type: 'openJobs' }                // the Jobs button or J key
   | { type: 'openLoadout' }             // button or L key
+  | { type: 'cycleAlly' }               // F key: the next adventurer within 18 m, nearest first
+  | { type: 'clearAlly' }               // the focus frame's close button
   | { type: 'clearTarget' };            // Esc key / tap on target frame close
 export interface HudApi {
   /** Live player settings (the Settings panel changes them; saved in this browser). */
@@ -295,8 +310,10 @@ export interface HudApi {
   /** Dialogue box; resolves with the index of the chosen option (0 if there are no choices) after the last line. */
   dialogue(speaker: string, lines: string[], choices?: string[]): Promise<number>;
   titleScreen(): Promise<void>;                                  // "Shady Grove 2" + Play
-  /** Pick `count` abilities from the pool; resolves with the chosen ids. */
-  loadout(pool: AbilityDef[], current: string[], weapon: WeaponId, count?: number): Promise<string[]>;
+  /** Pick `count` abilities from the pool; resolves with the chosen ids. `title` names it (the job's name). */
+  loadout(pool: AbilityDef[], current: string[], title: string, count?: number): Promise<string[]>;
+  /** The job board sheet: resolves with the job chosen ("Become a …"), or null when closed. */
+  jobs(view: JobBoardView): Promise<JobId | null>;
   /**
    * opts.countdown: a line counting down `seconds` (its text has `{s}` for the seconds left);
    * opts.waitS: the buttons wake up after this long. Resolves with the button chosen, or -1 when dismissed.
@@ -310,6 +327,21 @@ export interface HudApi {
   fade(toOpaque: boolean, color?: string, seconds?: number): Promise<void>;
   /** Hide/show the combat HUD (cutscenes, dialogue). */
   setVisible(on: boolean): void;
+}
+/** The job board as the HUD shows it (hud/jobs.ts jobBoardView builds it from the shared job data). */
+export interface JobBoardView {
+  current: JobId;
+  /** Where the adventurer stands allows a change (a town, a sanctuary); `note` says why not (the buttons stay on: the server decides). */
+  canSwitch: boolean; note: string | null;
+  rows: {
+    id: JobId; name: string; glyph: string; role: string; level: number; xpFrac: number; weaponName: string;
+    /** The trait's name and line (the job's one-line pitch). */
+    traitName: string; trait: string;
+    /** The bar (quick, finisher, signature) and the four picks of its pool; `chosen`: the two it has picked. */
+    bar: AbilityDef[]; picks: AbilityDef[]; chosen: string[];
+  }[];
+  /** Jobs to unlock later (data hooks only): shown locked. */
+  locked: { id: FutureJobId; name: string; glyph: string; role: string; weaponName: string; unique: string }[];
 }
 /** Implemented in src/hud/index.ts */
 export type CreateHud = (root: HTMLElement) => HudApi;

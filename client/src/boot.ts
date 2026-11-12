@@ -10,6 +10,8 @@ import { createPlayerRig } from './player/rig';
 import { createHud } from './hud/index';
 import { SAFE_FALL, findPath, withClearance, type Vec2 } from '@sg2/shared';
 
+/** The zones this client can build (Plan 4's 'lampfall' comes with Task 9). */
+const BUILT_ZONES: ReadonlySet<ZoneId> = new Set<ZoneId>(['grove', 'beacon', 'arena', 'greenway']);
 /** How far tap-to-walk routes keep from anything blocked, in m. */
 const CLEARANCE = 0.3;
 /** Distance at which a waypoint counts as reached and the walk heads for the next, in m. */
@@ -224,6 +226,8 @@ export function bootGame(opts: GameOpts = {}): Game {
     swapping = false;
   }
   function loadZone(z: ZoneId): void {
+    // a zone with no look built yet: refused before anything is torn down (the current scene keeps running)
+    if (!BUILT_ZONES.has(z)) { hud.toast("That area isn't open yet"); throw new Error(`zone ${z} has no client build yet`); }
     stopWalk();
     const from = zone;
     try {

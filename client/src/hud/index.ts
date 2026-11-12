@@ -2,7 +2,7 @@
 import type { CreateHud, HudApi, HudEvent, HudState } from '../core/contracts';
 import { injectStyles } from './style';
 import { h, toggle, ICONS } from './dom';
-import { PlayerFrame, TargetFrame, PartyFrames } from './frames';
+import { PlayerFrame, TargetFrame, PartyFrames, FocusFrame } from './frames';
 import { AbilityBar } from './abilities';
 import { Joystick } from './joystick';
 import { QuestTracker } from './quest';
@@ -48,6 +48,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const castSlot = h('div', 'sg-castslot', combat);
   const player = new PlayerFrame(tl, castSlot);
   const party = new PartyFrames(tl);
+  const ally = new FocusFrame(tl, () => emit({ type: 'clearAlly' }), () => emit({ type: 'interact' }));
   const bossSlot = h('div', 'sg-bossslot', combat);
   const target = new TargetFrame(combat, bossSlot, () => emit({ type: 'clearTarget' }));
   const quest = new QuestTracker(combat);
@@ -132,8 +133,9 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     if (c === 'ShiftLeft' || c === 'ShiftRight') { abar.flash('dodge'); emit({ type: 'dodge', dir: keyDir() }); return; }
     if (c === 'Tab') { e.preventDefault(); emit({ type: 'cycleTarget' }); return; }
     if (c === 'KeyE') { if (promptCache) prompt.animate([{ filter: 'brightness(1.5)' }, { filter: 'none' }], { duration: 200 }); emit({ type: 'interact' }); }
-    else if (c === 'KeyQ') { abar.flash('swap'); emit({ type: 'swapWeapon' }); }
+    else if (c === 'KeyJ') { abar.flash('jobs'); emit({ type: 'openJobs' }); }
     else if (c === 'KeyL') { abar.flash('loadout'); emit({ type: 'openLoadout' }); }
+    else if (c === 'KeyF') emit({ type: 'cycleAlly' });
     else if (c === 'KeyO') settings.toggle();
     else if (c === 'Escape') emit({ type: 'clearTarget' });
     else return;
@@ -164,6 +166,9 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
       const hasT = mode === 1;
       toggle(root, 'sg-has-target', hasT);
       party.update(s.party);
+      ally.update(s.ally ?? null);
+      ally.prompt(s.ally ? s.prompt : null);
+      toggle(root, 'sg-has-ally', !!s.ally);
       quest.update(s.quest);
       abar.update(s.slots, s.player);
       toggle(root, 'sg-no-abilities', s.slots.length === 0);
@@ -205,7 +210,8 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     floatText(x, y, text, kind) { floats.spawn(x, y, text, kind); },
     dialogue: (speaker, lines, choices) => overlays.dialogue(speaker, lines, choices),
     titleScreen: () => overlays.titleScreen(),
-    loadout: (pool, current, weapon, count) => overlays.loadout(pool, current, weapon, count),
+    loadout: (pool, current, title, count) => overlays.loadout(pool, current, title, count),
+    jobs: (view) => overlays.jobs(view),
     endScreen: (kind, lines, buttons, opts) => overlays.endScreen(kind, lines, buttons, opts),
     dismissEndScreen: () => overlays.dismissEndScreen(),
     danger(mode) {
