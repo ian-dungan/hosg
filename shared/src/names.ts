@@ -1,5 +1,6 @@
 // Adventurer names: what a player may call their adventurer, and the bad-word filter behind it.
-import { BAD_WORDS, SHORT_BAD_WORDS } from './badwords';
+import { BAD_WORD_HASHES, BAD_WORD_LENGTHS, SHORT_BAD_HASHES } from './badwords';
+import { blockHash } from './hash';
 
 const LENGTH = 'Names are 3 to 16 letters';
 const LETTERS = 'Names can only use letters, with single spaces, hyphens or apostrophes between them';
@@ -47,20 +48,20 @@ const SEPARATORS = /[\s'_-]+/;
 /** Lower case with look-alikes mapped to letters and everything else dropped; repeats are kept. */
 const letters = (s: string) => s.toLowerCase().replace(/[0-9@$]/g, (c) => LOOK_ALIKES[c] ?? '').replace(/[^a-z]/g, '');
 
-/** "ass" -> /^a+s{2,}(?:e?s)?$/: the word with any letter repeated more, and an optional plural. */
-function shortWordPattern(word: string): RegExp {
-  const runs = word.match(/(.)\1*/g)!.map((run) => (run.length === 1 ? `${run[0]}+` : `${run[0]}{${run.length},}`));
-  return new RegExp(`^${runs.join('')}(?:e?s)?$`);
-}
-
-/** The lists in normalised form, made on first use (so bundles that never check a name can drop them). */
+/** The lists as lookups, made on first use (so bundles that never check a name can drop them). */
 let normalised:
-  | { blocked: string[]; short: RegExp[]; allowed: Set<string>; reservedWords: Set<string>; reservedNames: Set<string> }
+  | {
+      blocked: Set<string>;
+      short: Map<string, number[][]>;
+      allowed: Set<string>;
+      reservedWords: Set<string>;
+      reservedNames: Set<string>;
+    }
   | undefined;
 const lists = () =>
   (normalised ??= {
-    blocked: BAD_WORDS.map(collapse),
-    short: SHORT_BAD_WORDS.map(shortWordPattern),
+    blocked: new Set(BAD_WORD_HASHES),
+    short: SHORT_BAD_HASHES.reduce((m, { h, runs }) => m.set(h, [...(m.get(h) ?? []), [...runs].map(Number)]), new Map<string, number[][]>()),
     allowed: new Set(ALLOWED_WORDS),
     reservedWords: new Set(RESERVED_WORDS.map(normalise)),
     reservedNames: new Set(RESERVED_NAMES.map(normalise)),
@@ -78,7 +79,7 @@ const looseLetters = (s: string) => s.toLowerCase().replace(/[@$]/g, (c) => LOOK
  * exempt (allowed) word: "Dickens" is fine, but an entry that runs out of an allowed word into its
  * neighbour ("…cock Sucker"-style) is still found.
  */
-function holdsBlocked(words: string[], exempt: boolean[], read: (w: string) => string, blocked: string[]): boolean {
+function holdsBlocked(words: string[], exempt: boolean[], read: (w: string) => string, blocked: Set<string>): boolean {
   // The joined letters, collapsed to runs of one letter, each run remembering where it lies in the raw letters.
   const runs: { ch: string; start: number; end: number }[] = [];
   const exemptRanges: [number, number][] = [];
@@ -94,16 +95,33 @@ function holdsBlocked(words: string[], exempt: boolean[], read: (w: string) => s
     }
   });
   const text = runs.map((r) => r.ch).join('');
-  return blocked.some((entry) => {
-    for (let i = text.indexOf(entry); i !== -1; i = text.indexOf(entry, i + 1)) {
+  // Every window of an entry's length, hashed: the entries ship only as hashes.
+  for (const length of BAD_WORD_LENGTHS) {
+    for (let i = 0; i + length <= text.length; i++) {
+      if (!blocked.has(blockHash(text.slice(i, i + length)))) continue;
       // The narrowest raw letters the match needs: a run of one letter can cross a word join ("Kay"
       // after "…k"), and either end of it will do, so a match inside an allowed word stays excused.
       const from = runs[i]!.end - 1;
-      const to = runs[i + entry.length - 1]!.start + 1;
+      const to = runs[i + length - 1]!.start + 1;
       if (!exemptRanges.some(([a, b]) => a <= from && to <= b)) return true;
     }
-    return false;
-  });
+  }
+  return false;
+}
+
+/**
+ * Whether `form` (a word's letters, repeats kept) is a short entry: its letters with repeats written once
+ * hash to an entry's, each run of one letter is at least as long as the entry's, and a final "s" or "es"
+ * may follow (the plural).
+ */
+function isShortEntry(form: string, short: Map<string, number[][]>): boolean {
+  for (const stem of [form, form.replace(/s$/, ''), form.replace(/es$/, '')]) {
+    const runs = stem.match(/(.)\1*/g);
+    if (!runs) continue;
+    const wanted = short.get(blockHash(runs.map((r) => r[0]).join('')));
+    if (wanted?.some((min) => min.length === runs.length && min.every((n, i) => runs[i]!.length >= n))) return true;
+  }
+  return false;
 }
 
 /**
@@ -122,7 +140,7 @@ export function isOffensive(s: string): boolean {
       const run = words.slice(i, j);
       if (run.length === 1 && exempt[i]) continue;
       const forms = [run.map(letters).join(''), run.map(looseLetters).join('')];
-      if (short.some((pattern) => forms.some((form) => pattern.test(form)))) return true;
+      if (forms.some((form) => isShortEntry(form, short))) return true;
     }
   }
   return false;

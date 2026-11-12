@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
-import { BAD_WORDS } from '@sg2/shared';
+import { LONG_FIXTURE, rot13 } from '../../../shared/src/names.fixture';
 import { authRouter } from './routes';
 import { signToken, verifyToken } from './tokens';
 
@@ -90,7 +90,7 @@ describe('POST /api/register', () => {
 
   it('refuses offensive and reserved usernames', async () => {
     const { url, store } = await startApp();
-    const word = BAD_WORDS.find((w) => w.length >= 4 && w.length <= 16)!;
+    const word = LONG_FIXTURE.map(rot13).find((w) => w.length >= 4 && w.length <= 16)!;
     for (const username of [word, 'Admin', 'Guest_12']) {
       const res = await post(url, '/api/register', { username, password: 'longenough' });
       expect(res).toEqual({ status: 400, body: { error: 'That name is not allowed' } });
@@ -202,7 +202,7 @@ describe('POST /api/name', () => {
     const { token } = (await post(url, '/api/register', { username: 'Rowan', password: 'longenough' })).body;
     expect(await nameAs(url, token, { name: 'Al' })).toEqual({ status: 400, body: { error: 'Names are 3 to 16 letters' } });
     expect(await nameAs(url, token, { name: 'Felix' })).toEqual({ status: 400, body: { error: 'That name is not allowed' } });
-    const word = BAD_WORDS.find((w) => w.length >= 4 && w.length <= 16)!;
+    const word = LONG_FIXTURE.map(rot13).find((w) => w.length >= 4 && w.length <= 16)!;
     expect(await nameAs(url, token, { name: word })).toEqual({ status: 400, body: { error: 'That name is not allowed' } });
     expect((await nameAs(url, token, {})).status).toBe(400);
   });

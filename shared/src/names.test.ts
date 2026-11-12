@@ -1,9 +1,13 @@
 // Adventurer names and the bad-word filter. Failures name a list entry by its index, never by the
-// word itself, so the blocklist is not printed into test output.
+// word itself, so the blocklist is not printed into test output. The words come from the ROT13 fixture.
 import { describe, expect, it } from 'vitest';
-import { BAD_WORDS, SHORT_BAD_WORDS } from './badwords';
+import { LONG_FIXTURE, SHORT_FIXTURE, rot13 } from './names.fixture';
 import { ALLOWED_WORDS, isOffensive, validateAdventurerName } from './names';
 import { validateUsername } from './validate';
+
+/** The blocklist, decoded from the ROT13 fixture in memory (badwords.ts ships hashes only). */
+const BAD_WORDS = LONG_FIXTURE.map(rot13);
+const SHORT_BAD_WORDS = SHORT_FIXTURE.map(rot13);
 
 const NOT_ALLOWED = 'That name is not allowed';
 const LETTERS_ONLY = 'Names can only use letters, with single spaces, hyphens or apostrophes between them';
@@ -283,3 +287,117 @@ describe('validateUsername', () => {
     expect(validateUsername('Rowan_01')).toBeNull();
   });
 });
+
+describe('the hashed blocklist', () => {
+  it('badwords.ts holds no fixture word in plain text', async () => {
+    // shared/ has no Node typings: a string-typed specifier keeps tsc out of node:fs
+    const fs: { readFileSync(p: string, enc: 'utf8'): string } = await import('node:fs' as string);
+    const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
+    const src = fs.readFileSync(here + 'badwords.ts', 'utf8').toLowerCase();
+    expect(src.includes('bad_word_hashes')).toBe(true); // never print the source: it is compared, not shown
+    const entries = [...BAD_WORDS, ...SHORT_BAD_WORDS];
+    const found = entries.flatMap((w, i) => (w.length >= 3 && src.includes(w) ? [i] : []));
+    expect(found).toEqual([]);
+  });
+
+  it('the hashed filter refuses exactly what the plain filter refused', () => {
+    const plain = plainIsOffensive(BAD_WORDS, SHORT_BAD_WORDS);
+    const LEET: Record<string, string> = { o: '0', i: '1', e: '3', a: '4', s: '5', t: '7' };
+    const variants = (w: string) => [
+      w, capitalise(w), w.toUpperCase(), `${capitalise(w)}s`, `${capitalise(w)}es`, w.split('').join('-'), w.split('').join(' '),
+      w.replace(/./g, '$&$&'), w.replace(/[oieast]/g, (c) => LEET[c]!), w.replace(/a/g, '@').replace(/s/g, '$'),
+      `Sir ${capitalise(w)}`, `${capitalise(w)}-Rook`, `Essex ${w}`, `${w} Dickens`, w.slice(0, -1), w.slice(1),
+      `${w.slice(0, 2)} ${w.slice(2)}`, `big_${w}_1`,
+    ];
+    // Seeded pseudo-names from syllables, so the two filters are also compared on names nobody chose.
+    let seed = 12345;
+    const next = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296;
+    const SYL = ['ba', 'ash', 'el', 'wen', 'ro', 'ok', 'mar', 'is', 'th', 'or', 'ne', 'li', 'ka', 'us', 'an', 'sh', 'it', 'co', 'ck', 'di', 'pu', 'ss', 'fa', 'gg', 'ni', 'cu', 'nt', 'ta', 'es', 'ho'];
+    const random = Array.from({ length: 4000 }, () => {
+      const n = 1 + Math.floor(next() * 4);
+      const word = () => capitalise(Array.from({ length: n }, () => SYL[Math.floor(next() * SYL.length)]).join(''));
+      return next() < 0.3 ? `${word()} ${word()}` : word();
+    });
+    const innocent = [
+      'Elowen', 'Thomas', 'Cassandra', 'Scunthorpe', 'Penistone', 'Sussex Rook', 'Dickens Rowe', 'Hancock', 'Mary-Ann',
+      'Cucumber', 'Pistachio', 'Arsenal', 'Michelle', 'Grape', 'Raccoon', 'Analise', 'Basement', 'Japan', 'Nigel', ...ALLOWED_WORDS,
+    ];
+    const names = [...BAD_WORDS.flatMap(variants), ...SHORT_BAD_WORDS.flatMap(variants), ...innocent, ...random];
+    expect(names.length).toBeGreaterThan(7500);
+    const differ = names.flatMap((n, i) => (isOffensive(n) === plain(n) ? [] : [i]));
+    expect(differ).toEqual([]);
+    // Both outcomes are exercised.
+    expect(names.filter((n) => isOffensive(n)).length).toBeGreaterThan(3000);
+    expect(names.filter((n) => !isOffensive(n)).length).toBeGreaterThan(1000);
+  });
+
+  it('lets a wider list of ordinary names through, the Scunthorpe kind included', () => {
+    const ordinary = [
+      'Abigail', 'Adrian', 'Agatha', 'Alasdair', 'Alice', 'Amara', 'Ambrose', 'Anastasia', 'Angus', 'Aoife', 'Arthur',
+      'Astrid', 'Barnaby', 'Beatrix', 'Bertram', 'Bianca', 'Brigid', 'Caspian', 'Celeste', 'Clement', 'Cordelia', 'Cosmo',
+      'Dashiell', 'Delphine', 'Desmond', 'Dorian', 'Edmund', 'Eleanor', 'Emeric', 'Esther', 'Evander', 'Fenella', 'Finnian',
+      'Florence', 'Gareth', 'Genevieve', 'Gideon', 'Greta', 'Gwendolyn', 'Harriet', 'Horace', 'Imogen', 'Isolde', 'Ivo',
+      'Jasper', 'Josephine', 'Kasimir', 'Lavinia', 'Leopold', 'Lorcan', 'Lucinda', 'Magnus', 'Marigold', 'Maximilian',
+      'Mercy', 'Montague', 'Morwenna', 'Nathaniel', 'Niamh', 'Octavia', 'Oswin', 'Percival', 'Philippa', 'Quentin',
+      'Rosalind', 'Rufus', 'Saoirse', 'Septimus', 'Sylvia', 'Tabitha', 'Tarquin', 'Theodora', 'Ursula', 'Valentina',
+      'Wilhelmina', 'Xavier', 'Yusuf', 'Zenobia', 'Lowen Ashby', 'Tamsin Reed', 'Oren Vale', 'Kit Marlowe', 'Rook Hadley',
+      'Sussex', 'Middlesex', 'Penistone', 'Clitheroe', 'Scunthorpe', 'Cockatiel', 'Shiitake', 'Matsushita', 'Montenegro',
+    ];
+    expect(ordinary.filter((n) => validateAdventurerName(n) !== null)).toEqual([]);
+  });
+});
+
+/** A test-local copy of the plain-list filter that names.ts used before the hashes (its behaviour is the contract). */
+function plainIsOffensive(BAD: readonly string[], SHORT: readonly string[]): (s: string) => boolean {
+  const LOOKS: Record<string, string> = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's' };
+  const collapse = (s: string) => s.replace(/(.)\1+/g, '$1');
+  const SEPARATORS = /[\s'_-]+/;
+  const letters = (s: string) => s.toLowerCase().replace(/[0-9@$]/g, (c) => LOOKS[c] ?? '').replace(/[^a-z]/g, '');
+  const looseLetters = (s: string) => s.toLowerCase().replace(/[@$]/g, (c) => LOOKS[c]!).replace(/[^a-z]/g, '');
+  const shortWordPattern = (word: string) => {
+    const runs = word.match(/(.)\1*/g)!.map((run) => (run.length === 1 ? `${run[0]}+` : `${run[0]}{${run.length},}`));
+    return new RegExp(`^${runs.join('')}(?:e?s)?$`);
+  };
+  const blocked = BAD.map(collapse);
+  const short = SHORT.map(shortWordPattern);
+  const allowed = new Set(ALLOWED_WORDS);
+  const wordsOf = (s: string) => s.split(SEPARATORS).filter((w) => w !== '');
+  function holdsBlocked(words: string[], exempt: boolean[], read: (w: string) => string): boolean {
+    const runs: { ch: string; start: number; end: number }[] = [];
+    const exemptRanges: [number, number][] = [];
+    let at = 0;
+    words.forEach((word, i) => {
+      const raw = read(word);
+      if (exempt[i]) exemptRanges.push([at, at + raw.length]);
+      for (const ch of raw) {
+        const last = runs.at(-1);
+        if (last && last.ch === ch) last.end = at + 1;
+        else runs.push({ ch, start: at, end: at + 1 });
+        at++;
+      }
+    });
+    const text = runs.map((r) => r.ch).join('');
+    return blocked.some((entry) => {
+      for (let i = text.indexOf(entry); i !== -1; i = text.indexOf(entry, i + 1)) {
+        const from = runs[i]!.end - 1;
+        const to = runs[i + entry.length - 1]!.start + 1;
+        if (!exemptRanges.some(([a, b]) => a <= from && to <= b)) return true;
+      }
+      return false;
+    });
+  }
+  return (s: string) => {
+    const words = wordsOf(s);
+    const exempt = words.map((w) => allowed.has(letters(w)));
+    if (holdsBlocked(words, exempt, letters) || holdsBlocked(words, exempt, looseLetters)) return true;
+    for (let i = 0; i < words.length; i++) {
+      for (let j = i + 1; j <= words.length; j++) {
+        const run = words.slice(i, j);
+        if (run.length === 1 && exempt[i]) continue;
+        const forms = [run.map(letters).join(''), run.map(looseLetters).join('')];
+        if (short.some((pattern) => forms.some((form) => pattern.test(form)))) return true;
+      }
+    }
+    return false;
+  };
+}
