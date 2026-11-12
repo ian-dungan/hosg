@@ -28,6 +28,10 @@ describe('spellVisualFor', () => {
     const odd = spellVisualFor({ t: 'react', src: 1, dst: 2, reaction: 'quake' as ReactionId });
     expect(odd?.kind).toBe('generic');
   });
+  it("Soft Rain on an ally is a short flash, not a 6 s slot (only the White Mage's own rain lasts)", () => {
+    expect(spellVisualFor({ t: 'buff', src: 1, dst: 2, buff: 'rain', on: true })?.dur).toBeLessThan(1);
+    expect(spellVisualFor({ t: 'buff', src: 1, dst: 1, buff: 'rain', on: true })?.dur).toBe(6);
+  });
   it('maps every support buff and every debuff when it starts, and nothing when it ends', () => {
     for (const buff of [...Object.keys(BUFF_BITS), ...Object.keys(DEBUFF_BITS)] as (BuffId | DebuffId)[]) {
       expect(spellVisualFor({ t: 'buff', src: 1, dst: 2, buff, on: true }), buff).not.toBeNull();
@@ -63,11 +67,15 @@ describe('spellVisualFor', () => {
     expect(spellVisualFor({ t: 'nonsense' } as unknown as FxEvent)).toBeNull();
   });
   it('every elemental ability has a cast tone; the staff tint follows the job', () => {
-    for (const id of Object.keys(ABILITIES) as AbilityId[]) {
-      const a = ABILITIES[id];
-      if (!a.cast) continue;
-      expect(castTone(id), id).toBe(a.element ?? (a.school === 'light' ? 'light' : 'arcane'));
-    }
+    // every cast spell, by name: its element, Light for the White Mage's Light school
+    const tones: Partial<Record<AbilityId, string>> = {
+      skyfall_arc: 'lightning', hearthfall: 'fire', bastion_stone: 'earth', rootbreak: 'earth',
+      lantern_flare: 'light', wellspring: 'water', second_dawn: 'light', sun_mote: 'light',
+    };
+    const cast = (Object.keys(ABILITIES) as AbilityId[]).filter((id) => ABILITIES[id].cast);
+    expect(cast.sort()).toEqual((Object.keys(tones) as AbilityId[]).sort());
+    for (const id of cast) expect(castTone(id), id).toBe(tones[id]);
+    expect(castTone('slash')).toBe('arcane');
     expect(castTone('nope' as AbilityId)).toBe('arcane');
     expect(staffTint('white_mage')).toBe('white');
     expect(staffTint('black_mage')).toBe('black');
@@ -97,6 +105,18 @@ describe('VisualPool', () => {
     const b = pool.add(spec(2), 2);
     expect(b).toBe(a);
     expect(pool.slots).toHaveLength(MAX_LIVE);
+  });
+  it('never recycles a reaction or a revive (big) while a slot that is not big is live', () => {
+    const pool = new VisualPool();
+    const big: VisualSpec = { kind: 'blast', src: 500, dst: 501, dur: 1, big: true };
+    pool.add(big, 0); // the oldest of all
+    for (let i = 0; i < 100; i++) pool.add(spec(i), 1 + i * 0.001);
+    expect(pool.slots.some((s) => s.on && s.kind === 'blast')).toBe(true);
+    // a pool full of big visuals still recycles its oldest
+    const full = new VisualPool();
+    for (let i = 0; i < MAX_LIVE + 1; i++) full.add({ ...big, src: i }, i);
+    expect(full.live).toBe(MAX_LIVE);
+    expect(full.slots.some((s) => s.src === 0)).toBe(false);
   });
   it('clear() empties it (a zone change)', () => {
     const pool = new VisualPool();

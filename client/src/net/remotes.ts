@@ -10,6 +10,8 @@ import type { ZoneRoom } from './session';
 
 /** Speed (m/s) above which a remote adventurer plays the run cycle. */
 const RUN_ABOVE = 0.8;
+/** Remote adventurers within this of the camera's target cast shadows; farther ones do not, in m. */
+const SHADOW_NEAR_M = 20;
 /** Label height above the head (m). */
 const LABEL_LIFT = 0.45;
 /** Parked characters wait here, out of sight (their ground shadow follows them). */
@@ -46,6 +48,8 @@ interface Remote {
   castId: string; castAt: number; castTotal: number; castSince: number;
   eid: number;
   job: string;
+  /** It casts a shadow (near the camera's target: SHADOW_NEAR_M). */
+  shadow: boolean;
   /** The weapon and staff tint, cast pose and Mist Form fade the state asks for (applied on the next frame), and as drawn. */
   want: { weapon: WeaponId | 'none'; tint: 'white' | 'black' | undefined; casting: boolean; faded: boolean };
   drawn: { weapon: WeaponId | 'none' | ''; tint: 'white' | 'black' | undefined; casting: boolean; faded: boolean; job: string };
@@ -141,7 +145,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     label.append(top, hpEl, castEl);
     layer.appendChild(label);
     const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, castId: '', castAt: 0, castTotal: 1, castSince: 0,
-      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
+      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', shadow: true, hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
     remotes.set(sessionId, r);
     return r;
   }
@@ -153,7 +157,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     r.label.remove();
     if (scene.isDisposed || spareScene !== scene) { r.view.dispose(); return; }
     // a spare view goes back to the plain look: the next adventurer to use it gets their own on its first frame
-    r.view.setWeapon('sword'); r.view.setCape(null); r.view.setCasting(false); r.view.setFade(1);
+    r.view.setWeapon('sword'); r.view.setCape(null); r.view.setCasting(false); r.view.setFade(1); r.view.setCastShadow(true);
     r.view.root.position.copyFrom(PARK);
     r.view.root.setEnabled(false);
     spare.push(r.view);
@@ -231,6 +235,14 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
         }
         if (wa.casting !== dr.casting) { dr.casting = wa.casting; r.view.setCasting(wa.casting); }
         if (wa.faded !== dr.faded) { dr.faded = wa.faded; r.view.setFade(wa.faded ? 0.5 : 1); }
+        // only the adventurers near the camera's target cast shadows (with 2 m of hysteresis): far ones cost a whole
+        // skinned body in the shadow map each, for a shadow too small to see
+        const target = (camera as { target?: Vector3 } | null)?.target;
+        if (target) {
+          const d = Math.hypot(s.x - target.x, s.z - target.z);
+          const near = r.shadow ? d < SHADOW_NEAR_M + 2 : d < SHADOW_NEAR_M;
+          if (near !== r.shadow) { r.shadow = near; r.view.setCastShadow(near); }
+        }
         r.view.update(dt);
 
         // Name label: project the point above the head to CSS pixels.

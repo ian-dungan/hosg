@@ -64,6 +64,8 @@ export function createLook(scene: Scene, o: LookOpts): Look {
     csm.bias = 0.004; csm.normalBias = 0.025; csm.darkness = 0.38;
     csm.depthClamp = true; csm.autoCalcDepthBounds = false;
     for (const c of o.casters) if (!c.isDisposed()) csm.addShadowCaster(c, false);
+    // a caster may opt out while it is far (CharacterView.setCastShadow: remote adventurers beyond SHADOW_NEAR_M)
+    csm.customAllowRendering = (sm) => !(sm.getMesh().metadata as { noShadow?: boolean } | null)?.noShadow;
     shadow = csm;
   };
   const applyPost = () => {

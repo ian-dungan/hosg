@@ -96,6 +96,8 @@ export interface CharacterView {
   setCasting(on: boolean): void;
   /** The body's opacity (Mist Form: 0.5; 1: solid). */
   setFade(alpha: number): void;
+  /** Whether its body casts a shadow (remotes far from the camera do not: the shadow map renders every caster). */
+  setCastShadow(on: boolean): void;
   /** Recolours the cape (and hood) to `color` (hex), keeping its shading; null: the colour it was built in. */
   setCape(color: string | null): void;
   /** Ring under the feet when targeted. */

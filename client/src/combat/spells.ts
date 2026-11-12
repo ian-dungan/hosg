@@ -74,6 +74,8 @@ export function spellVisualFor(ev: FxEvent): VisualSpec | null {
     case 'buff': {
       if (!ev.on) return null;
       const b = ev.buff as string;
+      // an ally's Soft Rain is a short flash over them: only the White Mage's own holds its slot for the buff's time
+      if (b === 'rain' && ev.src !== ev.dst) return spec('rain', ev.src, ev.dst, { dur: 0.4 });
       if (has(BUFF_BITS, b) || has(DEBUFF_BITS, b)) return spec(b as VisualKind, ev.src, ev.dst);
       return spec('generic', ev.src, ev.dst);
     }
@@ -139,6 +141,9 @@ export class VisualPool {
   add(sp: VisualSpec, now: number): Visual {
     let v: Visual | null = null;
     for (const s of this.slots) if (!s.on) { v = s; break; }
+    // full: the oldest that is not big (a reaction or a revive is the visual that must not be lost), or the
+    // oldest of all when every slot is big
+    if (!v) for (const s of this.slots) if (!s.big && (!v || s.born < v.born)) v = s;
     if (!v) { v = this.slots[0]; for (const s of this.slots) if (s.born < v.born) v = s; }
     v.kind = sp.kind; v.src = sp.src; v.dst = sp.dst; v.dur = sp.dur; v.big = sp.big; v.ability = sp.ability; v.tint = sp.tint;
     v.on = true; v.t = 0; v.born = now; v.seed = (this.seq = (this.seq + 1) % 9973) * 0.6180339 + 0.37;
@@ -296,7 +301,9 @@ const glowMat = (scene: Scene, name: string): StandardMaterial => {
 const solidMat = (scene: Scene, name: string, glow: number): StandardMaterial => {
   const m = new StandardMaterial(name, scene);
   m.diffuseColor = Color3.White(); m.specularColor = Color3.Black(); m.emissiveColor = new Color3(glow, glow, glow);
-  m.disableDepthWrite = false; m.backFaceCulling = true;
+  // no depth writes: rocks and puffs draw before the telegraphs (alphaIndex 500 < 1000), and a depth write would
+  // punch their shape out of a danger decal drawn after them
+  m.disableDepthWrite = true; m.backFaceCulling = true;
   return m;
 };
 
@@ -327,6 +334,13 @@ export interface Spells {
   readonly live: number;
   /** Instances drawn last frame (diagnostics). */
   readonly drawn: number;
+  /** The kinds of the live visuals (diagnostics for browser checks; allocates). */
+  kinds(): string[];
+  /**
+   * How fast pooled visuals play (1: as designed). Browser checks at about 1 fps set it low so that a reaction or a
+   * revive is still on screen for a screenshot; nothing in the game changes it.
+   */
+  timeScale: number;
   dispose(): void;
 }
 
@@ -651,7 +665,14 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
         // fire on Marked: a white-hot core, a fireball, two shock rings out to 3 m, a pillar of flame and a storm of
         // embers: the loudest moment in the game
         flash(cx, cy, cz, t, 3.6, 0.3, COL.fireCore);
-        if (t < 0.7) { const k = t / 0.7; gem.dot(cx, cy + 0.5 * k, cz, 2.2 + 3.2 * easeOut(k), k < 0.25 ? COL.fireHot : COL.fire, 0.9 * (1 - k) * (1 - k)); }
+        // a burst of fire round the target (a ring of flame balls flying out), never a dome over it: it stays in sight
+        if (t < 0.6) {
+          const k = t / 0.6;
+          for (let i = 0; i < 10; i++) {
+            const a = (i / 10) * Math.PI * 2 + v.seed, r = 0.6 + 2.6 * easeOut(k);
+            gem.dot(v.bx + Math.cos(a) * r, cy + 0.3 * Math.sin(k * Math.PI), v.bz + Math.sin(a) * r, 0.9 * (1 - 0.5 * k), k < 0.3 ? COL.fireHot : COL.fire, 0.95 * (1 - k));
+          }
+        }
         for (let i = 0; i < 3; i++) {
           const u = t - i * 0.08, k = clamp01(u / 0.5);
           if (u > 0) shock(v.bx, v.by, v.bz, 0.4 + 2.8 * easeOut(k) + i * 0.15, i === 1 ? COL.fireHot : i ? COL.gold : COL.fire, (1 - 0.15 * i) * (1 - k));
@@ -659,8 +680,9 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
         for (let i = 0; i < 7; i++) {   // a column of fireballs boiling up out of it
           const k = clamp01(t / 0.65 - i * 0.04);
           if (k <= 0 || k >= 1) continue;
-          const sw = Math.sin(i * 2.3 + t * 9) * 0.25;
-          gem.dot(v.bx + sw, v.by + 0.6 + k * (2.2 + i * 0.75), v.bz - sw, (1.5 - i * 0.14) * (1 - 0.5 * k), k < 0.3 ? COL.fireHot : i > 4 ? COL.ember : COL.fire, 0.95 * (1 - k));
+          // up from behind and beside it, not out of its middle
+          const a = i * 0.9 + v.seed, sw = 1.1 + 0.3 * Math.sin(i * 2.3 + t * 9);
+          gem.dot(v.bx + Math.cos(a) * sw, v.by + 0.6 + k * (2.2 + i * 0.75), v.bz + Math.sin(a) * sw, (0.9 - i * 0.08) * (1 - 0.5 * k), k < 0.3 ? COL.fireHot : i > 4 ? COL.ember : COL.fire, 0.9 * (1 - k));
         }
         sparks(v, cx, cy, cz, t, burst + 10, 8, 7, 0.38, COL.fire, COL.fireHot, 0.8, 7);
         for (let i = 0; i < 8; i++) {   // flame tongues
@@ -699,8 +721,9 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
         for (let i = 0; i < n; i++) {
           const d = (i / n) * 0.6, k = clamp01((t - d) / 0.9);
           if (k <= 0 || k >= 1) continue;
-          const a = rnd(v.seed, i) * Math.PI * 2, r = 0.3 + 0.5 * k;
-          puff.dot(v.bx + Math.cos(a) * r, v.by + 0.4 + k * 4.5, v.bz + Math.sin(a) * r, 0.8 + 1.3 * k, COL.white, Math.min(1, 1.3 * Math.sin(k * Math.PI)));
+          // a column of small, half-clear puffs rising round the target (never one opaque blob over it)
+          const a = rnd(v.seed, i) * Math.PI * 2, r = 0.7 + 0.5 * k;
+          puff.dot(v.bx + Math.cos(a) * r, v.by + 0.5 + k * 4.5, v.bz + Math.sin(a) * r, 0.35 + 0.6 * k, COL.white, 0.5 * Math.sin(k * Math.PI));
         }
         flash(cx, cy, cz, t, 2.4, 0.35, COL.waterCore);
         shock(v.bx, v.by, v.bz, 0.5 + 5.5 * easeOut(clamp01(t / 0.7)), COL.water, 0.9 * (1 - clamp01(t / 0.8)));
@@ -770,16 +793,19 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
     }
   };
 
-  return {
+  const api: Spells = {
+    timeScale: 1,
+    kinds() { return pool.slots.filter((v) => v.on).map((v) => v.kind); },
     play(sp) {
-      const v = pool.add(sp, performance.now());
-      // both ends where they stand now (an end out of view starts at the other, so nothing flies from the origin)
+      // both ends where they stand now (an end out of view starts at the other, so nothing flies from the origin);
+      // with neither in view there is nothing to draw, and no slot is taken (nor a live one recycled)
       const okA = sp.src >= 0 && o.locate(sp.src, A), okB = sp.dst >= 0 && o.locate(sp.dst, B);
+      if (!okA && !okB) return;
+      const v = pool.add(sp, performance.now());
       if (okA) { v.ax = A.x; v.ay = A.y; v.az = A.z; v.ah = A.h; }
       if (okB) { v.bx = B.x; v.by = B.y; v.bz = B.z; v.bh = B.h; }
       if (okA && !okB) { v.bx = v.ax; v.by = v.ay; v.bz = v.az; v.bh = v.ah; }
       if (okB && !okA) { v.ax = v.bx; v.ay = v.by; v.az = v.bz; v.ah = v.bh; }
-      if (!okA && !okB) v.on = false;   // neither end is in view: nothing to draw
     },
     begin() { for (const b of batches) b.begin(); },
     caster(x, y, z, tone, t) {
@@ -830,7 +856,7 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
       }
       if (marks & MARK_BITS.rooted) {         // earth: stones round its feet
         for (let i = 0; i < 4; i++) { const a = i * 1.5708 + 0.4; rock.put(x + Math.cos(a) * 0.8, y - 0.05, z + Math.sin(a) * 0.8, 0.35, 0.45, 0.35, COL.earth, 1, a, 0.3); }
-        ring.put(x, y + 0.06, z, 0.85, 1, 0.85, rgb(PALETTE.meadow), 0.5);
+        ring.put(x, y + 0.06, z, 0.85, 1, 0.85, COL.heal, 0.5);
       }
       if (marks & MARK_BITS.dazed) {          // gold stars circling its head
         for (let i = 0; i < 3; i++) { const a = t * 3 + i * 2.094; gem.put(x + Math.cos(a) * 0.45, y + h + 0.15, z + Math.sin(a) * 0.45, 0.13, 0.13, 0.13, COL.gold, 0.95, a * 2); }
@@ -843,7 +869,7 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
       }
     },
     update(dt) {
-      pool.step(dt);
+      pool.step(dt * api.timeScale);
       const q = o.quality();
       for (const v of pool.slots) if (v.on) { track(v); draw(v, q); }
       drawn = 0;
@@ -858,4 +884,5 @@ export function createSpells(scene: Scene, o: { quality: () => Quality; locate: 
       add.dispose(); rockMat.dispose(); puffMat.dispose();
     },
   };
+  return api;
 }

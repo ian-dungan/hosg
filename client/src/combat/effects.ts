@@ -9,7 +9,7 @@
 // small bolt in the staff's tint; melee weapons keep the blade arc.
 import { Color3, Matrix, Mesh, MeshBuilder, StandardMaterial, Vector3, VertexData, type Scene } from '@babylonjs/core';
 import {
-  ABILITIES, BEDROCK_R, BUFF_BITS, ENEMY_ATTACKS, JOBS, MELEE_REACH, TICK_HZ, WEAPONS, isJobId, type AbilityId, type FxEvent, type WeaponId,
+  ABILITIES, BEDROCK_SHIELD, BUFF_BITS, ENEMY_ATTACKS, JOBS, MELEE_REACH, TICK_HZ, WEAPONS, isJobId, type AbilityId, type FxEvent, type WeaponId,
 } from '@sg2/shared';
 import { castTone, createSpells, spellVisualFor, staffTint, type Spells } from './spells';
 import { capeFor } from '../player/character';
@@ -215,8 +215,11 @@ export function createEffects(o: EffectsOpts): Effects {
     } else shelterBy.delete(p.eid);
     if (bits) spells.aura(x, y, z, h, bits, clockT);
   };
+  /** The state's map keys for enemy ids, made once each (no string per enemy per frame). */
+  const enemyKeys = new Map<number, string>();
+  const keyOf = (eid: number) => { let k = enemyKeys.get(eid); if (k === undefined) { k = String(eid); if (enemyKeys.size > 512) enemyKeys.clear(); enemyKeys.set(eid, k); } return k; };
   const drawEnemy = (eid: number, d: { view: { height: number }; x: number; y: number; z: number }) => {
-    const e = room.state.enemies?.get(String(eid));
+    const e = room.state.enemies?.get(keyOf(eid));
     if (!e || e.mode === 'dead') return;
     const marks = e.marks ?? 0, debuffs = e.debuffs ?? 0;
     if (marks || debuffs) spells.enemy(d.x, d.y, d.z, d.view.height, marks, debuffs, clockT);
@@ -224,25 +227,37 @@ export function createEffects(o: EffectsOpts): Effects {
 
   // ── per-frame state poses: others charging or dead ──
   const acts = new Map<string, string>();
+  /** The hitters of this batch's Bedrock reactions (reused). */
+  const bedrockBy: number[] = [];
+  /** The (source, ability) of this batch's elemental hits so far (reused). */
+  const splashSrc: number[] = [], splashBy: string[] = [];
   let meDead = false;
 
   return {
     handle(events, myEid) {
       me = myEid;
+      // Bedrock's shields arrive as `shield` events from the reaction's hitter in the same batch: each draws as the
+      // stone ring round the adventurer it really shields (party members only), in place of the plain bubble
+      bedrockBy.length = 0; splashSrc.length = 0; splashBy.length = 0;
+      for (const ev of events) if (ev.t === 'react' && ev.reaction === 'bedrock') bedrockBy.push(ev.src);
       for (const ev of events) {
-        const sp = spellVisualFor(ev);
-        if (sp) spells.play(sp);
+        if (ev.t === 'shield' && ev.amount === BEDROCK_SHIELD && bedrockBy.includes(ev.src)) {
+          spells.play({ kind: 'bedrockRing', src: ev.dst, dst: ev.dst, dur: 1.5, big: true });
+        } else {
+          const sp = spellVisualFor(ev);
+          if (sp && ev.t === 'hit' && ev.element !== undefined) {
+            // a splash (Hearthfall's, Blast's): the first hit of a source's ability in a batch draws its full visual,
+            // the others a small impact on their own target only
+            let seen = false;
+            for (let i = 0; i < splashSrc.length; i++) if (splashSrc[i] === ev.src && splashBy[i] === ev.by) seen = true;
+            if (seen) { sp.src = ev.dst; sp.big = false; sp.ability = undefined; }
+            else { splashSrc.push(ev.src); splashBy.push(ev.by); }
+          }
+          if (sp) spells.play(sp);
+        }
         if (ev.t === 'buff') {
           if (ev.buff === 'aegis' || ev.buff === 'aegis_ally') { if (ev.on) aegisKind.set(ev.dst, ev.buff); }
           else if (ev.buff === 'sheltered') { if (ev.on) shelterBy.set(ev.dst, ev.src); else shelterBy.delete(ev.dst); }
-        } else if (ev.t === 'react' && ev.reaction === 'bedrock' && locate(ev.dst, A)) {
-          // a stone ring rises round each adventurer the reaction shields
-          room.state.players?.forEach((p) => {
-            if (p.dead || p.eid === undefined || p.eid < 0) return;
-            const at = p.eid === me ? game.rig.position : null;
-            const x = at ? at.x : p.x, z = at ? at.z : p.z;
-            if (Math.hypot(x - A.x, z - A.z) <= BEDROCK_R) spells.play({ kind: 'bedrockRing', src: p.eid, dst: p.eid, dur: 1.5, big: true });
-          });
         }
         switch (ev.t) {
           case 'hit': {

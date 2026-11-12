@@ -55,7 +55,8 @@ const C = {
 const JOINTS = ['base', 'hips', 'torso', 'head', 'eyes', 'hair', 'capeA', 'capeB', 'scarf',
   'uArmL', 'fArmL', 'uArmR', 'fArmR', 'thighL', 'shinL', 'thighR', 'shinR',
   'bladeHand', 'shieldArm', 'bowHand', 'prop', 'propL', 'bladeHip', 'shieldBack', 'bowBack',
-  'gsHand', 'gsBack', 'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'bladeBack'] as const;
+  'gsHand', 'gsBack', 'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'bladeBack',
+  'cueW', 'cueR', 'cueP', 'cueD', 'cueDh', 'cueN', 'cueWM', 'cueBM'] as const;
 type Joint = typeof JOINTS[number];
 const PARENT: Record<Joint, Joint | null> = {
   base: null, hips: 'base', torso: 'hips', head: 'torso', eyes: 'head', hair: 'head',
@@ -66,6 +67,8 @@ const PARENT: Record<Joint, Joint | null> = {
   bladeHip: 'hips', shieldBack: 'capeA', bowBack: 'torso',
   gsHand: 'fArmR', gsBack: 'capeA', dagR: 'fArmR', dagL: 'fArmL', dagBack: 'capeB',
   staffWHand: 'fArmR', staffBHand: 'fArmR', staffWBack: 'capeA', staffBBack: 'capeA', bladeBack: 'capeA',
+  // each job's own silhouette cue (buildJobCues): shown for that job only
+  cueW: 'torso', cueR: 'head', cueP: 'head', cueD: 'torso', cueDh: 'head', cueN: 'head', cueWM: 'head', cueBM: 'head',
 };
 type V3 = [number, number, number];
 type Pivots = Record<Joint, V3>;
@@ -82,6 +85,7 @@ function humanPivots(sh = 0.235): Pivots {
     bladeHip: [-0.19, 0.9, 0.06], shieldBack: [0, 1.12, -0.21], bowBack: [0, 1.1, -0.2],
     gsHand: [sh + 0.025, 0.73, 0.02], gsBack: [0, 1.3, -0.14], dagR: [sh + 0.025, 0.73, 0.02], dagL: [-sh - 0.025, 0.73, 0.02], dagBack: [0, 0.98, -0.2],
     staffWHand: [sh + 0.025, 0.73, 0.02], staffBHand: [sh + 0.025, 0.73, 0.02], staffWBack: [0, 1.3, -0.14], staffBBack: [0, 1.3, -0.14], bladeBack: [0, 1.3, -0.14],
+    cueW: [0, 1.28, 0], cueR: [0, 1.6, 0], cueP: [0, 1.6, 0], cueD: [0, 1.28, 0], cueDh: [0, 1.6, 0], cueN: [0, 1.5, 0], cueWM: [0, 1.6, 0], cueBM: [0, 1.6, 0],
   };
 }
 /** The old compact layout, kept for the (minimal) enemy models. */
@@ -95,6 +99,7 @@ function legacyPivots(): Pivots {
     bladeHip: [-0.2, 0.65, 0.05], shieldBack: [0, 0.9, -0.2], bowBack: [0, 0.9, -0.2],
     gsHand: [0.3, 0.6, 0.02], gsBack: [0, 0.9, -0.2], dagR: [0.3, 0.6, 0.02], dagL: [-0.3, 0.6, 0.02], dagBack: [0, 0.7, -0.15],
     staffWHand: [0.3, 0.6, 0.02], staffBHand: [0.3, 0.6, 0.02], staffWBack: [0, 0.9, -0.2], staffBBack: [0, 0.9, -0.2], bladeBack: [0, 0.9, -0.2],
+    cueW: [0, 1.1, 0], cueR: [0, 1.4, 0], cueP: [0, 1.4, 0], cueD: [0, 1.1, 0], cueDh: [0, 1.4, 0], cueN: [0, 1.3, 0], cueWM: [0, 1.4, 0], cueBM: [0, 1.4, 0],
   };
 }
 
@@ -190,7 +195,9 @@ class Geo {
     const vd = new VertexData();
     vd.positions = this.pos; vd.normals = this.nrm; vd.colors = this.col; vd.indices = this.idx;
     vd.matricesIndices = this.mi; vd.matricesWeights = this.mw;
-    vd.applyToMesh(mesh, this.tag.some((t) => t > 0)); // updatable when it has job-coloured cloth (its colours change)
+    vd.applyToMesh(mesh, false);
+    // only the colours change (the job-coloured cloth: setCape), so only they are updatable
+    if (this.tag.some((t) => t > 0)) mesh.setVerticesData('color', this.col, true);
     return mesh;
   }
 }
@@ -735,6 +742,26 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
     // hood folded over the shoulders
     k.lathe('torso', [0, 0, -0.015], [[1.22, 0.2], [1.27, 0.215], [1.33, 0.17], [1.37, 0.12]], cp.color, { seg: 16, sz: 0.88, arc: [Math.PI * 0.42, Math.PI * 1.58],
       paint: (w) => (w.y < 1.235 ? cp.trim : undefined) });
+    // a tabard down the front in the same job-coloured cloth (gold-edged), so the job reads from the front as well
+    {
+      const szT = 0.78 + belly * 0.25;
+      const asc = [...prof].sort((a, b) => a[0] - b[0]);
+      const rAt = (y: number) => {
+        for (let i = 1; i < asc.length; i++) if (y <= asc[i][0]) { const [y0, r0] = asc[i - 1], [y1, r1] = asc[i]; return r0 + ((r1 - r0) * (y - y0)) / Math.max(1e-6, y1 - y0); }
+        return asc[asc.length - 1][1];
+      };
+      const topY = 1.24, botY = hem - 0.03, tg: V3[][] = [];
+      for (let i = 0; i <= 8; i++) {
+        const y = topY - (i / 8) * (topY - botY), r = Math.max(0.05, rAt(Math.max(y, hem + 0.005)));
+        const half = Math.min(r * 0.8, 0.065 + (topY - y) * 0.05), row: V3[] = [];
+        for (let j = 0; j <= 4; j++) {
+          const x = (j / 4 - 0.5) * 2 * half;
+          row.push([x, y, r * szT * Math.sqrt(Math.max(0, 1 - (x / r) ** 2)) + 0.014]);
+        }
+        tg.push(row);
+      }
+      k.sheet('body', tg, 0.012, cp.color, { paint: (w, uv) => (uv[0] < 0.08 || uv[0] > 0.92 || w.y < botY + 0.04 ? cp.trim : undefined) });
+    }
     k.g.tagNow = 0; k.g.tagSkip = null;
     // shield strap across the chest
     k.tube('body', [[0.13, 1.3, 0.04], [0.06, 1.2, 0.155], [-0.06, 1.06, 0.165], [-0.16, 0.95, 0.13], [-0.2, 0.93, 0.0]], 0.018, C.leather, { seg: 4, noOcc: true, flatten: 0.45 });
@@ -802,7 +829,65 @@ function buildWeapons(k: Kit, shieldFace: Color3, legacy: boolean) {
       k.box('bowBack', [0.05, 0.12, 0.012], [ox + 0.03 * Math.sin(0.35), oy + 0.04, -0.27 + (i - 1) * 0.02], P.roof, [0, 0, -0.35]);
     }
     buildJobWeapons(k);
+    buildJobCues(k);
   }
+}
+
+/** Which cue joints each job shows (its silhouette from the front: buildJobCues). */
+const JOB_CUES: Record<string, readonly Joint[]> = {
+  warrior: ['cueW'], ranger: ['cueR'], paladin: ['cueP'], dark_knight: ['cueD', 'cueDh'], ninja: ['cueN'], white_mage: ['cueWM'], black_mage: ['cueBM'],
+};
+/** Jobs whose cue covers the head (their hair's loose locks are hidden). */
+const HEADGEAR = new Set(['ranger', 'paladin', 'dark_knight', 'white_mage', 'black_mage']);
+const CUE_JOINTS: readonly Joint[] = ['cueW', 'cueR', 'cueP', 'cueD', 'cueDh', 'cueN', 'cueWM', 'cueBM'];
+
+/**
+ * One front-facing silhouette cue per job, so the seven read apart even with weapons sheathed (in towns): the Warrior's
+ * steel pauldrons, the Ranger's green hood, the Paladin's helm with its gold crest, the Dark Knight's spiked pauldrons
+ * and horned helm, the Ninja's mask and red headband, the White Mage's gold-edged white hood and the Black Mage's tall
+ * pointed hat. (Interim: Plan 5's gear on the model replaces these.)
+ */
+function buildJobCues(k: Kit) {
+  const HY = 1.565;
+  const deep = shade(P.rock, 0.42);
+  // a hood: a shell a little larger than the head with the face open, and a point falling at the back
+  const hood = (j: Joint, col: Color3, rim: Color3) => {
+    k.ellip(j, [0, HY + 0.06, -0.03], [0.275, 0.3, 0.28], col, { seg: 16, lat: 10, noOcc: true,
+      deform: (l) => { if ((l.z > 0.32 && l.y < 0.58 && l.y > -0.75) || l.y < -0.8) { l.x *= 0.82; l.y *= 0.82; l.z *= 0.82; } },
+      paint: (_w, _uv, l) => (l.z > 0.2 && l.y < 0.66 && l.y > -0.7 && Math.abs(l.x) > 0.62 ? rim : l.z > 0.25 && l.y > 0.55 && l.y < 0.72 ? rim : undefined) });
+    k.tube(j, [[0, HY + 0.12, -0.22], [0, HY - 0.02, -0.3], [0, HY - 0.2, -0.3], [0, HY - 0.34, -0.25]], [0.13, 0.1, 0.06, 0.01], col, { seg: 8, noOcc: true });
+  };
+  // Warrior: rounded steel pauldrons with a red rim
+  for (const sx of [-1, 1]) {
+    k.ellip('cueW', [sx * 0.255, 1.285, 0], [0.12, 0.08, 0.13], C.steel, { seg: 10, lat: 6, power: 0.8, noOcc: true,
+      paint: (_w, _uv, l) => (l.y < -0.1 ? P.roof : undefined), deform: (l) => { if (l.y < -0.35) l.y = -0.35; } });
+  }
+  // Ranger: a green hood
+  hood('cueR', shade(P.meadow, 0.62), shade(P.meadow, 0.45));
+  // Paladin: a steel half-helm with a nose guard and a tall gold crest front to back
+  k.ellip('cueP', [0, HY + 0.04, -0.01], [0.255, 0.3, 0.26], C.steel, { seg: 16, lat: 8, noOcc: true, deform: (l) => { if (l.y < 0.05) l.y = 0.05; } });
+  k.box('cueP', [0.035, 0.07, 0.03], [0, HY + 0.03, 0.235], C.steel);
+  k.box('cueP', [0.04, 0.16, 0.4], [0, HY + 0.38, -0.02], P.gold);
+  k.box('cueP', [0.05, 0.05, 0.42], [0, HY + 0.3, -0.02], shade(P.gold, 0.85));
+  // Dark Knight: spiked dark pauldrons, and a dark helm with two pale horns
+  for (const sx of [-1, 1]) {
+    k.ellip('cueD', [sx * 0.265, 1.295, 0], [0.14, 0.095, 0.14], DARK_STEEL, { seg: 10, lat: 6, power: 0.75, noOcc: true, deform: (l) => { if (l.y < -0.3) l.y = -0.3; } });
+    k.cyl('cueD', 0, 0.07, 0.2, [sx * 0.3, 1.43, 0], shade(DARK_STEEL, 1.2), 5, [0, 0, -sx * 0.5]);
+    k.tube('cueDh', [[sx * 0.17, HY + 0.12, 0.03], [sx * 0.29, HY + 0.22, 0.07], [sx * 0.32, HY + 0.38, 0.13], [sx * 0.27, HY + 0.5, 0.17]], [0.045, 0.035, 0.02, 0.004], C.cream, { seg: 6, noOcc: true });
+  }
+  k.ellip('cueDh', [0, HY + 0.04, -0.01], [0.255, 0.3, 0.26], DARK_STEEL, { seg: 16, lat: 8, noOcc: true, deform: (l) => { if (l.y < -0.05 && l.z < 0.5) l.y = -0.05; if (l.y < 0.05 && l.z >= 0.5) l.y = 0.05; } });
+  k.box('cueDh', [0.2, 0.02, 0.02], [0, HY + 0.02, 0.24], P.roof);   // a red eye slit
+  // Ninja: a charcoal mask over the lower face, a red headband with its tails at the back
+  k.ellip('cueN', [0, HY - 0.055, 0.0], [0.218, 0.15, 0.222], deep, { seg: 16, lat: 8, noOcc: true, deform: (l) => { if (l.y > 0.3) l.y = 0.3; } });
+  k.lathe('cueN', [0, 0, -0.01], [[HY + 0.06, 0.226], [HY + 0.11, 0.228]], P.roof, { seg: 16, caps: false, noOcc: true, sz: 1.0 });
+  for (const sx of [-1, 1]) k.tube('cueN', [[sx * 0.03, HY + 0.085, -0.22], [sx * 0.09, HY + 0.02, -0.32], [sx * 0.12, HY - 0.12, -0.36]], [0.03, 0.025, 0.006], P.roof, { seg: 4, flatten: 0.4, noOcc: true });
+  // White Mage: a white hood edged in gold
+  hood('cueWM', P.cloud, P.gold);
+  // Black Mage: a tall pointed hat with a wide brim and a gold band, in its royal blue
+  const hat = shade(P.skyDeep, 0.8);
+  k.lathe('cueBM', [0, HY + 0.15, -0.02], [[0, 0.46], [0.025, 0.44], [0.03, 0.2], [0.27, 0.15], [0.42, 0.07], [0.5, 0.0]], hat, { seg: 18, noOcc: true,
+    paint: (w) => (w.y > HY + 0.19 && w.y < HY + 0.25 ? P.gold : undefined) });
+  k.tube('cueBM', [[0, HY + 0.62, -0.02], [0, HY + 0.72, -0.08], [0, HY + 0.74, -0.18]], [0.06, 0.035, 0.008], hat, { seg: 8, noOcc: true });
 }
 
 // ── the Plan 3b weapons: greatsword, twin daggers and the two staffs ──
@@ -898,12 +983,12 @@ function buildJobWeapons(k: Kit) {
 
 /**
  * Each job's cape: with its weapon, how an adventurer's job reads at a glance from any side (PALETTE colours).
- * Warrior red, Ranger green, Paladin gold, Dark Knight dark crimson, Ninja charcoal violet, White Mage white,
+ * Warrior red, Ranger green, Paladin gold, Dark Knight dark crimson, Ninja violet, White Mage white,
  * Black Mage royal blue.
  */
 export const JOB_CAPE: Record<string, string> = {
   warrior: PALETTE.roof, ranger: shade(hex(PALETTE.meadow), 0.72).toHexString(), paladin: PALETTE.gold,
-  dark_knight: shade(hex(PALETTE.cliff), 0.42).toHexString(), ninja: shade(hex(PALETTE.rock), 0.42).toHexString(),
+  dark_knight: shade(hex(PALETTE.cliff), 0.42).toHexString(), ninja: shade(mix(hex(PALETTE.skyDeep), hex(PALETTE.roof), 0.5), 0.75).toHexString(),
   white_mage: PALETTE.cloud, black_mage: PALETTE.skyDeep,
 };
 /** The cape colour for a job (null: the default look). */
@@ -1368,7 +1453,8 @@ function shared(scene: Scene): Shared {
 // ───────────────────────── factory ─────────────────────────
 let charCounter = 0;
 /** Triangle count of the most recently built character body (diagnostics / dev harness). */
-export const characterStats = { lastTriangles: 0 };
+/** lastTriangles: everything a character was built with; lastActiveTriangles: what the last weapon or job change left in its index buffer. */
+export const characterStats = { lastTriangles: 0, lastActiveTriangles: 0 };
 
 export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts): CharacterView => {
   const kind = opts.kind;
@@ -1430,7 +1516,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const cloth = opts.color ? hex(opts.color) : P.rock;
   if (des.spec) {
     buildHuman(kit, des.spec, piv);
-    if (kind !== 'npc') buildWeapons(kit, kind === 'player' ? P.skyDeep : P.teal, false);
+    // (the player's shield is white and gold: a blue one read as the Black Mage's cape from behind)
+    if (kind !== 'npc') buildWeapons(kit, kind === 'player' ? P.cloud : P.teal, false);
     buildProps(kit, des.prop);
   } else {
     switch (kind) {
@@ -1453,9 +1540,24 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const capeBase = Float32Array.from(capeIdx.flatMap((i) => [geo.col[i * 4], geo.col[i * 4 + 1], geo.col[i * 4 + 2]]));
   const capeKind = Uint8Array.from(capeIdx.map((i) => geo.tag[i]));   // (copied: the Geo itself is not kept)
   const capeFrom = des.spec?.cape?.color ?? null, scarfFrom = des.spec?.scarf ?? null;
-  const colors = capeIdx.length ? Float32Array.from(geo.col) : null;
+  // only the vertex range that holds the cloth is kept and uploaded (not a copy of every colour)
+  const capeLo = capeIdx.length ? capeIdx[0] : 0, capeHi = capeIdx.length ? capeIdx[capeIdx.length - 1] + 1 : 0;
+  const colors = capeIdx.length ? Float32Array.from(geo.col.slice(capeLo * 4, capeHi * 4)) : null;
+  // Triangles by the joint they ride (weapons and job cues sit on joints of their own): only the body and what is shown
+  // are in the index buffer (one upload when that changes, still one draw call), so hidden weapons cost nothing.
+  const HIDEABLE = new Set<Joint>(['bladeHand', 'shieldArm', 'bladeHip', 'bladeBack', 'shieldBack', 'bowHand', 'bowBack', 'gsHand', 'gsBack',
+    'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'prop', 'propL', ...CUE_JOINTS]);
+  const baseTris: number[] = [];
+  const jointTris = new Map<Joint, number[]>();
+  for (let t = 0; t < geo.idx.length; t += 3) {
+    const j = JOINTS[geo.mi[geo.idx[t] * 4]];
+    const list = HIDEABLE.has(j) && geo.mw[geo.idx[t] * 4] === 1 ? (jointTris.get(j) ?? (jointTris.set(j, []), jointTris.get(j)!)) : baseTris;
+    list.push(geo.idx[t], geo.idx[t + 1], geo.idx[t + 2]);
+  }
+  const vertexCount = geo.pos.length / 3;
   let capeNow = '';
   body.parent = rigRoot;
+  body.metadata = { noShadow: false };
   body.material = mats.body;
   body.skeleton = skeleton;
   body.numBoneInfluencers = 2;
@@ -1509,8 +1611,11 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   let tint: 'white' | 'black' = 'white';
   let drawn = !humanoid;
   let lastCombat = -1e9;
+  let cueJob = '';
+  let shownKey = '';
+  const shown = new Set<Joint>();
   const applyWeapon = () => {
-    const show = (j: Joint, on: boolean) => nodes[j].scaling.setAll(on ? 1 : 0);
+    const show = (j: Joint, on: boolean) => { nodes[j].scaling.setAll(on ? 1 : 0); if (on) shown.add(j); else shown.delete(j); };
     // legacy (enemy) models only ever carry Plan 3's blade or bow
     const w = humanoid ? weapon : weapon === 'bow' ? 'bow' : weapon === 'none' ? 'none' : 'blade';
     const sword = w === 'blade' || w === 'sword';
@@ -1532,6 +1637,23 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     show('staffBBack', w === 'staff' && tint === 'black' && !drawn);
     show('prop', des.prop !== null && des.prop !== 'rag' && !(drawn && weapon !== 'none'));
     show('propL', des.prop === 'rag');
+    for (const j of CUE_JOINTS) show(j, humanoid && (JOB_CUES[cueJob]?.includes(j) ?? false));
+    // under a hood, a helm or a hat the hair's loose locks are tucked away (they would poke through)
+    if (humanoid) nodes.hair.scaling.setAll(HEADGEAR.has(cueJob) ? 0 : 1);
+    // the index buffer: the body, and only the weapon and cue joints shown
+    let key = '';
+    for (const j of HIDEABLE) if (shown.has(j)) key += j + ',';
+    if (key === shownKey) return;
+    shownKey = key;
+    let n = baseTris.length;
+    for (const j of shown) n += jointTris.get(j)?.length ?? 0;
+    const idx = new Uint32Array(n);
+    idx.set(baseTris, 0);
+    let at = baseTris.length;
+    for (const j of shown) { const l = jointTris.get(j); if (l) { idx.set(l, at); at += l.length; } }
+    body.setIndices(idx, vertexCount);
+    body.setBoundingInfo(bounds);
+    characterStats.lastActiveTriangles = n / 3;
   };
   applyWeapon();
 
@@ -1599,11 +1721,19 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         return [to.r / Math.max(0.02, f.r), to.g / Math.max(0.02, f.g), to.b / Math.max(0.02, f.b)];
       };
       const rc = ratio(capeFrom), rs = ratio(scarfFrom);
-      capeIdx.forEach((v, k) => {
-        const r = capeKind[k] === 2 ? rs : rc;
+      capeIdx.forEach((v0, k) => {
+        const r = capeKind[k] === 2 ? rs : rc, v = v0 - capeLo;
         colors[v * 4] = Math.min(1, capeBase[k * 3] * r[0]); colors[v * 4 + 1] = Math.min(1, capeBase[k * 3 + 1] * r[1]); colors[v * 4 + 2] = Math.min(1, capeBase[k * 3 + 2] * r[2]);
       });
-      body.updateVerticesData('color', colors);
+      body.getVertexBuffer('color')?.updateDirectly(colors, capeLo * 4);
+      // the job's silhouette cue follows its cloth colour (capeFor(job)); none for the default look
+      cueJob = '';
+      for (const j in JOB_CAPE) if (JOB_CAPE[j] === c) cueJob = j;
+      applyWeapon();
+    },
+    setCastShadow(on) {
+      // read by the shadow generator's customAllowRendering (world/look.ts): no re-registration, nothing allocated
+      (body.metadata as { noShadow?: boolean }).noShadow = !on;
     },
     setCasting(on) {
       if (on === casting) return;

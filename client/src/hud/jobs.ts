@@ -131,7 +131,7 @@ export function openJobBoard(
       h('div', 'sg-jb-h', more, `Buttons 1–${r.bar.length}`);
       const bar = h('div', 'sg-jb-abs', more);
       for (const d of r.bar) abilityCard(bar, d);
-      h('div', 'sg-jb-h', more, `Picks · ${countWord(r.chosen.length)} at a time`);
+      h('div', 'sg-jb-h', more, `Picks · ${countWord(JOBS[r.id].picks.solo.length)} at a time`);
       const picks = h('div', 'sg-jb-abs', more);
       for (const d of r.picks) {
         const c = abilityCard(picks, d, r.chosen.includes(d.id) ? 'picked' : '');
