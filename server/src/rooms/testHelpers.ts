@@ -55,7 +55,14 @@ export async function joinZone(url: string, token: string, zone: ZoneId = 'grove
   const client = new Client(url);
   const room = await client.joinOrCreate(zone, { token });
   room.reconnection.enabled = false;
-  room.onMessage('*', () => {}); // messages a test does not collect (fx, self, ...) are dropped quietly
+  // Messages a test does not collect (fx, self, ...) are kept for collectFromJoin, else dropped quietly.
+  const early = new Map<string, any[]>();
+  earlyMessages.set(room, early);
+  room.onMessage('*', (type: string | number, message: any) => {
+    const list = early.get(String(type)) ?? [];
+    if (list.length < 200) list.push(message);
+    early.set(String(type), list);
+  });
   await waitFor(() => room.state.players?.get(room.sessionId));
   return { client, room };
 }
@@ -72,6 +79,18 @@ export async function waitFor<T>(check: () => T | Promise<T>, ms = 2000): Promis
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const earlyMessages = new WeakMap<Room<any, any>, Map<string, any[]>>();
+
+/**
+ * Every message of `type` the room received since it joined (while no handler took that type) and
+ * from now on: for messages a room sends right after a join (`jobs`).
+ */
+export function collectFromJoin(room: Room<any, any>, type: string): any[] {
+  const seen = collect(room, type);
+  seen.push(...(earlyMessages.get(room)?.get(type) ?? []));
+  return seen;
+}
 
 /** Every message of `type` the room receives from now on. */
 export function collect(room: Room<any, any>, type: string): any[] {

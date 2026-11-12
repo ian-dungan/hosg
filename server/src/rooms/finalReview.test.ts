@@ -3,7 +3,7 @@
 // held dodge a knock replaces being refused rather than dropped.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Room } from '@colyseus/sdk';
-import { SPAWN, fallDamage, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { SPAWN, TICK_HZ, fallDamage, worldOf, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import { accountFor, collect, joinZone, saveAs, serverRoom, sleep, startServer, testClock, waitFor, type TestServer } from './testHelpers';
@@ -31,18 +31,29 @@ async function joinAt(url: string, store: Store, name: string, x: number, z: num
 
 describe('elite stagger bar with more than one adventurer (I1)', () => {
   it('four adventurers on a Mossback: maxStagger 310 and maxHp 2325 reach the state, and stagger is not clamped to a byte', async () => {
-    server = await startServer({ combatSeed: 7, zones: { grove: flatZone([MOSSBACK]) } });
+    // The combat clock stands still and the room is stepped by hand (one tick a step): the fight plays
+    // out the same however busy the machine is.
+    const clock = testClock(0);
+    server = await startServer({ combatSeed: 7, combatClock: clock.now, zones: { grove: flatZone([MOSSBACK]) } });
     const { url, store } = server;
-    const joined = [];
+    const joined: Awaited<ReturnType<typeof joinAt>>[] = [];
     for (const [i, [x, z]] of [[0, -17.6], [2.4, -20], [-2.4, -20], [0, -22.4]].entries()) joined.push(await joinAt(url, store, `A${i}`, x, z));
     const room = joined[0].room;
+    const zr = serverRoom(room) as any;
+    zr.setSimulationInterval(undefined);
     const moss = await waitFor(() => enemyOf(room, 'mossback'));
     expect(moss).toMatchObject({ maxHp: 750, maxStagger: 100 });
     for (const j of joined) j.room.send('target', { id: moss.eid }); // in reach: their autos put them all on its threat table
+    await waitFor(() => joined.every((j) => j.room.state.players.get(j.room.sessionId)?.target === moss.eid));
+    const engine = [...worldOf(zr.combat).enemies.values()].find((x) => x.kind === 'mossback')!;
+    for (let k = 0; k < 10 * TICK_HZ && Math.round(engine.stagger.max) !== 310; k++) {
+      clock.skip(1 / TICK_HZ);
+      zr.step();
+    }
+    expect(Math.round(engine.stagger.max)).toBe(310);
     await waitFor(() => enemyOf(room, 'mossback')?.maxStagger === 310, 3000);
     expect(enemyOf(room, 'mossback').maxHp).toBe(2325);
     // a stagger value past 255 is shown as it is
-    const zr = serverRoom(room) as any;
     const e = zr.state.enemies.get(String(moss.eid));
     e.stagger = 300;
     expect(e.stagger).toBe(300);

@@ -2,6 +2,9 @@
 // window, travel through open exits, one session per account across every room, and the zone's
 // fight: the shared combat engine run on the room's tick, fed with validated intents, and mirrored
 // to clients (state, per-client fx, `self`), with server-stamped dodges and knockbacks, death and respawn.
+// Jobs: each adventurer runs its current job (saved with it); jobs change only where the zone allows
+// (a town, a sanctuary), picks anywhere out of combat; kills give the current job xp; a revive
+// (Second Dawn) stands the dead up where they lay.
 // Each client's state is its own view (interest management): itself, and the adventurers, enemies and
 // telegraphs near it (INTEREST_RADIUS, with hysteresis), kept from a spatial grid rebuilt each step;
 // `online` is the zone's head count. Chat stays zone-wide, and fx follow the views.
@@ -16,6 +19,9 @@ import {
   DODGE_MIN_GAP_S,
   DODGE_REFILL_S,
   INTEREST_MAX_ADVENTURERS,
+  JOBS,
+  JOB_IDS,
+  KILL_XP,
   INTEREST_RANK_HYSTERESIS,
   MAX_HP,
   MAX_MOVE_ALLOWANCE,
@@ -34,22 +40,29 @@ import {
   makeAirTrack,
   parsePose,
   refillAllowance,
+  addJobXp,
   createCombat,
+  isJobId,
+  isJobsSave,
   loadoutOf,
-  plan3LoadoutOf,
+  newJobsSave,
   recordFor,
   worldOf,
+  xpToNext,
   zoneFullReason,
   type Carry,
   type Combat,
   type CombatantView,
+  type AbilityId,
   type DisplaceOut,
+  type EnemyKindId,
   type FxEvent,
   type Intent,
   type IntentAction,
+  type JobId,
   type JobsSave,
+  type JobsView,
   type Loadout,
-  type Plan3Loadout,
   type Pose,
   type Refusal,
   type S2C,
@@ -131,9 +144,9 @@ const INTENT_RATE = 20;
 const INTENT_BURST = 30;
 /** At most one `refused 'rate'` to a client this often (ms); further dropped intents are silent. */
 const RATE_REFUSAL_EVERY_MS = 250;
-const INTENTS: Record<string, IntentAction> = { target: 'target', ability: 'ability', swap: 'swap', dodge: 'dodge', loadout: 'loadout', respawn: 'respawn' };
-/** A fresh carry: what a join without a kept one starts with. */
-const FRESH_CARRY: Carry = { cooldowns: {}, gcd: 0, dodgeCharges: DODGE_CHARGES, dodgeRefillIn: 0, momentum: 0 };
+const INTENTS: Record<string, IntentAction> = { target: 'target', ability: 'ability', dodge: 'dodge', loadout: 'loadout', job: 'job', respawn: 'respawn' };
+/** A fresh carry for `job`: what a join without a kept one starts with (all of the job's dodges). */
+const freshCarry = (job: JobId): Carry => ({ cooldowns: {}, gcd: 0, dodgeCharges: JOBS[job].dodgeCharges, dodgeRefillIn: 0, momentum: 0 });
 /**
  * How long a leaver's combat state (cooldowns, dodge charges, Momentum) is kept for its next join, in
  * ms: the longest cooldown anything has, plus a margin. After that everything would be ready anyway.
@@ -143,19 +156,19 @@ const CARRY_KEEP_MS = (Math.max(...Object.values(ABILITIES).map((a) => a.cooldow
 /** A measured time (ms) and when it was taken (wall ms). */
 interface Timing { at: number; ms: number }
 
-/**
- * Bridge until Task 6 (the room still offers Plan 3's swap and free picks): what the engine runs for a
- * saved JobsSave. A Warrior whose picks are both Plan 3 free picks runs as Plan 3's Blade loadout (so
- * swap and `loadout { free }` work as before); any other job loadout runs as it is.
- */
-function runLoadout(jobs: JobsSave): Plan3Loadout | Loadout {
-  const l = loadoutOf(jobs), p3 = plan3LoadoutOf(l);
-  return l.job === 'warrior' && p3.free[0] === l.picks[0] && p3.free[1] === l.picks[1] ? p3 : l;
+/** `jobs` with the engine's job and picks (`l`) as current: that job's xp and every other record kept. */
+function withLoadout(jobs: JobsSave, l: Loadout): JobsSave {
+  return { current: l.job, jobs: { ...jobs.jobs, [l.job]: { ...recordFor(jobs, l.job), picks: [l.picks[0], l.picks[1]] } } };
 }
 
-/** Bridge until Task 6: `jobs` with the engine's job loadout as current; every other record, and that job's xp, kept. */
-function jobsWith(jobs: JobsSave, l: Loadout): JobsSave {
-  return { current: l.job, jobs: { ...jobs.jobs, [l.job]: { ...recordFor(jobs, l.job), picks: [l.picks[0], l.picks[1]] } } };
+/** What the owner is told of its jobs: every starting job (unplayed ones fresh), level from xp. */
+function jobsView(s: JobsSave): JobsView {
+  const jobs = {} as JobsView['jobs'];
+  for (const id of JOB_IDS) {
+    const r = recordFor(s, id);
+    jobs[id] = { level: r.level, xp: r.xp, next: xpToNext(r.xp), picks: [r.picks[0], r.picks[1]] };
+  }
+  return { current: s.current, jobs };
 }
 
 /** Drops timings older than TICK_WINDOW_MS (oldest first). */
@@ -177,24 +190,25 @@ const byte = (v: number) => Math.min(255, Math.max(0, Math.round(v)));
 const u16 = (v: number) => Math.min(65535, Math.max(0, Math.round(v)));
 
 /**
- * A carry `seconds` older: cooldowns, the GCD, the swap cooldown, the shield and sprint run down,
- * dodge charges refill, Momentum decays, and every "since" grows. Absent optional fields stay absent.
+ * A carry `seconds` older: cooldowns, the GCD, the shield and sprint run down, dodge charges refill
+ * (up to `maxCharges`, the job's), Momentum decays, and every "since" grows. Absent optional fields
+ * stay absent; Plan 3's swapCd is dropped.
  */
-export function ageCarry(c: Carry, seconds: number): Carry {
+export function ageCarry(c: Carry, seconds: number, maxCharges: number = DODGE_CHARGES): Carry {
   const s = Math.max(0, seconds);
   const cooldowns: Carry['cooldowns'] = {};
   for (const [id, left] of Object.entries(c.cooldowns) as [keyof Carry['cooldowns'], number][]) if (left - s > 0) cooldowns[id] = left - s;
   let charges = c.dodgeCharges, refill = c.dodgeRefillIn, rest = s;
-  while (charges < DODGE_CHARGES && rest >= refill) { rest -= refill; charges++; refill = DODGE_REFILL_S; }
+  while (charges < maxCharges && rest >= refill) { rest -= refill; charges++; refill = DODGE_REFILL_S; }
   const aged: Carry = {
-    cooldowns, gcd: Math.max(0, c.gcd - s), dodgeCharges: charges, dodgeRefillIn: charges < DODGE_CHARGES ? refill - rest : 0,
+    cooldowns, gcd: Math.max(0, c.gcd - s), dodgeCharges: charges, dodgeRefillIn: charges < maxCharges ? refill - rest : 0,
     momentum: Math.max(0, c.momentum - MOMENTUM_DECAY_PER_S * s),
   };
   const since = (v: number | undefined) => (v === undefined ? undefined : v + s);
   const left = (v: number | undefined) => (v === undefined ? undefined : Math.max(0, v - s));
   const extras: Record<string, number | undefined> = {
     sinceCombat: since(c.sinceCombat), sinceHurt: since(c.sinceHurt), sinceDealt: since(c.sinceDealt),
-    swapCd: left(c.swapCd), sprintLeft: left(c.sprintLeft), shieldLeft: left(c.shieldLeft), shield: c.shield,
+    sprintLeft: left(c.sprintLeft), shieldLeft: left(c.shieldLeft), shield: c.shield,
   };
   if (extras.shieldLeft === 0) extras.shield = 0;
   for (const [k, v] of Object.entries(extras)) if (v !== undefined) (aged as unknown as Record<string, number>)[k] = v;
@@ -228,10 +242,20 @@ interface Session {
   accountId: string;
   adventurerId: string;
   player: PlayerState;
-  /** The equipped weapon and free picks the engine runs (Plan 3's shape until Task 6). */
-  loadout: Plan3Loadout;
-  /** The adventurer's jobs, saved with it: as loaded, with the engine's job loadout folded in (bridge until Task 6). */
+  /**
+   * The adventurer's jobs, saved with it: as the store read them, then only ever changed from the
+   * engine's own job and picks and from xp (setJobs keeps it a valid JobsSave).
+   */
   jobs: JobsSave;
+  /** `jobs` is to be sent on the next step (a join or a reconnect). */
+  jobsDue: boolean;
+  /** A job change's save in flight, and whether another is wanted once it settles (they are coalesced). */
+  jobSave?: Promise<void>;
+  jobSaveAgain: boolean;
+  /** When the cast its state shows began (combat clock, s), or NaN: a new cast is told from a running one. */
+  castStart: number;
+  /** A revive that came while the client was away, sent when it reconnects. */
+  missedRevive?: S2C['revived'];
   /** Last accepted position (exact: the state's copy is quantised). */
   lastGood: { x: number; z: number; y: number };
   /** Last accepted facing (exact, as sent). */
@@ -248,11 +272,18 @@ interface Session {
   lastSeqMessage?: { type: 'displaced'; message: S2C['displaced'] } | { type: 'respawned'; message: S2C['respawned'] };
   /** Everyone else sees the body travel a displacement's path, one sample a step. */
   anim?: { path: { x: number; z: number; y: number }[]; i: number };
-  /** Dead (the engine said so): moves are ignored, and it is saved as respawned. deadAt is on the combat clock. */
+  /**
+   * Dead (the engine said so): moves are ignored, and it is saved as respawned. deadAt is on the combat
+   * clock. A revive (Second Dawn) ends it where it lies.
+   */
   dead: boolean;
   deadAt: number;
-  /** The death has been saved as respawned (at the statue in RESPAWN_ZONE), settling with the save. */
-  deathSave?: Promise<void>;
+  /** The death's save as respawned (at the statue in RESPAWN_ZONE): every later save waits for it. */
+  deathSave?: Promise<'saved' | 'refused' | 'failed'>;
+  /**
+   * The store holds this adventurer as respawned (RESPAWN_ZONE's statue): until a save of it alive lands
+   * (after a revive), its saves expect RESPAWN_ZONE there.
+   */
   respawnSaved: boolean;
   /** The last `self` sent, as JSON ('' = none yet). */
   lastSelf: string;
@@ -407,7 +438,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.onMessage('chat', this.guard('chat', (client, message) => this.onChat(client, message)));
     this.onMessage('target', this.guard('target', (client, message) => this.onTarget(client, message)));
     this.onMessage('ability', this.guard('ability', (client, message) => this.onAbility(client, message)));
-    this.onMessage('swap', this.guard('swap', (client) => this.onSwap(client)));
+    // Plan 3's weapon swap is gone; the Plan 3 client still sends it until Task 7: ignored silently.
+    this.onMessage('swap', this.guard('swap', () => {}));
+    this.onMessage('job', this.guard('job', (client, message) => this.onJob(client, message)));
     this.onMessage('dodge', this.guard('dodge', (client, message) => this.onDodge(client, message)));
     this.onMessage('loadout', this.guard('loadout', (client, message) => this.onLoadout(client, message)));
     this.onMessage('respawn', this.guard('respawn', (client) => this.onRespawn(client)));
@@ -471,13 +504,22 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // Combat state a relog keeps (cooldowns, timers, combat, shield, sprint, Momentum), from its last
     // session anywhere, or a fresh one; a hurt adventurer waits out the regen delay again (relogging
     // never heals sooner).
-    const carry: Carry = { ...(this.takeCarry(accountId) ?? FRESH_CARRY), ...(hp < MAX_HP ? { sinceHurt: 0 } : {}) };
+    // Its jobs as the store read them (a Plan 3 save reads as the Warrior or the Ranger); the engine
+    // runs the current job with its picks. (The adventurer row's own level and xp are untouched and
+    // unused until Plan 5: job xp lives in jobs.)
+    const loaded = isJobsSave(adventurer.jobs) ? adventurer.jobs : newJobsSave();
+    const maxCharges = JOBS[loaded.current].dodgeCharges;
+    const carry: Carry = { ...(this.takeCarry(accountId, maxCharges) ?? freshCarry(loaded.current)), ...(hp < MAX_HP ? { sinceHurt: 0 } : {}) };
     const now = this.nowS();
-    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp, loadout: runLoadout(adventurer.jobs), carry }, now);
-    const loadout = this.combat.loadout(eid)!;
-    const player = new PlayerState({
+    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp, loadout: loadoutOf(loaded), carry }, now);
+    const engineJobs = withLoadout(loaded, this.combat.jobLoadout(eid)!);
+    const jobs = isJobsSave(engineJobs) ? engineJobs : loaded;
+    const job = jobs.current;
+    // cast, castTotal, castAt and buffs stay unset (read as '' and 0) until their first event: an
+    // adventurer coming into a view arrives whole, and most never cast or carry a buff.
+    const player = Object.assign(new PlayerState(), {
       name, x: start.x, z: start.z, y, facing: start.facing, moving: false, hp, maxHp: MAX_HP,
-      eid, weapon: loadout.weapon, target: -1, dead: false, act: '', shield: 0,
+      eid, weapon: JOBS[job].weapon, target: -1, dead: false, act: '', shield: 0, job,
     });
     const session: Session = {
       client,
@@ -487,8 +529,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       accountId,
       adventurerId: adventurer.id,
       player,
-      loadout,
-      jobs: jobsWith(adventurer.jobs, this.combat.jobLoadout(eid)!),
+      jobs,
+      jobsDue: true,
+      jobSaveAgain: false,
+      castStart: NaN,
       lastGood: { x: start.x, z: start.z, y },
       facing: start.facing,
       movement,
@@ -520,6 +564,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.view.add(player);
     client.view = session.view;
     this.refreshView(session);
+    // A save the store had to repair (a Plan 3 one, or one with bad parts) is written back repaired.
+    if (adventurer.jobsRepaired) this.saveJobs(session);
   }
 
   onDrop(client: Client) {
@@ -540,7 +586,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.refreshView(session);
     // It may have missed the message that set the ack its moves must carry, and its `self` is stale.
     if (session.lastSeqMessage) this.sendTo(client, session.lastSeqMessage.type, session.lastSeqMessage.message as never);
+    if (session.missedRevive) this.sendTo(client, 'revived', session.missedRevive);
+    session.missedRevive = undefined;
     session.lastSelf = '';
+    session.jobsDue = true;
   }
 
   async onLeave(client: Client) {
@@ -686,31 +735,89 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   private onAbility(client: Client, message: unknown) {
     const session = this.actor(client);
-    const { slot, phase } = (typeof message === 'object' && message !== null ? message : {}) as { slot?: unknown; phase?: unknown };
+    const { slot, phase, ally } = (typeof message === 'object' && message !== null ? message : {}) as { slot?: unknown; phase?: unknown; ally?: unknown };
     if (!session || !Number.isSafeInteger(slot) || (phase !== 'press' && phase !== 'release')) return;
+    if (ally !== undefined && !Number.isSafeInteger(ally)) return;
     // A release with no charge in progress (the shot already loosed, auto-released or cancelled, or no
     // press at all) is dropped silently: the client sends one on every key-up of the slot.
     if (phase === 'release' && (this.combat.self(session.eid)?.charge ?? null) === null) return;
-    this.intent(session, 'ability', { t: 'ability', slot: slot as number, phase });
+    // (the engine checks the slot against the current job's five, and the ally it names)
+    this.intent(session, 'ability', { t: 'ability', slot: slot as number, phase, ...(ally !== undefined ? { ally: ally as number } : {}) });
   }
 
-  private onSwap(client: Client) {
-    const session = this.actor(client);
-    if (session && this.intent(session, 'swap', { t: 'swap' })) this.takeLoadout(session);
-  }
-
+  /** New picks for the current job (two distinct ids of its pool), anywhere out of combat: sent back as `jobs`. */
   private onLoadout(client: Client, message: unknown) {
     const session = this.actor(client);
-    const free = (message as { free?: unknown } | null)?.free;
-    if (!session || !Array.isArray(free) || free.length !== 2 || !free.every((f) => typeof f === 'string')) return;
-    if (this.intent(session, 'loadout', { t: 'loadout', free: [free[0], free[1]] as Plan3Loadout['free'] })) this.takeLoadout(session);
+    const picks = (message as { picks?: unknown } | null)?.picks;
+    if (!session || !Array.isArray(picks) || picks.length !== 2 || !picks.every((p) => typeof p === 'string')) return;
+    if (!this.intent(session, 'loadout', { t: 'loadout', picks: [picks[0], picks[1]] as [AbilityId, AbilityId] })) return;
+    this.takeJob(session);
+    this.sendJobs(session);
   }
 
-  /** The engine's loadout becomes the one saved with the adventurer. */
-  private takeLoadout(session: Session) {
-    session.loadout = this.combat.loadout(session.eid)!;
-    session.jobs = jobsWith(session.jobs, this.combat.jobLoadout(session.eid)!);
-    session.player.weapon = session.loadout.weapon;
+  /**
+   * A job change: refused (with the engine's reason, 'busy' while travelling, 'invalid' for anything
+   * but a starting job) or taken with that job's own saved picks, then sent as `jobs` and saved at once.
+   */
+  private onJob(client: Client, message: unknown) {
+    const session = this.sessions.get(client.sessionId);
+    if (!session) return;
+    const job = (message as { job?: unknown } | null)?.job;
+    if (!isJobId(job)) return this.refuse(session, 'job', 'invalid');
+    if (session.travelling) return this.refuse(session, 'job', 'busy');
+    const before = session.jobs;
+    if (!this.intent(session, 'job', { t: 'job', job, picks: recordFor(session.jobs, job).picks })) return;
+    this.takeJob(session);
+    this.mirrorPlayer(session);
+    this.sendJobs(session);
+    if (JSON.stringify(before) !== JSON.stringify(session.jobs)) this.saveJobs(session);
+  }
+
+  /** The engine's job and picks become the ones saved with the adventurer. */
+  private takeJob(session: Session) {
+    const l = this.combat.jobLoadout(session.eid);
+    if (l) this.setJobs(session, withLoadout(session.jobs, l));
+  }
+
+  /** Replaces the session's jobs, only with a valid JobsSave (anything else is logged and the last good one kept). */
+  private setJobs(session: Session, next: JobsSave) {
+    if (isJobsSave(next)) session.jobs = next;
+    else this.logFailure('jobs', 'A jobs value failed its check; the last good one is kept', new TypeError(JSON.stringify(next)));
+  }
+
+  private sendJobs(session: Session) {
+    session.jobsDue = false;
+    if (session.reconnection) session.jobsDue = true; // (sent when it is back)
+    else this.sendTo(session.client, 'jobs', jobsView(session.jobs));
+  }
+
+  /**
+   * Saves now, best effort as travels are (a failure is logged; the periodic save tries again). At most
+   * one such save is in flight per session: changes meanwhile are saved once it settles.
+   */
+  private saveJobs(session: Session) {
+    if (session.jobSave) {
+      session.jobSaveAgain = true;
+      return;
+    }
+    session.jobSave = (async () => {
+      do {
+        session.jobSaveAgain = false;
+        if (session.travelling || session.dead || this.sessions.get(session.client.sessionId) !== session) return;
+        await this.save(session);
+      } while (session.jobSaveAgain);
+    })().finally(() => { session.jobSave = undefined; });
+  }
+
+  /** The current job gains a kill's xp: `jobXp` always (0 from the Training Dummy), `jobs` when it changed. */
+  private gainXp(session: Session, kind: EnemyKindId) {
+    const job = session.jobs.current;
+    const had = recordFor(session.jobs, job).xp;
+    const { save, level, levelUp } = addJobXp(session.jobs, job, KILL_XP[kind] ?? 0);
+    this.setJobs(session, save);
+    const xp = recordFor(session.jobs, job).xp;
+    this.sendTo(session.client, 'jobXp', { job, gained: xp - had, xp, level, levelUp });
+    if (xp !== had) this.sendJobs(session);
   }
 
   /**
@@ -967,13 +1074,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.combat.removeAdventurer(session.eid);
   }
 
-  /** The account's kept combat state, aged by the time since it left; forgotten once taken or after CARRY_KEEP_MS. */
-  private takeCarry(accountId: string): Carry | undefined {
+  /**
+   * The account's kept combat state, aged by the time since it left (dodges refill up to `maxCharges`,
+   * its job's); forgotten once taken or after CARRY_KEEP_MS.
+   */
+  private takeCarry(accountId: string, maxCharges: number): Carry | undefined {
     const kept = this.accounts.carries.get(accountId);
     if (!kept) return undefined;
     this.accounts.carries.delete(accountId);
     const ago = this.wallMs() - kept.at;
-    return ago < CARRY_KEEP_MS ? ageCarry(kept.carry, ago / 1000) : undefined;
+    return ago < CARRY_KEEP_MS ? ageCarry(kept.carry, ago / 1000, maxCharges) : undefined;
   }
 
   /** A dead adventurer already saved as respawned in another zone: this room must not save it again. */
@@ -992,7 +1102,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       here.map(async (session) => {
         // A death still being saved (as respawned, in the grove): saving it again from here meanwhile
         // would be refused once that lands, and kick the dead adventurer. Wait for it, then look again.
-        if (session.dead && session.deathSave) {
+        if (session.deathSave) {
           await session.deathSave;
           if (session.travelling || this.savedElsewhere(session) || this.sessions.get(session.client.sessionId) !== session) return;
         }
@@ -1013,14 +1123,24 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
   }
 
-  /**
-   * Saves the adventurer as it is in this room (or with `to`'s zone and spot, for a travel), only while
-   * it is still saved in this zone: 'saved' if written, 'refused' if the store says it is not (saved
-   * elsewhere, or unknown), 'failed' if the store threw (logged).
-   */
+  /** Saves the adventurer (see write), once any save of its death has settled. */
   private async save(
-    session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>, expectZone: ZoneId = this.zone.id,
+    session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>, expectZone?: ZoneId,
   ): Promise<'saved' | 'refused' | 'failed'> {
+    if (session.deathSave) await session.deathSave;
+    return this.write(session, to, expectZone);
+  }
+
+  /**
+   * Writes the adventurer as it is in this room (or with `to`'s zone and spot, for a travel), only while
+   * it is still saved in `expectZone` (by default this zone, or RESPAWN_ZONE for one revived after its
+   * death was saved as respawned there): 'saved' if written, 'refused' if the store says it is not
+   * (saved elsewhere, or unknown), 'failed' if the store threw (logged).
+   */
+  private async write(
+    session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>, expectZone?: ZoneId,
+  ): Promise<'saved' | 'refused' | 'failed'> {
+    const expect = expectZone ?? (session.respawnSaved && !session.dead ? RESPAWN_ZONE : this.zone.id);
     // Where it really is (the state's copy is quantised, and mid-displacement shows the path).
     const { x, z } = session.lastGood, facing = session.facing;
     // Health as a whole number rounded down (at least 1): a relog never gains the fraction.
@@ -1031,14 +1151,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, jobs: session.jobs, ...as };
     let result: 'saved' | 'refused' | 'failed';
     try {
-      result = (await this.store.saveAdventurer(values, { zone: expectZone })) ? 'saved' : 'refused';
+      result = (await this.store.saveAdventurer(values, { zone: expect })) ? 'saved' : 'refused';
     } catch (err) {
       this.logFailure('save', 'Saving an adventurer failed', err);
       return 'failed';
     }
     if (result === 'saved' && dead) {
       this.accounts.respawns.set(session.accountId, this.wallMs() + RESPAWN_ADMIT_MS);
-      if (session.dead) session.respawnSaved = true;
+      session.respawnSaved = true; // (also when it was revived meanwhile: the store holds the statue until it is saved alive)
+    } else if (result === 'saved' && !to && !session.dead) {
+      if (session.respawnSaved) this.accounts.respawns.delete(session.accountId);
+      session.respawnSaved = false;
     }
     return result;
   }
@@ -1082,7 +1205,21 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.pendingDodge = undefined;
     session.player.moving = false;
     if (session.travelling) return; // the travel saves it again as respawned once it has landed
-    session.deathSave = this.save(session).then(() => {}); // save() marks it respawnSaved
+    session.deathSave = this.write(session); // write() marks it respawnSaved
+  }
+
+  /**
+   * The engine revived this adventurer where it lies (Second Dawn): alive again with the moves' ack it
+   * had (nothing moved it), no respawn due; told with `revived`. A death already saved as respawned is
+   * saved over by its next save (which expects RESPAWN_ZONE until then: see write).
+   */
+  private revived(session: Session, r: { hp: number; by: number }) {
+    if (!session.dead) return; // a death this room never saw: nothing to undo (the mirror shows it alive)
+    Object.assign(session, { dead: false, deadAt: -Infinity, respawnRetryAt: -Infinity, pendingDodge: undefined, awaitingDisplace: false, anim: undefined });
+    this.mirrorPlayer(session);
+    const message: S2C['revived'] = { hp: r.hp, by: r.by };
+    if (session.reconnection) session.missedRevive = message;
+    else this.sendTo(session.client, 'revived', message);
   }
 
   /** Up again at the statue: revived here in RESPAWN_ZONE; from anywhere else, a travel there (one save). */
@@ -1090,6 +1227,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (this.zone.id !== RESPAWN_ZONE) {
       const destination = this.rooms.get(RESPAWN_ZONE);
       if (!destination) return; // every zone's room exists while the server runs
+      // Gone from the fight at once: nobody can revive it now (a Second Dawn on it fizzles).
+      this.leaveFight(session);
       this.travel(session, { to: RESPAWN_ZONE, arrive: this.respawnSpot() }, destination, session.lastGood, true);
       return;
     }
@@ -1169,6 +1308,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         if (session.awaitingDisplace && !session.pendingDodge && target - session.awaitingSince > DISPLACE_RESYNC_S) this.resync(session);
         if (!session.dead && this.combat.get(session.eid)?.alive === false) this.died(session); // a death the step lost
         if (session.dead && !session.travelling && target - session.deadAt >= this.autoRespawnSeconds && wall >= session.respawnRetryAt) this.respawn(session);
+        if (session.jobsDue && !session.reconnection) this.sendJobs(session);
       });
     }
     this.safely('mirror', () => this.mirrorAll());
@@ -1192,8 +1332,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     for (const kill of out.kills) {
       for (const id of kill.credit) {
         const session = this.sessionByEid.get(id);
-        if (session) this.safely('credit', () => this.sendTo(session.client, 'credit', { kind: kill.kind }));
+        if (!session) continue;
+        this.safely('credit', () => {
+          this.sendTo(session.client, 'credit', { kind: kill.kind });
+          this.gainXp(session, kill.kind);
+        });
       }
+    }
+    for (const r of out.revived ?? []) {
+      const session = this.sessionByEid.get(r.id);
+      if (session) this.safely('revive', () => this.revived(session, r));
     }
   }
 
@@ -1403,9 +1551,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (session.reconnection) return;
     const view = this.combat.self(session.eid);
     if (!view) return;
+    const cast = view.cast ?? null;
     const self: SelfView = {
-      ...view, momentum: round2(view.momentum), cd: view.cd.map(round2), gcd: round2(view.gcd), swapCd: round2(view.swapCd),
+      ...view, momentum: round2(view.momentum), cd: view.cd.map(round2), gcd: round2(view.gcd),
+      swapCd: 0, swapLock: 0, // deprecated (Plan 3), until the engine's SelfView drops them (Task 7)
       dodgeNextIn: round2(view.dodgeNextIn), charge: view.charge === null ? null : round2(view.charge),
+      cast: cast && { ability: cast.ability, total: round2(cast.total), left: round2(cast.left) },
     };
     const json = JSON.stringify(self);
     if (json === session.lastSelf) return;
@@ -1445,7 +1596,26 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (p.target !== target) p.target = target;
     const shield = byte(v.shield);
     if (p.shield !== shield) p.shield = shield;
-    if (p.weapon !== session.loadout.weapon) p.weapon = session.loadout.weapon;
+    // Job, buffs and casts change only on events (a job change, a buff on or off, a cast's start or end).
+    const job = v.job ?? session.jobs.current, weapon = JOBS[job].weapon;
+    if (p.job !== job) p.job = job;
+    if (p.weapon !== weapon) p.weapon = weapon;
+    const buffs = v.buffs ?? 0;
+    if ((p.buffs ?? 0) !== buffs) p.buffs = buffs;
+    const cast = v.cast ?? null;
+    if (cast) {
+      const startS = worldOf(this.combat).now - (cast.total - cast.left);
+      if (p.cast !== cast.ability || !(Math.abs(startS - session.castStart) < 0.05)) {
+        p.cast = cast.ability;
+        p.castTotal = cast.total;
+        p.castAt = this.clockSteps(startS);
+        session.castStart = startS;
+      }
+    } else if ((p.cast ?? '') !== '') {
+      p.cast = '';
+      p.castTotal = 0;
+      session.castStart = NaN;
+    }
   }
 
   /** Enemies and telegraphs onto the state (the room's start; steps use mirrorAll). */
@@ -1460,7 +1630,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       const key = this.keyOf(v.id);
       let e = this.state.enemies.get(key);
       if (!e) {
-        e = new EnemySchema({
+        // (debuffs stays unset, read as 0, until its first debuff)
+        e = Object.assign(new EnemySchema(), {
           eid: v.id, kind: v.kind, x: v.x, z: v.z, y: v.y, facing: v.facing, hp: Math.ceil(v.hp), maxHp: u16(v.maxHp), stagger: 0,
           maxStagger: u16(v.maxStagger), marks: 0, mode: 'idle', target: -1, windup: '', windupTotal: 0, surging: false, staggerImmune: 0,
         });
@@ -1485,6 +1656,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       const surging = v.surging === true, staggerImmune = round2(v.staggerImmune ?? 0);
       if (e.surging !== surging) e.surging = surging;
       if (e.staggerImmune !== staggerImmune) e.staggerImmune = staggerImmune;
+      const debuffs = v.debuffs ?? 0;
+      if ((e.debuffs ?? 0) !== debuffs) e.debuffs = debuffs; // (unset until its first debuff)
     }
   }
 

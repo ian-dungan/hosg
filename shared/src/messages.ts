@@ -1,12 +1,16 @@
 // Message shapes between client and server, keyed by message type, and the reasons the server
 // gives when it refuses a join or ends a session (the client recognises them by exact text).
 import type { AbilityId } from './combat/abilities';
+import type { JobId } from './combat/jobs';
 import type { Displacement } from './combat/displace';
 import type { Refusal, SelfView } from './combat/engine';
 import type { EnemyKindId } from './combat/enemies';
 import type { FxEvent } from './combat/fx';
 import type { Pose } from './movement';
 import type { ZoneId } from './world/zones';
+
+/** Why a job change is refused where the zone allows none (`refused { action: 'job', reason: 'not-here' }`). */
+export { REASON_JOB_NOT_HERE } from './world/zones';
 
 /** A join refused because the account's adventurer has no name yet. */
 export const REASON_NAME_FIRST = 'Name your adventurer first';
@@ -28,9 +32,16 @@ export type C2S = {
   chat: { text: string };
   /** Target an enemy by engine id, or clear the target (null). */
   target: { id: number | null };
-  /** An ability slot (0..4: quick, finisher, signature, free, free): press, or release (Charged Shot). */
-  ability: { slot: number; phase: 'press' | 'release' };
-  /** Blade ⇄ Bow (only out of combat). */
+  /**
+   * An ability slot of the current job (0..4: quick, finisher, signature, pick, pick): press, or
+   * release (Charged Shot). ally: the engine id of the adventurer an ally-aimed ability should land on
+   * (an integer; else the aim rule picks one). The server checks the slot against the current job.
+   */
+  ability: { slot: number; phase: 'press' | 'release'; ally?: number };
+  /**
+   * @deprecated Plan 3's weapon swap: gone (the weapon is the job's). Kept only so the Plan 3 client
+   * builds until Task 7; the server ignores it silently.
+   */
   swap: Record<string, never>;
   /**
    * A dodge roll: the pose it starts from (checked like a move) and a direction. Its ack must be the
@@ -41,14 +52,27 @@ export type C2S = {
    * Any refused dodge means: back to the pose it was sent from (then any `correct`, as always).
    */
   dodge: Pose & { dx: number; dz: number };
-  /** The two free picks (only out of combat). */
-  loadout: { free: [AbilityId, AbilityId] };
+  /**
+   * The current job's two picks (two distinct ids of its pool), anywhere out of combat. The `free`
+   * shape is Plan 3's, deprecated: kept only so the Plan 3 client builds until Task 7; the server drops it.
+   */
+  loadout: { picks: [AbilityId, AbilityId] } | { free: [AbilityId, AbilityId] };
+  /**
+   * Change job: only where the zone allows it (a town, a sanctuary), out of combat, alive, not
+   * displaced, casting or charging. The job's own saved picks come with it; Momentum resets to 0.
+   */
+  job: { job: JobId };
   /** Get up again after dying (from DEATH_MIN_S on). */
   respawn: Record<string, never>;
 };
 
 /** What a refused intent was. */
-export type IntentAction = 'target' | 'ability' | 'swap' | 'dodge' | 'loadout' | 'respawn';
+export type IntentAction = 'target' | 'ability' | 'dodge' | 'loadout' | 'job' | 'respawn';
+
+/** One job's progress and picks as the owner sees them (level from xp; next = xp still needed, 0 at the cap). */
+export interface JobView { level: number; xp: number; next: number; picks: [AbilityId, AbilityId] }
+/** The owner's jobs: the current one, and every starting job (one never played shows level 1 with its solo picks). */
+export interface JobsView { current: JobId; jobs: Record<JobId, JobView> }
 
 /** Server → client. */
 export type S2C = {
@@ -84,10 +108,23 @@ export type S2C = {
    * bursts of 30).
    */
   refused: { action: IntentAction; reason: Refusal | 'stale' | 'rate' };
-  /** The adventurer's own combat numbers, at most 5 times a second, only when they changed. */
+  /**
+   * The adventurer's own combat numbers, at most 5 times a second, only when they changed: with its job,
+   * dodgeMax and cast (cast.left and timers rounded to 0.01 s). swapCd and swapLock are always 0
+   * (deprecated: they stay only while the engine's SelfView has them, until Task 7).
+   */
   self: SelfView;
   /** This adventurer shares the kill of an enemy of this kind. */
   credit: { kind: EnemyKindId };
+  /** The owner's jobs: a step after joining (or reconnecting), and after a job or picks change or xp. */
+  jobs: JobsView;
+  /** Xp a kill gave the current job (0 for the Training Dummy), sent with every `credit`. */
+  jobXp: { job: JobId; gained: number; xp: number; level: number; levelUp: boolean };
+  /**
+   * Revived where it lay (Second Dawn), with `hp`, by the adventurer with engine id `by`. Unlike
+   * `respawned` it starts no new ack and moves nothing: poses carry the same ack as before the death.
+   */
+  revived: { hp: number; by: number };
   /**
    * Revived in this room at the statue, at full health. Like a displacement it starts a new ack:
    * poses from now on carry `ack: seq`.

@@ -37,15 +37,26 @@ export const PlayerState = schema(
     maxHp: t.number(),
     /** The adventurer's combat engine id (fx events, enemy targets and telegraph owners use it). */
     eid: t.int32(),
-    /** The equipped weapon ('blade' | 'bow'). */
+    /** The current job's weapon (JOBS[job].weapon): 'blade' | 'bow' | 'sword' | 'greatsword' | 'daggers' | 'staff'. */
     weapon: t.string(),
     /** The engine id of the targeted enemy, or -1. */
     target: t.int32(),
     dead: t.boolean(),
     /** '' | 'charge' | 'dodge' | 'knock' | 'dead'. */
     act: t.string(),
-    /** Shield points left (Bulwark). */
+    /** Shield points left (Bulwark, Dawn Ward, Mistveil, ...). */
     shield: t.uint8(),
+    /** The current job (a JobId). */
+    job: t.string(),
+    /**
+     * The ability being cast ('' = none), its full cast time in seconds, and when it began on the zone's
+     * `clock` (as TelegraphState.at). Unset (read as '' and 0) until the adventurer's first cast.
+     */
+    cast: t.string(),
+    castTotal: t.float32(),
+    castAt: t.uint32(),
+    /** Live buffs as bits (BUFF_BITS); unset (read as 0) until the first buff. */
+    buffs: t.uint8(),
   },
   'PlayerState',
 );
@@ -78,6 +89,8 @@ export const EnemyState = schema(
     surging: t.boolean(),
     /** Seconds until its stagger bar can fill again (after a break); 0 = it can. */
     staggerImmune: t.float32(),
+    /** Live debuffs as bits (DEBUFF_BITS); unset (read as 0) until the first debuff. */
+    debuffs: t.uint8(),
   },
   'EnemyState',
 );

@@ -15,8 +15,10 @@
 // It also prints how many adventurers each bot had in its state (its view) and the online count field.
 //
 // --fight: bots that fight, with the shared brain (adventurerBrain, as the tuning simulation runs it).
-// Each asks GET /api/zone (60 a minute per account) and joins that room; every 4th bot swaps to the Bow
-// first, and every 5th (SPRINTERS) takes Sprint for its second free pick. In the
+// Each asks GET /api/zone (60 a minute per account) and joins that room. Most are Warriors (a new
+// adventurer's job); every 4th is a Ranger (the Bow), and every 5th (SPRINTERS) a Ranger with Sprint
+// for a pick. Jobs change only in a town, so a Ranger-to-be that starts in the Greenway first walks out
+// through its west gate into the grove, changes job there and walks back through the east gate. In the
 // Greenway, every tick it picks an enemy (its current one while it lives; else one attacking it; else the
 // nearest live one within TARGET_RANGE that fewer than FIGHTERS_PER_ENEMY others in its view fight, one
 // for an elite), or with none walks to the nearest camp it has not just visited (by findPath over the
@@ -50,14 +52,13 @@ import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
   DEATH_MIN_S,
-  PLAN3_DEFAULT_LOADOUT,
-  DODGE_CHARGES,
   DODGE_MIN_GAP_S,
   ENEMY_ATTACKS,
   ENEMY_KINDS,
   GCD_S,
   GROVE_EAST_GATE,
   INTEREST_RADIUS,
+  JOBS,
   MAX_ENEMIES_PER_ZONE,
   RESPAWN_CLEAR_RADIUS,
   RUN_SPEED,
@@ -74,9 +75,9 @@ import {
   isZoneId,
   makeAirTrack,
   makeBody,
-  plan3Slots,
   newBrainMemory,
   simulateDisplacement,
+  slotsFor,
   stepBody,
   withClearance,
   zoneDef,
@@ -86,6 +87,7 @@ import {
   type BodyInput,
   type BodyStep,
   type BrainMemory,
+  type CastView,
   type CombatantView,
   type EnemyAttackId,
   type EnemyKindId,
@@ -96,7 +98,8 @@ import {
   type TelegraphView,
   type Vec2,
   type AbilityId,
-  type WeaponId,
+  type JobId,
+  type Loadout,
   type ZoneId,
 } from '@sg2/shared';
 
@@ -124,9 +127,13 @@ const MAX_STEP_P95_MS = 15;
 const MAX_PEAK_RSS_MB = 400;
 /** Walking speed as a share of what the server allows (RUN_SPEED × its speed scale); sprinters walk at 1. */
 const WALK_SHARE = 0.95;
-/** Bots (by index mod 5) that walk at the browser's full speed and take Sprint (free picks Mend, Sprint). */
+/** Bots (by index mod 5) that walk at the browser's full speed and take Sprint (Rangers with Sprint and Field Dressing). */
 const SPRINTER = 0;
-const SPRINTER_FREE: [AbilityId, AbilityId] = ['mend', 'sprint'];
+const SPRINTER_PICKS: [AbilityId, AbilityId] = ['sprint', 'field_dressing'];
+/** A new adventurer's job and picks. */
+const NEW_LOADOUT: Loadout = { job: 'warrior', picks: [JOBS.warrior.picks.solo[0], JOBS.warrior.picks.solo[1]] };
+/** A job change not confirmed by `jobs` is asked again after this (ms). */
+const JOB_RETRY_MS = 2000;
 /** The browser stops sprinting this long before Sprint ends (client/src/combat/controller.ts). */
 const SPRINT_EARLY_S = 0.15;
 /** A sprinter presses Sprint when its walk goal is farther than this. */
@@ -148,8 +155,12 @@ const RACY_ROLLBACKS = ['busy'];
 const CHARGE_WALK_SCALE = 0.4;
 /** A dodge with no answer after this long is given up (the server resyncs a lost one after 1 s). */
 const DODGE_WAIT_MS = 1500;
-/** How many adventurers a bot lets fight one enemy (one elite) before it looks for another. */
-const FIGHTERS_PER_ENEMY = 2;
+/**
+ * How many adventurers a bot lets fight one enemy (one elite) before it looks for another. (Was 2 in
+ * Plan 3: with the jobs' traits, two Warriors kill a camp so fast that 60 s saw only 18-22 dodges
+ * against the gate of 20; one each gives 23-31, and the 120 s cycle still passes.)
+ */
+const FIGHTERS_PER_ENEMY = 1;
 const FIGHTERS_PER_ELITE = 1;
 /** Path search settings for a bot's walks (camps, the grove's east gate): coarse, so cheap. */
 const PATH_OPTS = { cell: 1, maxNodes: 60_000 };
@@ -395,8 +406,15 @@ class Bot {
   readonly sprinter: boolean;
   /** Predicts its rolls, sees its displacements late and rolls twice (PREDICTOR). */
   readonly predictor: boolean;
-  /** Its free picks. */
-  private readonly free: [AbilityId, AbilityId];
+  /** The job and picks it fights with (changed in the grove: see the file comment). */
+  private readonly loadout: Loadout;
+  /** The job and picks the server last said it has (its `jobs`), and when it last asked for its own. */
+  private jobNow: Loadout = NEW_LOADOUT;
+  private jobAskedAt = -Infinity;
+  /** It runs the job and picks it fights with. */
+  private get jobReady(): boolean {
+    return this.jobNow.job === this.loadout.job && this.jobNow.picks[0] === this.loadout.picks[0] && this.jobNow.picks[1] === this.loadout.picks[1];
+  }
   /** Sprinting (by the browser's rule: from Sprint's `use` fx) until then (performance.now ms). */
   private sprintUntil = -Infinity;
   /** A predictor's rolls sent and not answered yet, oldest first: where each went from and its predicted end. */
@@ -428,7 +446,8 @@ class Bot {
     this.hunter = fight && ELITE_HUNTERS.includes(index);
     this.sprinter = fight && index % 5 === SPRINTER;
     this.predictor = fight && index % 5 === PREDICTOR;
-    this.free = this.sprinter ? SPRINTER_FREE : [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]];
+    this.loadout = this.sprinter ? { job: 'ranger', picks: SPRINTER_PICKS }
+      : fight && index % 4 === 1 ? { job: 'ranger', picks: [JOBS.ranger.picks.solo[0], JOBS.ranger.picks.solo[1]] } : NEW_LOADOUT;
   }
 
   async join() {
@@ -441,10 +460,17 @@ class Bot {
     this.name = body.name ?? `bot ${this.index}`;
     this.token = body.token;
     await this.connect(fight ? await this.askZone() : zoneId);
-    // Loadout changes out of combat (saved with the adventurer, so they stay across travels): sprinters
-    // take Sprint, and a quarter of the fighters use the Bow.
-    if (this.sprinter) this.room.send('loadout', { free: this.free });
-    if (fight && this.index % 4 === 1) this.room.send('swap', {});
+  }
+
+  /**
+   * In a town: asks for its job and picks (saved with the adventurer, so they stay across travels),
+   * again every JOB_RETRY_MS until `jobs` shows them.
+   */
+  private askJob(now: number) {
+    if (this.jobReady || now - this.jobAskedAt < JOB_RETRY_MS) return;
+    this.jobAskedAt = now;
+    if (this.jobNow.job !== this.loadout.job) this.room.send('job', { job: this.loadout.job });
+    this.room.send('loadout', { picks: this.loadout.picks });
   }
 
   /** GET /api/zone: the room to join (60 a minute per account, so every bot asks for itself). */
@@ -471,6 +497,7 @@ class Bot {
     };
     room.onMessage('*', () => {});
     room.onMessage('self', (m: S2C['self']) => { this.selfView = m; this.selfAt = performance.now(); });
+    room.onMessage('jobs', (m: S2C['jobs']) => { this.jobNow = { job: m.current, picks: [m.jobs[m.current].picks[0], m.jobs[m.current].picks[1]] }; });
     room.onMessage('fx', (m: S2C['fx']) => this.onFx(m));
     room.onMessage('credit', (m: S2C['credit']) => { this.kills++; killsByKind[m.kind] = (killsByKind[m.kind] ?? 0) + 1; });
     // A predictor sees what moves it late (a slow downlink), all by the same lag, so in order.
@@ -747,17 +774,21 @@ class Bot {
     const down = (v: number) => Math.max(0, v - el);
     const localGcd = Math.max(0, GCD_S - (now - this.pressedAt) / 1000);
     return {
-      ...s, cd: s.cd.map(down), gcd: Math.max(down(s.gcd), localGcd), swapCd: down(s.swapCd), dodgeNextIn: down(s.dodgeNextIn),
+      ...s, cd: s.cd.map(down), gcd: Math.max(down(s.gcd), localGcd), dodgeNextIn: down(s.dodgeNextIn),
       charge: s.charge === null || this.releasedAt + 150 >= this.selfAt ? null : s.charge + el,
     };
   }
 
-  /** A fresh adventurer's own numbers (nothing used yet), with the weapon the state shows. */
-  private freshSelf(weapon: string): SelfView {
-    const w: WeaponId = weapon === 'bow' ? 'bow' : 'blade';
-    const slots = plan3Slots({ weapon: w, free: this.free });
+  /** A fresh adventurer's own numbers (nothing used yet), for the job and picks the server last said it has. */
+  private freshSelf(): SelfView {
+    const { job } = this.jobNow;
+    const slots = slotsFor(this.jobNow);
     const localGcd = Math.max(0, GCD_S - (performance.now() - this.pressedAt) / 1000);
-    return { momentum: 0, weapon: w, slots, cd: slots.map(() => 0), gcd: localGcd, swapCd: 0, swapLock: 0, dodgeCharges: DODGE_CHARGES, dodgeNextIn: 0, charge: null, inCombat: false };
+    const dodges = JOBS[job].dodgeCharges;
+    return {
+      momentum: 0, weapon: JOBS[job].weapon, slots, cd: slots.map(() => 0), gcd: localGcd, swapCd: 0, swapLock: 0, dodgeCharges: dodges, dodgeNextIn: 0,
+      charge: null, inCombat: false, job, dodgeMax: dodges, cast: null,
+    };
   }
 
   /** The brain's view of an enemy in the state. */
@@ -876,9 +907,16 @@ class Bot {
     if (this.diedAt !== null) this.noteProgress(now);
 
     if (this.zone !== 'greenway') {
-      // Back from a death (or started in the grove): to the east gate, and through it.
-      this.maybeSprint(dist(GROVE_EAST_GATE, this.body), this.agedSelf(now) ?? this.freshSelf(me.weapon), now);
+      // In the grove (a town) it takes its job first, standing; then (back from a death, or started in
+      // the grove, or come for its job) to the east gate, and through it.
+      if (!this.jobReady) return this.askJob(now);
+      this.maybeSprint(dist(GROVE_EAST_GATE, this.body), this.agedSelf(now) ?? this.freshSelf(), now);
       this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
+      return;
+    }
+    if (!this.jobReady && this.diedAt === null) {
+      // Its job can only be taken in a town: out through the west gate into the grove first.
+      this.walkRoute(greenwayLayout().westGate, dt, now, 1, true);
       return;
     }
 
@@ -890,15 +928,18 @@ class Bot {
     }
     // A `self` sent while the room was being joined can arrive before its handler is set (and the next
     // comes only when something changes): until one arrives it is a fresh adventurer.
-    const sv = this.agedSelf(now) ?? this.freshSelf(me.weapon);
-    const self: CombatantView & SelfView = {
+    const sv = this.agedSelf(now) ?? this.freshSelf();
+    const job = sv.job ?? this.jobNow.job;
+    const self: CombatantView & SelfView & { job: JobId; dodgeMax: number; cast: CastView } = {
       id: me.eid, team: 'adventurer', kind: 'adventurer', x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading,
       hp: me.hp, maxHp: me.maxHp, alive: !me.dead, shield: me.shield, marks: 0, stagger: 0, maxStagger: 0,
       targetId: me.target < 0 ? null : me.target, act: (me.act || '') as Act, windup: null, ...sv,
+      job, dodgeMax: sv.dodgeMax ?? JOBS[job].dodgeCharges, cast: sv.cast ?? null,
     };
     const telegraphs = this.telegraphs(now);
     for (const t of telegraphs) if (inShape(t.shape, this.body.x, this.body.z)) this.inside.add(t.id);
-    const act = adventurerBrain({ nowS: now / 1000, careful: this.careful, self, target: target ? this.enemyView(target, now) : null, telegraphs }, this.memory);
+    // (no allies: these bots fight alone, as Plan 3's did; mixed-job bots that help each other are Task 9's)
+    const act = adventurerBrain({ nowS: now / 1000, careful: this.careful, self, allies: [], target: target ? this.enemyView(target, now) : null, telegraphs }, this.memory);
     if (sv.charge === null && this.chargeSince !== null && now - this.chargeSince > 1000) this.chargeSince = null;
     const scale = this.chargeSince !== null || sv.charge !== null || me.act === 'charge' ? CHARGE_WALK_SCALE : 1;
     this.lastScale = `scale ${scale}, act '${me.act}', charge ${sv.charge}, pressed ${((now - this.pressedAt) / 1000).toFixed(2)} s ago, self ${((now - this.selfAt) / 1000).toFixed(2)} s old`;

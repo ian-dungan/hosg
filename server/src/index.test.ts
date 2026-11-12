@@ -2,8 +2,9 @@
 import { spawn } from 'node:child_process';
 import { createServer, type AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { Client } from '@colyseus/sdk';
 import { describe, expect, it } from 'vitest';
-import { SECRET } from './rooms/testHelpers';
+import { SECRET, waitFor } from './rooms/testHelpers';
 
 const entry = fileURLToPath(new URL('./index.ts', import.meta.url));
 
@@ -34,6 +35,46 @@ async function heldPort(): Promise<{ port: number; release: () => Promise<void> 
   const { port } = holder.address() as AddressInfo;
   return { port, release: () => new Promise((resolve) => holder.close(() => resolve())) };
 }
+
+/** Runs src/index.ts with `env` on a free port until it listens; the enemies a guest sees in the grove, then it is stopped. */
+async function groveEnemies(env: Record<string, string>): Promise<string[]> {
+  const { port, release } = await heldPort();
+  await release();
+  const child = spawn(process.execPath, ['--import', 'tsx', entry], {
+    env: { PATH: process.env.PATH ?? '', SG2_JWT_SECRET: SECRET, SG2_STORE: 'memory', SG2_PORT: String(port), ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    let out = '';
+    child.stdout.on('data', (chunk) => (out += chunk));
+    child.stderr.on('data', () => {});
+    await waitFor(() => out.includes('listening'), 15_000);
+    const url = `http://127.0.0.1:${port}`;
+    const { token } = (await (await fetch(`${url}/api/guest`, { method: 'POST' })).json()) as { token: string };
+    const room = await new Client(url).joinOrCreate('grove', { token });
+    room.onMessage('*', () => {});
+    await waitFor(() => room.state.players?.get(room.sessionId), 5000);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const kinds = [...room.state.enemies.values()].map((e: any) => `${e.kind}@${e.x},${e.z}`);
+    await room.leave();
+    return kinds;
+  } finally {
+    child.kill('SIGTERM');
+  }
+}
+
+describe('SG2_TEST_DUMMY', () => {
+  it('is off by default: the grove has no enemies; =1 adds one Training Dummy at (3, -11)', async () => {
+    expect(await groveEnemies({})).toEqual([]);
+    expect(await groveEnemies({ SG2_TEST_DUMMY: '1' })).toEqual(['dummy@3,-11']);
+  }, 40_000);
+
+  it('exits with one line for anything but 1, 0 or empty', async () => {
+    const { code, stderr } = await runServer({ SG2_STORE: 'memory', SG2_TEST_DUMMY: 'yes' });
+    expect(code).toBe(1);
+    expect(stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_DUMMY must be 1 or empty (got "yes").');
+  }, 20_000);
+});
 
 describe('server startup', () => {
   it('exits with one line when the port is already in use', async () => {

@@ -3,7 +3,7 @@
 // room that survives nonsense. Timers run on an injected combat clock (testClock), never real time.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Room } from '@colyseus/sdk';
-import { DODGE_DISTANCE, REASON_ELSEWHERE, SPAWN, TICK_HZ, fallDamage, worldOf, zoneDef, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { DODGE_DISTANCE, DODGE_REFILL_S, REASON_ELSEWHERE, SPAWN, TICK_HZ, fallDamage, worldOf, zoneDef, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
@@ -166,9 +166,12 @@ describe('intent spam and nonsense', () => {
     a.room.send('dodge', { ...pose(SPAWN.x, SPAWN.z), dx: NaN, dz: 0 });
     a.room.send('dodge', { x: 'a', dx: 1, dz: 0 });
     a.room.send('respawn', {}); // while alive
-    a.room.send('loadout', { free: ['mend', 'mend'] });
+    a.room.send('loadout', { picks: ['mend', 'mend'] });
+    a.room.send('loadout', { free: ['mend', 'bulwark'] }); // Plan 3's shape: dropped
     a.room.send('loadout', 'everything');
-    a.room.send('swap', 42);
+    a.room.send('job', { job: 'sky_lancer' });
+    a.room.send('job', null);
+    a.room.send('swap', 42); // Plan 3's swap: ignored
     await sleep(300);
     expect(me(a.room).target).toBe(dummy.eid);
     expect(me(a.room).x).toBe(before.x);
@@ -178,6 +181,7 @@ describe('intent spam and nonsense', () => {
       { action: 'ability', reason: 'invalid' },
       { action: 'respawn', reason: 'invalid' },
       { action: 'loadout', reason: 'invalid' },
+      { action: 'job', reason: 'invalid' },
     ]));
     expect(corrections).toEqual([]);
     a.room.send('move', { ...pose(SPAWN.x + 0.3, SPAWN.z), moving: true });
@@ -214,34 +218,32 @@ describe('intent spam and nonsense', () => {
   });
 });
 
-describe('weapons and loadout', () => {
-  it('swaps and changes free picks out of combat, saves them, and refuses both in combat', async () => {
+describe('jobs and picks', () => {
+  it('changes job and picks out of combat in the grove, saves them, and refuses both in combat', async () => {
     const clock = testClock(1);
     const { url, store } = await start({ ...grove([DUMMY]), combatClock: clock.now });
     const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
     const refused = collect(a.room, 'refused');
-    a.room.send('swap', {});
+    a.room.send('job', { job: 'ranger' });
     await waitFor(() => me(a.room).weapon === 'bow');
-    a.room.send('loadout', { free: ['taunt', 'sprint'] });
+    a.room.send('loadout', { picks: ['sprint', 'barbed_rain'] });
     await sleep(150);
     expect(refused).toEqual([]);
     const dummy = enemyOf(a.room, 'dummy');
     a.room.send('target', { id: dummy.eid });
     await waitFor(() => enemyOf(a.room, 'dummy').hp < 40); // a Bow auto: in combat now
-    clock.skip(2); // past the swap cooldown
-    a.room.send('swap', {});
-    a.room.send('loadout', { free: ['mend', 'bulwark'] });
+    a.room.send('job', { job: 'warrior' });
+    a.room.send('loadout', { picks: ['field_dressing', 'pinning_shot'] });
     await waitFor(() => refused.length === 2);
-    expect(refused).toEqual([{ action: 'swap', reason: 'in-combat' }, { action: 'loadout', reason: 'in-combat' }]);
-    expect(me(a.room).weapon).toBe('bow');
+    expect(refused).toEqual([{ action: 'job', reason: 'in-combat' }, { action: 'loadout', reason: 'in-combat' }]);
+    expect(me(a.room)).toMatchObject({ weapon: 'bow', job: 'ranger' });
     await a.room.leave();
-    // Saved as a job (until Task 6): the Bow is the Ranger; taunt is not the Ranger's, so its solo picks.
-    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).jobs.current === 'ranger');
+    await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).jobs.jobs.ranger?.picks[0] === 'sprint');
     expect((await store.getOrCreateAdventurer(a.accountId)).jobs).toEqual({
       current: 'ranger',
       jobs: {
         warrior: { level: 1, xp: 0, picks: ['mend', 'bulwark'], talents: [], outfit: null },
-        ranger: { level: 1, xp: 0, picks: ['field_dressing', 'pinning_shot'], talents: [], outfit: null },
+        ranger: { level: 1, xp: 0, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null },
       },
     });
   });
@@ -779,7 +781,7 @@ describe('respawn saves (fix round 1)', () => {
 });
 
 describe('relog mid-fight (fix round 1)', () => {
-  it('a relog in combat is still in combat (swap refused), and keeps its Bulwark', async () => {
+  it('a relog in combat is still in combat (job change refused), and keeps its Bulwark', async () => {
     const { url, store } = await start(grove([DUMMY]));
     const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
     const dummy = await waitFor(() => enemyOf(a.room, 'dummy'));
@@ -791,9 +793,9 @@ describe('relog mid-fight (fix round 1)', () => {
     const again = await joinZone(url, a.token, 'grove');
     const refused = collect(again.room, 'refused');
     expect(me(again.room).shield).toBe(25);
-    again.room.send('swap', {});
+    again.room.send('job', { job: 'ninja' });
     await waitFor(() => refused.length > 0);
-    expect(refused).toEqual([{ action: 'swap', reason: 'in-combat' }]);
+    expect(refused).toEqual([{ action: 'job', reason: 'in-combat' }]);
   });
 
   it('ageCarry runs every timer down and every "since" up', () => {
@@ -803,8 +805,11 @@ describe('relog mid-fight (fix round 1)', () => {
     }, 3);
     expect(aged).toEqual({
       cooldowns: { mend: 7 }, gcd: 0, dodgeCharges: 1, dodgeRefillIn: 4, momentum: 20,
-      sinceCombat: 4, sinceHurt: 5, sinceDealt: 6, swapCd: 0, shield: 20, shieldLeft: 1, sprintLeft: 0,
-    });
+      sinceCombat: 4, sinceHurt: 5, sinceDealt: 6, shield: 20, shieldLeft: 1, sprintLeft: 0,
+    }); // (Plan 3's swapCd is dropped)
+    // dodges refill up to the job's charges (the Ninja's 3)
+    expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 1, dodgeRefillIn: 1, momentum: 0 }, 1 + DODGE_REFILL_S, 3)).toMatchObject({ dodgeCharges: 3, dodgeRefillIn: 0 });
+    expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 1, dodgeRefillIn: 1, momentum: 0 }, 1 + DODGE_REFILL_S)).toMatchObject({ dodgeCharges: 2, dodgeRefillIn: 0 });
     expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0 }, 5)).toEqual({ cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0 });
   });
 });

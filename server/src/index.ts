@@ -1,5 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { ZONE_IDS, isZoneId, zoneDef, type ZoneId } from '@sg2/shared';
+import { ZONE_IDS, isZoneId, zoneDef, type CampSpawn, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -65,6 +65,17 @@ function openExits(): Partial<Record<ZoneId, ZoneId[]>> | undefined {
   return open;
 }
 
+/**
+ * SG2_TEST_DUMMY=1 (test servers only, never in Docker): a Training Dummy camp in the grove at (3, -11),
+ * for job and ability checks against a server; unset, empty or 0 adds none.
+ */
+function testDummy(): Partial<Record<ZoneId, { camps: CampSpawn[] }>> | undefined {
+  const raw = process.env.SG2_TEST_DUMMY;
+  if (raw === undefined || raw === '' || raw === '0') return undefined;
+  if (raw !== '1') fail(`SG2_TEST_DUMMY must be 1 or empty (got "${raw}").`);
+  return { grove: { camps: [...zoneDef('grove').camps, { kind: 'dummy', x: 3, z: -11, facing: 0 }] } };
+}
+
 const port = positiveInt('SG2_PORT', 2570);
 const start = (() => {
   const zone = startZone();
@@ -72,6 +83,7 @@ const start = (() => {
   return { zone, x, z, facing };
 })();
 const exitsOpen = openExits();
+const dummyZones = testDummy();
 const trustProxy = trustProxyHops();
 const authRatePerMinute = positiveInt('SG2_AUTH_RATE_PER_MIN', 10);
 const jwtSecret = process.env.SG2_JWT_SECRET;
@@ -93,7 +105,7 @@ if (process.env.SG2_STORE === 'memory') {
   }
 }
 
-const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen });
+const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones });
 try {
   await app.listen(port);
 } catch (err) {
@@ -102,6 +114,7 @@ try {
 }
 console.log(`Shady Grove 2 server listening on port ${port}${clientDir ? `, serving ${clientDir}` : ''}.`);
 if (start.zone !== 'grove') console.log(`Shady Grove 2 server: SG2_START_ZONE=${start.zone}; new adventurers start there.`);
+if (dummyZones) console.log('Shady Grove 2 server: SG2_TEST_DUMMY=1; a Training Dummy stands in the grove (test servers only).');
 if (exitsOpen) console.log(`Shady Grove 2 server: SG2_OPEN_EXITS=${process.env.SG2_OPEN_EXITS}; those exits are open.`);
 console.log(
   trustProxy === undefined

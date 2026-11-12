@@ -109,7 +109,9 @@ async function fuzz(o: {
   const session = room.sessions.get(sdkRoom.sessionId);
   const r = rng(o.seed);
   const up = channel(o.rttMs / 2, o.jitterMs, r), down = channel(o.rttMs / 2, o.jitterMs, r);
-  const client = { sessionId: sdkRoom.sessionId, send: (type: string, msg: any) => down.push(clock.ms, type, msg) };
+  // (`jobs`, sent a step after the join, means nothing to this client: kept off the channel, so it
+  // draws no jitter from the run's generator and every seed plays out as before jobs existed)
+  const client = { sessionId: sdkRoom.sessionId, send: (type: string, msg: any) => (type === 'jobs' ? undefined : down.push(clock.ms, type, msg)) };
   session.client = client;
   session.movement.metres = MAX_MOVE_ALLOWANCE; // as after standing a second
 
