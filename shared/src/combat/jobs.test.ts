@@ -3,8 +3,9 @@ import {
   ABILITIES, BUFF_BITS, DEBUFF_BITS, DEFAULT_LOADOUT, ENEMY_KINDS, FINISHER_COST, FUTURE_JOBS, JOBS, JOB_IDS, JOB_LEVEL_CAP, KILL_XP, MARK_BITS,
   MARK_S, REACTIONS, WEAPONS, WEAPON_BARS, XP_PER_LEVEL, addJobXp, applyFinisherMark, applyPrimerMark, elementMult, isJobId,
   isJobsSave, legacyLoadout, levelForXp, liveMarks, loadoutOf, newJobsSave, parseJobsSave, parseLoadout, reactionFor, recordFor,
-  plan3LoadoutOf, slotsFor, xpToNext, type AbilityId, type ElementId, type FutureJobId, type JobId, type JobsSave, type Marks,
+  plan3LoadoutOf, slotsFor, totalTo, xpToNext, type AbilityId, type ElementId, type FutureJobId, type JobId, type JobsSave, type Marks,
 } from './index';
+import { TALENTS } from '../talents';
 
 const jobs = () => JOB_IDS.map((id) => JOBS[id]);
 
@@ -255,7 +256,7 @@ describe('jobs save', () => {
   it('garbage reads as a new save', () => {
     for (const v of [undefined, null, 'x', 3, [], [1, 2], true]) expect(parseJobsSave(v)).toEqual(newJobsSave());
     expect(parseJobsSave('x', { weapon: 'nope' })).toEqual(newJobsSave());
-    expect(newJobsSave()).toEqual({ current: 'warrior', jobs: { warrior: { level: 1, xp: 0, picks: ['mend', 'bulwark'], talents: [], outfit: null } } });
+    expect(newJobsSave()).toEqual({ current: 'warrior', jobs: { warrior: { level: 1, xp: 0, picks: ['mend', 'bulwark'], talents: [], outfit: null } }, curve: 2 });
     expect(newJobsSave('ninja').jobs.ninja!.picks).toEqual(['mist_form', 'ashcloud']);
   });
   it('a legacy Plan 3 loadout becomes the matching job', () => {
@@ -280,7 +281,9 @@ describe('jobs save', () => {
       },
     });
     expect(s.current).toBe('paladin');
-    expect(s.jobs.paladin).toEqual({ level: 3, xp: 250, picks: ['taunt', 'shelter'], talents: ['a'], outfit: null });
+    // No curve: Plan 3b's stub xp, converted (stub level 3, half way: 240 + 95), so the level is kept.
+    expect(s.curve).toBe(2);
+    expect(s.jobs.paladin).toEqual({ level: 3, xp: 335, picks: ['taunt', 'shelter'], talents: [], outfit: null });
     expect(s.jobs.ninja).toEqual({ level: 1, xp: 0, picks: ['mist_form', 'ashcloud'], talents: [], outfit: null });
     expect(s.jobs.ranger).toEqual({ level: 1, xp: 0, picks: ['field_dressing', 'pinning_shot'], talents: [], outfit: null });
     expect(s.jobs.warrior).toBeUndefined();
@@ -289,7 +292,7 @@ describe('jobs save', () => {
   });
   it('a future-job record is kept, but it can never be current', () => {
     const monk = { level: 2, xp: 140, picks: ['mend', 'bulwark'] as [AbilityId, AbilityId], talents: [], outfit: null };
-    const s = parseJobsSave({ current: 'monk', jobs: { monk } });
+    const s = parseJobsSave({ current: 'monk', jobs: { monk }, curve: 2 });
     expect(s.current).toBe('warrior');
     expect(s.jobs.monk).toEqual(monk);
     expect(s.jobs.warrior).toEqual(newJobsSave().jobs.warrior);
@@ -315,6 +318,11 @@ describe('jobs save', () => {
     const bad: unknown[] = [
       null, {}, { current: 'ranger' }, { current: 'ranger', jobs: {} },              // no record for current
       { ...ok, extra: 1 },
+      { current: 'ranger', jobs: ok.jobs },                                         // no curve: a 3b save
+      { ...ok, curve: 1 }, { ...ok, curve: '2' },
+      { current: 'ranger', curve: 2, jobs: { ranger: { ...ok.jobs.ranger!, xp: 3181, level: 10 } } },   // above the cap
+      { current: 'ranger', curve: 2, jobs: { ranger: { ...ok.jobs.ranger!, talents: ['ranger_1a'] } } }, // row 1 locked at level 1
+      { current: 'ranger', curve: 2, jobs: { ranger: { ...ok.jobs.ranger!, outfit: { body: null, head: null, back: null } } } },
       { current: 'ranger', jobs: { ranger: { ...ok.jobs.ranger!, level: 2 } } },     // level not derived
       { current: 'ranger', jobs: { ranger: { ...ok.jobs.ranger!, xp: 1.5 } } },
       { current: 'ranger', jobs: { ranger: { ...ok.jobs.ranger!, picks: ['mend', 'bulwark'] } } },
@@ -330,13 +338,14 @@ describe('jobs save', () => {
     const pick = <T>(xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
     const ids = [...JOB_IDS, 'monk', 'bard', 'wizard', 'toString', '__proto__'];
     const abilityIds = [...Object.keys(ABILITIES), 'fireball', 'constructor'];
+    const talentIds = [...Object.keys(TALENTS), 'warrior_4a', 'nope'];
     const junk = (): unknown => pick([null, undefined, 3, -1, 2.5, NaN, Infinity, 'x', true, [], {}, [1, 'a']]);
     const record = (): unknown => r() < 0.15 ? junk() : {
       level: r() < 0.5 ? Math.floor(r() * 20) : junk(),
       xp: r() < 0.7 ? Math.floor(r() * 2000) - (r() < 0.1 ? 3000 : 0) : junk(),
       picks: r() < 0.8 ? [pick(abilityIds), pick(abilityIds)] : junk(),
-      talents: r() < 0.7 ? [] : r() < 0.5 ? ['t', 1] : junk(),
-      outfit: r() < 0.8 ? null : junk(),
+      talents: r() < 0.5 ? [] : r() < 0.5 ? [pick(talentIds), pick(talentIds), pick(talentIds)] : r() < 0.5 ? ['t', 1] : junk(),
+      outfit: r() < 0.6 ? null : r() < 0.5 ? { body: pick(['coat', null]), head: null, back: pick(['cape', null, 3]), hideHead: pick([true, false, 0]) } : junk(),
     };
     for (let n = 0; n < 200; n++) {
       let v: unknown;
@@ -345,7 +354,7 @@ describe('jobs save', () => {
         const jobsObj: Record<string, unknown> = {};
         const k = Math.floor(r() * 5);
         for (let i = 0; i < k; i++) jobsObj[pick(ids)] = record();
-        v = { current: r() < 0.8 ? pick(ids) : junk(), jobs: r() < 0.9 ? jobsObj : junk() };
+        v = { current: r() < 0.8 ? pick(ids) : junk(), jobs: r() < 0.9 ? jobsObj : junk(), ...(r() < 0.6 ? { curve: r() < 0.9 ? 2 : junk() } : {}) };
       }
       const legacy = r() < 0.3 ? { weapon: pick(['blade', 'bow', 'staff']), free: [pick(abilityIds), pick(abilityIds)] } : undefined;
       const s = parseJobsSave(v, legacy);
@@ -353,6 +362,66 @@ describe('jobs save', () => {
       expect(parseJobsSave(s)).toEqual(s);
       if (isJobsSave(v)) expect(s).toEqual(v);
     }
+  });
+  it('a 3b save converts once: curve absent → curve 2 and levels kept; a curve-2 save is untouched', () => {
+    const stub = {
+      current: 'warrior',
+      jobs: {
+        warrior: { level: 5, xp: 450, picks: ['mend', 'bulwark'], talents: [], outfit: null },   // level 5, half way
+        ranger: { level: 10, xp: 900, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null },   // the cap
+        ninja: { level: 1, xp: 50, picks: ['mist_form', 'ashcloud'], talents: [], outfit: null },
+        monk: { level: 3, xp: 230, picks: ['mend', 'taunt'], talents: [], outfit: null },
+      },
+    };
+    expect(isJobsSave(stub)).toBe(false);   // so the room's repair write-back stores the converted save
+    const s = parseJobsSave(stub);
+    expect(s.curve).toBe(2);
+    expect(s.jobs.warrior).toMatchObject({ level: 5, xp: 680 + 160 });
+    expect(s.jobs.ranger).toMatchObject({ level: 10, xp: totalTo(10) });
+    expect(s.jobs.ninja).toMatchObject({ level: 1, xp: 50 });
+    expect(s.jobs.monk).toMatchObject({ level: 3, xp: 240 + 57 });
+    for (const [k, r] of Object.entries(stub.jobs)) expect(s.jobs[k as JobId]!.level, k).toBe(r.level);
+    expect(isJobsSave(s)).toBe(true);
+    // Once only: reading the converted save again changes nothing.
+    expect(parseJobsSave(s)).toEqual(s);
+    expect(parseJobsSave(JSON.parse(JSON.stringify(s)))).toEqual(s);
+    // A curve-2 save is read as it is.
+    const v2 = { current: 'warrior', curve: 2, jobs: { warrior: { level: 4, xp: 450, picks: ['mend', 'bulwark'], talents: [], outfit: null } } };
+    expect(isJobsSave(v2)).toBe(true);
+    expect(parseJobsSave(v2)).toEqual(v2);
+    // Any other curve value reads as the stub; xp above the cap on curve 2 is capped.
+    expect(parseJobsSave({ ...v2, curve: 7 }).jobs.warrior).toMatchObject({ level: 5, xp: 840 });
+    expect(parseJobsSave({ ...v2, jobs: { warrior: { ...v2.jobs.warrior, xp: 99999 } } }).jobs.warrior).toMatchObject({ level: 10, xp: 3180 });
+    // A Plan 3 loadout and garbage are new saves on the curve.
+    expect(parseJobsSave(undefined, { weapon: 'bow', free: ['taunt', 'sprint'] }).curve).toBe(2);
+    expect(parseJobsSave('garbage').curve).toBe(2);
+  });
+  it('talents of another job, two in one row, or above the level are dropped; outfit garbage → null', () => {
+    const rec = (xp: number, talents: unknown, outfit: unknown = null) => ({ level: 1, xp, picks: ['mend', 'bulwark'], talents, outfit });
+    const read = (r: unknown) => parseJobsSave({ current: 'warrior', curve: 2, jobs: { warrior: r } }).jobs.warrior!;
+    const l7 = totalTo(7), l10 = totalTo(10);
+    expect(read(rec(l10, ['warrior_1a', 'warrior_2b', 'warrior_3c'])).talents).toEqual(['warrior_1a', 'warrior_2b', 'warrior_3c']);
+    expect(read(rec(l10, ['ranger_1a', 'warrior_2b'])).talents).toEqual(['warrior_2b']);            // another job's
+    expect(read(rec(l10, ['warrior_1a', 'warrior_1b', 'warrior_1c'])).talents).toEqual(['warrior_1a']);   // two in one row
+    expect(read(rec(l7, ['warrior_1a', 'warrior_2a', 'warrior_3a'])).talents).toEqual(['warrior_1a', 'warrior_2a']);   // row 3 locked at 7
+    expect(read(rec(totalTo(4) - 1, ['warrior_1a'])).talents).toEqual([]);                          // level 3
+    expect(read(rec(l10, ['warrior_4a', 'x', 7, null, 'toString'])).talents).toEqual([]);
+    expect(read(rec(l10, 'warrior_1a')).talents).toEqual([]);
+    // A stub save's talents are checked at the converted level (stub 650 is level 7).
+    expect(parseJobsSave({ current: 'warrior', jobs: { warrior: rec(650, ['warrior_2a', 'warrior_3a']) } }).jobs.warrior!.talents).toEqual(['warrior_2a']);
+    const outfit = { body: 'lamplighter_coat', head: null, back: 'patchwork_cape', hideHead: true };
+    expect(read(rec(0, [], outfit)).outfit).toEqual(outfit);
+    expect(read(rec(0, [], { body: null, head: null, back: null, hideHead: false })).outfit).toEqual({ body: null, head: null, back: null, hideHead: false });
+    for (const bad of ['hat', 3, [], {}, { ...outfit, extra: 1 }, { ...outfit, hideHead: 'yes' }, { ...outfit, body: 5 }, { ...outfit, head: '' }, { ...outfit, back: 'x'.repeat(65) }, { body: null, head: null, back: null }]) {
+      expect(read(rec(0, [], bad)).outfit, JSON.stringify(bad)).toBeNull();
+    }
+    const kept = parseJobsSave({ current: 'warrior', curve: 2, jobs: { warrior: rec(l10, ['warrior_3a', 'warrior_1c'], outfit) } });
+    expect(isJobsSave(kept)).toBe(true);
+    expect(kept.jobs.warrior!.outfit).not.toBe(outfit);
+    // recordFor copies the outfit too.
+    const r = recordFor(kept, 'warrior');
+    r.outfit!.hideHead = false;
+    expect(kept.jobs.warrior!.outfit!.hideHead).toBe(true);
   });
 });
 
@@ -365,15 +434,16 @@ describe('xp', () => {
     expect(levelForXp(100)).toBe(2);
     expect(levelForXp(5000)).toBe(10);
     expect(xpToNext(0)).toBe(100);
-    expect(xpToNext(130)).toBe(70);
-    expect(xpToNext(950)).toBe(0);
+    expect(xpToNext(130)).toBe(110);
+    expect(xpToNext(950)).toBe(50);
+    expect(xpToNext(3180)).toBe(0);
     expect(KILL_XP).toEqual({ thornling: 10, boar: 10, archer: 10, mossback: 40, dummy: 0, wickhound: 120, fallen_warden: 300, lens_shard: 0 });
   });
   it('addJobXp is pure and reports a level-up', () => {
     const s: JobsSave = { current: 'ranger', jobs: { ranger: { level: 1, xp: 95, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null } } };
     const before = JSON.stringify(s);
     const r1 = addJobXp(s, 'ranger', 10);
-    expect(r1).toEqual({ save: { current: 'ranger', jobs: { ranger: { level: 2, xp: 105, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null } } }, level: 2, levelUp: true });
+    expect(r1).toEqual({ save: { current: 'ranger', jobs: { ranger: { level: 2, xp: 105, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null } }, curve: 2 }, level: 2, levelUp: true });
     expect(JSON.stringify(s)).toBe(before);
     const r2 = addJobXp(r1.save, 'ranger', 10);
     expect(r2.levelUp).toBe(false);
@@ -386,6 +456,8 @@ describe('xp', () => {
     // the cap
     const r4 = addJobXp(s, 'ranger', 10_000);
     expect(r4.level).toBe(JOB_LEVEL_CAP);
+    expect(r4.save.jobs.ranger!.xp).toBe(totalTo(JOB_LEVEL_CAP));   // capped at 3180
+    expect(addJobXp(r4.save, 'ranger', 10).save.jobs.ranger!.xp).toBe(3180);
     expect(addJobXp(r4.save, 'ranger', 10).levelUp).toBe(false);
     expect(addJobXp(s, 'ranger', -50).save.jobs.ranger!.xp).toBe(95);
   });

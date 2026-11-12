@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ABILITIES, FUTURE_JOBS, JOBS, JOB_IDS, REASON_JOB_NOT_HERE, XP_PER_LEVEL, levelForXp, type JobId, type JobsView } from '@sg2/shared';
+import { ABILITIES, FUTURE_JOBS, JOBS, JOB_IDS, REASON_JOB_NOT_HERE, XP_TO_NEXT, levelForXp, totalTo, type JobId, type JobsView } from '@sg2/shared';
 import { article, jobBoardView } from './jobs';
 
 const view = (over: Partial<Record<JobId, { xp: number }>> = {}, current: JobId = 'warrior'): JobsView => ({
@@ -27,7 +27,7 @@ describe('jobBoardView', () => {
     expect(v.locked.every((f) => f.glyph === FUTURE_JOBS[f.id].glyph && f.unique === FUTURE_JOBS[f.id].unique)).toBe(true);
   });
   it('levels and xp fractions come from xp', () => {
-    const v = jobBoardView(view({ ninja: { xp: XP_PER_LEVEL * 2 + XP_PER_LEVEL / 4 }, ranger: { xp: 99999 } }, 'ninja'), 'grove');
+    const v = jobBoardView(view({ ninja: { xp: totalTo(3) + XP_TO_NEXT[2]! / 4 }, ranger: { xp: 99999 } }, 'ninja'), 'grove');
     const ninja = v.rows.find((r) => r.id === 'ninja')!;
     expect(ninja.level).toBe(3);
     expect(ninja.xpFrac).toBeCloseTo(0.25);

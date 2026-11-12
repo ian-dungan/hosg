@@ -313,7 +313,7 @@ describe('saved with the adventurer', () => {
     const { url, store } = await start(withExit());
     const alice = await accountFor(store, 'Alice');
     const jobs: JobsSave = {
-      current: 'warrior',
+      current: 'warrior', curve: 2,
       jobs: {
         warrior: { level: 2, xp: 120, picks: ['bulwark', 'mend'], talents: [], outfit: null },
         ranger: { level: 1, xp: 50, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null },

@@ -17,6 +17,6 @@ export { ZONE_IDS, isZoneId, SAVE_ZONE_IDS, isSaveZoneId, LAMPFALL_MOUTH, zoneDe
 export { LAMPFALL_RECIPE, SANCTUARY_R, generateDungeon, lampfallLayout, yawOf, DungeonWalk, type RoomId, type RoomSpec, type DungeonRecipe, type DungeonRoom, type DungeonCorridor, type DungeonLayout, type Gate } from './world/dungeon';
 export * from './world/lampGates';
 export * from './combat';
-// The curve's levelForXp, xpToNext and JOB_LEVEL_CAP join these when jobXp.ts moves onto it.
-export { XP_TO_NEXT, XP_CURVE_VERSION, CATCH_UP_MULT, CLEAR_XP, TALENT_LEVELS, BASE_STATS_L1, BASE_STATS_L10, totalTo, migrateStubXp, baseStats, catchUp } from './progression';
+export * from './progression';
 export * from './mods';
+export * from './talents';

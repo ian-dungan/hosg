@@ -4,7 +4,7 @@
 // it may change here: outside a town the sheet says so at the top, and the button stays on). Esc or J closes it.
 // Every name, line and number comes from the shared job and ability data.
 import {
-  FUTURE_JOBS, JOBS, JOB_IDS, MELEE_REACH, REASON_JOB_NOT_HERE, WEAPONS, XP_PER_LEVEL, JOB_LEVEL_CAP, jobSwitchAt, levelForXp, zoneDef,
+  FUTURE_JOBS, JOBS, JOB_IDS, MELEE_REACH, REASON_JOB_NOT_HERE, WEAPONS, XP_TO_NEXT, JOB_LEVEL_CAP, jobSwitchAt, levelForXp, totalTo, zoneDef,
   type AbilityId, type FutureJobId, type JobData, type JobId, type JobsView, type ZoneId,
 } from '@sg2/shared';
 import type { AbilityDef, JobBoardView } from '../core/contracts';
@@ -55,7 +55,7 @@ export function jobBoardView(
       const xp = rec?.xp ?? 0, level = levelForXp(xp);
       return {
         id, name: j.name, glyph: j.glyph, role: roleLabel(j.role), level,
-        xpFrac: level >= JOB_LEVEL_CAP ? 1 : (xp % XP_PER_LEVEL) / XP_PER_LEVEL,
+        xpFrac: level >= JOB_LEVEL_CAP ? 1 : (xp - totalTo(level)) / XP_TO_NEXT[level - 1]!,
         weaponName: WEAPONS[j.weapon].name, traitName: j.trait.name, trait: j.trait.desc,
         bar: defs(j.bar), picks: defs(j.pool), chosen: [...(rec?.picks ?? j.picks.solo)],
       };

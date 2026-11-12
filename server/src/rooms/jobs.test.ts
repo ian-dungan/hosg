@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Room } from '@colyseus/sdk';
 import {
-  ABILITIES, DEATH_MIN_S, JOBS, REASON_ELSEWHERE, KILL_XP, MAX_HP, SPAWN, TICK_HZ, isJobsSave, levelForXp, newJobsSave, slotsFor, worldOf, xpToNext,
+  ABILITIES, DEATH_MIN_S, JOBS, REASON_ELSEWHERE, KILL_XP, MAX_HP, SPAWN, TICK_HZ, isJobsSave, levelForXp, newJobsSave, slotsFor, totalTo, worldOf, xpToNext,
   type AbilityId, type CampSpawn, type JobId, type JobsSave, type Surface, type ZoneDef, type ZoneId,
 } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer';
@@ -248,6 +248,34 @@ describe('job switching', () => {
     expect(selves.at(-1).slots).toEqual(slotsFor({ job: 'ninja', picks: ['weak_point', 'quickstep'] }));
     await a.room.leave();
     await waitFor(async () => (await stored(store, a.accountId)).jobs.jobs.ninja?.picks[0] === 'weak_point');
+  });
+
+  it('a job or picks change keeps curve 2, xp, talents and outfit (the save passes isJobsSave)', async () => {
+    const { url, store } = await start(zones());
+    const outfit = { body: 'orchard_smock', head: null, back: null, hideHead: true };
+    const saved: JobsSave = {
+      current: 'warrior', curve: 2,
+      jobs: { warrior: { level: 7, xp: totalTo(7) + 5, picks: ['mend', 'bulwark'], talents: ['warrior_1b', 'warrior_2c'], outfit } },
+    };
+    expect(isJobsSave(saved)).toBe(true);
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z, { jobs: saved });
+    const jobs = collectFromJoin(a.room, 'jobs');
+    await waitFor(() => jobs.length > 0);
+    a.room.send('job', { job: 'ninja' });
+    await waitFor(async () => (await stored(store, a.accountId)).jobs.current === 'ninja');
+    let s = (await stored(store, a.accountId)).jobs;
+    expect(isJobsSave(s)).toBe(true);
+    expect(s.curve).toBe(2);
+    expect(s.jobs.warrior).toEqual(saved.jobs.warrior);
+    a.room.send('loadout', { picks: ['weak_point', 'quickstep'] });
+    await waitFor(() => jobs.at(-1).jobs.ninja.picks[0] === 'weak_point');
+    a.room.send('job', { job: 'warrior' });
+    await waitFor(async () => (await stored(store, a.accountId)).jobs.current === 'warrior');
+    s = (await stored(store, a.accountId)).jobs;
+    expect(isJobsSave(s)).toBe(true);
+    expect(s.curve).toBe(2);
+    expect(s.jobs.warrior).toEqual(saved.jobs.warrior);
+    expect(s.jobs.ninja!.picks).toEqual(['weak_point', 'quickstep']);
   });
 
   it("loadout with another job's ability, a duplicate, a bar ability or an unknown id → refused invalid", async () => {

@@ -2,9 +2,10 @@
 // hooks, and the per-job save. Job names come only from JOBS[id].name (they may be renamed).
 import { ABILITIES, legacyLoadout, type AbilityId, type Loadout, type WeaponId } from './abilities';
 import { deepFreeze } from './freeze';
-import { levelForXp } from './jobXp';
-// jobs.ts ⇄ abilities.ts and jobs.ts ⇄ jobXp.ts import each other: none of them may read another's
-// exports at the top level (only inside functions).
+import { JOB_LEVEL_CAP, levelForXp, migrateStubXp, totalTo } from '../progression';
+import { validTalents } from '../talents';
+// jobs.ts ⇄ abilities.ts import each other: neither may read the other's exports at the top level
+// (only inside functions). progression.ts and talents.ts import only types from here.
 
 export type JobId = 'warrior' | 'ranger' | 'paladin' | 'dark_knight' | 'ninja' | 'white_mage' | 'black_mage';
 export type FutureJobId = 'monk' | 'bard' | 'beastmaster' | 'sky_lancer';
@@ -107,25 +108,28 @@ const isFutureJobId = (v: unknown): v is FutureJobId => own(FUTURE_JOBS, v);
 type CostumeId = string;
 /** A job's outfit: the costume worn in each costume slot (ownership is checked by the server against the wardrobe), and whether the head piece is hidden. */
 export interface JobOutfit { body: CostumeId | null; head: CostumeId | null; back: CostumeId | null; hideHead: boolean }
-/** level is derived from xp (levelForXp), never trusted. talents and outfit are Plan 5 hooks. */
+/**
+ * level is derived from xp (levelForXp), never trusted. talents: the chosen talent ids (validTalents:
+ * of this job, one per row, unlocked at the level). outfit: null until a costume is worn or the head hidden.
+ */
 export interface JobRecord { level: number; xp: number; picks: [AbilityId, AbilityId]; talents: string[]; outfit: JobOutfit | null }
 /**
- * A record under a future job id is kept as it is, but such an id can never be `current`. curve: the xp
- * curve the records are on (XP_CURVE_VERSION); absent means Plan 3b's stub.
+ * A record under a future job id is kept, but such an id can never be `current`. curve: the xp curve
+ * the records are on (XP_CURVE_VERSION); absent means Plan 3b's stub, converted once by parseJobsSave.
  */
 export interface JobsSave { current: JobId; jobs: Partial<Record<JobId | FutureJobId, JobRecord>>; curve?: 2 }
 
 const freshRecord = (job: JobId): JobRecord => ({ level: 1, xp: 0, picks: [JOBS[job].picks.solo[0], JOBS[job].picks.solo[1]], talents: [], outfit: null });
 
-/** `job` (default the Warrior) as current, with a fresh record: level 1, 0 xp, the solo picks. */
+/** `job` (default the Warrior) as current, with a fresh record: level 1, 0 xp, the solo picks, on the current curve. */
 export function newJobsSave(job: JobId = 'warrior'): JobsSave {
-  return { current: job, jobs: { [job]: freshRecord(job) } };
+  return { current: job, jobs: { [job]: freshRecord(job) }, curve: 2 };
 }
 
 /** A copy of the stored record for `job`, or a fresh one (not stored). */
 export function recordFor(s: JobsSave, job: JobId): JobRecord {
   const r = s.jobs[job];
-  return r ? { ...r, picks: [r.picks[0], r.picks[1]], talents: [...r.talents] } : freshRecord(job);
+  return r ? { ...r, picks: [r.picks[0], r.picks[1]], talents: [...r.talents], outfit: r.outfit ? { ...r.outfit } : null } : freshRecord(job);
 }
 
 /** The current job and its picks. */
@@ -140,35 +144,54 @@ function validPicks(job: JobId | FutureJobId, v: unknown): v is [AbilityId, Abil
   const ok = (id: unknown) => (isJobId(job) ? (JOBS[job].pool as readonly unknown[]).includes(id) : own(ABILITIES, id));
   return ok(v[0]) && ok(v[1]);
 }
-const validXp = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+const validXp = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= totalTo(JOB_LEVEL_CAP);
 const plainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** Costume ids are short: a slot holds null or a string of 1..64 characters. */
+const costumeRef = (v: unknown): v is string | null => v === null || (typeof v === 'string' && v.length >= 1 && v.length <= 64);
+const OUTFIT_KEYS = ['back', 'body', 'head', 'hideHead'];
 
-/** A clean record for `job` from `v`, or null when it cannot be read (not an object, or a future job's picks unusable). */
-function parseRecord(job: JobId | FutureJobId, v: unknown): JobRecord | null {
+/** A clean outfit from `v` (exactly its four keys), or null. */
+function parseOutfit(v: unknown): JobOutfit | null {
+  if (!plainObject(v) || !sameKeys(v, OUTFIT_KEYS)) return null;
+  if (!costumeRef(v.body) || !costumeRef(v.head) || !costumeRef(v.back) || typeof v.hideHead !== 'boolean') return null;
+  return { body: v.body, head: v.head, back: v.back, hideHead: v.hideHead };
+}
+
+/**
+ * A clean record for `job` from `v`, or null when it cannot be read (not an object, or a future job's
+ * picks unusable). stub: the xp is Plan 3b's and is converted with migrateStubXp.
+ */
+function parseRecord(job: JobId | FutureJobId, v: unknown, stub: boolean): JobRecord | null {
   if (!plainObject(v)) return null;
-  const xp = validXp(v.xp) ? v.xp : 0;
+  const raw = typeof v.xp === 'number' && Number.isInteger(v.xp) && v.xp >= 0 ? v.xp : 0;
+  const xp = Math.min(totalTo(JOB_LEVEL_CAP), stub ? migrateStubXp(raw) : raw);
   let picks: [AbilityId, AbilityId];
   if (validPicks(job, v.picks)) picks = [v.picks[0], v.picks[1]];
   else if (isJobId(job)) picks = [JOBS[job].picks.solo[0], JOBS[job].picks.solo[1]];
   else return null;
-  const talents = Array.isArray(v.talents) ? v.talents.filter((t): t is string => typeof t === 'string') : [];
-  return { level: levelForXp(xp), xp, picks, talents, outfit: null };
+  const level = levelForXp(xp);
+  const talents = Array.isArray(v.talents) ? validTalents(job, level, v.talents) : [];
+  return { level, xp, picks, talents, outfit: parseOutfit(v.outfit) };
 }
 
 /**
- * A JobsSave from stored data; never throws. With an object `v`, each readable record is kept and its
- * bad parts fixed (xp → 0 unless a non-negative integer, level = levelForXp(xp), picks invalid for the
- * job → its solo picks, talents → strings only, outfit → null); unknown keys are dropped, future-job
- * keys kept. An invalid `current` reads as the Warrior. When `v` is not an object or has no valid
- * current, and `legacy` (a Plan 3 loadout) passes legacyLoadout, its job becomes current with its
- * picks. Otherwise a new save. The current job always has a stored record.
+ * A JobsSave from stored data, on the current curve (curve: 2); never throws. With an object `v`, each
+ * readable record is kept and its bad parts fixed (xp → 0 unless a non-negative integer, capped at
+ * totalTo(10), level = levelForXp(xp), picks invalid for the job → its solo picks, talents → the
+ * valid ones (validTalents at the record's level), outfit → null unless a clean JobOutfit); unknown
+ * keys are dropped, future-job keys kept. When `v.curve` is not 2 the xp is Plan 3b's stub xp and
+ * every record is converted once with migrateStubXp (no job loses a level). An invalid `current` reads
+ * as the Warrior. When `v` is not an object or has no valid current, and `legacy` (a Plan 3 loadout)
+ * passes legacyLoadout, its job becomes current with its picks. Otherwise a new save. The current job
+ * always has a stored record.
  */
 export function parseJobsSave(v: unknown, legacy?: unknown): JobsSave {
   const jobs: JobsSave['jobs'] = {};
   if (plainObject(v) && plainObject(v.jobs)) {
+    const stub = v.curve !== 2;
     for (const k of Object.keys(v.jobs)) {
       if (!isJobId(k) && !isFutureJobId(k)) continue;
-      const r = parseRecord(k, v.jobs[k]);
+      const r = parseRecord(k, v.jobs[k], stub);
       if (r) jobs[k] = r;
     }
   }
@@ -183,7 +206,7 @@ export function parseJobsSave(v: unknown, legacy?: unknown): JobsSave {
     else current = 'warrior';
   }
   if (!jobs[current]) jobs[current] = freshRecord(current);
-  return { current, jobs };
+  return { current, jobs, curve: 2 };
 }
 
 const RECORD_KEYS = ['level', 'outfit', 'picks', 'talents', 'xp'];
@@ -192,13 +215,14 @@ const sameKeys = (o: object, keys: readonly string[]) => {
   return k.length === keys.length && k.every((x, i) => x === keys[i]);
 };
 function isRecord(job: JobId | FutureJobId, v: unknown): v is JobRecord {
-  return plainObject(v) && sameKeys(v, RECORD_KEYS) && validXp(v.xp) && v.level === levelForXp(v.xp) && validPicks(job, v.picks)
-    && Array.isArray(v.talents) && v.talents.every((t) => typeof t === 'string') && v.outfit === null;
+  if (!plainObject(v) || !sameKeys(v, RECORD_KEYS) || !validXp(v.xp) || v.level !== levelForXp(v.xp) || !validPicks(job, v.picks)) return false;
+  if (!Array.isArray(v.talents) || validTalents(job, v.level, v.talents).length !== v.talents.length) return false;
+  return v.outfit === null || parseOutfit(v.outfit) !== null;
 }
 
-/** Strict: exactly what parseJobsSave returns unchanged (what saves must pass). */
+/** Strict: exactly what parseJobsSave returns unchanged (what saves must pass), so curve: 2 is required. */
 export function isJobsSave(v: unknown): v is JobsSave {
-  if (!plainObject(v) || !sameKeys(v, ['current', 'jobs']) || !isJobId(v.current) || !plainObject(v.jobs)) return false;
+  if (!plainObject(v) || !sameKeys(v, ['current', 'curve', 'jobs']) || v.curve !== 2 || !isJobId(v.current) || !plainObject(v.jobs)) return false;
   const jobs = v.jobs;
   if (!own(jobs, v.current)) return false;
   return Object.keys(jobs).every((k) => (isJobId(k) || isFutureJobId(k)) && isRecord(k, jobs[k]));

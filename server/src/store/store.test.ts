@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
-import { MAX_HP, SPAWN, isJobsSave, newJobsSave, type JobsSave } from '@sg2/shared';
+import { MAX_HP, SPAWN, isJobsSave, levelForXp, newJobsSave, type JobsSave } from '@sg2/shared';
 import { NameTakenError, checkedSave, type Adventurer, type Store } from './types';
 import { createMemoryStore, type LegacyRow } from './memory';
 import { createPgStore, createPool } from './pg';
@@ -24,8 +24,8 @@ function saved(a: Adventurer, changes: Partial<Pick<Adventurer, 'x' | 'z' | 'fac
 /** Plan 3's default loadout, exactly as migration 003 wrote it. */
 const PLAN3_DEFAULT = { weapon: 'blade', free: ['mend', 'bulwark'] };
 
-/** A record as JobsSave holds it. */
-const rec = (xp: number, picks: [string, string], level = 1 + Math.floor(xp / 100)) => ({ level, xp, picks, talents: [], outfit: null });
+/** A record as JobsSave holds it (xp on the Plan 5 curve). */
+const rec = (xp: number, picks: [string, string], level = levelForXp(xp)) => ({ level, xp, picks, talents: [], outfit: null });
 
 /**
  * Opens a store holding one adventurer per row, stored as a Plan 3 save would be: `loadout` in its
@@ -171,7 +171,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
     it('a new adventurer is a level 1 Warrior with mend and bulwark', async () => {
       const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
       const { jobs } = await store.getOrCreateAdventurer(account.id);
-      expect(jobs).toEqual({ current: 'warrior', jobs: { warrior: rec(0, ['mend', 'bulwark']) } });
+      expect(jobs).toEqual({ current: 'warrior', jobs: { warrior: rec(0, ['mend', 'bulwark']) }, curve: 2 });
       expect(isJobsSave(jobs)).toBe(true);
     });
 
@@ -179,11 +179,11 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
       const adventurer = await store.getOrCreateAdventurer(account.id);
       const jobs = {
-        current: 'black_mage',
+        current: 'black_mage', curve: 2,
         jobs: {
           warrior: rec(230, ['bulwark', 'rallying_roar']),
           black_mage: rec(40, ['kindred_spark', 'stormcage']),
-          ranger: rec(999, ['sprint', 'barbed_rain'], 10),
+          ranger: rec(3180, ['sprint', 'barbed_rain']), // the cap
           monk: rec(0, ['mend', 'taunt']), // a future job's record is kept as it is
         },
       } as JobsSave;
@@ -212,16 +212,16 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
         null,
         'warrior',
         [],
-        { current: 'warrior', jobs: {} }, // the current job has no record
-        { current: 'monk', jobs: { monk: rec(0, ['mend', 'taunt']) } }, // a future job is never current
-        { current: 'wizard', jobs: { warrior: rec(0, ['mend', 'bulwark']) } },
-        { current: 'warrior', jobs: { warrior: rec(0, ['mend', 'mend']) } },
-        { current: 'warrior', jobs: { warrior: rec(0, ['mend', 'taunt']) } }, // taunt is the Paladin's
-        { current: 'warrior', jobs: { warrior: rec(0, ['slash', 'mend']) } }, // a bar ability
-        { current: 'warrior', jobs: { warrior: rec(150, ['mend', 'bulwark'], 1) } }, // level not from xp
-        { current: 'warrior', jobs: { warrior: rec(-1, ['mend', 'bulwark'], 1) } },
-        { current: 'warrior', jobs: { warrior: rec(0, ['mend', 'bulwark']) }, extra: 1 },
-        { current: 'warrior', jobs: { warrior: rec(0, ['mend', 'bulwark']), wizard: rec(0, ['mend', 'bulwark']) } },
+        { curve: 2, current: 'warrior', jobs: {} }, // the current job has no record
+        { curve: 2, current: 'monk', jobs: { monk: rec(0, ['mend', 'taunt']) } }, // a future job is never current
+        { curve: 2, current: 'wizard', jobs: { warrior: rec(0, ['mend', 'bulwark']) } },
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['mend', 'mend']) } },
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['mend', 'taunt']) } }, // taunt is the Paladin's
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['slash', 'mend']) } }, // a bar ability
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(150, ['mend', 'bulwark'], 1) } }, // level not from xp
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(-1, ['mend', 'bulwark'], 1) } },
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['mend', 'bulwark']) }, extra: 1 },
+        { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['mend', 'bulwark']), wizard: rec(0, ['mend', 'bulwark']) } },
       ];
       for (const jobs of bad) {
         expect(isJobsSave(jobs)).toBe(false);
@@ -240,7 +240,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
     });
 
     it('legacy rows load: blade → warrior with picks kept, bow with taunt and sprint → ranger with its solo picks, garbage → new', async () => {
-      const wrongJob = { current: 'paladin', jobs: { paladin: rec(150, ['mend', 'taunt']), warrior: rec(30, ['mend', 'bulwark']) } };
+      const wrongJob = { current: 'paladin', jobs: { paladin: rec(150, ['mend', 'taunt'], 2), warrior: rec(30, ['mend', 'bulwark']) } }; // a 3b save (no curve)
       const { store: s, accountIds } = await seedLegacy([
         { loadout: PLAN3_DEFAULT },
         { loadout: { weapon: 'blade', free: ['bulwark', 'mend'] } },
@@ -255,8 +255,8 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       ]);
       try {
         const jobsOf = async (i: number) => (await s.getOrCreateAdventurer(accountIds[i]!)).jobs;
-        const warrior = (picks: [string, string]) => ({ current: 'warrior', jobs: { warrior: rec(0, picks) } });
-        const ranger = { current: 'ranger', jobs: { ranger: rec(0, ['field_dressing', 'pinning_shot']) } };
+        const warrior = (picks: [string, string]) => ({ current: 'warrior', jobs: { warrior: rec(0, picks) }, curve: 2 });
+        const ranger = { current: 'ranger', jobs: { ranger: rec(0, ['field_dressing', 'pinning_shot']) }, curve: 2 };
         expect(await jobsOf(0)).toEqual(warrior(['mend', 'bulwark']));
         expect(await jobsOf(1)).toEqual(warrior(['bulwark', 'mend']));
         expect(await jobsOf(2)).toEqual(warrior(['mend', 'bulwark'])); // not the Warrior's picks: its solo picks
@@ -264,13 +264,13 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
         expect(await jobsOf(4)).toEqual(ranger);
         for (const i of [5, 6, 7, 8]) expect(await jobsOf(i)).toEqual(newJobsSave());
         // A picked ability from the wrong job reads as that job's solo picks; xp and the other record are kept.
-        expect(await jobsOf(9)).toEqual({ current: 'paladin', jobs: { paladin: rec(150, ['kindle', 'dawn_ward']), warrior: rec(30, ['mend', 'bulwark']) } });
+        expect(await jobsOf(9)).toEqual({ current: 'paladin', jobs: { paladin: rec(170, ['kindle', 'dawn_ward']), warrior: rec(30, ['mend', 'bulwark']) }, curve: 2 }); // 3b xp 150 (level 2, half way) → 170
         for (let i = 0; i < accountIds.length; i++) expect(isJobsSave(await jobsOf(i))).toBe(true);
         // Each was repaired to read, and says so (the room writes it back on the first join).
         for (let i = 0; i < accountIds.length; i++) expect((await s.getOrCreateAdventurer(accountIds[i]!)).jobsRepaired).toBe(true);
         // A legacy adventurer saves (and then reads) as any other.
         const a = await s.getOrCreateAdventurer(accountIds[3]!);
-        const jobs = { current: 'ranger', jobs: { ranger: rec(10, ['sprint', 'barbed_rain']) } } as JobsSave;
+        const jobs = { current: 'ranger', jobs: { ranger: rec(10, ['sprint', 'barbed_rain']) }, curve: 2 } as JobsSave;
         expect(await s.saveAdventurer(saved(a, { jobs }))).toBe(true);
         expect(await jobsOf(3)).toEqual(jobs);
         expect(await s.getOrCreateAdventurer(accountIds[3]!)).not.toHaveProperty('jobsRepaired');
@@ -295,8 +295,8 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
         { hp: Number.NaN },
         { hp: Infinity },
         { jobs: PLAN3_DEFAULT }, // a Plan 3 loadout is no longer saved
-        { jobs: { current: 'warrior', jobs: { warrior: rec(0, ['mend', 'mend']) } } },
-        { jobs: { current: 'warrior', jobs: { warrior: rec(0, ['slash', 'mend']) } } },
+        { jobs: { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['mend', 'mend']) } } },
+        { jobs: { curve: 2, current: 'warrior', jobs: { warrior: rec(0, ['slash', 'mend']) } } },
       ];
       for (const change of bad) {
         await expect(store.saveAdventurer({ ...saved(adventurer), ...(change as object), x: 99 })).rejects.toThrow(TypeError);
@@ -620,8 +620,8 @@ if (databaseUrl) {
           await legacy.end();
         }
 
-        const warrior = (picks: [string, string]) => ({ current: 'warrior', jobs: { warrior: rec(0, picks) } });
-        const ranger = { current: 'ranger', jobs: { ranger: rec(0, ['field_dressing', 'pinning_shot']) } };
+        const warrior = (picks: [string, string]) => ({ current: 'warrior', jobs: { warrior: rec(0, picks) }, curve: 2 });
+        const ranger = { current: 'ranger', jobs: { ranger: rec(0, ['field_dressing', 'pinning_shot']) }, curve: 2 };
         const expected = [
           warrior(['mend', 'bulwark']),
           warrior(['bulwark', 'mend']),

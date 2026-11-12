@@ -174,6 +174,7 @@ New constants live in the files named. Combat-side constants go in `shared/src/c
 
 - `levelForXp(xp)` and `xpToNext(xp)` use `XP_TO_NEXT`. `addJobXp` keeps its signature, now on the new curve.
 - **Migration of 3b progress** (`migrateStubXp(xp)`): old level `Lo = min(10, 1 + floor(xp / 100))` and progress `p = (xp mod 100) / 100`. The new xp is `totalTo(Lo) + floor(p × XP_TO_NEXT[Lo − 1])`, or `totalTo(10)` at the cap. No job loses a level.
+  - Worked examples: 0 → 0, 50 → 50, 450 (level 5, half way) → totalTo(5) + 160 = 680 + 160 = **840** (still level 5; an earlier draft said 1000 + 160, which would be level 6 — corrected in Task 1, coordinator ruling), 900 → 3180, 5000 → 3180.
   - `parseJobsSave` converts every record once, when `curve` is absent, and sets `curve: 2`.
   - Such a save is "repaired", so Plan 3b's `jobsRepaired` write-back stores it on the first join.
 - Each credited adventurer's **current** job gains the kill's xp (Plan 3b), × `CATCH_UP_MULT` when it applies, floored.
@@ -760,7 +761,7 @@ export interface JobsSave { current: JobId; jobs: Partial<Record<JobId | FutureJ
 - [ ] **Step 1: Write the failing tests.**
   - `progression.test.ts`:
     - `it('the curve: 100 to level 2, 3180 to level 10, levelForXp and xpToNext agree at every boundary')`;
-    - `it('migrateStubXp keeps every stub level and its share of progress: 0→0, 50→50, 450→1000+160, 900→3180, 5000→3180')`;
+    - `it('migrateStubXp keeps every stub level and its share of progress: 0→0, 50→50, 450→680+160, 900→3180, 5000→3180')`;
     - `it('baseStats(10) is 9 / 8 / 90; baseStats(1) is 6 / 5 / 72; every step rises')`;
     - `it('catchUp is 1.5 below the highest job level, 1 otherwise')`;
     - `it('parseMods refuses unknown kinds, unknown abilities and non-finite numbers')`.

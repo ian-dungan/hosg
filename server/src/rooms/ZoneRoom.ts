@@ -255,9 +255,13 @@ const PARTY_STATUS_MS = 1000 / PARTY_STATUS_HZ;
 /** A measured time (ms) and when it was taken (wall ms). */
 interface Timing { at: number; ms: number }
 
-/** `jobs` with the engine's job and picks (`l`) as current: that job's xp and every other record kept. */
+/**
+ * `jobs` with the engine's job and picks (`l`) as current: that job's xp, talents and outfit and every
+ * other record kept. A session's jobs are always on the current curve (the store reads them with
+ * parseJobsSave), so the result says so: without `curve: 2`, isJobsSave refuses it.
+ */
 function withLoadout(jobs: JobsSave, l: Loadout): JobsSave {
-  return { current: l.job, jobs: { ...jobs.jobs, [l.job]: { ...recordFor(jobs, l.job), picks: [l.picks[0], l.picks[1]] } } };
+  return { curve: 2, current: l.job, jobs: { ...jobs.jobs, [l.job]: { ...recordFor(jobs, l.job), picks: [l.picks[0], l.picks[1]] } } };
 }
 
 /** What the owner is told of its jobs: every starting job (unplayed ones fresh), level from xp. */

@@ -240,7 +240,7 @@ describe('jobs and picks', () => {
     await a.room.leave();
     await waitFor(async () => (await store.getOrCreateAdventurer(a.accountId)).jobs.jobs.ranger?.picks[0] === 'sprint');
     expect((await store.getOrCreateAdventurer(a.accountId)).jobs).toEqual({
-      current: 'ranger',
+      current: 'ranger', curve: 2,
       jobs: {
         warrior: { level: 1, xp: 0, picks: ['mend', 'bulwark'], talents: [], outfit: null },
         ranger: { level: 1, xp: 0, picks: ['sprint', 'barbed_rain'], talents: [], outfit: null },

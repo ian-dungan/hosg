@@ -102,7 +102,7 @@ async function fuzz(o: {
   const { store, url } = server;
   const account = await accountFor(store, `Fuzz${o.seed}`);
   const start = { x: 0, z: -13 };
-  await saveAs(store, account.accountId, { ...start, facing: 0, ...(o.sprint ? { jobs: { current: 'ranger', jobs: { ranger: { level: 1, xp: 0, picks: ['sprint', 'field_dressing'], talents: [], outfit: null } } } as JobsSave } : {}) });
+  await saveAs(store, account.accountId, { ...start, facing: 0, ...(o.sprint ? { jobs: { curve: 2, current: 'ranger', jobs: { ranger: { level: 1, xp: 0, picks: ['sprint', 'field_dressing'], talents: [], outfit: null } } } as JobsSave } : {}) });
   const { room: sdkRoom } = await joinZone(url, account.token, 'grove');
   const room = serverRoom(sdkRoom) as any;
   room.setSimulationInterval(undefined); // stepped by hand, on the virtual clock
