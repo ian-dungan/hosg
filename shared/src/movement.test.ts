@@ -318,7 +318,7 @@ describe('checkPose', () => {
 
 describe('checkPose once the arc is surely over (lag, reconnect, re-join)', () => {
   /** A track that left flat ground at 1000 ms and was last accepted at y (peak `peak`) in the air. */
-  const airborne = (y: number, peak = y): AirTrack => ({ grounded: false, airStartMs: 1000, airStartY: 0, peakY: peak, y });
+  const airborne = (y: number, peak = y): AirTrack => ({ grounded: false, airStartMs: 1000, airStartY: 0, peakY: peak, y, atMs: 1400 });
 
   it('accepts a landing whose poses arrive 400 ms late, and is not locked out afterwards', () => {
     const c = new SimClient(flat, 0, 0, 1 / 15);
@@ -342,7 +342,7 @@ describe('checkPose once the arc is surely over (lag, reconnect, re-join)', () =
 
   it('charges the whole fall when it lands long after (a reconnect on the ground)', () => {
     const ledge: Surface = (x) => (x < 1 ? 10 : 0);
-    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 10, peakY: 10, y: 9.9 };
+    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 10, peakY: 10, y: 9.9, atMs: 1067 };
     const r = checkPose({ x: 1.1, z: 0 }, track, at(1.4, 0, 0), 4000, 5, ledge);
     expect(r).toEqual({ result: 'ok', landedDrop: 10 });
   });
@@ -415,6 +415,51 @@ describe('checkPose with jump held (landing and jumping again between two poses)
   });
 });
 
+describe('checkPose: no hovering by pretending to land and jump again', () => {
+  /** Takes off from flat ground, then sends y every 1/15 s while moving 0.4 m a pose (the reviewer's scenario). */
+  function hover(y: number, seconds = 10) {
+    const track = makeAirTrack(0);
+    let x = 0, now = 1000;
+    const results: string[] = [];
+    for (let i = 0; i < seconds * TICK_HZ; i++) {
+      now += 1000 / TICK_HZ;
+      let r = checkPose({ x, z: 0 }, track, at(x + 0.4, 0, y), now, 8, flat).result;
+      if (r !== 'ok') r = checkPose({ x, z: 0 }, track, at(x + 0.4, 0, y + 0.001), now, 8, flat).result; // nudged
+      if (r === 'ok') x += 0.4;
+      results.push(r);
+    }
+    return { results, track };
+  }
+
+  for (const y of [0.15, 0.3, 0.45, 0.5, 0.8, 1.2, 1.6]) {
+    it(`refuses hovering at ${y} m: nothing is accepted after the first jump's arc runs out (about 1 s)`, () => {
+      const { results } = hover(y);
+      expect(results.slice(16).filter((r) => r === 'ok')).toEqual([]);
+    });
+  }
+
+  it('cannot pretend to land on a ledge higher than one jump reaches', () => {
+    for (const h of [2.05, 2.2, 2.35, 2.6]) {
+      const ledge: Surface = (x) => (x > 2 ? h : 0);
+      // ride the ceiling up to the ledge, then claim to stand on it or to jump again from it
+      for (const claim of ['land', 'rejump'] as const) {
+        const track = makeAirTrack(0);
+        let x = 0, now = 1000, onTop = false;
+        for (let i = 1; i <= 30 && !onTop; i++) {
+          now += 1000 / TICK_HZ;
+          const nx = Math.min(x + 0.4, 2.2);
+          const best = jumpCeiling(track.grounded ? track.y : track.airStartY, (now - (track.grounded ? now - 1000 / TICK_HZ : track.airStartMs)) / 1000);
+          const y = nx > 2 ? (claim === 'land' ? h : h + 0.3) : Math.min(best, h + 0.35);
+          const r = checkPose({ x, z: 0 }, track, at(nx, 0, y), now, 8, ledge);
+          if (r.result === 'ok') x = nx;
+          if (r.result === 'ok' && nx > 2) onTop = true;
+        }
+        expect(onTop, `${claim} on a ${h} m ledge`).toBe(false);
+      }
+    }
+  });
+});
+
 describe('checkPose when a body slides round an obstacle', () => {
   for (const r of [0.2, 0.5, 1.2]) {
     it(`accepts running into a post of radius ${r} m and sliding round it, on foot and in the air`, () => {
@@ -443,12 +488,27 @@ describe('checkPose when a body slides round an obstacle', () => {
     }
   });
 
+  for (const deg of [30, 45, 60]) {
+    it(`refuses crossing a 0.3 m thick wall at ${deg} degrees, at any offset along it`, () => {
+      const c = Math.cos((deg * Math.PI) / 180), sn = Math.sin((deg * Math.PI) / 180);
+      // a long wall through (1.5, 0), its normal at `deg` to the path's +x
+      const wall: Surface = (x, z) => (Math.abs((x - 1.5) * c + z * sn) < 0.15 ? null : 0);
+      for (const len of [0.4, 0.6, 1, 1.6]) for (let z0 = -0.3; z0 <= 0.3; z0 += 0.05) {
+        const from = { x: 1.5 - len / 2, z: z0 }, to = at(1.5 + len / 2, z0, 0);
+        if (wall(from.x, from.z) === null || wall(to.x, to.z) === null) continue;
+        const side = (p: { x: number; z: number }) => Math.sign((p.x - 1.5) * c + p.z * sn);
+        if (side(from) === side(to)) continue; // this step does not cross the wall
+        expect(checkPose(from, makeAirTrack(0), to, 1000, 5, wall).result, `len ${len}, z ${z0.toFixed(2)}`).toBe('blocked');
+      }
+    });
+  }
+
   it('still refuses a step through a wall 1 m long', () => {
     const wall: Surface = (x, z) => (x > 1.1 && x < 1.4 && Math.abs(z) < 0.5 ? null : 0);
     expect(checkPose({ x: 0.8, z: 0 }, makeAirTrack(0), at(1.7, 0, 0), 1000, 5, wall).result).toBe('blocked');
     expect(checkPose({ x: 0.8, z: 0.25 }, makeAirTrack(0), at(1.7, 0.25, 0), 1000, 5, wall).result).toBe('blocked');
-    // within 0.2 m of its end is going round it
-    expect(checkPose({ x: 0.8, z: 0.35 }, makeAirTrack(0), at(1.7, 0.35, 0), 1000, 5, wall).result).toBe('ok');
+    // clipping its end by a few centimetres is going round it
+    expect(checkPose({ x: 0.8, z: 0.45 }, makeAirTrack(0), at(1.7, 0.45, 0), 1000, 5, wall).result).toBe('ok');
   });
 });
 
@@ -479,11 +539,11 @@ describe('checkPose against honest clients wandering the grove', () => {
 
 describe('landAirTrack', () => {
   it('puts a track on the ground and returns how far it fell from its highest point', () => {
-    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 4.5, peakY: 5, y: 3 };
+    const track: AirTrack = { grounded: false, airStartMs: 1000, airStartY: 4.5, peakY: 5, y: 3, atMs: 1500 };
     expect(landAirTrack(track, 0)).toBe(5);
-    expect(track).toEqual(makeAirTrack(0));
+    expect(track).toEqual(makeAirTrack(0, 1500)); // keeps when it was last accepted
     expect(landAirTrack(makeAirTrack(2), 2)).toBe(0);
-    expect(landAirTrack({ grounded: false, airStartMs: 0, airStartY: 0, peakY: 0.5, y: 0.4 }, 0.9)).toBe(0); // never negative
+    expect(landAirTrack({ grounded: false, airStartMs: 0, airStartY: 0, peakY: 0.5, y: 0.4, atMs: 0 }, 0.9)).toBe(0); // never negative
   });
 });
 
