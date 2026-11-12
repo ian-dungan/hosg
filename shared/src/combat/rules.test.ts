@@ -263,3 +263,52 @@ describe('lineOfSight', () => {
     expect(lineOfSight(() => false, 0, 0, 3, 0)).toBe(false);
   });
 });
+
+describe('fix round 1: guards', () => {
+  it('a negated hit is 0 (a factor not above 0, or not finite); a real hit is at least 1; never NaN', () => {
+    for (const [raw, mult] of [[0, 1], [-5, 1], [NaN, 1], [Infinity, 1], [7, 0], [7, -1], [7, NaN], [7, Infinity]]) expect(enemyHit(raw, 10, mult)).toBe(0);
+    for (const [coef, power, mult] of [[0, 10, 1], [1, 0, 1], [1, NaN, 1], [NaN, 10, 1], [1, 10, 0], [1, 10, NaN], [Infinity, 10, 1], [1, -10, 1]]) {
+      expect(hitDamage(coef, power, 10, mult)).toBe(0);
+    }
+    expect(enemyHit(0.1, 10)).toBe(1);
+    expect(hitDamage(0.01, 10, 10)).toBe(1);
+    // a nonsense defence counts as none; an infinite one still lets the floor of 1 through
+    expect(mitigation(NaN)).toBe(1);
+    expect(enemyHit(7, NaN)).toBe(7);
+    expect(mitigation(Infinity)).toBe(0);
+    expect(enemyHit(7, Infinity)).toBe(1);
+    expect(hitDamage(1, 10, Infinity)).toBe(1);
+  });
+  it('momentum never becomes NaN', () => {
+    expect(gainMomentum(NaN, 10)).toBe(10);
+    expect(gainMomentum(50, NaN)).toBe(50);
+    expect(gainMomentum(50, Infinity)).toBe(50);
+    expect(decayMomentum(NaN, 10, 1)).toBe(0);
+    expect(decayMomentum(50, NaN, 1)).toBe(50);
+    expect(decayMomentum(50, 10, NaN)).toBe(50);
+    expect(decayMomentum(50, Infinity, Infinity)).toBe(0);
+  });
+  it('lineOfSight is false for non-finite points, and never loops on huge ones', () => {
+    for (const p of [[NaN, 0, 10, 0], [0, Infinity, 10, 0], [0, 0, -Infinity, 0], [0, 0, 10, NaN]]) {
+      expect(lineOfSight(() => true, p[0], p[1], p[2], p[3])).toBe(false);
+    }
+    const t0 = Date.now();
+    expect(lineOfSight(() => true, 0, 0, 1e15, 0)).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(100);
+  });
+  it('a cone pointing at ±π (−Z) and at any wrapped angle', () => {
+    for (const dir of [Math.PI, -Math.PI, 3 * Math.PI, -5 * Math.PI]) {
+      const c: Shape = { kind: 'cone', x: 0, z: 0, dir, r: 11, angle: 1.2 };
+      expect(inShape(c, 0, -5)).toBe(true);
+      expect(inShape(c, Math.sin(Math.PI + 0.5) * 5, Math.cos(Math.PI + 0.5) * 5)).toBe(true);
+      expect(inShape(c, Math.sin(Math.PI - 0.5) * 5, Math.cos(Math.PI - 0.5) * 5)).toBe(true);
+      expect(inShape(c, Math.sin(Math.PI + 0.7) * 5, Math.cos(Math.PI + 0.7) * 5)).toBe(false);
+      expect(inShape(c, 0, 5)).toBe(false);
+      for (const side of [-1, 1]) {
+        const x = Math.sin(Math.PI + side * 0.5) * 5, z = Math.cos(Math.PI + side * 0.5) * 5;
+        const e = escapeDir(c, x, z);
+        expect(inShape(c, x + e.x * DODGE_DISTANCE, z + e.z * DODGE_DISTANCE)).toBe(false);
+      }
+    }
+  });
+});
