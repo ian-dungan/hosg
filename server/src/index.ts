@@ -1,5 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type ZoneId } from '@sg2/shared';
+import { GOLD_MAX, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -101,7 +101,36 @@ function testInstanceStart(): CheckpointId | undefined {
   return raw;
 }
 
+/** SG2_TEST_START_GOLD=<n> (test servers only, never in Docker): new adventurers start with n gold. */
+function testStartGold(): number | undefined {
+  const raw = process.env.SG2_TEST_START_GOLD;
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n > GOLD_MAX) fail(`SG2_TEST_START_GOLD must be a whole number of gold from 0 to ${GOLD_MAX}, or empty (got "${raw}").`);
+  return n;
+}
+
+/** SG2_TEST_LOOT=always (test servers only, never in Docker): every credited kill on a row with items drops one (the roll still picks which). */
+function testLoot(): boolean {
+  const raw = process.env.SG2_TEST_LOOT;
+  if (raw === undefined || raw === '') return false;
+  if (raw !== 'always') fail(`SG2_TEST_LOOT must be always or empty (got "${raw}").`);
+  return true;
+}
+
+/** SG2_TEST_KIT=t1|t2|t3 (test servers only, never in Docker): new adventurers get that tier's full kit for every job, worn. */
+function testKit(): 1 | 2 | 3 | undefined {
+  const raw = process.env.SG2_TEST_KIT;
+  if (raw === undefined || raw === '') return undefined;
+  if (raw !== 't1' && raw !== 't2' && raw !== 't3') fail(`SG2_TEST_KIT must be t1, t2, t3 or empty (got "${raw}").`);
+  return Number(raw.slice(1)) as 1 | 2 | 3;
+}
+
 const port = positiveInt('SG2_PORT', 2570);
+const startGold = testStartGold();
+const lootAlways = testLoot();
+const startKit = testKit();
+const newAdventurer = { ...(startGold !== undefined ? { gold: startGold } : {}), ...(startKit ? { kit: startKit } : {}) };
 const mouthStart = startAt();
 const instanceStart = testInstanceStart();
 const start = (() => {
@@ -122,19 +151,19 @@ const clientDir = process.env.SG2_CLIENT_DIR || undefined;
 let store: Store;
 if (process.env.SG2_STORE === 'memory') {
   console.warn('Shady Grove 2 server: SG2_STORE=memory, nothing is saved across restarts.');
-  store = createMemoryStore({ start });
+  store = createMemoryStore({ start, newAdventurer });
 } else {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) fail('DATABASE_URL is not set (or set SG2_STORE=memory to run without a database).');
   try {
-    store = await createPgStore(databaseUrl, { start });
+    store = await createPgStore(databaseUrl, { start, newAdventurer });
   } catch (err) {
     fail(`cannot open the database at DATABASE_URL: ${reason(err)}.`);
   }
 }
 
 const app = createApp({
-  store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones,
+  store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones, lootAlways,
   ...(instanceStart ? { instances: { startAt: instanceStart } } : {}),
 });
 try {
@@ -148,6 +177,9 @@ if (mouthStart) console.log('Shady Grove 2 server: SG2_START_AT=lampfall-mouth; 
 else if (start.zone !== 'grove') console.log(`Shady Grove 2 server: SG2_START_ZONE=${start.zone}; new adventurers start there.`);
 if (instanceStart) console.log('Shady Grove 2 server: SG2_TEST_INSTANCE_START=landing; new instances start at the landing (test servers only).');
 if (dummyZones) console.log('Shady Grove 2 server: SG2_TEST_DUMMY=1; a Training Dummy stands in the grove (test servers only).');
+if (startGold !== undefined) console.log(`Shady Grove 2 server: SG2_TEST_START_GOLD=${startGold}; new adventurers start with that gold (test servers only).`);
+if (lootAlways) console.log('Shady Grove 2 server: SG2_TEST_LOOT=always; every credited kill drops an item (test servers only).');
+if (startKit) console.log(`Shady Grove 2 server: SG2_TEST_KIT=t${startKit}; new adventurers wear that tier's kit (test servers only).`);
 if (exitsOpen) console.log(`Shady Grove 2 server: SG2_OPEN_EXITS=${process.env.SG2_OPEN_EXITS}; those exits are open.`);
 console.log(
   trustProxy === undefined

@@ -1,7 +1,10 @@
 // Message shapes between client and server, keyed by message type, and the reasons the server
 // gives when it refuses a join or ends a session (the client recognises them by exact text).
 import type { AbilityId } from './combat/abilities';
-import type { JobId } from './combat/jobs';
+import type { JobId, JobOutfit } from './combat/jobs';
+import type { InvOp, InvRefusal, InventoryView } from './inventory';
+import type { ItemId } from './items';
+import type { EmoteId, Look } from './look';
 import type { Displacement } from './combat/displace';
 import type { Refusal, SelfView } from './combat/engine';
 import type { EnemyKindId } from './combat/enemies';
@@ -78,13 +81,39 @@ export type C2S = {
   release: Record<string, never>;
   /** Leave the Lampfall for the crater mouth (the victory screen's button). */
   leaveInstance: Record<string, never>;
+  /**
+   * An inventory operation (parseInvOp; ids only: the server owns every item, price and amount). Answered by
+   * `inventory` (applied, or a resend of an applied op id) or `invRefused`. Purchases and Vault moves need an
+   * op id (12–40 of A–Z a–z 0–9 _ -, random per operation); at most INV_OPS_PER_S a second.
+   */
+  inv: InvOp;
+  /** The Barber (within reach of its stall): a new look, for barberCost gold (the free creator visit: 0). */
+  look: { look: Look };
+  /** An emote (EMOTES): alive and out of combat, at most one every EMOTE_MIN_S; a move cancels it on clients. */
+  emote: { emote: EmoteId };
 };
+
+/** Emotes are accepted at most this often (s); others are dropped. */
+export const EMOTE_MIN_S = 2;
+/** Why an operation was refused: an InvRefusal, or 'save' (the store could not take it; nothing changed). */
+export type InvRefusedReason = InvRefusal | 'save';
+/** The line for a refusal 'save'. */
+export const INV_SAVE_TEXT = 'That could not be saved just now; nothing was changed. Try again.';
+/** The line for a kill that gave no credit (and so no xp or loot): too little of the fight's threat. */
+export const NO_CREDIT_TEXT = 'No credit: too little contribution to that fight (in a party, members nearby share kills)';
+/** The notice for a drop sold because the bag was full ("Your bag is full: <item> was sold for <n> gold"). */
+export const bagFullText = (item: string, gold: number): string => `Your bag is full: ${item} was sold for ${gold} gold`;
+/** The notice for gold that could not be kept at GOLD_MAX. */
+export const purseFullText = (gold: number): string => `Your purse is full: ${gold} gold could not be kept`;
 
 /** What a refused intent was. */
 export type IntentAction = 'target' | 'ability' | 'dodge' | 'loadout' | 'job' | 'respawn';
 
-/** One job's progress and picks as the owner sees them (level from xp; next = xp still needed, 0 at the cap). */
-export interface JobView { level: number; xp: number; next: number; picks: [AbilityId, AbilityId] }
+/**
+ * One job's progress and picks as the owner sees them (level from xp; next = xp still needed, 0 at the cap),
+ * its chosen talents (TalentIds) and its outfit (costumes worn, head hidden; null: none).
+ */
+export interface JobView { level: number; xp: number; next: number; picks: [AbilityId, AbilityId]; talents: string[]; outfit: JobOutfit | null }
 /** The owner's jobs: the current one, and every starting job (one never played shows level 1 with its solo picks). */
 export interface JobsView { current: JobId; jobs: Record<JobId, JobView> }
 
@@ -162,4 +191,24 @@ export type S2C = {
   instance: InstanceView;
   /** A boss kill this adventurer is credited with. */
   victory: VictoryView;
+  /** The owner's inventory, gold, Seals and kit stats: a step after joining (like `jobs`), and after every change (and a resent op id). */
+  inventory: InventoryView;
+  /** An operation (or a Barber `look`; op null: a message that is no operation at all) refused: nothing changed (text: INV_TEXT[reason], or INV_SAVE_TEXT for 'save'). */
+  invRefused: { op: InvOp['op'] | 'look' | null; reason: InvRefusedReason; text: string };
+  /**
+   * What one kill or pack clear gave this adventurer (sent to it only; personal loot): items that landed in the
+   * bag (with their new uids), the gold, the gold from drops sold because the bag was full (each with a notice),
+   * and where the enemy fell.
+   */
+  loot: { items: { item: ItemId; uid: number }[]; gold: number; soldFor: number; x: number; z: number };
+  /** The current job reached `level`; talentRow: the talent row (0–2) this level unlocks, else null. */
+  levelUp: { job: JobId; level: number; talentRow: 0 | 1 | 2 | null };
+  /**
+   * Adventurers' look and gear codes, as [eid, encodeLook, encodeGearLook] (the client keeps them by engine id;
+   * engine ids are never reused): each the first time it comes into this client's view (its own included) and
+   * whenever it changes, never again when it comes back into view; all again after a reconnect.
+   */
+  looks: { a: [number, string, string][] };
+  /** Whether the one free creator visit is unused: a step after joining, and when it is spent. */
+  lookFree: { free: boolean };
 };

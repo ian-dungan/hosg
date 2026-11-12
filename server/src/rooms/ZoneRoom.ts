@@ -114,11 +114,43 @@ import {
   type EncounterId,
   type InstanceView,
   type VictoryView,
+  EMOTES,
+  EMOTE_MIN_S,
+  GUILD_BOARD,
+  INV_SAVE_TEXT,
+  INV_TEXT,
+  NO_CREDIT_TEXT,
+  PACK_ENCOUNTERS,
+  STALL_REACH,
+  applyInvOp,
+  bagFullText,
+  barberCost,
+  defaultLook,
+  encodeGearLook,
+  encodeLook,
+  gearItems,
+  gearLookOf,
+  inventoryView,
+  kitFor,
+  levelForXp,
+  lootTable,
+  parseInvOp,
+  parseLook,
+  purseFullText,
+  stallAt,
+  type EmoteId,
+  type InvCtx,
+  type InvOp,
+  type InvRefusedReason,
+  type Kit,
+  type Look,
 } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer'; // (a relog of the dead inside: re-added dead)
 import { verifyToken } from '../auth/tokens';
 import type { MemberStatus, Parties } from '../party/parties';
 import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../store/types';
+import { InventoryQueue, TokenBucket, WriteLock, type InvSnapshot, type InvTask, type TaskResult } from './inventoryQueue';
+import { applyLoot, clearXp, itemName, killXp, talentRowFor, type LootAward } from './rewards';
 import type { InstanceInfo, Instances } from './instances';
 import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
@@ -160,7 +192,23 @@ export interface ZoneRoomOptions {
   instances?: Instances;
   /** This room is a Lampfall instance (its key is the party's, or 'solo:' + accountId). */
   instance?: { key: string; registry: Instances; parties?: Parties; startAt?: CheckpointId; timings?: Partial<InstanceTimings> };
+  /** The process's loot seed (a random 32-bit value made at start, never the engine's): rollLoot's first seed part. */
+  serverSeed: number;
+  /** Adventurers run their kits (kitFor: level, gear, talents); false (test-only) runs everyone on STARTER_STATS with no mods. */
+  kits?: boolean;
+  /** Test-only (SG2_TEST_LOOT=always): every credited kill on a row with items drops one. */
+  lootAlways?: boolean;
+  /** Each inventory write that lands (the app's invWritesPerS). */
+  onInvWrite?: () => void;
 }
+
+/** Refusals an operation checks once more on a fresh read before giving them (balances and room). */
+const RECHECK: readonly string[] = ['gold', 'seals', 'bag-full', 'bank-full', 'purse-full'];
+/** Loot writes that fail (the store threw) are tried again this many times, this far apart (ms), then given up (logged). */
+const LOOT_TRIES = 3;
+const LOOT_RETRY_MS = 500;
+/** A stale loot write is re-read and rolled again up to this many times. */
+const LOOT_STALE_RETRIES = 5;
 
 /** An instance's timings (s): the Numbers by default, shorter in tests. */
 export interface InstanceTimings { reconnectS: number; evictS: number; wipeS: number; releaseMinS: number; autoReleaseS: number; sealS: number }
@@ -269,7 +317,7 @@ function jobsView(s: JobsSave): JobsView {
   const jobs = {} as JobsView['jobs'];
   for (const id of JOB_IDS) {
     const r = recordFor(s, id);
-    jobs[id] = { level: r.level, xp: r.xp, next: xpToNext(r.xp), picks: [r.picks[0], r.picks[1]] };
+    jobs[id] = { level: r.level, xp: r.xp, next: xpToNext(r.xp), picks: [r.picks[0], r.picks[1]], talents: [...r.talents], outfit: r.outfit ? { ...r.outfit } : null };
   }
   return { current: s.current, jobs };
 }
@@ -430,6 +478,29 @@ interface Session {
   /** What its last `instance` message said (its discrete parts), '' = none yet. */
   instanceSent: string;
   statusAt: number;
+  // ───────── Plan 5 ─────────
+  /** Its inventory queue (every op, Barber visit, loot award and grant), and the lock its saves share with it. */
+  queue: InventoryQueue;
+  lock: WriteLock;
+  /** INV_OPS_PER_S for inventory and Barber requests. */
+  invBucket: TokenBucket;
+  /** `inventory` and `lookFree` are to be sent on the next step (a join or a reconnect). */
+  invDue: boolean;
+  /** Loot rolls from this step's kills, written as one queue task at the step's end. */
+  loot: LootAward[];
+  /** What the kit was made from (job, level, worn items, talents), as JSON: the kit is set again only when it changes. */
+  kitKey: string;
+  /** The engine's max hp (the kit's) as of the last mirror. */
+  maxHp: number;
+  /** When the last emote was accepted (combat clock). */
+  emoteAt: number;
+  /** Its look and gear codes (encodeLook, encodeGearLook): sent in `looks`, never in the state. */
+  lookCode: string;
+  gearCode: string;
+  /** What this client was last sent of each adventurer's codes (by engine id; only adventurers in this room). */
+  looksSent: Map<number, string>;
+  /** Adventurers whose codes this client is due (they came into its view, or changed): sent at the step's end. */
+  looksOut: Set<Session>;
 }
 
 const NO_ENEMIES: readonly EnemySchema[] = [];
@@ -462,7 +533,7 @@ const ALLOWANCE_FORGET_MS = 2000;
 /** The same notice is not sent to one adventurer again within this (ms), however often it walks into a full gate. */
 const NOTICE_REPEAT_MS = 2000;
 
-const clampHp = (hp: number) => (Number.isFinite(hp) ? Math.min(MAX_HP, Math.max(1, Math.round(hp))) : MAX_HP);
+const clampHp = (hp: number, max: number = MAX_HP) => (Number.isFinite(hp) ? Math.min(max, Math.max(1, Math.round(hp))) : max);
 
 export class ZoneRoom extends Room<{ state: ZoneState }> {
   state = new ZoneState();
@@ -532,6 +603,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private inst?: InstanceRun;
   /** An instance's delayed first step (the stagger). */
   private startTimer?: ReturnType<typeof setTimeout>;
+  private serverSeed = 0;
+  private kits = true;
+  private lootAlways = false;
+  private onInvWrite?: () => void;
+  /** Kills handled so far (a loot roll's seed part and kill key). */
+  private killCounter = 0;
+  /** Each engaged enemy's threat table (adventurer ids) as last seen alive: who fought it but got no credit (at most one entry an enemy). */
+  private threatSeen = new Map<number, number[]>();
+  /** Per pack encounter of an instance: the accounts credited for any of its kills (its clear's reward). */
+  private encounterCredit = new Map<string, Set<string>>();
 
   onCreate(options: ZoneRoomOptions & { instanceKey?: string }) {
     this.instances = options.instances ?? options.instance?.registry;
@@ -561,6 +642,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.respawnRetryMs = options.respawnRetryMs ?? RESPAWN_RETRY_MS;
     if (options.viewCap) this.viewCap = { ...options.viewCap };
     this.parties = options.parties;
+    this.serverSeed = options.serverSeed;
+    this.kits = options.kits !== false;
+    this.lootAlways = options.lootAlways === true;
+    this.onInvWrite = options.onInvWrite;
     const createdAt = performance.now();
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
@@ -587,6 +672,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.onMessage('party', this.guard('party', (client, message) => this.onParty(client, message)));
     this.onMessage('release', this.guard('release', (client) => this.onRelease(client)));
     this.onMessage('leaveInstance', this.guard('leaveInstance', (client) => this.onLeaveInstance(client)));
+    this.onMessage('inv', this.guard('inv', (client, message) => this.onInv(client, message)));
+    this.onMessage('look', this.guard('look', (client, message) => this.onLook(client, message)));
+    this.onMessage('emote', this.guard('emote', (client, message) => this.onEmote(client, message)));
     // (intents spend the intent budget, every other message the message budget: see guard)
     this.clock.setInterval(() => {
       this.forgetIdleAllowances();
@@ -625,6 +713,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     try {
       // Saves the older session (unless it was travelling: then this waits for the travel's own save).
       if (previous) await previous.room.kick(previous.sessionId);
+      // An ended session's inventory write still in flight lands first (once), so this join reads the truth.
+      await this.accounts.inventorySettled(accountId);
       adventurer = await this.store.getOrCreateAdventurer(accountId);
       // onAuth refused unnamed adventurers already; names are never taken away, so this is a safeguard.
       if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
@@ -658,7 +748,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
     movement.zone = this.zone.id;
     const y = movement.air.y + 0; // + 0: never -0 (terrain height can be), which state and messages encode differently
-    const hp = clampHp(adventurer.hp);
+    const look = adventurer.look ?? defaultLook(accountId);
+    const snapshot: InvSnapshot = {
+      inv: adventurer.inventory, gold: adventurer.gold, seals: adventurer.seals, look, lookFree: adventurer.lookFree, version: adventurer.invVersion,
+    };
     if (this.zone.id === RESPAWN_ZONE) this.accounts.respawns.delete(accountId);
     // Combat state a relog keeps (cooldowns, timers, combat, shield, sprint, Momentum), from its last
     // session anywhere, or a fresh one; a hurt adventurer waits out the regen delay again (relogging
@@ -667,19 +760,28 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // runs the current job with its picks. (The adventurer row's own level and xp are untouched and
     // unused until Plan 5: job xp lives in jobs.)
     const loaded = isJobsSave(adventurer.jobs) ? adventurer.jobs : newJobsSave();
-    const maxCharges = JOBS[loaded.current].dodgeCharges;
-    const carry: Carry = { ...(this.takeCarry(accountId, maxCharges) ?? freshCarry(loaded.current)), ...(hp < MAX_HP ? { sinceHurt: 0 } : {}) };
+    // The kit (level, worn gear, talents) goes in with the adventurer, so the carry's dodges fit it.
+    const kit = this.kitOf(loaded, snapshot.inv, loaded.current);
+    const maxHp = this.kits ? kit.kit.stats.maxHp : MAX_HP;
+    const hp = clampHp(adventurer.hp, maxHp);
+    // (a kit may give one dodge charge more: the carry ages up to that, and the engine clamps it to the kit's own)
+    const maxCharges = JOBS[loaded.current].dodgeCharges + (this.kits ? 1 : 0);
+    const carry: Carry = { ...(this.takeCarry(accountId, maxCharges) ?? freshCarry(loaded.current)), ...(hp < maxHp ? { sinceHurt: 0 } : {}) };
     const now = this.nowS();
-    const eid = this.combat.addAdventurer({ x: start.x, z: start.z, y, facing: start.facing, hp, loadout: loadoutOf(loaded), carry }, now);
+    const eid = this.combat.addAdventurer({
+      x: start.x, z: start.z, y, facing: start.facing, hp, loadout: loadoutOf(loaded), carry, ...(this.kits ? { kit: kit.kit, level: kit.level } : {}),
+    }, now);
     const engineJobs = withLoadout(loaded, this.combat.jobLoadout(eid)!);
     const jobs = isJobsSave(engineJobs) ? engineJobs : loaded;
     const job = jobs.current;
     // cast, castTotal, castAt and buffs stay unset (read as '' and 0) until their first event: an
     // adventurer coming into a view arrives whole, and most never cast or carry a buff.
     const player = Object.assign(new PlayerState(), {
-      name, x: start.x, z: start.z, y, facing: start.facing, moving: false, hp, maxHp: MAX_HP,
+      name, x: start.x, z: start.z, y, facing: start.facing, moving: false, hp, maxHp,
       eid, weapon: JOBS[job].weapon, target: -1, dead: false, act: '', shield: 0, job,
+      level: levelForXp(recordFor(jobs, job).xp),
     });
+    const lock = new WriteLock();
     const session: Session = {
       client,
       view: new StateView(),
@@ -720,7 +822,20 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       engineParty: null,
       instanceSent: '',
       statusAt: -Infinity,
+      queue: undefined as unknown as InventoryQueue,
+      lock,
+      invBucket: new TokenBucket(this.wallMs()),
+      invDue: true,
+      loot: [],
+      kitKey: kit.key,
+      maxHp,
+      emoteAt: -Infinity,
+      lookCode: encodeLook(look),
+      gearCode: this.gearCode(snapshot.inv, jobs, job),
+      looksSent: new Map(),
+      looksOut: new Set(),
     };
+    session.queue = this.makeQueue(snapshot, lock, adventurer.id, accountId, () => session.jobs);
     this.sessions.set(sessionId, session);
     this.sessionByEid.set(eid, session);
     if (prevDeadAt !== undefined) {
@@ -734,6 +849,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.state.online = this.state.players.size;
     // Its view: itself always, and at once whatever is near (so its first state already shows them).
     session.view.add(player);
+    session.looksOut.add(session); // its own codes
     client.view = session.view;
     // Findable by name while online; its party (if any) learns where it is now, and the engine has it
     // in the party (the engine forgets parties with the adventurer: every join sets it again).
@@ -745,6 +861,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.refreshView(session);
     // A save the store had to repair (a Plan 3 one, or one with bad parts) is written back repaired.
     if (adventurer.jobsRepaired) this.saveJobs(session);
+    // ...and an inventory the store had to repair (a new adventurer's starter kit, a migrated row): once, through the queue.
+    if (adventurer.inventoryRepaired) {
+      void session.queue.push({
+        retries: 1,
+        run: (s, jobs) => ({ kind: 'write', write: { inventory: s.inv, jobs, dGold: 0, dSeals: 0 }, next: { inv: s.inv, gold: s.gold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree }, info: null }),
+        settle: (r) => { if (r.status === 'failed') this.logFailure('inventory', 'Writing back a repaired inventory failed', r.error); },
+      });
+    }
   }
 
   onDrop(client: Client) {
@@ -769,6 +893,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.missedRevive = undefined;
     session.lastSelf = '';
     session.jobsDue = true;
+    session.invDue = true;
+    // its looks: everything in its view again (what it held may be gone with the old connection)
+    session.looksSent.clear();
+    session.looksOut.add(session);
+    for (const item of session.seen) if (item instanceof PlayerState) this.lookDue(session, item);
     session.partySent = null;
     this.sendParty(session); // its party may have changed while it was away
     this.sendInvites(session);
@@ -910,6 +1039,317 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     return true;
   }
 
+  // ───────── Plan 5: kits, the inventory queue, shops, the Barber, emotes ─────────
+
+  /** The kit `job` runs (kitFor: its level, what it wears, its talents), its level, and what it was made from. */
+  private kitOf(jobs: JobsSave, inv: InvSnapshot['inv'], job: JobId): { kit: Kit; level: number; key: string } {
+    const r = recordFor(jobs, job), level = levelForXp(r.xp), gear = gearItems(inv, job);
+    return { kit: kitFor({ job, level, gear, talents: r.talents }), level, key: JSON.stringify([job, level, gear, r.talents]) };
+  }
+
+  /** What `job` shows (gear, costumes, the hidden head) as the state's code. */
+  private gearCode(inv: InvSnapshot['inv'], jobs: JobsSave, job: JobId): string {
+    return encodeGearLook(gearLookOf(inv, job, recordFor(jobs, job).outfit));
+  }
+
+  /**
+   * The kit, the `gear` code and the `level` from the session's jobs and inventory now. The engine's kit is set
+   * only when what it is made from changed (a job change, equip, talent, level-up): loot or a dye never re-kits.
+   * Callers re-kit only out of combat and not mid-cast (operations are refused then), except a level-up.
+   */
+  private refreshKit(session: Session) {
+    const inv = session.queue.snapshot.inv, job = session.jobs.current;
+    const k = this.kitOf(session.jobs, inv, job);
+    if (k.key !== session.kitKey) {
+      session.kitKey = k.key;
+      if (this.kits) this.combat.setKit(session.eid, k.kit, k.level);
+    }
+    const p = session.player, gear = this.gearCode(inv, session.jobs, job);
+    if (session.gearCode !== gear) {
+      session.gearCode = gear;
+      this.codesChanged(session);
+    }
+    if (p.level !== k.level) p.level = k.level;
+    this.mirrorPlayer(session);
+  }
+
+  /**
+   * `player`'s codes are due to this client unless it was sent them as they are now (an adventurer coming
+   * back into its view costs nothing: the client keeps what it was sent, by engine id).
+   */
+  private lookDue(session: Session, player: PlayerState) {
+    const other = this.sessionByEid.get(player.eid);
+    if (other && session.looksSent.get(player.eid) !== `${other.lookCode} ${other.gearCode}`) session.looksOut.add(other);
+  }
+
+  /** An adventurer's look or gear code changed: due to itself and every client that has it in view. */
+  private codesChanged(session: Session) {
+    for (const s of this.sessions.values()) if (s === session || s.seen.has(session.player)) s.looksOut.add(session);
+  }
+
+  /** The step's due codes to one client, as one `looks` message. */
+  private sendLooks(session: Session) {
+    if (session.looksOut.size === 0 || session.reconnection) return;
+    const a: [number, string, string][] = [];
+    for (const o of session.looksOut) {
+      if (this.sessions.get(o.client.sessionId) !== o) continue; // gone meanwhile
+      const key = `${o.lookCode} ${o.gearCode}`;
+      if (session.looksSent.get(o.eid) === key) continue;
+      session.looksSent.set(o.eid, key);
+      a.push([o.eid, o.lookCode, o.gearCode]);
+    }
+    session.looksOut.clear();
+    if (a.length > 0) this.sendTo(session.client, 'looks', { a });
+  }
+
+  /** The adventurer's inventory queue: reads and writes the store for it, its writes under the session's lock. */
+  private makeQueue(snapshot: InvSnapshot, lock: WriteLock, adventurerId: string, accountId: string, jobs: () => JobsSave): InventoryQueue {
+    return new InventoryQueue(snapshot, {
+      lock,
+      jobs,
+      write: (expect, w) => this.store.writeInventory(adventurerId, expect, w),
+      load: async () => {
+        const a = await this.store.getOrCreateAdventurer(accountId);
+        return { inv: a.inventory, gold: a.gold, seals: a.seals, look: a.look ?? defaultLook(accountId), lookFree: a.lookFree, version: a.invVersion };
+      },
+      onWrite: () => this.onInvWrite?.(),
+      onError: (err) => this.logFailure('inventory', 'Applying an inventory result failed', err),
+    });
+  }
+
+  /** The owner's inventory view now (or when it is back). */
+  private sendInventory(session: Session) {
+    if (session.reconnection) {
+      session.invDue = true;
+      return;
+    }
+    const s = session.queue.snapshot;
+    this.sendTo(session.client, 'inventory', inventoryView({ inv: s.inv, gold: s.gold, seals: s.seals, jobs: session.jobs }));
+  }
+
+  private refuseInv(session: Session, op: InvOp['op'] | 'look' | null, reason: InvRefusedReason) {
+    if (session.reconnection) return;
+    const text = reason === 'save' ? INV_SAVE_TEXT : INV_TEXT[reason];
+    this.sendTo(session.client, 'invRefused', { op, reason, text });
+  }
+
+  /** Where and how the adventurer stands for an operation, from the server's own view (never the client's). */
+  private invCtx(session: Session): InvCtx {
+    const self = this.combat.self(session.eid);
+    const { x, z } = session.lastGood;
+    const grove = this.zone.id === 'grove' && !this.inst;
+    return {
+      stall: grove ? stallAt('grove', x, z) : null,
+      jobSwitch: this.zone.jobSwitch(x, z),
+      townBoard: grove && Math.hypot(x - GUILD_BOARD.x, z - GUILD_BOARD.z) <= STALL_REACH,
+      inCombat: self?.inCombat ?? false,
+      dead: session.dead || !(this.combat.get(session.eid)?.alive ?? false),
+      busy: session.travelling !== undefined || (self?.cast ?? null) !== null || (self?.charge ?? null) !== null || session.awaitingDisplace,
+    };
+  }
+
+  /**
+   * Talents and outfits from an operation's result, onto the session's jobs as they are now (xp, picks and the
+   * current job may have moved on while the write was in flight: the session is their authority).
+   */
+  private mergeJobs(session: Session, result: JobsSave) {
+    const next: JobsSave = { ...session.jobs, jobs: { ...session.jobs.jobs } };
+    for (const [id, r] of Object.entries(result.jobs) as [JobId, NonNullable<JobsSave['jobs'][JobId]>][]) {
+      const cur = next.jobs[id];
+      next.jobs[id] = cur ? { ...cur, talents: [...r.talents], outfit: r.outfit ? { ...r.outfit } : null } : { ...r, picks: [r.picks[0], r.picks[1]], talents: [...r.talents] };
+    }
+    const changed = JSON.stringify(next) !== JSON.stringify(session.jobs);
+    this.setJobs(session, next);
+    return changed;
+  }
+
+  /** A task's end as the owner hears it: the view after a change (or a resend), else the refusal. */
+  private settleInv(session: Session, op: InvOp['op'] | 'look' | null, r: TaskResult<unknown>) {
+    if (this.sessions.get(session.client.sessionId) !== session) return; // ended meanwhile (its write, if any, landed)
+    switch (r.status) {
+      case 'applied':
+        if (this.mergeJobs(session, r.jobs)) this.sendJobs(session);
+        this.refreshKit(session);
+        this.sendInventory(session);
+        return;
+      case 'unchanged':
+        this.sendInventory(session); // a resent op id: the client hears the truth again
+        return;
+      case 'refused':
+        this.refuseInv(session, op, r.reason as InvRefusedReason);
+        if (r.reread) this.sendInventory(session); // it was read afresh: the truth as well
+        return;
+      case 'stale':
+      case 'failed':
+        if (r.status === 'failed') this.logFailure('inventory', 'An inventory write failed', r.error);
+        this.refuseInv(session, op, 'save');
+        this.refreshKit(session);
+        this.sendInventory(session); // the stored truth
+        return;
+      case 'dropped':
+        return;
+    }
+  }
+
+  /** `inv`: an operation through the queue (parseInvOp; at most INV_OPS_PER_S a second, more → 'rate'). */
+  private onInv(client: Client, message: unknown) {
+    const session = this.sessions.get(client.sessionId);
+    if (!session) return;
+    const op = parseInvOp(message);
+    const name = op?.op ?? null;
+    if (!session.invBucket.take(this.wallMs())) return this.refuseInv(session, name, 'rate');
+    if (!op) return this.refuseInv(session, null, 'unknown');
+    void session.queue.push<null>({
+      retries: 1,
+      recheck: RECHECK,
+      run: (s, jobs) => {
+        const r = applyInvOp({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, op, this.invCtx(session));
+        if ('refusal' in r) return { kind: 'refuse', reason: r.refusal };
+        if (r.dup) return { kind: 'none', info: null };
+        return {
+          kind: 'write', info: null,
+          write: { inventory: r.state.inv, jobs: r.state.jobs, dGold: r.dGold, dSeals: r.dSeals },
+          next: { ...r.state, look: s.look, lookFree: s.lookFree },
+        };
+      },
+      settle: (r) => this.settleInv(session, op.op, r),
+    });
+  }
+
+  /**
+   * `look`: the Barber, within reach of its stall, alive, out of combat and not busy. parseLook first (the
+   * server never throws on a bad look); barberCost gold, or nothing on the free visit; an unchanged look
+   * costs nothing and changes nothing.
+   */
+  private onLook(client: Client, message: unknown) {
+    const session = this.sessions.get(client.sessionId);
+    if (!session) return;
+    if (!session.invBucket.take(this.wallMs())) return this.refuseInv(session, 'look', 'rate');
+    const look = parseLook((message as { look?: unknown } | null)?.look);
+    if (!look) return this.refuseInv(session, 'look', 'unknown');
+    void session.queue.push<boolean>({
+      retries: 1,
+      recheck: RECHECK,
+      run: (s, jobs) => {
+        const ctx = this.invCtx(session);
+        if (ctx.dead) return { kind: 'refuse', reason: 'dead' };
+        if (ctx.inCombat) return { kind: 'refuse', reason: 'combat' };
+        if (ctx.busy) return { kind: 'refuse', reason: 'busy' };
+        if (ctx.stall !== 'barber') return { kind: 'refuse', reason: 'where' };
+        if (encodeLook(look) === encodeLook(s.look)) return { kind: 'none', info: false };
+        const cost = s.lookFree ? 0 : barberCost(s.look, look);
+        if (s.gold < cost) return { kind: 'refuse', reason: 'gold' };
+        return {
+          kind: 'write', info: s.lookFree,
+          write: { inventory: s.inv, jobs, dGold: -cost, dSeals: 0, look, ...(s.lookFree ? { lookFree: false as const } : {}) },
+          next: { inv: s.inv, gold: s.gold - cost, seals: s.seals, jobs, look, lookFree: false },
+        };
+      },
+      settle: (r) => {
+        if (r.status === 'applied' || r.status === 'stale' || r.status === 'failed') this.lookChanged(session, r.status === 'applied' && r.info === true);
+        this.settleInv(session, 'look', r);
+      },
+    });
+  }
+
+  /** The look field from the queue's look; `lookFree` when the free visit was just spent. */
+  private lookChanged(session: Session, spentFree: boolean) {
+    const code = encodeLook(session.queue.snapshot.look);
+    if (session.lookCode !== code) {
+      session.lookCode = code;
+      this.codesChanged(session);
+    }
+    if (spentFree && !session.reconnection) this.sendTo(session.client, 'lookFree', { free: false });
+  }
+
+  /** `emote`: alive, out of combat, at most one every EMOTE_MIN_S (others are dropped); only the state's two fields. */
+  private onEmote(client: Client, message: unknown) {
+    const session = this.actor(client);
+    const emote = (message as { emote?: unknown } | null)?.emote;
+    if (!session || typeof emote !== 'string' || !(EMOTES as readonly string[]).includes(emote) || session.dead) return;
+    const now = this.nowS();
+    if (now - session.emoteAt < EMOTE_MIN_S - 1e-6 || this.combat.self(session.eid)?.inCombat) return;
+    session.emoteAt = now;
+    session.player.emote = emote as EmoteId;
+    session.player.emoteAt = this.clockSteps(now);
+  }
+
+  /** In-process (Task 7's grants): runs a task through the account's queue here; undefined when it has no session here. */
+  public enqueueInventory<T>(accountId: string, task: InvTask<T>): Promise<TaskResult<T>> | undefined {
+    const session = this.sessionOf(accountId);
+    if (!session) return undefined;
+    const settle = task.settle;
+    return session.queue.push<T>({
+      ...task,
+      settle: (r) => {
+        settle?.(r);
+        this.settleInv(session, null, r as TaskResult<unknown>);
+      },
+    });
+  }
+
+  /** A loot task for `awards`: rolled from the queued state, at most once per kill key; then `loot`, its notices and the view. */
+  private lootTask(session: Session, awards: LootAward[], tries: number): InvTask<ReturnType<typeof applyLoot>['given']> {
+    return {
+      retries: LOOT_STALE_RETRIES,
+      run: (s, jobs) => {
+        const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, awards, this.lootAlways);
+        if (out.given.every((g) => g.dup)) return { kind: 'none', info: out.given };
+        return {
+          kind: 'write', info: out.given,
+          write: { inventory: out.state.inv, jobs, dGold: out.dGold, dSeals: 0 },
+          next: { ...out.state, look: s.look, lookFree: s.lookFree },
+        };
+      },
+      settle: (r) => {
+        if (r.status === 'failed' || r.status === 'stale') {
+          if (r.status === 'failed') this.logFailure('loot', 'A loot write failed', r.error);
+          // tried again a little later (a kill key is rewarded once however often it is tried); then given up
+          if (tries + 1 < LOOT_TRIES) {
+            setTimeout(() => { void session.queue.push(this.lootTask(session, awards, tries + 1)); }, LOOT_RETRY_MS);
+          } else this.logFailure('loot', 'Loot was given up after its tries', new Error(`${awards.length} awards for ${session.accountId}`));
+          return;
+        }
+        if (r.status === 'dropped') {
+          this.offlineLoot(session, awards); // the session ended first: written for the adventurer all the same
+          return;
+        }
+        if (r.status !== 'applied' || this.sessions.get(session.client.sessionId) !== session) return;
+        for (const g of r.info) {
+          if (g.dup || session.reconnection) continue;
+          this.sendTo(session.client, 'loot', { items: g.items, gold: g.gold, soldFor: g.soldFor, x: g.award.x, z: g.award.z });
+          for (const sold of g.sold) this.sendTo(session.client, 'notice', { text: bagFullText(itemName(sold.item), sold.gold) });
+          if (g.lost > 0) this.sendTo(session.client, 'notice', { text: purseFullText(g.lost) });
+        }
+        this.sendInventory(session);
+      },
+    };
+  }
+
+  /** The step's loot rolls for the session, as one write. */
+  private flushLoot(session: Session) {
+    if (session.loot.length === 0) return;
+    const awards = session.loot.splice(0);
+    void session.queue.push(this.lootTask(session, awards, 0));
+  }
+
+  /** Loot for an adventurer whose session ended before its write: a queue of its own on the stored truth (the kill keys keep it once). */
+  private offlineLoot(session: Session, awards: LootAward[]) {
+    const jobs = session.jobs;
+    const queue = this.makeQueue(session.queue.snapshot, new WriteLock(), session.adventurerId, session.accountId, () => jobs);
+    queue.markStale();
+    const flight = queue.push({
+      retries: LOOT_STALE_RETRIES,
+      run: (s, j) => {
+        const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs: j }, awards, this.lootAlways);
+        if (out.given.every((g) => g.dup)) return { kind: 'none', info: null };
+        return { kind: 'write', info: null, write: { inventory: out.state.inv, jobs: j, dGold: out.dGold, dSeals: 0 }, next: { ...out.state, look: s.look, lookFree: s.lookFree } };
+      },
+      settle: (r) => { if (r.status === 'failed') this.logFailure('loot', 'Loot for an adventurer who left could not be written', r.error); },
+    });
+    this.accounts.inventoryInFlight(session.accountId, flight.then(() => {}));
+  }
+
   // ───────── intents ─────────
 
   /** The session of a client that may act now (not travelling), or undefined. */
@@ -972,7 +1412,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const before = session.jobs;
     if (!this.intent(session, 'job', { t: 'job', job, picks: recordFor(session.jobs, job).picks })) return;
     this.takeJob(session);
-    this.mirrorPlayer(session);
+    // the engine keeps the old job's kit through a job change: the new job's kit (its gear and talents) at once
+    this.refreshKit(session);
     this.sendJobs(session);
     if (JSON.stringify(before) !== JSON.stringify(session.jobs)) this.saveJobs(session);
   }
@@ -1013,15 +1454,29 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     })().finally(() => { session.jobSave = undefined; });
   }
 
-  /** The current job gains a kill's xp: `jobXp` always (0 from the Training Dummy), `jobs` when it changed. */
+  /** The current job gains a kill's xp (KILL_XP, × CATCH_UP_MULT below the highest job level): see gainXpAmount. */
   private gainXp(session: Session, kind: EnemyKindId): number {
+    return this.gainXpAmount(session, killXp(session.jobs, session.jobs.current, kind));
+  }
+
+  /**
+   * The current job gains `amount` xp: `jobXp` always (0 from the Training Dummy), `jobs` when it changed; a
+   * level-up re-kits at once (the one kit change allowed mid-fight), sets `level` and `lvlAt`, and sends `levelUp`.
+   */
+  private gainXpAmount(session: Session, amount: number): number {
     const job = session.jobs.current;
     const had = recordFor(session.jobs, job).xp;
-    const { save, level, levelUp } = addJobXp(session.jobs, job, KILL_XP[kind] ?? 0);
+    const { save, level, levelUp } = addJobXp(session.jobs, job, amount);
     this.setJobs(session, save);
     const xp = recordFor(session.jobs, job).xp;
     this.sendTo(session.client, 'jobXp', { job, gained: xp - had, xp, level, levelUp });
     if (xp !== had) this.sendJobs(session);
+    if (levelUp) {
+      this.refreshKit(session);
+      session.player.lvlAt = Math.max(1, this.clockSteps(this.nowS()));
+      if (!session.reconnection) this.sendTo(session.client, 'levelUp', { job, level, talentRow: talentRowFor(level) });
+      this.sendInventory(session); // its stats
+    }
     return xp - had;
   }
 
@@ -1471,10 +1926,19 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.state.players.delete(sessionId);
     this.state.online = this.state.players.size;
     // Everyone who saw it gets its removal with the state; their views forget it, and its own view goes.
-    for (const other of this.sessions.values()) other.seen.delete(session.player);
+    for (const other of this.sessions.values()) {
+      other.seen.delete(session.player);
+      other.looksSent.delete(session.eid);
+      other.looksOut.delete(session);
+    }
     // A client still connected for a moment (travelling, kicked) gets only the unfiltered state until it goes.
     if (session.client.view === session.view) session.client.view = undefined;
     session.view.dispose();
+    // Its inventory queue: the write in flight lands (once; the account's next join waits for it), the rest is
+    // dropped; loot rolled this step but not written yet is written for it all the same.
+    if (session.loot.length > 0) this.offlineLoot(session, session.loot.splice(0));
+    session.queue.close();
+    this.accounts.inventoryInFlight(session.accountId, session.queue.idle());
     this.leaveFight(session);
     // Its party members here stop pinning it; the party sees it gone from this room.
     for (const other of this.sessions.values()) {
@@ -1579,12 +2043,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // The dead are always saved as respawned: at the statue, with full health.
     const dead = session.dead;
     // In an instance: always at the crater mouth in the Greenway (a crash or restart puts it there); the dead at full health.
-    const as = this.inst ? { zone: 'greenway' as const, ...LAMPFALL_MOUTH.arrive, ...(dead ? { hp: MAX_HP } : {}), ...to }
-      : dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: MAX_HP } : to;
+    const full = Math.max(1, Math.round(session.maxHp));
+    const as = this.inst ? { zone: 'greenway' as const, ...LAMPFALL_MOUTH.arrive, ...(dead ? { hp: full } : {}), ...to }
+      : dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: full } : to;
     const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, jobs: session.jobs, ...as };
     let result: 'saved' | 'refused' | 'failed';
     try {
-      result = (await this.store.saveAdventurer(values, { zone: expect })) ? 'saved' : 'refused';
+      // (under the session's write lock: never interleaved with an inventory write's jobs)
+      result = (await session.lock.run(() => this.store.saveAdventurer(values, { zone: expect }))) ? 'saved' : 'refused';
     } catch (err) {
       this.logFailure('save', 'Saving an adventurer failed', err);
       return 'failed';
@@ -1950,7 +2416,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (enc && !inst.cleared.has(enc)) {
       const w = worldOf(this.combat);
       const left = [...inst.encounterOf].some(([id, en]) => en === enc && w.enemies.get(id)?.alive);
-      if (!left) inst.cleared.add(enc);
+      if (!left) {
+        inst.cleared.add(enc);
+        this.clearRewards(enc);
+      }
     }
     const boss = inst.bosses.get(kill.enemy);
     if (!boss) return;
@@ -1965,6 +2434,23 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const seconds = Math.max(0.1, Math.round((nowS - (boss.wokeAt ?? nowS)) * 10) / 10);
     const most = Math.max(boss.most, this.sessions.size);
     void this.bossFallen(boss.boss, seconds, most, credited).catch((err) => this.logFailure('rewards', 'A boss reward failed', err));
+  }
+
+  /** A pack encounter cleared: each adventurer credited for any of its kills and still here gets CLEAR_XP (with catch-up) and its clear loot. */
+  private clearRewards(enc: EncounterId) {
+    const credited = this.encounterCredit.get(enc);
+    this.encounterCredit.delete(enc);
+    if (!credited || !(PACK_ENCOUNTERS as readonly string[]).includes(enc)) return;
+    const day = utcDay(this.wallMs());
+    for (const accountId of credited) {
+      const session = this.sessionOf(accountId);
+      if (!session) continue;
+      this.gainXpAmount(session, clearXp(session.jobs, session.jobs.current));
+      session.loot.push({
+        src: { clear: enc }, seedParts: [this.serverSeed, this.roomId, `clear:${enc}`, 0, accountId], killKey: `${this.roomId}:clear:${enc}`,
+        job: session.jobs.current, day, x: session.lastGood.x, z: session.lastGood.z,
+      });
+    }
   }
 
   /** A boss woke (its gate shuts SEAL_DELAY_S later) or reset (its gate opens again). */
@@ -2123,6 +2609,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         const r = await this.retry('seal', () => this.store.awardSeal(session.adventurerId, day));
         if (r) seal = r.awarded || (before !== undefined && before.sealDay !== day && r.seals > before.seals);
         if (r) seals = r.seals;
+        // the award bumped inv_version: the queue reads the new truth (and the owner hears its Seals)
+        if (r?.awarded) {
+          session.queue.markStale();
+          void session.queue.push({ retries: 0, run: () => ({ kind: 'none', info: null }), settle: (res) => this.settleInv(session, null, res) });
+        }
         if (solo && (await this.retry('title', () => this.store.addTitle(session.adventurerId, SOLO_TITLE))) !== undefined) title = SOLO_TITLE;
       } else {
         seals = (await this.retry('seals', () => this.store.getOrCreateAdventurer(session.accountId)))?.seals ?? 0;
@@ -2185,6 +2676,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         if (held && held.due <= target && !session.dead && !session.travelling) this.startDodge(session, held.dx, held.dz, Math.max(target, held.due));
       }
     });
+    this.safely('threat', () => this.seeThreat());
     for (let k = 1; k <= n; k++) {
       let out: TickOut | undefined;
       this.safely('tick', () => { out = this.combat.tick(w0 + ((target - w0) * k) / n); });
@@ -2204,15 +2696,34 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           if (session.dead && !session.travelling && target - session.deadAt >= this.inst.t.autoReleaseS) this.release(session);
         } else if (session.dead && !session.travelling && target - session.deadAt >= this.autoRespawnSeconds && wall >= session.respawnRetryAt) this.respawn(session);
         if (session.jobsDue && !session.reconnection) this.sendJobs(session);
+        if (session.invDue && !session.reconnection) {
+          session.invDue = false;
+          this.sendInventory(session);
+          this.sendTo(session.client, 'lookFree', { free: session.queue.snapshot.lookFree });
+        }
+        this.flushLoot(session);
       });
     }
     if (this.inst) this.safely('instance', () => this.stepInstance(target));
     this.safely('mirror', () => this.mirrorAll());
     this.safely('party', () => this.relayPartyStatus(wall));
     this.safely('views', () => this.updateViews());
+    for (const session of this.sessions.values()) this.safely('looks', () => this.sendLooks(session));
     if (fx.length > 0) this.safely('fx', () => this.sendFx(fx));
     if (this.steps % SELF_EVERY_STEPS === 0) {
       for (const session of this.sessions.values()) this.safely('self', () => this.sendSelf(session));
+    }
+  }
+
+  /** Each engaged enemy's threat table now (the step's kills clear them): who fought an enemy that then died without crediting them. */
+  private seeThreat() {
+    const enemies = worldOf(this.combat).enemies;
+    for (const id of this.threatSeen.keys()) if (!enemies.has(id)) this.threatSeen.delete(id); // gone (despawned)
+    for (const e of enemies.values()) {
+      if (!e.alive) continue; // (a dead one keeps what was seen until its kill is handled)
+      const ids = e.threat.ids();
+      if (ids.length > 0) this.threatSeen.set(e.id, ids);
+      else this.threatSeen.delete(e.id);
     }
   }
 
@@ -2236,13 +2747,38 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         const arena = this.inst!.arenas[boss.encounter];
         credited = new Set([...credited].filter((c) => arena(c.lastGood.x, c.lastGood.z)));
       }
+      const counter = ++this.killCounter;
+      const at = this.combat.get(kill.enemy) ?? this.state.enemies.get(this.keyOf(kill.enemy));
+      const day = utcDay(this.wallMs());
+      const hasLoot = (() => { const row = lootTable({ kind: kill.kind, zone: this.zone.id }); return row.gold[1] > 0 || row.tier !== null; })();
       for (const session of credited) {
         this.safely('credit', () => {
           this.sendTo(session.client, 'credit', { kind: kill.kind });
           xp.set(session, this.gainXp(session, kill.kind));
+          if (hasLoot) {
+            session.loot.push({
+              src: { kind: kill.kind, zone: this.zone.id }, seedParts: [this.serverSeed, this.roomId, kill.enemy, counter, session.accountId],
+              killKey: `${this.roomId}:${kill.enemy}:${counter}`, job: session.jobs.current, day, x: at?.x ?? 0, z: at?.z ?? 0,
+            });
+          }
         });
       }
-      if (this.inst) this.safely('instance kill', () => this.instanceKill(kill, xp, nowS));
+      // fought it, but too little to be credited (and no party member nearby shared it): said, not silent
+      const seen = this.threatSeen.get(kill.enemy) ?? [];
+      this.threatSeen.delete(kill.enemy);
+      for (const id of seen) {
+        const session = this.sessionByEid.get(id);
+        if (session && !credited.has(session) && !session.reconnection) this.notice(session, NO_CREDIT_TEXT, this.wallMs());
+      }
+      if (this.inst) {
+        const enc = this.inst.encounterOf.get(kill.enemy);
+        if (enc && (PACK_ENCOUNTERS as readonly string[]).includes(enc)) {
+          let set = this.encounterCredit.get(enc);
+          if (!set) this.encounterCredit.set(enc, (set = new Set()));
+          for (const session of credited) set.add(session.accountId);
+        }
+        this.safely('instance kill', () => this.instanceKill(kill, xp, nowS));
+      }
     }
     for (const b of out.boss ?? []) if (this.inst) this.safely('boss', () => this.bossEvent(b));
     for (const id of out.despawned ?? []) this.safely('despawn', () => this.dropEnemy(id));
@@ -2418,6 +2954,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (seen.has(item)) return;
       seen.add(item);
       view.add(item);
+      if (item instanceof PlayerState) this.lookDue(session, item);
     };
     for (const f of this.state.fields.values()) show(f); // every field, whatever the radius
     for (const t of this.state.telegraphs.values()) {
@@ -2517,6 +3054,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.hpExact = v.hp;
     const hp = v.alive ? Math.max(1, Math.ceil(v.hp)) : 0;
     if (p.hp !== hp) p.hp = hp;
+    session.maxHp = v.maxHp;
+    const maxHp = Math.round(v.maxHp);
+    if (p.maxHp !== maxHp) p.maxHp = maxHp;
     const dead = !v.alive;
     if (p.dead !== dead) p.dead = dead;
     if (p.act !== v.act) p.act = v.act;

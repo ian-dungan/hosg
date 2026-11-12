@@ -1,9 +1,11 @@
 // Shared helpers for the room tests: boot an app on a free port and connect SDK clients to it.
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
-import { LAMPFALL_MOUTH, TICK_HZ, groveTownSurface, worldOf as worldOfCombat, zoneDef, type Surface, type ZoneId } from '@sg2/shared';
+import { LAMPFALL_MOUTH, TICK_HZ, groveTownSurface, worldOf as worldOfCombat, zoneDef, type InvOp, type Surface, type ZoneId } from '@sg2/shared';
+import { killEnemy } from '../../../shared/src/combat/adventurer';
 import { createApp, type AppOptions } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
@@ -27,12 +29,16 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** Starts an app on a free port; the caller must `app.close()` it. */
+/**
+ * Starts an app on a free port; the caller must `app.close()` it. Kits are off unless `kits: true`: the room
+ * tests written before Plan 5 describe an adventurer on STARTER_STATS (a level 10 adventurer in the starter
+ * kit, parity P1), so they run every adventurer so; Plan 5's tests turn kits on.
+ */
 export async function startServer(
   opts: Partial<Omit<AppOptions, 'jwtSecret'>> = {},
 ): Promise<TestServer> {
   const store = opts.store ?? createMemoryStore();
-  const app = createApp({ ...opts, store, jwtSecret: SECRET });
+  const app = createApp({ ...opts, kits: opts.kits ?? false, store, jwtSecret: SECRET });
   const port = await freePort();
   await app.listen(port);
   return { url: `http://127.0.0.1:${port}`, store, app };
@@ -214,4 +220,56 @@ export async function intoLampfall(url: string, store: Store, account: { account
 export function place(room: Room<any, any>, x: number, z: number): number {
   const server = serverRoom(room) as unknown as { testPlace(sessionId: string, x: number, z: number): number };
   return server.testPlace(room.sessionId, x, z);
+}
+
+// ───────── Plan 5 ─────────
+
+/** A fresh operation id (ruling P5-e: random, 16 characters of base64url). */
+export const opId = (): string => randomBytes(12).toString('base64url');
+
+/** Sends an inventory operation with a fresh op id (unless it carries one, or `id: null` asks for none). */
+export function sendInv(room: Room<any, any>, op: InvOp | (Record<string, unknown> & { op: string }), id: string | null = opId()): string | null {
+  room.send('inv', id === null || 'id' in op ? op : { ...op, id });
+  return id === null ? null : ((op as { id?: string }).id ?? id);
+}
+
+/**
+ * Kills an enemy of the room behind `room` (its engine id) with each `credit` room's adventurer on its threat
+ * table at the given threat (default 50 each): the kill and its credit reach the room on its next tick (with
+ * foughtMs 0 the kill is made at once, before the call returns).
+ */
+export async function killFor(room: Room<any, any>, enemyEid: number, credit: { room: Room<any, any>; threat?: number }[], foughtMs = 0): Promise<void> {
+  const w = worldOfCombat(serverRoom(room).combat);
+  const e = w.enemies.get(enemyEid);
+  if (!e) throw new Error(`no enemy ${enemyEid}`);
+  for (const c of credit) e.threat.set(c.room.state.players.get(c.room.sessionId).eid, c.threat ?? 50);
+  // (foughtMs: the threat stands for a few steps first, as in a real fight)
+  if (foughtMs > 0) await sleep(foughtMs);
+  killEnemy(w, e, w.now);
+}
+
+/** Every state patch the client receives from now on, as raw bytes (look and gear codes are searched for in them). */
+export function patchLog(room: Room<any, any>): Uint8Array[] {
+  const serializer = (room as unknown as { serializer: { patch(bytes: Uint8Array, it: { offset: number }): unknown } }).serializer;
+  const patch = serializer.patch.bind(serializer);
+  const log: Uint8Array[] = [];
+  serializer.patch = (bytes, it) => {
+    log.push(Uint8Array.from(bytes.subarray(it.offset)));
+    return patch(bytes, it);
+  };
+  return log;
+}
+
+/** The patches that carry `text` (a look or gear code: plain ASCII on the wire). */
+export const carrying = (log: readonly Uint8Array[], text: string): number => log.filter((p) => Buffer.from(p).includes(Buffer.from(text, 'latin1'))).length;
+
+/** Every `looks` message the room gets from its join on, and the codes it holds by engine id. */
+export function trackLooks(room: Room<any, any>): { messages: any[]; look(eid: number): string | undefined; gear(eid: number): string | undefined } {
+  const messages = collectFromJoin(room, 'looks');
+  const latest = (eid: number) => {
+    let found: [number, string, string] | undefined;
+    for (const m of messages) for (const e of m.a as [number, string, string][]) if (e[0] === eid) found = e;
+    return found;
+  };
+  return { messages, look: (eid) => latest(eid)?.[1], gear: (eid) => latest(eid)?.[2] };
 }

@@ -1,20 +1,30 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
-import { MAX_HP, SPAWN, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, checkedKill, checkedSave, isUtcDay, jobsNeedRepair, type Account, type Adventurer, type BossKill, type StartSpot, type Store } from './types';
+import { MAX_HP, SPAWN, isZoneId, newJobsSave, parseJobsSave, parseLook } from '@sg2/shared';
+import {
+  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, readInvLook,
+  testKitInventory, type Account, type Adventurer, type BossKill, type GmAuditRow, type NewAdventurerOpts, type StartSpot, type Store,
+} from './types';
 
-/** A stored adventurer, kept as a database row would be: jobs as stored, and Plan 3's loadout column (legacy rows only). */
-type Row = Omit<Adventurer, 'jobs'> & { jobs: unknown; legacyLoadout?: unknown };
+/**
+ * A stored adventurer, kept as a database row would be: jobs, inventory and look as stored (as JSON text, so
+ * nothing is shared with a caller), and Plan 3's loadout column (legacy rows only).
+ */
+type Row = Omit<Adventurer, 'jobs' | 'inventory' | 'look' | 'inventoryRepaired'> & { jobs: unknown; inventory: string | null; look: string | null; legacyLoadout?: unknown };
 
-/** Test-only: an adventurer stored by Plan 3 (its old loadout; jobs absent when the migration missed it). */
-export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown }
+/** Test-only: an adventurer stored by Plan 3 (its old loadout; jobs absent when the migration missed it), or with any stored inventory or look. */
+export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown; inventory?: unknown; look?: unknown }
 
-/** A copy that shares nothing with the stored row, read as PgStore reads one (parseJobsSave(jobs, loadout)). */
-const copy = ({ legacyLoadout, jobs, titles, ...a }: Row): Adventurer => ({
+const json = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
+const unjson = (s: string | null): unknown => (s === null ? null : JSON.parse(s));
+
+/** A copy that shares nothing with the stored row, read as PgStore reads one (parseJobsSave(jobs, loadout), readInvLook). */
+const copy = ({ legacyLoadout, jobs, titles, inventory, look, ...a }: Row): Adventurer => ({
   ...a, titles: [...titles], jobs: parseJobsSave(jobs, legacyLoadout), ...(jobsNeedRepair(jobs) ? { jobsRepaired: true as const } : {}),
+  ...readInvLook(unjson(inventory), unjson(look), a.accountId),
 });
 
-export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readonly LegacyRow[] } = {}): Store {
+export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readonly LegacyRow[]; newAdventurer?: NewAdventurerOpts } = {}): Store {
   const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const accountsByName = new Map<string, Account>(); // key: lower-cased username
   const accountsById = new Map<string, Account>();
@@ -22,6 +32,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
   const adventurersById = new Map<string, Row>();
   const adventurerNames = new Set<string>(); // lower-cased
   const kills: (BossKill & { seq: number })[] = [];
+  const audit: (GmAuditRow & { seq: number })[] = [];
 
   function adventurerFor(accountId: string): Row {
     let adventurer = adventurersByAccount.get(accountId);
@@ -38,10 +49,15 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
         jobs: newJobsSave(),
         level: 1,
         xp: 0,
-        gold: 0,
+        gold: opts.newAdventurer?.gold ?? 0,
         seals: 0,
         sealDay: null,
         titles: [],
+        // NULL until first written: the reader gives the starter kit (a test kit is stored at once)
+        inventory: opts.newAdventurer?.kit ? json(testKitInventory(opts.newAdventurer.kit)) : null,
+        invVersion: 0,
+        look: null,
+        lookFree: true,
       };
       adventurersByAccount.set(accountId, adventurer);
       adventurersById.set(adventurer.id, adventurer);
@@ -53,6 +69,8 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     const row = adventurerFor(r.accountId);
     row.jobs = r.jobs;
     row.legacyLoadout = r.loadout;
+    if (r.inventory !== undefined) row.inventory = json(r.inventory);
+    if (r.look !== undefined) row.look = json(r.look);
   }
 
   return {
@@ -94,8 +112,45 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       const adventurer = adventurersById.get(id);
       // As in PgStore: a stored zone that is not a known one (never written here) matches any `expect`.
       if (!adventurer || (expect && adventurer.zone !== expect.zone && isZoneId(adventurer.zone))) return false;
-      Object.assign(adventurer, values);
+      Object.assign(adventurer, values, { level: highestLevel(values.jobs) });
       return true;
+    },
+
+    async writeInventory(adventurerId, expect, w) {
+      const v = checkedInvWrite(w);
+      const adventurer = adventurersById.get(adventurerId);
+      if (!adventurer || adventurer.invVersion !== expect) return null;
+      if (adventurer.gold + v.dGold < 0 || adventurer.seals + v.dSeals < 0) return null;
+      adventurer.inventory = json(v.inventory);
+      adventurer.jobs = v.jobs;
+      adventurer.level = highestLevel(v.jobs);
+      adventurer.gold = goldAfter(adventurer.gold, v.dGold);
+      adventurer.seals += v.dSeals;
+      if (v.look) adventurer.look = json(v.look);
+      if (v.lookFree === false) adventurer.lookFree = false;
+      adventurer.invVersion += 1;
+      return { version: adventurer.invVersion, gold: adventurer.gold, seals: adventurer.seals };
+    },
+
+    async useFreeLook(accountId, look) {
+      const l = parseLook(look);
+      if (!l) throw new TypeError('useFreeLook: not a look');
+      const adventurer = adventurersByAccount.get(accountId);
+      if (!adventurer || !adventurer.lookFree) return false;
+      adventurer.look = json(l);
+      adventurer.lookFree = false;
+      adventurer.invVersion += 1;
+      return true;
+    },
+
+    async logGm(e) {
+      const row = checkedGmLog(e);
+      audit.push({ at: new Date().toISOString(), gmAccount: row.gmAccount, command: row.command, target: row.target, args: row.args, ok: row.ok, result: row.result, seq: audit.length });
+      if (audit.length > 10_000) audit.splice(0, audit.length - 10_000); // memory only: the newest rows are enough
+    },
+
+    async gmAudit(limit = 100) {
+      return audit.slice().reverse().slice(0, Math.max(0, Math.floor(limit))).map(({ seq: _seq, ...r }) => ({ ...r, args: JSON.parse(JSON.stringify(r.args)) as unknown }));
     },
 
     async awardSeal(adventurerId, dayUtc) {
@@ -105,6 +160,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       if (adventurer.sealDay !== null && adventurer.sealDay >= dayUtc) return { awarded: false, seals: adventurer.seals }; // ('YYYY-MM-DD' sorts as dates)
       adventurer.seals += 1;
       adventurer.sealDay = dayUtc;
+      adventurer.invVersion += 1; // a write computed before the Seal retries from the new truth
       return { awarded: true, seals: adventurer.seals };
     },
 

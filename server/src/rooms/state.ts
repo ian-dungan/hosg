@@ -59,6 +59,15 @@ export const PlayerState = schema(
     buffs: t.uint8(),
     /** Searing stacks (0–5; the Warden's autos); unset (read as 0) until the first. */
     searing: t.uint8(),
+    // Plan 5: each changes only on an event. (The look and gear codes are not here: they go in `looks`
+    // messages, once per client per adventurer and on change, so a view's churn never re-sends them.)
+    /** The current job's level (1–10). */
+    level: t.uint8(),
+    /** The zone `clock` step of the last level-up (0: none yet): others play the effect when it changes. */
+    lvlAt: t.uint32(),
+    /** The last emote (an EmoteId; unset until the first), and its `clock` step: a change plays it; a move cancels it on clients. */
+    emote: t.string(),
+    emoteAt: t.uint32(),
   },
   'PlayerState',
 );

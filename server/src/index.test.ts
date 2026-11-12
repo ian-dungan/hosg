@@ -139,3 +139,54 @@ describe('SG2_START_AT and SG2_TEST_INSTANCE_START (test servers only)', () => {
     expect(inst.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_INSTANCE_START must be landing or empty (got "rim").');
   }, 60_000);
 });
+
+/** Runs src/index.ts with `env` until it listens; a guest's first inventory view in the grove, then it is stopped. */
+async function guestInventory(env: Record<string, string>): Promise<any> {
+  const { port, release } = await heldPort();
+  await release();
+  const child = spawn(process.execPath, ['--import', 'tsx', entry], {
+    env: { PATH: process.env.PATH ?? '', SG2_JWT_SECRET: SECRET, SG2_STORE: 'memory', SG2_PORT: String(port), ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    let out = '';
+    child.stdout.on('data', (chunk) => (out += chunk));
+    child.stderr.on('data', () => {});
+    await waitFor(() => out.includes('listening'), 15_000);
+    const url = `http://127.0.0.1:${port}`;
+    const { token } = (await (await fetch(`${url}/api/guest`, { method: 'POST' })).json()) as { token: string };
+    const room = await new Client(url).joinOrCreate('grove', { token });
+    let view: any;
+    room.onMessage('*', (type: string | number, message: any) => { if (type === 'inventory') view ??= message; });
+    await waitFor(() => view, 5000);
+    await room.leave();
+    return view;
+  } finally {
+    child.kill('SIGTERM');
+  }
+}
+
+describe('SG2_TEST_START_GOLD, SG2_TEST_LOOT and SG2_TEST_KIT (test servers only)', () => {
+  it('are off by default (never set in Docker or docker-compose.yml), give gold and a worn kit when set, and exit with one line for anything else', async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const file of ['../../docker-compose.yml', '../../Dockerfile']) {
+      const text = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+      expect(text, file).not.toMatch(/SG2_TEST_START_GOLD|SG2_TEST_LOOT|SG2_TEST_KIT/);
+    }
+    const plain = await guestInventory({});
+    expect(plain.gold).toBe(0);
+    expect(plain.bag).toHaveLength(16);
+    const kitted = await guestInventory({ SG2_TEST_START_GOLD: '777', SG2_TEST_KIT: 't1', SG2_TEST_LOOT: 'always' });
+    expect(kitted.gold).toBe(777);
+    expect(kitted.bag.find((i: any) => i.item === 'thornrunner_chest')?.worn).toEqual(['warrior', 'ranger', 'ninja']);
+    for (const [name, value, line] of [
+      ['SG2_TEST_START_GOLD', '-5', 'SG2_TEST_START_GOLD must be a whole number of gold from 0 to 1000000, or empty (got "-5").'],
+      ['SG2_TEST_LOOT', 'sometimes', 'SG2_TEST_LOOT must be always or empty (got "sometimes").'],
+      ['SG2_TEST_KIT', 't4', 'SG2_TEST_KIT must be t1, t2, t3 or empty (got "t4").'],
+    ] as const) {
+      const r = await runServer({ SG2_STORE: 'memory', [name]: value });
+      expect(r.code, name).toBe(1);
+      expect(r.stderr.trim()).toBe(`Shady Grove 2 server: ${line}`);
+    }
+  }, 60_000);
+});

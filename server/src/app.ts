@@ -1,4 +1,5 @@
 // The game server: the accounts API, health check and client files over Express, and one Colyseus room per zone, on one port.
+import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
 import type { Server as HttpServer } from 'node:http';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
@@ -11,6 +12,7 @@ import {
 } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import { leaderboardRouter } from './routes/leaderboard';
+import { lookRouter } from './routes/look';
 import { Instances } from './rooms/instances';
 import type { Store } from './store/types';
 import { Parties } from './party/parties';
@@ -54,6 +56,12 @@ export interface AppOptions {
    * already dead, the checkpoint at the landing).
    */
   instances?: { max?: number; emptyS?: number; maxS?: number; sweepMs?: number; startAt?: CheckpointId; timings?: Partial<InstanceTimings> };
+  /** Loot's own seed (rollLoot's first part): a random 32-bit value made at start by default (fixed in tests). Never the engine's seed. */
+  serverSeed?: number;
+  /** Adventurers run their kits (default true); false (the room tests written before Plan 5) runs everyone on STARTER_STATS. */
+  kits?: boolean;
+  /** Test-only (SG2_TEST_LOOT=always): every credited kill on a row with items drops one. */
+  lootAlways?: boolean;
 }
 
 /** The instances' numbers in stats() and /healthz: open now, adventurers inside, and the worst instance step p95 (ms). */
@@ -72,7 +80,7 @@ export interface App {
    * state patches (one encode per client's view); stepErrors counts the failures its steps and
    * handlers caught (and carried on from) since it started.
    */
-  stats(): { players: number; tickHz: number; zones: Record<SaveZoneId, ZoneStats>; instances: InstanceStats };
+  stats(): { players: number; tickHz: number; zones: Record<SaveZoneId, ZoneStats>; instances: InstanceStats; invWritesPerS: number };
   /** The process's Lampfall instances. */
   instances: Instances;
   /** Whether the exits from `from` to `to` are open now. */
@@ -87,6 +95,9 @@ const MAX_WS_PAYLOAD = 16 * 1024;
 /** How often the party registry drops expired invites and long-offline members (ms). */
 const PARTY_SWEEP_MS = 5000;
 
+/** Seconds of /healthz's invWritesPerS (the last whole INV_WINDOW_S − 1 seconds). */
+const INV_WINDOW_S = 6;
+
 /** Window of /healthz's eventLoopP99Ms (ms). */
 const EVENT_LOOP_WINDOW_MS = 5000;
 
@@ -98,6 +109,25 @@ function mergedZone(id: ZoneId, over: Partial<ZoneDef> | undefined): ZoneDef {
 
 export function createApp(opts: AppOptions): App {
   const rooms = new Map<ZoneId, ZoneRoom>();
+  const serverSeed = opts.serverSeed ?? randomInt(2 ** 32);
+  // Inventory writes that landed, per second over the last INV_WINDOW_MS (a ring of whole-second counts).
+  const invSeconds = new Array<number>(INV_WINDOW_S).fill(0);
+  let invSecond = Math.floor(Date.now() / 1000);
+  const tickInv = (now: number) => {
+    const sec = Math.floor(now / 1000);
+    for (; invSecond < sec; invSecond++) invSeconds[(invSecond + 1) % INV_WINDOW_S] = 0;
+  };
+  const onInvWrite = () => {
+    const now = Date.now();
+    tickInv(now);
+    invSeconds[invSecond % INV_WINDOW_S]! += 1;
+  };
+  const invWritesPerS = () => {
+    tickInv(Date.now());
+    let sum = 0;
+    for (let k = 1; k < INV_WINDOW_S; k++) sum += invSeconds[(invSecond - k + INV_WINDOW_S) % INV_WINDOW_S]!; // whole seconds only
+    return Math.round((sum / (INV_WINDOW_S - 1)) * 10) / 10;
+  };
   // One party registry for the process (memory only): it follows who is online, and each change
   // reaches every member's session wherever it is.
   const parties = new Parties();
@@ -182,6 +212,7 @@ export function createApp(opts: AppOptions): App {
       tickHz: busy.length > 0 ? Math.min(...busy) : perZone.grove.tickHz,
       zones: perZone,
       instances: { open: instances.count, players: instances.players, tickMsP95Max: Math.round(instances.tickMsP95Max * 100) / 100 },
+      invWritesPerS: invWritesPerS(),
     };
   };
 
@@ -193,6 +224,7 @@ export function createApp(opts: AppOptions): App {
     express: (app) => {
       if (opts.trustProxy !== undefined) app.set('trust proxy', opts.trustProxy); // before the login limit reads req.ip
       app.use('/api/leaderboard', leaderboardRouter(opts.store));
+      app.use('/api/look', lookRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute }));
       app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute, instanceOf: (accountId) => instances.heldRoom(accountId) }));
       app.get('/healthz', (_req, res) => {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
@@ -222,6 +254,7 @@ export function createApp(opts: AppOptions): App {
       viewCap: opts.viewCap,
       parties,
       instances,
+      serverSeed, kits: opts.kits, lootAlways: opts.lootAlways, onInvWrite,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }
@@ -244,6 +277,7 @@ export function createApp(opts: AppOptions): App {
       viewCap: opts.viewCap,
       parties,
       instances,
+      serverSeed, kits: opts.kits, lootAlways: opts.lootAlways, onInvWrite,
       instance: { key: '', registry: instances, parties, startAt: opts.instances?.startAt, timings: opts.instances?.timings },
     };
     gameServer.define('lampfall', instanceRoomFor(roomOptions, opts.jwtSecret), roomOptions);

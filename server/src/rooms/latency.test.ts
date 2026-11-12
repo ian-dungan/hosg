@@ -109,7 +109,10 @@ async function fuzz(o: {
   const session = room.sessions.get(sdkRoom.sessionId);
   const r = rng(o.seed);
   const up = channel(o.rttMs / 2, o.jitterMs, r), down = channel(o.rttMs / 2, o.jitterMs, r);
-  const client = { sessionId: sdkRoom.sessionId, send: (type: string, msg: any) => down.push(clock.ms, type, msg) };
+  // (Plan 5's inventory and look messages are not read here: kept off the channel, whose jitter draws from the
+  // run's seeded generator, so the runs stay the ones these seeds were chosen for)
+  const unread = new Set(['inventory', 'lookFree', 'looks', 'loot', 'levelUp', 'invRefused']);
+  const client = { sessionId: sdkRoom.sessionId, send: (type: string, msg: any) => { if (!unread.has(type)) down.push(clock.ms, type, msg); } };
   session.client = client;
   session.movement.metres = MAX_MOVE_ALLOWANCE; // as after standing a second
 

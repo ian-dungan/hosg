@@ -238,6 +238,20 @@ to run again. So:
 3. Nobody is ever saved inside the Lampfall: an adventurer in a dungeon run is saved at the crater mouth
    in the Greenway, so a restart (or going back) puts it there.
 
+**The update that brings gear, levels and looks (database migration 006) has no way back.** The
+migration itself only adds: the inventory, its version, the look and the free creator visit as new
+adventurer columns, two checks that gold and Seals never go below 0, and a `gm_audit` table. It also
+changes the default of the jobs column for new rows. It never changes an existing adventurer's jobs.
+But the new server moves each adventurer's job xp onto the new level curve the first time it joins
+(no job loses a level), and from then on saves that xp marked as "on the new curve". An older server
+does not know that mark: it drops it on its next save, and when you update again the xp would be
+moved onto the new curve a second time (an adventurer could jump several levels). So, for this update:
+
+1. Back up the database first (see "Back up the database" below).
+2. `git pull` and `docker compose up -d --build` as usual.
+3. **Do not go back** to a version from before this update. If you really must, restore the backup
+   from step 1 instead (everything played since is lost), never just `git checkout` the older version.
+
 ### Back up the database
 
 ```
@@ -287,8 +301,8 @@ $ docker compose down
 
 This removes only `sg2-server`, `sg2-db` and `sg2-net`. Start it again with `docker compose up -d`.
 
-If a new version misbehaves, go back to the one before (but not back across the jobs update: see
-"Update to a new version"):
+If a new version misbehaves, go back to the one before (but not back across the jobs update, nor
+across the gear, levels and looks update: see "Update to a new version"):
 
 ```
 $ git log --oneline -5          # the newest version is on top; copy the code of the one below it

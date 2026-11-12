@@ -91,6 +91,21 @@ export class Presence {
    */
   readonly respawns = new Map<string, number>();
 
+  /**
+   * An ended session's inventory write still in flight, per account (it is atomic and lands once): the
+   * account's next join waits for it before reading the store. Entries go once it settles.
+   */
+  private readonly invFlights = new Map<string, Promise<void>>();
+  /** Holds the account's next join until `flight` settles. */
+  inventoryInFlight(accountId: string, flight: Promise<void>): void {
+    const entry = flight.catch(() => {}).finally(() => { if (this.invFlights.get(accountId) === entry) this.invFlights.delete(accountId); });
+    this.invFlights.set(accountId, entry);
+  }
+  /** Resolves once no ended session's inventory write for the account is in flight. */
+  inventorySettled(accountId: string): Promise<void> {
+    return this.invFlights.get(accountId) ?? Promise.resolve();
+  }
+
   /** The session that holds the account now, if any (a copy). */
   get(accountId: string): Claim | undefined {
     const claim = this.claims.get(accountId);

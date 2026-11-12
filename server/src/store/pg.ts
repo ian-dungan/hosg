@@ -3,8 +3,11 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, checkedKill, checkedSave, isUtcDay, jobsNeedRepair, type Account, type Adventurer, type StartSpot, type Store } from './types';
+import { GOLD_MAX, MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave, parseLook } from '@sg2/shared';
+import {
+  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, readInvLook,
+  testKitInventory, type Account, type Adventurer, type NewAdventurerOpts, type StartSpot, type Store,
+} from './types';
 
 const UNIQUE_VIOLATION = '23505';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -72,10 +75,14 @@ interface AdventurerRow {
   /** The date column as 'YYYY-MM-DD' text (to_char in ADVENTURER_COLUMNS: never a Date in the server's time zone). */
   seal_day: string | null;
   titles: unknown;
+  inventory: unknown;
+  inv_version: number;
+  look: unknown;
+  look_free: boolean;
 }
 
 const ACCOUNT_COLUMNS = 'id, username, password_hash, is_guest, is_gm';
-const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold, seals, to_char(seal_day, \'YYYY-MM-DD\') AS seal_day, titles';
+const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold, seals, to_char(seal_day, \'YYYY-MM-DD\') AS seal_day, titles, inventory, inv_version, look, look_free';
 
 function toAccount(r: AccountRow): Account {
   return { id: r.id, username: r.username, passwordHash: r.password_hash, isGuest: r.is_guest, isGm: r.is_gm };
@@ -101,6 +108,9 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     seals: r.seals ?? 0,
     sealDay: r.seal_day ?? null,
     titles: Array.isArray(r.titles) ? r.titles.filter((t): t is string => typeof t === 'string') : [],
+    ...readInvLook(r.inventory, r.look, r.account_id),
+    invVersion: r.inv_version ?? 0,
+    lookFree: r.look_free ?? true,
   };
 }
 
@@ -118,7 +128,7 @@ export function createPool(databaseUrl: string): pg.Pool {
   return pool;
 }
 
-export async function createPgStore(databaseUrl: string, opts: { start?: StartSpot } = {}): Promise<Store> {
+export async function createPgStore(databaseUrl: string, opts: { start?: StartSpot; newAdventurer?: NewAdventurerOpts } = {}): Promise<Store> {
   const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const pool = createPool(databaseUrl);
   try {
@@ -131,10 +141,13 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
   /** Makes the account's adventurer if it has none; insert-or-nothing keeps one per account even if two calls race. */
   async function insertAdventurer(accountId: string): Promise<void> {
     await pool.query(
-      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, hp, jobs, level, xp, gold)
-       VALUES ($1, NULL, $2, $3, $4, $5, $6, $7::jsonb, 1, 0, 0)
+      `INSERT INTO adventurers (account_id, name, x, z, facing, zone, hp, jobs, level, xp, gold, inventory)
+       VALUES ($1, NULL, $2, $3, $4, $5, $6, $7::jsonb, 1, 0, $8, $9::jsonb)
        ON CONFLICT (account_id) DO NOTHING`,
-      [accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(newJobsSave())],
+      [
+        accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(newJobsSave()), opts.newAdventurer?.gold ?? 0,
+        opts.newAdventurer?.kit ? JSON.stringify(testKitInventory(opts.newAdventurer.kit)) : null,
+      ],
     );
   }
 
@@ -201,9 +214,9 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
       // A stored zone this server does not know reads as the grove (toAdventurer), so it counts as any
       // expected zone here: whoever holds that adventurer may save it into a real one.
       const { rowCount } = await pool.query(
-        `UPDATE adventurers SET x = $2, z = $3, facing = $4, zone = $5, hp = $6, jobs = $7::jsonb, updated_at = now()
+        `UPDATE adventurers SET x = $2, z = $3, facing = $4, zone = $5, hp = $6, jobs = $7::jsonb, level = $10, updated_at = now()
          WHERE id = $1 AND ($8::text IS NULL OR zone = $8 OR NOT (zone = ANY($9::text[])))`,
-        [id, x, z, facing, zone, hp, JSON.stringify(jobs), expect?.zone ?? null, ZONE_IDS],
+        [id, x, z, facing, zone, hp, JSON.stringify(jobs), expect?.zone ?? null, ZONE_IDS, highestLevel(jobs)],
       );
       return (rowCount ?? 0) > 0;
     },
@@ -214,7 +227,8 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
       // One statement: only a row whose seal_day is before that day gains one (two kills, a retry, two
       // processes, a clock that steps back: at most one Seal a UTC day, never one for an older day).
       const { rows } = await pool.query<{ seals: number }>(
-        `UPDATE adventurers SET seals = seals + 1, seal_day = $2::date WHERE id = $1 AND (seal_day IS NULL OR seal_day < $2::date) RETURNING seals`,
+        `UPDATE adventurers SET seals = seals + 1, seal_day = $2::date, inv_version = inv_version + 1
+         WHERE id = $1 AND (seal_day IS NULL OR seal_day < $2::date) RETURNING seals`,
         [adventurerId, dayUtc],
       );
       if (rows[0]) return { awarded: true, seals: rows[0].seals };
@@ -248,6 +262,54 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
         [boss, partySize, Math.max(0, Math.floor(limit))],
       );
       return rows.map((r) => ({ names: Array.isArray(r.names) ? r.names.filter((n): n is string => typeof n === 'string') : [], seconds: r.seconds, at: r.at.toISOString() }));
+    },
+
+    async writeInventory(adventurerId, expect, w) {
+      const v = checkedInvWrite(w);
+      if (!UUID_RE.test(adventurerId) || !Number.isSafeInteger(expect)) return null;
+      // One statement: the version and both balances are checked and changed together (a Seal awarded,
+      // a GM grant or another write in between bumps inv_version, and this one writes nothing).
+      const { rows } = await pool.query<{ inv_version: number; gold: number; seals: number }>(
+        `UPDATE adventurers SET inventory = $3::jsonb, jobs = $4::jsonb, level = $5, gold = LEAST($8::integer, gold + $6::integer), seals = seals + $7::integer,
+           look = COALESCE($9::jsonb, look), look_free = CASE WHEN $10::boolean THEN false ELSE look_free END,
+           inv_version = inv_version + 1, updated_at = now()
+         WHERE id = $1 AND inv_version = $2 AND gold + $6::integer >= 0 AND seals + $7::integer >= 0
+         RETURNING inv_version, gold, seals`,
+        [
+          adventurerId, expect, JSON.stringify(v.inventory), JSON.stringify(v.jobs), highestLevel(v.jobs), v.dGold, v.dSeals, GOLD_MAX,
+          v.look ? JSON.stringify(v.look) : null, v.lookFree === false,
+        ],
+      );
+      const r = rows[0];
+      return r ? { version: r.inv_version, gold: r.gold, seals: r.seals } : null;
+    },
+
+    async useFreeLook(accountId, look) {
+      const l = parseLook(look);
+      if (!l) throw new TypeError('useFreeLook: not a look');
+      if (!UUID_RE.test(accountId)) return false;
+      const { rowCount } = await pool.query(
+        `UPDATE adventurers SET look = $2::jsonb, look_free = false, inv_version = inv_version + 1, updated_at = now() WHERE account_id = $1 AND look_free`,
+        [accountId, JSON.stringify(l)],
+      );
+      return (rowCount ?? 0) > 0;
+    },
+
+    async logGm(e) {
+      const row = checkedGmLog(e);
+      if (row.gmAccount !== null && !UUID_RE.test(row.gmAccount)) throw new TypeError('logGm: gmAccount is not an account id');
+      await pool.query(
+        `INSERT INTO gm_audit (gm_account, command, target, args, ok, result) VALUES ($1, $2, $3, $4::jsonb, $5, $6)`,
+        [row.gmAccount, row.command, row.target, JSON.stringify(row.args), row.ok, row.result],
+      );
+    },
+
+    async gmAudit(limit = 100) {
+      const { rows } = await pool.query<{ at: Date; gm_account: string | null; command: string; target: string | null; args: unknown; ok: boolean; result: string }>(
+        `SELECT at, gm_account, command, target, args, ok, result FROM gm_audit ORDER BY at DESC, id DESC LIMIT $1`,
+        [Math.max(0, Math.floor(limit))],
+      );
+      return rows.map((r) => ({ at: r.at.toISOString(), gmAccount: r.gm_account, command: r.command, target: r.target, args: r.args, ok: r.ok, result: r.result }));
     },
 
     async close() {

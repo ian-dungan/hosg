@@ -1,5 +1,8 @@
 // What the server keeps between sessions: accounts and their adventurers.
-import { isJobsSave, isSaveZoneId, parseJobsSave, type JobsSave, type ZoneId } from '@sg2/shared';
+import {
+  GOLD_MAX, JOB_IDS, defaultLook, isJobsSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook,
+  type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type ZoneId,
+} from '@sg2/shared';
 
 export interface Account {
   id: string;
@@ -44,7 +47,109 @@ export interface Adventurer {
   sealDay: string | null;
   /** Titles held (for example 'Lampbreaker'), each once, in the order won. */
   titles: string[];
+  /**
+   * The bag, the Vault, what each job wears, the wardrobe, loot days and the remembered kill keys and
+   * operation ids: read with parseInventory (garbage or NULL reads as the starter kit, dyed with the
+   * look's outfit dyes, or the default look's).
+   */
+  inventory: InventorySave;
+  /** The compare-and-set version of inventory, jobs, gold, Seals and look (writeInventory; awardSeal and useFreeLook bump it). */
+  invVersion: number;
+  /** Present (true) only when the stored inventory had to be repaired to read: the room writes it back once on join. */
+  inventoryRepaired?: true;
+  /** The look chosen in the creator or at the Barber; null until then (the room uses defaultLook(accountId)). */
+  look: Look | null;
+  /** The one free creator visit is still unused. */
+  lookFree: boolean;
 }
+
+/**
+ * One atomic inventory write (writeInventory): the inventory and jobs as they are after the operation,
+ * gold and Seals as checked deltas (whole numbers), and the look (with lookFree false when the free visit is spent).
+ */
+export interface InvWrite { inventory: InventorySave; jobs: JobsSave; dGold: number; dSeals: number; look?: Look; lookFree?: false }
+
+/** The new version and the gold and Seals after a write. */
+export interface InvWritten { version: number; gold: number; seals: number }
+
+/** One GM audit row as logGm takes it. */
+export interface GmLogEntry { gmAccount: string | null; command: string; target: string | null; args: unknown; ok: boolean; result: string }
+/** One GM audit row as gmAudit answers it (newest first). */
+export interface GmAuditRow { at: string; gmAccount: string | null; command: string; target: string | null; args: unknown; ok: boolean; result: string }
+
+/** The highest job level in a jobs save (the adventurer row's `level` column: for queries; nothing reads it in play). */
+export function highestLevel(jobs: JobsSave): number {
+  let level = 1;
+  for (const r of Object.values(jobs.jobs)) if (r) level = Math.max(level, levelForXp(r.xp));
+  return level;
+}
+
+/** Checks a write before it is applied (both stores): a valid inventory (parseInventory changes nothing), jobs, look and whole deltas. */
+export function checkedInvWrite(w: InvWrite): InvWrite {
+  const inv = parseInventory(w?.inventory);
+  if (inv.repaired) throw new TypeError('writeInventory: not an inventory');
+  if (!isJobsSave(w.jobs)) throw new TypeError('writeInventory: not a jobs save');
+  let look: Look | undefined;
+  if (w.look !== undefined) {
+    const parsed = parseLook(w.look);
+    if (!parsed) throw new TypeError('writeInventory: not a look');
+    look = parsed;
+  }
+  for (const k of ['dGold', 'dSeals'] as const) {
+    if (!Number.isSafeInteger(w[k])) throw new TypeError(`writeInventory: ${k} is not a whole number`);
+  }
+  if (w.lookFree !== undefined && w.lookFree !== false) throw new TypeError('writeInventory: lookFree can only be spent');
+  return { inventory: inv.inv, jobs: parseJobsSave(w.jobs), dGold: w.dGold, dSeals: w.dSeals, ...(look ? { look } : {}), ...(w.lookFree === false ? { lookFree: false as const } : {}) };
+}
+
+/** Checks a GM audit entry (both stores): a command of 1..64 characters, a result of at most 500, a target of at most 64. */
+export function checkedGmLog(e: GmLogEntry): GmLogEntry {
+  if (typeof e?.command !== 'string' || e.command.length < 1 || e.command.length > 64) throw new TypeError('logGm: command must be 1..64 characters');
+  if (e.target !== null && (typeof e.target !== 'string' || e.target.length > 64)) throw new TypeError('logGm: target must be null or at most 64 characters');
+  if (e.gmAccount !== null && typeof e.gmAccount !== 'string') throw new TypeError('logGm: gmAccount must be null or an account id');
+  if (typeof e.ok !== 'boolean' || typeof e.result !== 'string') throw new TypeError('logGm: ok and result');
+  const args = JSON.parse(JSON.stringify(e.args ?? {})) as unknown;
+  return { gmAccount: e.gmAccount, command: e.command, target: e.target, args, ok: e.ok, result: e.result.slice(0, 500) };
+}
+
+/**
+ * A stored row's inventory and look as both stores read them: the look with parseLook (anything else is null:
+ * the default look), the inventory with parseInventory, a fallback starter kit dyed with the look's outfit
+ * dyes (or the default look's, from the account id).
+ */
+export function readInvLook(inventory: unknown, look: unknown, accountId: string): Pick<Adventurer, 'inventory' | 'look' | 'inventoryRepaired'> {
+  const l = parseLook(look);
+  const outfit = (l ?? defaultLook(accountId)).outfit;
+  const read = parseInventory(inventory, [outfit.dye1, outfit.dye2]);
+  return { inventory: read.inv, look: l, ...(read.repaired ? { inventoryRepaired: true as const } : {}) };
+}
+
+/** Clamped gold after a delta (never above GOLD_MAX). */
+export const goldAfter = (gold: number, dGold: number): number => Math.min(GOLD_MAX, gold + dGold);
+
+/**
+ * Test-only (SG2_TEST_KIT): the starter kit plus that tier's full kit for every job (its JOB_ARMOUR set,
+ * weapon and off-hand), worn; each item once (jobs of one armour type share the pieces).
+ */
+export function testKitInventory(tier: 1 | 2 | 3, dyes: [DyeId, DyeId] = [0, 0]): InventorySave {
+  const inv = newInventory(dyes);
+  for (const job of JOB_IDS) {
+    const kit = kitItems(tier, job);
+    for (const [slot, item] of Object.entries(kit) as [GearSlot, string | null][]) {
+      if (!item) continue;
+      let inst = inv.bag.find((i) => i.item === item);
+      if (!inst) {
+        inst = { uid: inv.nextUid++, item, dye: [dyes[0], dyes[1]] };
+        inv.bag.push(inst);
+      }
+      (inv.gear[job] ??= {})[slot] = inst.uid;
+    }
+  }
+  return inv;
+}
+
+/** How a store makes new adventurers beyond the start spot (test-only switches: SG2_TEST_START_GOLD, SG2_TEST_KIT). */
+export interface NewAdventurerOpts { gold?: number; kit?: 1 | 2 | 3 }
 
 /** One boss kill for the leaderboard: the party size, seconds from the boss's wake to its death, the credited names. */
 export interface BossKill { boss: 'wickhound' | 'fallen_warden'; partySize: number; seconds: number; names: string[]; at: Date }
@@ -102,7 +207,7 @@ export interface StartSpot {
   facing: number;
 }
 
-/** What saveAdventurer takes. */
+/** What saveAdventurer takes (it also writes `level`, the highest job level, and never inventory, gold, Seals or look). */
 export type AdventurerSave = Pick<Adventurer, 'id' | 'x' | 'z' | 'facing' | 'zone' | 'hp' | 'jobs'>;
 
 /**
@@ -147,7 +252,7 @@ export interface Store {
   /**
    * One Warden's Seal for the adventurer, atomically, only when its sealDay is null or before `dayUtc` ('YYYY-MM-DD'):
    * awarded false (and nothing changed) when it already had that day's Seal, or for an unknown id. seals:
-   * the count after. Never touched by saveAdventurer.
+   * the count after. Never touched by saveAdventurer. An award bumps inv_version (a stale inventory write retries).
    */
   awardSeal(adventurerId: string, dayUtc: string): Promise<{ awarded: boolean; seals: number }>;
   /** Adds a title to the adventurer, atomically; false if it already holds it (or the id is unknown). */
@@ -156,5 +261,19 @@ export interface Store {
   recordBossKill(k: BossKill): Promise<{ rank: number }>;
   /** The fastest kills of a boss at a party size (at most `limit`, default 10, fastest first; ties by time). */
   bossLeaderboard(boss: BossKill['boss'], partySize: number, limit?: number): Promise<{ names: string[]; seconds: number; at: string }[]>;
+  /**
+   * Atomic compare-and-set: writes inventory, jobs (and look) and adds dGold/dSeals only while inv_version = expect
+   * and gold + dGold ≥ 0 and seals + dSeals ≥ 0 (gold clamped to GOLD_MAX); bumps inv_version. Resolves the new
+   * { version, gold, seals } or null when the check failed (nothing written; also for an unknown id). Validates
+   * with parseInventory/isJobsSave/parseLook (TypeError). awardSeal also bumps inv_version, so a stale write retries
+   * rather than overwriting.
+   */
+  writeInventory(adventurerId: string, expect: number, w: InvWrite): Promise<InvWritten | null>;
+  /** The creator's free visit: sets look and look_free = false only while look_free is true (bumps inv_version). TypeError for a bad look. */
+  useFreeLook(accountId: string, look: Look): Promise<boolean>;
+  /** GM audit (Task 7 writes rows; created here so the migration and both stores are in one place). */
+  logGm(e: GmLogEntry): Promise<void>;
+  /** The newest audit rows first (at most `limit`, default 100). */
+  gmAudit(limit?: number): Promise<GmAuditRow[]>;
   close(): Promise<void>;
 }

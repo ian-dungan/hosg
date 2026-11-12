@@ -80,8 +80,8 @@ describe('job switching', () => {
     await waitFor(() => jobs.length > 0 && selves.length > 0);
     expect(jobs[0].current).toBe('warrior');
     expect(Object.keys(jobs[0].jobs).sort()).toEqual(Object.keys(JOBS).sort());
-    expect(jobs[0].jobs.warrior).toEqual({ level: 1, xp: 0, next: xpToNext(0), picks: [...JOBS.warrior.picks.solo] });
-    expect(jobs[0].jobs.ninja).toEqual({ level: 1, xp: 0, next: xpToNext(0), picks: [...JOBS.ninja.picks.solo] });
+    expect(jobs[0].jobs.warrior).toEqual({ level: 1, xp: 0, next: xpToNext(0), picks: [...JOBS.warrior.picks.solo], talents: [], outfit: null });
+    expect(jobs[0].jobs.ninja).toEqual({ level: 1, xp: 0, next: xpToNext(0), picks: [...JOBS.ninja.picks.solo], talents: [], outfit: null });
     expect(me(joined.room)).toMatchObject({ job: 'warrior', weapon: 'blade' });
     // unset until their first event (an adventurer coming into a view arrives whole): read as '' and 0
     for (const k of ['cast', 'castTotal', 'castAt', 'buffs']) expect(me(joined.room)[k] ?? 0).toBeFalsy();
