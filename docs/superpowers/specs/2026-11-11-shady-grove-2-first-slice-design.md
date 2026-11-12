@@ -42,6 +42,7 @@ The player starts on solid ground. The first game was a small corner of a much l
    - Two weapon types with their own rhythm: Blade (parry) and Bow (charged shot).
    - Every dangerous attack is telegraphed on the ground and can be dodged.
    - Wind is not a standing combat mechanic. A few set-piece battles may use it as their special twist, where it is done well.
+   - Being in the air never dodges a ground attack: the server decides hits by position on the ground, because it cannot fully trust a client's reported height (a modified client can float up to one jump high). Knockback and launches are applied by the server, not reported by clients.
 7. **Parties**
    - Up to 4 players. Invite by tapping a player. Party health bars. Shared loot rolls.
    - No fixed classes: gear and loadout decide whether you lean damage, healing or tanking.

@@ -12,8 +12,8 @@
 
 ## Roadmap (one plan per subsystem; each ships working software)
 
-1. **Online foundation** — this plan.
-2. **Movement** — server-checked jumping, gravity, falling and fall damage; tap-to-walk path-finding; the "Tap to walk" setting.
+1. **Online foundation** — this plan. Done.
+2. **Movement** — server-checked jumping, gravity, falling and fall damage; tap-to-walk path-finding; the "Tap to walk" setting. Done (`2026-11-12-sg2-plan-2-movement.md`).
 3. **Combat core** — shared combat rules, 12 abilities, stagger, combos, Blade and Bow, telegraphs, knockback, the Greenway zone and its enemies.
 4. **Parties and the Fallen Warden** — parties of 4, loot rolls, private boss arenas, three phases, solo title and leaderboard.
 5. **Progression and gear** — levels 1–10, armour types and nine sets, unique weapons, visible gear, costumes and the gold costume shop, GM tools.

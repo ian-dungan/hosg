@@ -181,3 +181,23 @@ export function findPath(from: Vec2, to: Vec2, passable: (x: number, z: number) 
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Root `npm test`, client `tsc`, both builds. In the offline demo with Playwright at desktop size and `devices['iPhone 13']`, open screenshots showing: a tap behind a house walks around it and arrives (final position within 0.6 m of the marker); a tap across the river shows "Can't get there"; the Settings panel with the switch; with the switch off a ground tap does not move the adventurer; a tap on Old Marrow from across the plaza walks over and opens his dialogue. No page errors.**
 - [ ] **Step 5: Commit** — `feat: tap-to-walk finds its way around obstacles; Settings switch`.
+
+## Outcome (2026-11-12)
+
+Complete. Root `npm test`: 263 passed, 1 skipped. 100 bots: 15.1 Hz, 120 MB peak, 0 corrections.
+
+Decisions made during the build:
+- Jumping at a rim lifts the adventurer onto it; honest reach is 1.80 m.
+- The server guarantees bounds, not ground contact: a single jump never lands more than 2.00 m above its take-off, walls 0.25 m or thicker are never crossed, real drops over 3 m are always charged, honest clients are never refused. A modified client can float within one jump of real ground; game rules must never treat "airborne" as avoiding ground effects.
+- Anything meant to be unclimbable must be a wall or at least 2.1 m high.
+- Path-finding walks on the ground only; a walk ends if the adventurer hops onto a platform.
+
+Deferred (minor):
+- Health is not saved; rejoining restores it. Fix before any other damage source exists.
+- Below about 10 frames a second a client's jumps can be corrected (needs a real-time client clock).
+- Server room tests wait in real time (suite takes about 55 s); inject a clock.
+- `window.__sg2` test handle ships in the online client; `smoke.mjs` frees its port with `fuser`.
+- Small mesh overlaps at the Old Lookout boulders, well roof and planters; blob shadows rise with a jumper.
+- Tapping a walled-off pocket on a river bank can cost a full search before "Can't get there".
+
+For Plan 3 (combat): knockback must be stamped on the server's air track with a widened allowance; the path follower must cancel or re-path when the adventurer is displaced.
