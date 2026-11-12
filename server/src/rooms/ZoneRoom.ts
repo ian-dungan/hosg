@@ -153,7 +153,7 @@ import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../sto
 import { InventoryQueue, TokenBucket, WriteLock, type InvSnapshot, type InvTask, type TaskResult } from './inventoryQueue';
 import { applyLoot, clearXp, itemName, killXp, talentRowFor, type LootAward } from './rewards';
 import type { InstanceInfo, Instances } from './instances';
-import { isGmLine, runGmLine, type GmHost, type GmProcess } from '../gm/commands';
+import { gmVerb, isGmLine, runGmLine, type GmHost, type GmProcess } from '../gm/commands';
 import { applyGrant, grantThing, type GmGrant, type GrantOutcome } from '../gm/grant';
 import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
@@ -225,6 +225,8 @@ const INSTANCE_TIMINGS: InstanceTimings = {
 
 /** A GM's kick closes the connection with this code (the client shows the sign-in screen with the reason). */
 const GM_KICK_CODE = 4003;
+/** A GM's role is read again at most this often on its ordinary chat (its badge; every /gm line reads it anyway) (ms). */
+const GM_ROLE_RECHECK_MS = 30_000;
 /** The Lampfall's gate bits of each boss room's entry gate. */
 const ENTRY_GATE: Record<ArenaEncounter, number> = { wickhound: GATE_WICK, warden: GATE_PIT };
 /** A boss kind's encounter and leaderboard id. */
@@ -496,6 +498,8 @@ interface Session {
   kitPending?: boolean;
   /** The stored GM role as last read (at join, and on each /gm line): its chat lines carry the badge, its /gm lines are run. */
   isGm: boolean;
+  /** When the role was last read from the store (wall ms). */
+  roleCheckedAt: number;
   lock: WriteLock;
   /** INV_OPS_PER_S for inventory and Barber requests. */
   invBucket: TokenBucket;
@@ -854,6 +858,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       looksSent: new Map(),
       looksOut: new Set(),
       isGm: isGm === true,
+      roleCheckedAt: this.wallMs(),
     };
     session.queue = this.makeQueue(snapshot, lock, adventurer.id, accountId, () => session.jobs, (j) => {
       // (inside the write lock: a save waiting on it reads these jobs, even if the session ended meanwhile)
@@ -1765,13 +1770,25 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // A game master's /gm line is a command (never broadcast); anyone else's is ordinary chat, like any other text.
     const gmLine = isGmLine(text);
     if (gmLine && session.isGm && this.gm) return this.onGmLine(session, text);
+    // A GM's badge: its role is read again at most every GM_ROLE_RECHECK_MS of chat (a revoked GM loses it soon).
+    if (session.isGm && this.wallMs() - session.roleCheckedAt >= GM_ROLE_RECHECK_MS) {
+      session.roleCheckedAt = this.wallMs();
+      void this.store.findAccountById(session.accountId).then(
+        (a) => { session.isGm = a?.isGm === true; this.onChat(client, message); },
+        (err) => { this.logFailure('gm', 'Reading a GM role failed', err); this.onChat(client, message); },
+      );
+      return;
+    }
     const party = channel === 'party' ? this.parties.partyOf(session.accountId) : undefined;
     if (channel === 'party' && !party) return this.refuseParty(session, 'not-member');
     const now = Date.now();
     if (now - session.lastChatAt < CHAT_MIN_INTERVAL_MS) return;
     session.lastChatAt = now;
     // (a non-GM's /gm line: one refused audit row, never seen by any client)
-    if (gmLine) this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { text }, ok: false, result: 'not a game master' });
+    // (at most one a day per account, and DENIED_PER_MIN for the process: the log cannot be flooded; the verb only)
+    if (gmLine && this.gm?.deniedRow(session.accountId, Date.now())) {
+      void this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { verb: gmVerb(text) }, ok: false, result: 'not a game master' });
+    }
     const chat: S2C['chat'] = { from: session.player.name, text, channel, ...(session.isGm ? { gm: true as const } : {}) };
     if (!party) return this.broadcast('chat', chat);
     for (const m of party.members) {
@@ -2014,9 +2031,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.broadcast('announce', m);
   }
 
-  /** One audit row; a store failure is logged (with the row) and never stops the command's answer. */
-  private audit(row: Parameters<Store['logGm']>[0]): Promise<void> {
-    return this.store.logGm(row).catch((err) => this.logFailure('gm-audit', `A GM audit row could not be written: ${JSON.stringify(row)}`, err));
+  /** One audit row: true when written; a store failure is logged (with the row) and reported to the GM. */
+  private audit(row: Parameters<Store['logGm']>[0]): Promise<boolean> {
+    return this.store.logGm(row).then(() => true, (err) => {
+      this.logFailure('gm-audit', `A GM audit row could not be written: ${JSON.stringify(row)}`, err);
+      return false;
+    });
   }
 
   /**
@@ -2031,19 +2051,20 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         isGm = (await this.store.findAccountById(session.accountId))?.isGm === true;
       } catch (err) {
         this.logFailure('gm', 'Reading a GM role failed', err);
-        await this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { text }, ok: false, result: 'the role could not be read' });
+        if (this.gm!.deniedRow(session.accountId, Date.now())) await this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { verb: gmVerb(text) }, ok: false, result: 'the role could not be read' });
         this.deliverTo(session, 'That could not be checked just now; try again');
         return;
       }
       if (!isGm) {
         session.isGm = false;
-        await this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { text }, ok: false, result: 'not a game master (revoked)' });
+        if (this.gm!.deniedRow(session.accountId, Date.now())) await this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { verb: gmVerb(text) }, ok: false, result: 'not a game master (revoked)' });
         this.deliverTo(session, 'You are not a game master');
         return;
       }
       const run = await runGmLine(text, session.accountId, this.gmHost(session));
-      for (const row of run.rows) await this.audit({ gmAccount: session.accountId, ...row });
-      this.deliverTo(session, run.notice);
+      let logged = true;
+      for (const row of run.rows) logged = (await this.audit({ gmAccount: session.accountId, ...row })) && logged;
+      this.deliverTo(session, logged ? run.notice : `${run.notice} (the audit log could not be written: see the server log)`);
     }).catch((err) => this.logFailure('gm', 'A GM command failed', err));
   }
 

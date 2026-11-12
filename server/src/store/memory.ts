@@ -83,7 +83,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     async createAccount({ username, passwordHash, isGuest }) {
       const key = username.toLowerCase();
       if (accountsByName.has(key)) throw new NameTakenError(username);
-      const account: Account = { id: randomUUID(), username, passwordHash, isGuest, isGm: testGms.has(key) };
+      const account: Account = { id: randomUUID(), username, passwordHash, isGuest, isGm: !isGuest && testGms.has(key) }; // (never a guest)
       accountsByName.set(key, account);
       accountsById.set(account.id, account);
       return { ...account };
@@ -183,8 +183,8 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     async gmGoldToday(gmAccount, dayUtc) {
       let sum = 0;
       for (const r of audit) {
-        const amount = (r.args as { amount?: unknown } | null)?.amount;
-        if (r.gmAccount === gmAccount && r.command === 'grant gold' && r.ok && r.at.slice(0, 10) === dayUtc && Number.isSafeInteger(amount)) sum += amount as number;
+        const counted = (r.args as { counted?: unknown } | null)?.counted;
+        if (r.gmAccount === gmAccount && r.at.slice(0, 10) === dayUtc && Number.isSafeInteger(counted)) sum += counted as number;
       }
       return sum;
     },

@@ -9,11 +9,23 @@ export const GM_CLI_USAGE = [
   '  revoke <username>   take the role away (its next /gm line is refused)',
   '  list                every game master account',
   '  audit [n]           the newest n audit rows (default 50, at most 1000)',
+  '  --by <name>         who you are (recorded in the audit row with the shell user), for grant and revoke',
 ].join('\n');
 
 /** Runs one CLI command against `store`; `who` is the shell user (recorded in the audit row). Resolves the exit code. */
 export async function runRoleCli(argv: readonly string[], store: Store, out: (line: string) => void, who: string): Promise<number> {
-  const [command, arg, extra] = argv;
+  const args = [...argv];
+  let by: string | undefined;
+  const at = args.indexOf('--by');
+  if (at >= 0) {
+    by = args[at + 1];
+    if (typeof by !== 'string' || by.length < 1 || by.length > 64) {
+      out(GM_CLI_USAGE);
+      return 2;
+    }
+    args.splice(at, 2);
+  }
+  const [command, arg, extra] = args;
   switch (command) {
     case 'grant':
     case 'revoke': {
@@ -30,7 +42,7 @@ export async function runRoleCli(argv: readonly string[], store: Store, out: (li
         ok = await store.setGm(account.username, on);
         result = ok ? (on ? `${account.username} is a game master now` : `${account.username} is not a game master any more`) : `${account.username} could not be changed`;
       }
-      await store.logGm({ gmAccount: null, command: 'role', target: (account?.username ?? arg).slice(0, 64), args: { on, by: who.slice(0, 64) }, ok, result });
+      await store.logGm({ gmAccount: null, command: 'role', target: (account?.username ?? arg).slice(0, 64), args: { on, by: (by ?? who).slice(0, 64), shell: who.slice(0, 64) }, ok, result });
       out(result);
       return ok ? 0 : 1;
     }

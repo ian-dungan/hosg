@@ -19,7 +19,8 @@ try {
 }
 let code = 1;
 try {
-  const store = await createPgStore(databaseUrl);
+  // (no migrations: the server applies them; this tool only reads and sets the role on the schema as it is)
+  const store = await createPgStore(databaseUrl, { migrate: false });
   try {
     code = await runRoleCli(process.argv.slice(2), store, (line) => console.log(line), who);
   } finally {

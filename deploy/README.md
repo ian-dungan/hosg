@@ -300,12 +300,13 @@ $ docker compose exec sg2-server node server/dist/gm.js revoke TheirName
 TheirName is not a game master any more
 ```
 
-`list` shows every GM account. The tool reads the database address (`DATABASE_URL`) from the container's
+`list` shows every GM account. Add `--by YourName` to a `grant` or `revoke` to record who did it
+(the shell user is recorded as well). The tool never changes the database's tables (the server's update does). The tool reads the database address (`DATABASE_URL`) from the container's
 environment, exactly as the game server does, so it needs no password typed in. Outside Docker (a
 development machine), the same tool is `DATABASE_URL=… npm run gm -w server -- grant TheirName`.
 
-**The GM audit log.** Every GM line (done or refused, including too-fast ones), every refused `/gm` line
-from someone who is not a GM, and every `grant` and `revoke` above is written to the `gm_audit` table in
+**The GM audit log.** Every GM line (done or refused, including too-fast ones), the first refused `/gm` line
+of the day from each account that is not a GM (only the command word, never the text), and every `grant` and `revoke` above is written to the `gm_audit` table in
 the database: when, which account (empty for this shell tool), the command, its target, what was typed
 and the result. Costumes given with `/gm event award` are marked as event grants there, with the event's
 title. The table only grows: the database refuses to change or delete its rows (update 007 adds that
@@ -318,8 +319,29 @@ $ docker compose exec sg2-server node server/dist/gm.js audit 50
 or with `psql`: `docker compose exec sg2-db psql -U sg2 -d sg2 -c "SELECT * FROM gm_audit ORDER BY id DESC LIMIT 50;"`.
 Backups (see above) include it.
 
+**Known limits of the audit log.** The append-only rule is a database trigger. In the shipped
+`docker-compose.yml` the game server connects as `sg2`, the database's owner and a superuser, so anyone
+with that password on the server's shell could still drop the trigger and edit the table. If you want the
+log protected even from that account, split the roles (do it once, after a backup; this does not change
+the compose file's credentials, which you would edit yourself afterwards):
+
+```
+$ docker compose exec sg2-db psql -U sg2 -d sg2
+sg2=# CREATE ROLE sg2_app LOGIN PASSWORD 'pick-a-long-random-password';
+sg2=# GRANT CONNECT ON DATABASE sg2 TO sg2_app;
+sg2=# GRANT USAGE ON SCHEMA public TO sg2_app;
+sg2=# GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO sg2_app;
+sg2=# GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO sg2_app;
+sg2=# REVOKE UPDATE, DELETE, TRUNCATE ON gm_audit FROM sg2_app;
+sg2=# GRANT SELECT, INSERT ON gm_audit TO sg2_app;
+```
+
+Then the game server's `DATABASE_URL` would use `sg2_app`, and migrations (which need the owner) would be
+run by `sg2` before each update. The shipped setup keeps one role for simplicity; with it, the trigger
+guards against mistakes and against everything the game itself can do, not against the database's owner.
+
 **Limits:** each GM may run 20 commands a minute; there is one announcement every 30 seconds for the whole
-server; each GM may give at most 100 000 gold a day (10 000 at a time), never past an adventurer's purse
+server; each GM may give at most 100 000 gold a day (10 000 at a time; items count at their sell value), never past an adventurer's purse
 limit; items need a free bag slot (a full bag is refused, and nothing is lost). Announcements are plain text
 of at most 200 characters.
 

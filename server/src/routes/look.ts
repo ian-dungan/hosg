@@ -66,6 +66,7 @@ export function lookRouter(store: Store, secret: string, opts: { ratePerMinute?:
           if (!(err instanceof AlreadyNamedError)) throw err; // named meanwhile: it keeps that name
         }
       }
+      // a real change from here on: the look is set and the free visit spent (whether or not the dyes follow)
       if (!(await store.useFreeLook(account.id, look))) return void res.status(409).json({ error: LOOK_NOT_FREE });
       a = await store.getOrCreateAdventurer(account.id);
       if (a.inventory.nextUid === UNTOUCHED_NEXT_UID) {

@@ -500,7 +500,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       const guest = await store.createAccount({ username: uniqueName('Guest'), passwordHash: null, isGuest: true });
       const lines: string[] = [];
       const cli = (...argv: string[]) => runRoleCli(argv, store, (l) => lines.push(l), 'tester');
-      expect(await cli('grant', name.toUpperCase())).toBe(0);
+      expect(await cli('grant', name.toUpperCase(), '--by', 'Ada Admin')).toBe(0);
       expect((await store.findAccountById(account.id))!.isGm).toBe(true);
       expect(await store.listGms()).toContain(name);
       expect(await cli('list')).toBe(0);
@@ -519,7 +519,8 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       expect(rows.map((r) => [r.target === name ? 'gm' : r.target === guest.username ? 'guest' : 'nobody', r.ok, (r.args as any).on, r.gmAccount])).toEqual([
         ['gm', true, true, null], ['guest', false, true, null], ['nobody', false, true, null], ['gm', true, false, null],
       ]);
-      expect((rows[0]!.args as any).by).toBe('tester');
+      expect(rows[0]!.args).toMatchObject({ by: 'Ada Admin', shell: 'tester' });
+      expect((rows[1]!.args as any).by).toBe('tester');
     });
 
     it('grantOffline: once per key, the bag limit, the purse cap, owned costumes, unknown names; jobs never written', async () => {
@@ -563,15 +564,15 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
     it("gmGoldToday sums the GM's successful gold grants of that UTC day", async () => {
       const gm = await store.createAccount({ username: uniqueName('Gm'), passwordHash: 'h', isGuest: false });
       const other = await store.createAccount({ username: uniqueName('Gm'), passwordHash: 'h', isGuest: false });
-      const row = (gmAccount: string, command: string, amount: unknown, ok = true) => store.logGm({ gmAccount, command, target: 'X', args: { amount, name: 'X' }, ok, result: '' });
+      const row = (gmAccount: string, command: string, counted: unknown, ok = true) => store.logGm({ gmAccount, command, target: 'X', args: { amount: 1, name: 'X', ...(counted === undefined ? {} : { counted }) }, ok, result: '' });
       await row(gm.id, 'grant gold', 300);
-      await row(gm.id, 'grant gold', 200);
-      await row(gm.id, 'grant gold', 9000, false);
-      await row(gm.id, 'grant item', 50);
+      await row(gm.id, 'grant gold', 200, false); // failed: it may have landed, so it counts
+      await row(gm.id, 'grant gold', undefined, false); // refused: nothing counted
+      await row(gm.id, 'grant item', 50); // an item at its sell value
       await row(gm.id, 'grant gold', 'lots');
       await row(other.id, 'grant gold', 40);
       const today = new Date().toISOString().slice(0, 10);
-      expect(await store.gmGoldToday(gm.id, today)).toBe(500);
+      expect(await store.gmGoldToday(gm.id, today)).toBe(550);
       expect(await store.gmGoldToday(gm.id, '2001-01-01')).toBe(0);
     });
 
@@ -663,6 +664,29 @@ if (databaseUrl) {
       } finally {
         await db.end();
         await store.close();
+      }
+    });
+  });
+
+  describe('PgStore without migrations (the role CLI)', () => {
+    it('opens on the schema as it is and runs no migration', async () => {
+      const dbName = `sg2_nomigrate_${Math.floor(Math.random() * 1e9)}`;
+      const admin = new pg.Client({ connectionString: databaseUrl });
+      await admin.connect();
+      await admin.query(`CREATE DATABASE ${dbName}`);
+      const url = new URL(databaseUrl);
+      url.pathname = `/${dbName}`;
+      try {
+        const store = await createPgStore(url.toString(), { migrate: false });
+        await store.close();
+        const db = new pg.Client({ connectionString: url.toString() });
+        await db.connect();
+        const { rows } = await db.query(`SELECT to_regclass('schema_migrations') AS t`);
+        await db.end();
+        expect(rows[0].t).toBeNull();
+      } finally {
+        await admin.query(`DROP DATABASE ${dbName} WITH (FORCE)`);
+        await admin.end();
       }
     });
   });

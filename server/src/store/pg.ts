@@ -29,6 +29,9 @@ async function migrate(pool: pg.Pool): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // (a migration may take longer than the pool's per-statement limits: none inside this transaction)
+    await client.query('SET LOCAL statement_timeout = 0');
+    await client.query('SET LOCAL lock_timeout = 0');
     await client.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK_ID]);
     await client.query(
       'CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())',
@@ -137,11 +140,12 @@ export function createPool(databaseUrl: string, opts: { statementTimeoutMs?: num
   return pool;
 }
 
-export async function createPgStore(databaseUrl: string, opts: { start?: StartSpot; newAdventurer?: NewAdventurerOpts } = {}): Promise<Store> {
+/** `migrate: false` (the role CLI): opens the store on the schema as it is, running no migration. */
+export async function createPgStore(databaseUrl: string, opts: { start?: StartSpot; newAdventurer?: NewAdventurerOpts; migrate?: boolean } = {}): Promise<Store> {
   const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const pool = createPool(databaseUrl);
   try {
-    await migrate(pool);
+    if (opts.migrate !== false) await migrate(pool);
   } catch (err) {
     await pool.end();
     throw err;
@@ -344,9 +348,8 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
     async gmGoldToday(gmAccount, dayUtc) {
       if (!UUID_RE.test(gmAccount) || !isUtcDay(dayUtc)) return 0;
       const { rows } = await pool.query<{ sum: string | null }>(
-        `SELECT sum((args->>'amount')::bigint) AS sum FROM gm_audit
-         WHERE gm_account = $1 AND command = 'grant gold' AND ok AND jsonb_typeof(args->'amount') = 'number'
-           AND at >= $2::date AND at < $2::date + 1`,
+        `SELECT sum((args->>'counted')::bigint) AS sum FROM gm_audit
+         WHERE gm_account = $1 AND jsonb_typeof(args->'counted') = 'number' AND (at AT TIME ZONE 'UTC')::date = $2::date`,
         [gmAccount, dayUtc],
       );
       return Number(rows[0]?.sum ?? 0);

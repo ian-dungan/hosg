@@ -8,8 +8,17 @@ import { GM_ANNOUNCE_EVERY_S, GM_GOLD_PER_DAY, GM_HELP, GM_PER_MIN } from '../gm
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import {
-  accountFor, collect, collectFromJoin, intoLampfall, joinGrove, joinZone, saveAs, sendInv, sleep, startServer, waitFor, walk, type TestServer,
+  SECRET, collect, collectFromJoin, intoLampfall, joinGrove, joinZone, saveAs, sendInv, sleep, startServer, waitFor, walk, type TestServer,
 } from './testHelpers';
+
+import { signToken } from '../auth/tokens';
+
+/** A registered (never a guest) account, its adventurer named `username`, and a token: game masters are never guests. */
+async function accountFor(store: Store, username: string): Promise<{ accountId: string; token: string }> {
+  const account = await store.createAccount({ username, passwordHash: 'h', isGuest: false });
+  await store.nameAdventurer(account.id, username);
+  return { accountId: account.id, token: signToken(account.id, SECRET) };
+}
 
 let server: TestServer | undefined;
 afterEach(async () => {
@@ -62,7 +71,7 @@ describe('GM tools', () => {
     }
     const rows = await audit(store);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ gmAccount: bob.accountId, command: 'denied', ok: false, target: null, args: { text: '/gm announce free gold' } });
+    expect(rows[0]).toMatchObject({ gmAccount: bob.accountId, command: 'denied', ok: false, target: null, args: { verb: '/gm announce' } });
     // a game master's own /gm line goes to nobody else; its ordinary chat carries the badge
     const notices = collect(g.room, 'notice');
     expect(await gm(g.room, notices, '/gm help')).toBe(GM_HELP);
@@ -265,7 +274,7 @@ describe('GM tools', () => {
   it('gold beyond 100 000 a day is refused', async () => {
     const { url, store } = await start(['Gail', 'Bob']);
     const gail = await accountFor(store, 'Gail'), bob = await accountFor(store, 'Bob');
-    await store.logGm({ gmAccount: gail.accountId, command: 'grant gold', target: 'Bob', args: { amount: GM_GOLD_PER_DAY - 10, name: 'Bob' }, ok: true, result: 'done' });
+    await store.logGm({ gmAccount: gail.accountId, command: 'grant gold', target: 'Bob', args: { amount: GM_GOLD_PER_DAY - 10, name: 'Bob', counted: GM_GOLD_PER_DAY - 10 }, ok: true, result: 'done' });
     await store.logGm({ gmAccount: gail.accountId, command: 'grant gold', target: 'Bob', args: { amount: 9000, name: 'Bob' }, ok: false, result: 'refused' }); // refusals do not count
     const g = await joinGrove(url, gail.token);
     const notices = collect(g.room, 'notice');

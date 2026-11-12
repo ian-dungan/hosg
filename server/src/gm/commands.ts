@@ -12,7 +12,7 @@
 //   /gm kick <name> <reason>
 //   /gm event start <title>  |  /gm event end
 //   /gm event award <costume id> <name> [<name> …]   at most 20 names
-import { CHAT_MAX, GOLD_MAX, cleanChat, isCostumeId, isItemId, type CostumeId, type ItemId } from '@sg2/shared';
+import { CHAT_MAX, GOLD_MAX, ITEMS, cleanChat, isCostumeId, isItemId, type CostumeId, type ItemId } from '@sg2/shared';
 import { GM_GOLD_GRANT_MAX, grantThing, type GmGrant, type GrantOutcome } from './grant';
 import { utcDay, type GmLogEntry, type Store } from '../store/types';
 
@@ -219,7 +219,8 @@ function grantText(outcome: GrantOutcome, name: string, thing: string): string {
     case 'owned': return `${name} already has ${thing}`;
     case 'bag-full': return `${name}'s bag is full: nothing was given (try again later)`;
     case 'purse-full': return `${name}'s purse would pass ${GOLD_MAX} gold: nothing was given`;
-    default: return `The grant to ${name} could not be saved: nothing was given (try again)`;
+    case 'invalid': return `That grant is not possible: nothing was given`;
+    default: return `The grant to ${name} may not have landed: check before retrying (its inventory, or the audit log)`;
   }
 }
 
@@ -259,14 +260,17 @@ async function run(c: GmCommand, gmAccount: string, host: GmHost): Promise<GmRun
     case 'grant': {
       const args = c.what === 'gold' ? { amount: c.amount, name: c.name } : c.what === 'item' ? { item: c.item, name: c.name } : { costume: c.costume, name: c.name };
       const g: GmGrant = c.what === 'gold' ? { gold: c.amount } : c.what === 'item' ? { item: c.item } : { costume: c.costume };
-      if (c.what === 'gold') {
+      // gold, and items at their sell value, count toward the GM's daily cap (a grant that may have landed too)
+      const worth = c.what === 'gold' ? c.amount : c.what === 'item' ? (ITEMS[c.item]?.sell ?? 0) : 0;
+      if (worth > 0) {
         const today = await host.store.gmGoldToday(gmAccount, utcDay(host.now()));
-        if (today + c.amount > GM_GOLD_PER_DAY) {
-          return one(false, `At most ${GM_GOLD_PER_DAY} gold a day per game master: ${Math.max(0, GM_GOLD_PER_DAY - today)} left today`, c.name, args);
+        if (today + worth > GM_GOLD_PER_DAY) {
+          return one(false, `At most ${GM_GOLD_PER_DAY} gold (items at their sell value) a day per game master: ${Math.max(0, GM_GOLD_PER_DAY - today)} left today`, c.name, args);
         }
       }
       const { outcome, name } = await host.grant(c.name, { ...g, key: host.key() });
-      return one(outcome === 'done', grantText(outcome, name, grantThing(g)), c.name, args);
+      const counted = worth > 0 && (outcome === 'done' || outcome === 'failed') ? { counted: worth } : {};
+      return one(outcome === 'done', grantText(outcome, name, grantThing(g)), c.name, { ...args, ...counted });
     }
     case 'tp': {
       const r = host.tp('name' in c ? { name: c.name } : { x: c.x, z: c.z });
@@ -315,12 +319,38 @@ export interface GmProcess {
   announceAll(text: string): void;
   /** Runs one GM's lines one at a time (so its daily gold sum and limits are never raced by its own lines). */
   serial<T>(gmAccount: string, fn: () => Promise<T>): Promise<T>;
+  /**
+   * Whether a refused ('denied') row may be written for the account now (wall ms): at most one per account a UTC
+   * day, and at most DENIED_PER_MIN for the process a minute, so nobody can flood the append-only log.
+   */
+  deniedRow(accountId: string, now: number): boolean;
+}
+
+/** Refused rows from accounts that are not GMs, for the whole process, a minute at most. */
+export const DENIED_PER_MIN = 60;
+
+/** The verb of a /gm line as a refused row keeps it ("/gm grant"; at most 16 characters): never the text. */
+export function gmVerb(text: string): string {
+  return `/gm ${(text.slice(3).trim().split(/\s+/)[0] ?? '').replace(/[^A-Za-z]/g, '')}`.trim().slice(0, 16);
 }
 
 /** A GmProcess over the rooms `each` lists (the app's zone rooms and instances). */
 export function gmProcess(each: () => Iterable<{ announce(m: { text: string; event: string | null }): void }>): GmProcess {
   const tails = new Map<string, Promise<unknown>>();
+  let deniedDay = '';
+  const deniedToday = new Set<string>();
+  let deniedTimes: number[] = [];
   const p: GmProcess = {
+    deniedRow(accountId, now) {
+      const day = utcDay(now);
+      if (day !== deniedDay) { deniedDay = day; deniedToday.clear(); }
+      if (deniedToday.has(accountId)) return false;
+      deniedTimes = deniedTimes.filter((t) => now - t < 60_000);
+      if (deniedTimes.length >= DENIED_PER_MIN) return false;
+      deniedToday.add(accountId);
+      deniedTimes.push(now);
+      return true;
+    },
     limits: new GmLimits(),
     event: null,
     announceAll(text) {

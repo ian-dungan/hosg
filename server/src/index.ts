@@ -128,12 +128,13 @@ function testKit(): 1 | 2 | 3 | undefined {
 
 /**
  * SG2_TEST_GMS=alice,bob (test servers only, never in Docker, off by default): with SG2_STORE=memory, accounts
- * registered with those usernames are game masters. Refused with a database: there the role is set only by the
+ * registered with those usernames are game masters (never guests; refused when NODE_ENV=production). Refused with a database: there the role is set only by the
  * role CLI (npm run gm -w server).
  */
 function testGms(): string[] | undefined {
   const raw = process.env.SG2_TEST_GMS;
   if (raw === undefined || raw === '') return undefined;
+  if (process.env.NODE_ENV === 'production') fail('SG2_TEST_GMS is refused when NODE_ENV=production.');
   if (process.env.SG2_STORE !== 'memory') fail('SG2_TEST_GMS works only with SG2_STORE=memory; with a database, use the role CLI (npm run gm -w server -- grant <username>).');
   const names = raw.split(',').map((n) => n.trim());
   if (names.some((n) => !/^[A-Za-z0-9_-]{1,64}$/.test(n))) fail(`SG2_TEST_GMS must be a comma-separated list of usernames (got "${raw}").`);

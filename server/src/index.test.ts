@@ -235,6 +235,9 @@ describe('SG2_TEST_GMS (test servers only)', () => {
     const bad = await runServer({ SG2_STORE: 'memory', SG2_TEST_GMS: 'a b' });
     expect(bad.code).toBe(1);
     expect(bad.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_GMS must be a comma-separated list of usernames (got "a b").');
+    const prod = await runServer({ SG2_STORE: 'memory', SG2_TEST_GMS: 'alice', NODE_ENV: 'production' });
+    expect(prod.code).toBe(1);
+    expect(prod.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_GMS is refused when NODE_ENV=production.');
     const pg = await runServer({ SG2_TEST_GMS: 'alice', DATABASE_URL: 'postgres://nobody@127.0.0.1:1/none' });
     expect(pg.code).toBe(1);
     expect(pg.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_GMS works only with SG2_STORE=memory; with a database, use the role CLI (npm run gm -w server -- grant <username>).');
