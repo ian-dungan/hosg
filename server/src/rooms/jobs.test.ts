@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Room } from '@colyseus/sdk';
 import {
-  ABILITIES, DEATH_MIN_S, JOBS, KILL_XP, MAX_HP, SPAWN, TICK_HZ, isJobsSave, levelForXp, newJobsSave, slotsFor, worldOf, xpToNext,
+  ABILITIES, DEATH_MIN_S, JOBS, REASON_ELSEWHERE, KILL_XP, MAX_HP, SPAWN, TICK_HZ, isJobsSave, levelForXp, newJobsSave, slotsFor, worldOf, xpToNext,
   type AbilityId, type CampSpawn, type JobId, type JobsSave, type Surface, type ZoneDef, type ZoneId,
 } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer';
@@ -485,6 +485,36 @@ describe('casts, allies and revives', () => {
     expect(respawned).toEqual([]);
     await waitFor(() => !me(b.room).dead);
     expect(me(b.room)).toMatchObject({ x: 3, z: -10, dead: false });
+  });
+
+  it('revived in the Greenway, then signed in elsewhere before any save of it alive: the kick saves it where it lay, and it comes back there', async () => {
+    const { url, a, b, slot, store } = await reviveScene({ zone: 'greenway' });
+    const revived = collect(b.room, 'revived'), kicked = collect(b.room, 'kicked');
+    kill(b.room);
+    await waitFor(() => me(b.room).dead);
+    await waitFor(async () => (await stored(store, b.accountId)).zone === 'grove'); // the death, saved as respawned
+    a.room.send('ability', { slot, phase: 'press', ally: me(b.room).eid });
+    await waitFor(() => revived.length > 0, 3000);
+    expect(await stored(store, b.accountId)).toMatchObject({ zone: 'grove' }); // not saved alive yet
+    // signing in again asks GET /api/zone (the grove now) and joins there: that kicks the old session,
+    // whose save puts it back in the Greenway, so the grove sends it on
+    await expect(joinZone(url, b.token, 'grove')).rejects.toThrow(REASON_ELSEWHERE);
+    await waitFor(() => kicked.length > 0);
+    expect(await stored(store, b.accountId)).toMatchObject({ zone: 'greenway', x: 3, z: -10, hp: Math.round(0.4 * MAX_HP) });
+    const again = await joinZone(url, b.token, 'greenway');
+    expect(me(again.room)).toMatchObject({ x: 3, z: -10, hp: Math.round(0.4 * MAX_HP), dead: false });
+    const respawned = collect(again.room, 'respawned');
+    await sleep(300);
+    expect(respawned).toEqual([]);
+  });
+
+  it('a job message from a session the room does not hold (not entered yet, or gone) is refused busy', async () => {
+    const { url, store } = await start(zones());
+    const a = await joinAt(url, store, 'Alice', SPAWN.x, SPAWN.z);
+    const room = serverRoom(a.room) as any;
+    const sent: any[] = [];
+    room.onJob({ sessionId: 'not-entered', send: (type: string, message: unknown) => sent.push({ type, message }) }, { job: 'ninja' });
+    expect(sent).toEqual([{ type: 'refused', message: { action: 'job', reason: 'busy' } }]);
   });
 
   it('disconnected while dead, then revived: saved alive where it lay when the window runs out', async () => {

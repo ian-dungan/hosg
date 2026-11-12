@@ -198,7 +198,7 @@ export function ageCarry(c: Carry, seconds: number, maxCharges: number = DODGE_C
   const s = Math.max(0, seconds);
   const cooldowns: Carry['cooldowns'] = {};
   for (const [id, left] of Object.entries(c.cooldowns) as [keyof Carry['cooldowns'], number][]) if (left - s > 0) cooldowns[id] = left - s;
-  let charges = c.dodgeCharges, refill = c.dodgeRefillIn, rest = s;
+  let charges = Math.min(c.dodgeCharges, maxCharges), refill = c.dodgeRefillIn, rest = s;
   while (charges < maxCharges && rest >= refill) { rest -= refill; charges++; refill = DODGE_REFILL_S; }
   const aged: Carry = {
     cooldowns, gcd: Math.max(0, c.gcd - s), dodgeCharges: charges, dodgeRefillIn: charges < maxCharges ? refill - rest : 0,
@@ -761,7 +761,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    */
   private onJob(client: Client, message: unknown) {
     const session = this.sessions.get(client.sessionId);
-    if (!session) return;
+    // not entered yet (or gone already): nothing to change
+    if (!session) return this.sendTo(client, 'refused', { action: 'job', reason: 'busy' });
     const job = (message as { job?: unknown } | null)?.job;
     if (!isJobId(job)) return this.refuse(session, 'job', 'invalid');
     if (session.travelling) return this.refuse(session, 'job', 'busy');

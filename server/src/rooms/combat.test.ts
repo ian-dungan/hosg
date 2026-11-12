@@ -810,6 +810,8 @@ describe('relog mid-fight (fix round 1)', () => {
     // dodges refill up to the job's charges (the Ninja's 3)
     expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 1, dodgeRefillIn: 1, momentum: 0 }, 1 + DODGE_REFILL_S, 3)).toMatchObject({ dodgeCharges: 3, dodgeRefillIn: 0 });
     expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 1, dodgeRefillIn: 1, momentum: 0 }, 1 + DODGE_REFILL_S)).toMatchObject({ dodgeCharges: 2, dodgeRefillIn: 0 });
+    // a carry with more charges than the job has is clamped to the job's
+    expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 3, dodgeRefillIn: 0, momentum: 0 }, 0, 2)).toMatchObject({ dodgeCharges: 2, dodgeRefillIn: 0 });
     expect(ageCarry({ cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0 }, 5)).toEqual({ cooldowns: {}, gcd: 0, dodgeCharges: 2, dodgeRefillIn: 0, momentum: 0 });
   });
 });

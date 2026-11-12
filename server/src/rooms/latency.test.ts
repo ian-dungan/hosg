@@ -109,9 +109,7 @@ async function fuzz(o: {
   const session = room.sessions.get(sdkRoom.sessionId);
   const r = rng(o.seed);
   const up = channel(o.rttMs / 2, o.jitterMs, r), down = channel(o.rttMs / 2, o.jitterMs, r);
-  // (`jobs`, sent a step after the join, means nothing to this client: kept off the channel, so it
-  // draws no jitter from the run's generator and every seed plays out as before jobs existed)
-  const client = { sessionId: sdkRoom.sessionId, send: (type: string, msg: any) => (type === 'jobs' ? undefined : down.push(clock.ms, type, msg)) };
+  const client = { sessionId: sdkRoom.sessionId, send: (type: string, msg: any) => down.push(clock.ms, type, msg) };
   session.client = client;
   session.movement.metres = MAX_MOVE_ALLOWANCE; // as after standing a second
 
@@ -123,6 +121,8 @@ async function fuzz(o: {
   let charges = DODGE_CHARGES, refillAt: number | null = null, lastDodge = -Infinity, secondAt: number | null = null;
   let standing = false, phaseUntil = 0;
   let quietUntil = 0;
+  /** The ends of its predicted rolls not answered yet, oldest first (as the browser keeps them). */
+  const ends: { x: number; z: number; y: number }[] = [];
   let predicted = 0, nextMash = 0, sprintAt: number | null = null; // no dodges for a while after a knock (the server holds it 'knock' until it ends)
   const knockTimes: number[] = [];
   let last = { ...session.lastGood };
@@ -138,6 +138,7 @@ async function fuzz(o: {
     const result = simulateDisplacement(from, dodgeDisplacement(Math.sin(dir), Math.cos(dir)), flat);
     rollUntil = t + result.seconds * 1000;
     rollEnd = { x: result.x, z: result.z, y: result.y };
+    ends.push({ ...rollEnd });
     charges--;
     refillAt ??= t + DODGE_REFILL_S * 1000;
     lastDodge = t;
@@ -158,10 +159,23 @@ async function fuzz(o: {
           secondAt = null;
           quietUntil = t + 1500;
           predicted = 0;
+          ends.length = 0;
         } else if (m.msg.kind === 'dodge') {
           out.dodgesRolled++;
-          if (predicted > 0) predicted--;
-          else { out.mashRolls++; body = makeBody(m.msg.to.x, m.msg.to.z, flat); } // a roll it pressed for while empty: taken as it comes
+          if (predicted > 0) {
+            predicted--;
+            // its own roll: where the server put it is where it predicted, else it goes there (as the
+            // browser's controller does). Only a mashing client (a roll the server held for it, taken
+            // for its own prediction) may be off; an honest one never is.
+            const end = ends.shift();
+            const to = m.msg.to;
+            if (end && Math.hypot(end.x - to.x, end.z - to.z) > 0.05) {
+              if (!o.mash) throw new Error(`honest client mispredicted a roll at ${t} ms: ${JSON.stringify(end)} vs ${JSON.stringify(to)}`);
+              if (t < rollUntil) rollEnd = { ...to };
+              else body = makeBody(to.x, to.z, flat);
+              ends.length = 0;
+            }
+          } else { out.mashRolls++; body = makeBody(m.msg.to.x, m.msg.to.z, flat); } // a roll it pressed for while empty: taken as it comes
         }
       } else if (m.type === 'correct') {
         out.corrections++;
