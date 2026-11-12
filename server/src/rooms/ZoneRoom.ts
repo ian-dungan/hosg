@@ -12,6 +12,7 @@
 // requests, invites wherever the invitee is, party chat, the engine's allies (setParty on every way into
 // the engine), pinned party members in each view, member status at most PARTY_STATUS_HZ, and kill
 // credit shared with party members nearby.
+import { randomUUID } from 'node:crypto';
 import { CloseCode, ErrorCode, Room, ServerError, type AuthContext, type Client, type Deferred } from '@colyseus/core';
 import { StateView } from '@colyseus/schema';
 import {
@@ -152,6 +153,8 @@ import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../sto
 import { InventoryQueue, TokenBucket, WriteLock, type InvSnapshot, type InvTask, type TaskResult } from './inventoryQueue';
 import { applyLoot, clearXp, itemName, killXp, talentRowFor, type LootAward } from './rewards';
 import type { InstanceInfo, Instances } from './instances';
+import { isGmLine, runGmLine, type GmHost, type GmProcess } from '../gm/commands';
+import { applyGrant, grantThing, type GmGrant, type GrantOutcome } from '../gm/grant';
 import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
 import type { Allowance, Presence } from './presence';
@@ -200,6 +203,8 @@ export interface ZoneRoomOptions {
   lootAlways?: boolean;
   /** Each inventory write that lands (the app's invWritesPerS). */
   onInvWrite?: () => void;
+  /** The process's GM tools (limits, event, announce); absent: /gm lines are ordinary chat for everyone. */
+  gm?: GmProcess;
 }
 
 /** Operations refused inside a sealed boss arena (ruling P5-h): gear and talents. */
@@ -218,6 +223,8 @@ const INSTANCE_TIMINGS: InstanceTimings = {
   reconnectS: INSTANCE_RECONNECT_S, evictS: INSTANCE_EVICT_S, wipeS: WIPE_DELAY_S, releaseMinS: RELEASE_MIN_S, autoReleaseS: AUTO_RELEASE_S, sealS: SEAL_DELAY_S,
 };
 
+/** A GM's kick closes the connection with this code (the client shows the sign-in screen with the reason). */
+const GM_KICK_CODE = 4003;
 /** The Lampfall's gate bits of each boss room's entry gate. */
 const ENTRY_GATE: Record<ArenaEncounter, number> = { wickhound: GATE_WICK, warden: GATE_PIT };
 /** A boss kind's encounter and leaderboard id. */
@@ -487,6 +494,8 @@ interface Session {
   invJobsChanged?: boolean;
   /** A kit change waits for the fight (or cast) to end: tried again every step. */
   kitPending?: boolean;
+  /** The stored GM role as last read (at join, and on each /gm line): its chat lines carry the badge, its /gm lines are run. */
+  isGm: boolean;
   lock: WriteLock;
   /** INV_OPS_PER_S for inventory and Barber requests. */
   invBucket: TokenBucket;
@@ -517,6 +526,8 @@ type Viewed = PlayerState | EnemySchema | TelegraphSchema | FieldSchema;
 /** What a successful onAuth attaches to the client (`client.auth`). */
 interface JoinAuth {
   accountId: string;
+  /** The stored role at sign-in (the chat badge); every /gm line reads the role from the store again. */
+  isGm: boolean;
 }
 
 /** The account for a join's `{ token }` option, or false (missing or invalid token, unknown account). */
@@ -524,7 +535,7 @@ async function authenticate(store: Store, jwtSecret: string, options: unknown): 
   const token = (options as { token?: unknown } | undefined)?.token;
   const verified = typeof token === 'string' ? verifyToken(token, jwtSecret) : null;
   const account = verified && (await store.findAccountById(verified.accountId));
-  return account ? { accountId: account.id } : false;
+  return account ? { accountId: account.id, isGm: account.isGm === true } : false;
 }
 
 /**
@@ -613,6 +624,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private kits = true;
   private lootAlways = false;
   private onInvWrite?: () => void;
+  private gm?: GmProcess;
   /** Kills handled so far (a loot roll's seed part and kill key). */
   private killCounter = 0;
   /** Each engaged enemy's threat table (adventurer ids) as last seen alive: who fought it but got no credit (at most one entry an enemy). */
@@ -652,6 +664,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.kits = options.kits !== false;
     this.lootAlways = options.lootAlways === true;
     this.onInvWrite = options.onInvWrite;
+    this.gm = options.gm;
     const createdAt = performance.now();
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
@@ -695,7 +708,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   async onJoin(client: Client) {
-    const { accountId } = client.auth as JoinAuth;
+    const { accountId, isGm } = client.auth as JoinAuth;
     const sessionId = client.sessionId;
     // Checked again here because two joins can pass onAuth at the same time.
     if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(this.zone.id));
@@ -840,6 +853,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       gearCode: this.gearCode(snapshot.inv, jobs, job),
       looksSent: new Map(),
       looksOut: new Set(),
+      isGm: isGm === true,
     };
     session.queue = this.makeQueue(snapshot, lock, adventurer.id, accountId, () => session.jobs, (j) => {
       // (inside the write lock: a save waiting on it reads these jobs, even if the session ended meanwhile)
@@ -1748,12 +1762,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const text = cleanChat((message as { text?: unknown } | null)?.text);
     const channel = (message as { channel?: unknown } | null)?.channel ?? 'zone';
     if (!session || text === null || (channel !== 'zone' && channel !== 'party')) return;
+    // A game master's /gm line is a command (never broadcast); anyone else's is ordinary chat, like any other text.
+    const gmLine = isGmLine(text);
+    if (gmLine && session.isGm && this.gm) return this.onGmLine(session, text);
     const party = channel === 'party' ? this.parties.partyOf(session.accountId) : undefined;
     if (channel === 'party' && !party) return this.refuseParty(session, 'not-member');
     const now = Date.now();
     if (now - session.lastChatAt < CHAT_MIN_INTERVAL_MS) return;
     session.lastChatAt = now;
-    const chat: S2C['chat'] = { from: session.player.name, text, channel };
+    // (a non-GM's /gm line: one refused audit row, never seen by any client)
+    if (gmLine) this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { text }, ok: false, result: 'not a game master' });
+    const chat: S2C['chat'] = { from: session.player.name, text, channel, ...(session.isGm ? { gm: true as const } : {}) };
     if (!party) return this.broadcast('chat', chat);
     for (const m of party.members) {
       const claim = this.accounts.get(m.accountId);
@@ -1967,7 +1986,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * removed at once. A session that is travelling is not saved again: this waits for its travel's own
    * save to settle instead, so whoever kicked it then loads the adventurer where it really is.
    */
-  async kick(sessionId: string) {
+  async kick(sessionId: string, why: { reason: string; code: number } = { reason: REASON_SIGNED_IN_ELSEWHERE, code: CloseCode.CONSENTED }) {
     const session = this.sessions.get(sessionId);
     const travel = this.travels.get(sessionId); // also for a session that already left mid-travel
     if (!session) {
@@ -1978,13 +1997,170 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // seats toward maxClients, so a window left open would let one account fill the room). Ended
     // before the save, so a reconnection cannot slip in meanwhile; a client that comes back finds
     // its session gone ("Connection lost").
-    if (session.reconnection) session.reconnection.reject(new Error(REASON_SIGNED_IN_ELSEWHERE));
+    if (session.reconnection) session.reconnection.reject(new Error(why.reason));
     await this.removeSession(sessionId);
     if (!session.reconnection) {
-      this.sendTo(session.client, 'kicked', { reason: REASON_SIGNED_IN_ELSEWHERE });
-      session.client.leave(CloseCode.CONSENTED);
+      if (why.code !== CloseCode.CONSENTED) this.sendTo(session.client, 'notice', { text: why.reason });
+      this.sendTo(session.client, 'kicked', { reason: why.reason });
+      session.client.leave(why.code);
     }
     await travel;
+  }
+
+  // ───────── GM tools (server only: see gm/commands.ts) ─────────
+
+  /** An announcement to everyone in this room. */
+  public announce(m: S2C['announce']): void {
+    this.broadcast('announce', m);
+  }
+
+  /** One audit row; a store failure is logged (with the row) and never stops the command's answer. */
+  private audit(row: Parameters<Store['logGm']>[0]): Promise<void> {
+    return this.store.logGm(row).catch((err) => this.logFailure('gm-audit', `A GM audit row could not be written: ${JSON.stringify(row)}`, err));
+  }
+
+  /**
+   * A GM's /gm line: the role is read from the store again first (a revoked GM loses its commands at once), then
+   * the line runs (one at a time per GM), every outcome is audited, and the GM alone hears the result as a notice.
+   */
+  private onGmLine(session: Session, text: string): void {
+    const gm = this.gm!;
+    void gm.serial(session.accountId, async () => {
+      let isGm = false;
+      try {
+        isGm = (await this.store.findAccountById(session.accountId))?.isGm === true;
+      } catch (err) {
+        this.logFailure('gm', 'Reading a GM role failed', err);
+        await this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { text }, ok: false, result: 'the role could not be read' });
+        this.deliverTo(session, 'That could not be checked just now; try again');
+        return;
+      }
+      if (!isGm) {
+        session.isGm = false;
+        await this.audit({ gmAccount: session.accountId, command: 'denied', target: null, args: { text }, ok: false, result: 'not a game master (revoked)' });
+        this.deliverTo(session, 'You are not a game master');
+        return;
+      }
+      const run = await runGmLine(text, session.accountId, this.gmHost(session));
+      for (const row of run.rows) await this.audit({ gmAccount: session.accountId, ...row });
+      this.deliverTo(session, run.notice);
+    }).catch((err) => this.logFailure('gm', 'A GM command failed', err));
+  }
+
+  /** A notice to the session, if it is still here and connected. */
+  private deliverTo(session: Session, text: string) {
+    if (this.sessions.get(session.client.sessionId) === session && !session.reconnection) this.sendTo(session.client, 'notice', { text });
+  }
+
+  /** What a GM's command acts with: this room for its own moves, presence for everyone else, the store for the rest. */
+  private gmHost(session: Session): GmHost {
+    const gm = this.gm!;
+    const online = (name: string) => {
+      const accountId = this.accounts.names.get(name.toLowerCase());
+      const claim = accountId === undefined ? undefined : this.accounts.get(accountId);
+      return accountId === undefined ? undefined : { accountId, claim, name: this.accounts.nameOf(accountId) ?? name };
+    };
+    return {
+      store: this.store,
+      limits: gm.limits,
+      now: () => Date.now(),
+      event: () => gm.event,
+      setEvent: (title) => { gm.event = title; },
+      announce: (text) => gm.announceAll(text),
+      key: () => `gm:${randomUUID()}`,
+      grant: async (name, g) => {
+        const o = online(name);
+        if (o?.claim) {
+          const r = await o.claim.room.grantTo(o.accountId, g);
+          if (r !== 'dropped') return { outcome: r, name: o.name };
+        }
+        // offline (or between rooms, or its session just ended): straight to the store, the same key
+        const outcome = await this.store.grantOffline(name, g);
+        if (outcome === 'done' && o) this.accounts.get(o.accountId)?.room.refreshInventory(o.accountId);
+        return { outcome, name: o?.name ?? name };
+      },
+      tp: (to) => this.gmTeleport(session, to, online),
+      kick: async (name, reason) => {
+        const o = online(name);
+        if (!o?.claim) return { ok: false, result: `${name} is not online` };
+        await o.claim.room.kick(o.claim.sessionId, { reason: `Removed by a game master: ${reason}`, code: GM_KICK_CODE });
+        return { ok: true, result: `Kicked ${o.name}: ${reason}` };
+      },
+    };
+  }
+
+  /**
+   * A GM grant to the account's session here, through its inventory queue (the same compare-and-set and checks as
+   * any operation; at most once per grant key). The owner gets "A game master gave you …" and its new view.
+   * 'dropped': no session here, or it ended first (the caller writes it offline with the same key).
+   */
+  public grantTo(accountId: string, g: GmGrant): Promise<GrantOutcome | 'dropped'> {
+    const session = this.sessionOf(accountId);
+    if (!session) return Promise.resolve('dropped');
+    return session.queue.push<boolean>({
+      retries: 3,
+      unbounded: true,
+      recheck: ['bag-full', 'purse-full'],
+      run: (s, jobs) => {
+        const r = applyGrant(s.inv, s.gold, g);
+        if ('refusal' in r) return { kind: 'refuse', reason: r.refusal };
+        if (r.dup) return { kind: 'none', info: false };
+        // (jobs left as stored: a grant changes none)
+        return { kind: 'write', info: true, write: { inventory: r.inv, dGold: r.dGold, dSeals: 0 }, next: { inv: r.inv, gold: s.gold + r.dGold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree } };
+      },
+      settle: (r) => {
+        if (this.sessions.get(session.client.sessionId) !== session) return;
+        if (r.status === 'applied') {
+          this.refreshKit(session);
+          if (!session.reconnection) this.sendTo(session.client, 'notice', { text: `A game master gave you ${grantThing(g)}` });
+        }
+        if (r.status !== 'dropped') this.sendInventory(session);
+      },
+    }).then((r) => {
+      switch (r.status) {
+        case 'applied': case 'unchanged': return 'done';
+        case 'refused': return r.reason as GrantOutcome;
+        case 'dropped': return 'dropped';
+        default: return 'failed';
+      }
+    });
+  }
+
+  /**
+   * A GM's own move (a server `correct`): to a named adventurer in this room, or to (x, z) on this room's ground.
+   * Never in an instance (arenas, gates and checkpoints), never while dead, travelling, displaced or fighting,
+   * never onto an exit; the saved-zone check of every later save is unchanged (the spot is in this zone).
+   */
+  private gmTeleport(session: Session, to: { name: string } | { x: number; z: number }, online: (name: string) => { accountId: string; claim?: { room: ZoneRoom; sessionId: string }; name: string } | undefined): { ok: boolean; result: string } {
+    if (this.inst) return { ok: false, result: 'Teleport is not allowed in an instance' };
+    if (this.sessions.get(session.client.sessionId) !== session) return { ok: false, result: 'You are not here any more' };
+    if (session.dead || session.travelling || session.awaitingDisplace || session.anim) return { ok: false, result: 'You cannot move now (dead, travelling or being moved)' };
+    if (this.combat.self(session.eid)?.inCombat) return { ok: false, result: 'Not while you are in combat' };
+    let x: number, z: number, label: string;
+    if ('name' in to) {
+      const o = online(to.name);
+      if (!o?.claim) return { ok: false, result: `${to.name} is not online` };
+      if (o.claim.room !== this) return { ok: false, result: `${o.name} is not here (another zone or an instance)` };
+      const other = this.sessionOf(o.accountId);
+      if (!other) return { ok: false, result: `${o.name} is not here` };
+      ({ x, z } = other.lastGood);
+      label = o.name;
+    } else {
+      ({ x, z } = to);
+      label = `(${x}, ${z})`;
+    }
+    const ground = this.zone.surface(x, z);
+    if (ground === null) return { ok: false, result: `No ground at ${label}` };
+    if (this.exitAt(x, z)) return { ok: false, result: `${label} is in an exit` };
+    const y = ground + 0;
+    session.lastGood = { x, z, y };
+    session.movement.air = makeAirTrack(y);
+    session.movement.at = this.wallMs();
+    session.pendingDodge = undefined;
+    Object.assign(session.player, { x, z, y, moving: false });
+    this.combat.setPose(session.eid, x, z, y, session.facing);
+    this.sendTo(session.client, 'correct', { x, z, y });
+    return { ok: true, result: `Moved to ${label}` };
   }
 
   /** Takes the adventurer out of the room and saves it (not when it is travelling, or `save` is false); unknown sessions are ignored. */

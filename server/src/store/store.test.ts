@@ -8,6 +8,7 @@ import {
 import { NameTakenError, checkedSave, type Adventurer, type InvWrite, type Store } from './types';
 import { createMemoryStore, type LegacyRow } from './memory';
 import { createPgStore, createPool } from './pg';
+import { runRoleCli } from '../gm/cli';
 import type { StartSpot } from './types';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -493,6 +494,87 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       await expect(store.logGm({ gmAccount: null, command: '', target: null, args: {}, ok: true, result: '' })).rejects.toThrow(TypeError);
     });
 
+    it('setGm and the role CLI: grant, list, revoke, guests refused, unknown names; one audit row each, in order', async () => {
+      const name = uniqueName('Warden');
+      const account = await store.createAccount({ username: name, passwordHash: 'h', isGuest: false });
+      const guest = await store.createAccount({ username: uniqueName('Guest'), passwordHash: null, isGuest: true });
+      const lines: string[] = [];
+      const cli = (...argv: string[]) => runRoleCli(argv, store, (l) => lines.push(l), 'tester');
+      expect(await cli('grant', name.toUpperCase())).toBe(0);
+      expect((await store.findAccountById(account.id))!.isGm).toBe(true);
+      expect(await store.listGms()).toContain(name);
+      expect(await cli('list')).toBe(0);
+      expect(lines.at(-1)).toContain(name);
+      expect(await cli('grant', guest.username)).toBe(1);
+      expect((await store.findAccountById(guest.id))!.isGm).toBe(false);
+      expect(await store.setGm(guest.username, true)).toBe(false);
+      const nobody = uniqueName('Nobody');
+      expect(await cli('grant', nobody)).toBe(1);
+      expect(await cli('revoke', name)).toBe(0);
+      expect((await store.findAccountById(account.id))!.isGm).toBe(false);
+      expect(await cli('frobnicate')).toBe(2);
+      expect(await cli('grant')).toBe(2);
+      expect(await cli('audit', '5')).toBe(0);
+      const rows = (await store.gmAudit(1000)).filter((r) => r.command === 'role' && (r.target === name || r.target === guest.username || r.target === nobody)).reverse();
+      expect(rows.map((r) => [r.target === name ? 'gm' : r.target === guest.username ? 'guest' : 'nobody', r.ok, (r.args as any).on, r.gmAccount])).toEqual([
+        ['gm', true, true, null], ['guest', false, true, null], ['nobody', false, true, null], ['gm', true, false, null],
+      ]);
+      expect((rows[0]!.args as any).by).toBe('tester');
+    });
+
+    it('grantOffline: once per key, the bag limit, the purse cap, owned costumes, unknown names; jobs never written', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const name = uniqueName('Elowen');
+      await store.nameAdventurer(account.id, name);
+      const before = await store.getOrCreateAdventurer(account.id);
+      expect(await store.grantOffline(uniqueName('Nobody'), { gold: 5 })).toBe('unknown');
+      expect(await store.grantOffline(name.toLowerCase(), { gold: 5, key: 'gm:key-number-0001' })).toBe('done');
+      expect(await store.grantOffline(name, { gold: 5, key: 'gm:key-number-0001' })).toBe('done'); // a retry
+      expect(await store.grantOffline(name, { costume: 'beacon_halo', key: 'gm:key-number-0002' })).toBe('done');
+      expect(await store.grantOffline(name, { costume: 'beacon_halo', key: 'gm:key-number-0003' })).toBe('owned');
+      expect(await store.grantOffline(name, { item: 'hedgecutter' })).toBe('done');
+      expect(await store.grantOffline(name, { gold: 0 })).toBe('invalid');
+      expect(await store.grantOffline(name, { gold: 5, item: 'hedgecutter' })).toBe('invalid');
+      expect(await store.grantOffline(name, { item: 'excalibur' })).toBe('invalid');
+      const a = await store.getOrCreateAdventurer(account.id);
+      expect(a.gold).toBe(5);
+      expect(a.inventory.wardrobe).toEqual(['beacon_halo']);
+      expect(a.inventory.bag.filter((i) => i.item === 'hedgecutter')).toHaveLength(1);
+      expect(a.jobs).toEqual(before.jobs);
+      // the purse cap: refused whole, nothing lost
+      await store.writeInventory(a.id, a.invVersion, { inventory: a.inventory, dGold: GOLD_MAX - 5 - 3, dSeals: 0 });
+      expect(await store.grantOffline(name, { gold: 4 })).toBe('purse-full');
+      expect(await store.grantOffline(name, { gold: 3 })).toBe('done');
+      expect((await store.getOrCreateAdventurer(account.id)).gold).toBe(GOLD_MAX);
+      // a full bag
+      const full = await store.getOrCreateAdventurer(account.id);
+      const bag = [...full.inventory.bag];
+      let uid = full.inventory.nextUid;
+      while (bag.filter((i) => i.uid > 16).length < 30) bag.push({ uid: uid++, item: 'hedge_buckler', dye: [0, 0] });
+      await store.writeInventory(full.id, full.invVersion, { inventory: { ...full.inventory, bag, nextUid: uid }, dGold: 0, dSeals: 0 });
+      expect(await store.grantOffline(name, { item: 'rowan_staff' })).toBe('bag-full');
+      // two grants at once both land
+      const g = await store.getOrCreateAdventurer(account.id);
+      await store.writeInventory(g.id, g.invVersion, { inventory: g.inventory, dGold: -1000, dSeals: 0 });
+      expect(await Promise.all([store.grantOffline(name, { gold: 7 }), store.grantOffline(name, { gold: 11 })])).toEqual(['done', 'done']);
+      expect((await store.getOrCreateAdventurer(account.id)).gold).toBe(GOLD_MAX - 1000 + 18);
+    });
+
+    it("gmGoldToday sums the GM's successful gold grants of that UTC day", async () => {
+      const gm = await store.createAccount({ username: uniqueName('Gm'), passwordHash: 'h', isGuest: false });
+      const other = await store.createAccount({ username: uniqueName('Gm'), passwordHash: 'h', isGuest: false });
+      const row = (gmAccount: string, command: string, amount: unknown, ok = true) => store.logGm({ gmAccount, command, target: 'X', args: { amount, name: 'X' }, ok, result: '' });
+      await row(gm.id, 'grant gold', 300);
+      await row(gm.id, 'grant gold', 200);
+      await row(gm.id, 'grant gold', 9000, false);
+      await row(gm.id, 'grant item', 50);
+      await row(gm.id, 'grant gold', 'lots');
+      await row(other.id, 'grant gold', 40);
+      const today = new Date().toISOString().slice(0, 10);
+      expect(await store.gmGoldToday(gm.id, today)).toBe(500);
+      expect(await store.gmGoldToday(gm.id, '2001-01-01')).toBe(0);
+    });
+
     it("refuses to save 'lampfall' (an instance is never a saved zone)", async () => {
       const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
       const a = await store.getOrCreateAdventurer(account.id);
@@ -566,6 +648,25 @@ if (databaseUrl) {
     }
   });
 
+  describe('PgStore GM audit', () => {
+    it('is append-only: rows cannot be updated, deleted or truncated', async () => {
+      const store = await createPgStore(databaseUrl);
+      const db = new pg.Client({ connectionString: databaseUrl });
+      await db.connect();
+      try {
+        const tag = uniqueName('cmd');
+        await store.logGm({ gmAccount: null, command: tag, target: null, args: {}, ok: true, result: 'kept' });
+        await expect(db.query(`UPDATE gm_audit SET result = 'changed' WHERE command = $1`, [tag])).rejects.toThrow(/append-only/);
+        await expect(db.query('DELETE FROM gm_audit WHERE command = $1', [tag])).rejects.toThrow(/append-only/);
+        await expect(db.query('TRUNCATE gm_audit')).rejects.toThrow(/append-only/);
+        expect((await store.gmAudit(1000)).filter((r) => r.command === tag).map((r) => r.result)).toEqual(['kept']);
+      } finally {
+        await db.end();
+        await store.close();
+      }
+    });
+  });
+
   describe('PgStore timeouts', () => {
     it('every connection has a statement and a lock timeout (a hung call never holds a session forever)', async () => {
       const pool = createPool(databaseUrl);
@@ -595,7 +696,7 @@ if (databaseUrl) {
         const { rows } = await client.query('SELECT name FROM schema_migrations ORDER BY name');
         expect(rows).toEqual([
           { name: '001_init.sql' }, { name: '002_adventurer_names.sql' }, { name: '003_combat.sql' }, { name: '004_jobs.sql' }, { name: '005_parties_and_warden.sql' },
-          { name: '006_progression_gear_looks.sql' },
+          { name: '006_progression_gear_looks.sql' }, { name: '007_gm_audit_append_only.sql' },
         ]);
       } finally {
         await client.end();
@@ -803,7 +904,7 @@ if (databaseUrl) {
           await db.query(await sql('004_jobs.sql'));
           expect(await raw()).toEqual(first);
           const { rows } = await db.query('SELECT name FROM schema_migrations ORDER BY name');
-          expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql', '006_progression_gear_looks.sql']);
+          expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql', '006_progression_gear_looks.sql', '007_gm_audit_append_only.sql']);
           // A row made after 004 without jobs gets the column default (a new Warrior), and NULL is refused.
           const { rows: acc } = await db.query(`INSERT INTO accounts (username, password_hash, is_guest) VALUES ('New', 'h', false) RETURNING id`);
           const { rows: made } = await db.query(

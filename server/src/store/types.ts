@@ -4,6 +4,8 @@ import {
   type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type ZoneId,
 } from '@sg2/shared';
 
+import type { GmGrant, GrantOutcome } from '../gm/grant';
+
 export interface Account {
   id: string;
   username: string;
@@ -278,7 +280,22 @@ export interface Store {
   useFreeLook(accountId: string, look: Look): Promise<boolean>;
   /** GM audit (Task 7 writes rows; created here so the migration and both stores are in one place). */
   logGm(e: GmLogEntry): Promise<void>;
-  /** The newest audit rows first (at most `limit`, default 100). */
+  /** The newest audit rows first (at most `limit`, default 100). The log is append-only: nothing edits or deletes rows. */
   gmAudit(limit?: number): Promise<GmAuditRow[]>;
+  /**
+   * The GM role (`is_gm`). Called ONLY by the role CLI (server/scripts/gm.ts, run on the server's shell with
+   * DATABASE_URL): no route, message or command reaches it. True when the account exists and was set (a guest
+   * account can only lose the role, never get it).
+   */
+  setGm(username: string, on: boolean): Promise<boolean>;
+  /** The usernames of every GM account (the role CLI's list), sorted. */
+  listGms(): Promise<string[]>;
+  /**
+   * A GM grant to the adventurer named `name` (any case) without a session: compare-and-set, at most 5 tries, the
+   * same bag limit, purse cap and validation as any write, at most once per `g.key`. Jobs are left as stored.
+   */
+  grantOffline(name: string, g: GmGrant): Promise<GrantOutcome>;
+  /** The gold a GM granted on that UTC day ('YYYY-MM-DD'), summed from its successful 'grant gold' audit rows. */
+  gmGoldToday(gmAccount: string, dayUtc: string): Promise<number>;
   close(): Promise<void>;
 }

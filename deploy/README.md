@@ -281,15 +281,47 @@ The `--wait` line ends with `Container sg2-db Healthy`. The `psql` line prints a
 
 ### Make an account a GM
 
-Put the account's name where it says `TheirName` (capital letters do not matter):
+Game masters (GMs) can announce, give gold, items and costumes, teleport themselves, kick and run events,
+by typing `/gm …` lines in the chat (`/gm help` lists them; nobody else sees those lines or the list).
+The GM role can be given or taken away **only here, on the server's shell**: no web page, game message,
+chat command or setting can do it, and a GM cannot make other GMs. Put the account's name where it says
+`TheirName` (capital letters do not matter; guest accounts, called `Guest-` and six digits, cannot be GMs):
 
 ```
-$ docker compose exec sg2-db psql -U sg2 -d sg2 -c "UPDATE accounts SET is_gm = true WHERE lower(username) = lower('TheirName');"
-UPDATE 1
+$ cd ~/shady-grove-2
+$ docker compose exec sg2-server node server/dist/gm.js grant TheirName
+TheirName is a game master now
 ```
 
-`UPDATE 1` means it worked; `UPDATE 0` means no account has that name (guest accounts are called
-`Guest-` and six digits). To take GM away again, run the same line with `false` instead of `true`.
+To take the role away again (it works at once: the next `/gm` line is refused):
+
+```
+$ docker compose exec sg2-server node server/dist/gm.js revoke TheirName
+TheirName is not a game master any more
+```
+
+`list` shows every GM account. The tool reads the database address (`DATABASE_URL`) from the container's
+environment, exactly as the game server does, so it needs no password typed in. Outside Docker (a
+development machine), the same tool is `DATABASE_URL=… npm run gm -w server -- grant TheirName`.
+
+**The GM audit log.** Every GM line (done or refused, including too-fast ones), every refused `/gm` line
+from someone who is not a GM, and every `grant` and `revoke` above is written to the `gm_audit` table in
+the database: when, which account (empty for this shell tool), the command, its target, what was typed
+and the result. Costumes given with `/gm event award` are marked as event grants there, with the event's
+title. The table only grows: the database refuses to change or delete its rows (update 007 adds that
+guard), and no GM command can touch it. To read the newest 50 rows (or another number up to 1000):
+
+```
+$ docker compose exec sg2-server node server/dist/gm.js audit 50
+```
+
+or with `psql`: `docker compose exec sg2-db psql -U sg2 -d sg2 -c "SELECT * FROM gm_audit ORDER BY id DESC LIMIT 50;"`.
+Backups (see above) include it.
+
+**Limits:** each GM may run 20 commands a minute; there is one announcement every 30 seconds for the whole
+server; each GM may give at most 100 000 gold a day (10 000 at a time), never past an adventurer's purse
+limit; items need a free bag slot (a full bag is refused, and nothing is lost). Announcements are plain text
+of at most 200 characters.
 
 ### Stop the game, or go back to an earlier version
 

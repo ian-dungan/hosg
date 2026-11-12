@@ -6,10 +6,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --alias:@sg2/shared=../shared/src/index.ts --outfile=dist/index.js",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --alias:@sg2/shared=../shared/src/index.ts --outfile=dist/index.js && esbuild scripts/gm.ts --bundle --platform=node --target=node22 --format=esm --packages=external --alias:@sg2/shared=../shared/src/index.ts --outfile=dist/gm.js",
     "start": "tsx src/index.ts",
     "bots": "tsx scripts/bots.ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "gm": "tsx scripts/gm.ts"
   },
   "devDependencies": {
     "@colyseus/sdk": "^0.18.10",

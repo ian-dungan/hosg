@@ -119,8 +119,13 @@ export interface JobsView { current: JobId; jobs: Record<JobId, JobView> }
 
 /** Server → client. */
 export type S2C = {
-  /** channel: where the line was said (absent: 'zone', as before Plan 4). */
-  chat: { from: string; text: string; channel?: 'zone' | 'party' };
+  /** channel: where the line was said (absent: 'zone', as before Plan 4). gm: said by a game master (a GM badge). */
+  chat: { from: string; text: string; channel?: 'zone' | 'party'; gm?: true };
+  /**
+   * A game master's announcement, to everyone online in every room and instance: plain text (clients set it as
+   * text, never as HTML), a banner for 8 s and a chat line. event: the running event's title, or null.
+   */
+  announce: { text: string; event: string | null };
   /** The move was refused: go back to the last accepted pose. */
   correct: { x: number; z: number; y: number };
   /** Health lost (already taken off the adventurer's hp). */

@@ -5,6 +5,7 @@ import {
   AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, readInvLook,
   testKitInventory, type Account, type Adventurer, type BossKill, type GmAuditRow, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
+import { grantByCas } from '../gm/grant';
 
 /**
  * A stored adventurer, kept as a database row would be: jobs, inventory and look as stored (as JSON text, so
@@ -24,7 +25,12 @@ const copy = ({ legacyLoadout, jobs, titles, inventory, look, ...a }: Row): Adve
   ...readInvLook(unjson(inventory), unjson(look), a.accountId),
 });
 
-export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readonly LegacyRow[]; newAdventurer?: NewAdventurerOpts } = {}): Store {
+/**
+ * testGms (test-only, SG2_TEST_GMS with the memory store; never with a database): accounts created with one of
+ * these usernames (any case) are GMs.
+ */
+export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readonly LegacyRow[]; newAdventurer?: NewAdventurerOpts; testGms?: readonly string[] } = {}): Store {
+  const testGms = new Set((opts.testGms ?? []).map((n) => n.toLowerCase()));
   const start: StartSpot = opts.start ?? { zone: 'grove', x: SPAWN.x, z: SPAWN.z, facing: SPAWN.facing };
   const accountsByName = new Map<string, Account>(); // key: lower-cased username
   const accountsById = new Map<string, Account>();
@@ -77,7 +83,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     async createAccount({ username, passwordHash, isGuest }) {
       const key = username.toLowerCase();
       if (accountsByName.has(key)) throw new NameTakenError(username);
-      const account: Account = { id: randomUUID(), username, passwordHash, isGuest, isGm: false };
+      const account: Account = { id: randomUUID(), username, passwordHash, isGuest, isGm: testGms.has(key) };
       accountsByName.set(key, account);
       accountsById.set(account.id, account);
       return { ...account };
@@ -153,6 +159,34 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
 
     async gmAudit(limit = 100) {
       return audit.slice().reverse().slice(0, Math.max(0, Math.floor(limit))).map(({ seq: _seq, ...r }) => ({ ...r, args: JSON.parse(JSON.stringify(r.args)) as unknown }));
+    },
+
+    async setGm(username, on) {
+      const account = accountsByName.get(String(username).toLowerCase());
+      if (!account || typeof on !== 'boolean' || (on && account.isGuest)) return false;
+      account.isGm = on;
+      return true;
+    },
+
+    async listGms() {
+      return [...accountsById.values()].filter((a) => a.isGm).map((a) => a.username).sort((a, b) => a.localeCompare(b));
+    },
+
+    async grantOffline(name, g) {
+      if (typeof name !== 'string') return 'unknown';
+      const key = name.toLowerCase();
+      const row = [...adventurersByAccount.values()].find((r) => r.name !== null && r.name.toLowerCase() === key);
+      if (!row) return 'unknown';
+      return grantByCas(this, row.accountId, g);
+    },
+
+    async gmGoldToday(gmAccount, dayUtc) {
+      let sum = 0;
+      for (const r of audit) {
+        const amount = (r.args as { amount?: unknown } | null)?.amount;
+        if (r.gmAccount === gmAccount && r.command === 'grant gold' && r.ok && r.at.slice(0, 10) === dayUtc && Number.isSafeInteger(amount)) sum += amount as number;
+      }
+      return sum;
     },
 
     async awardSeal(adventurerId, dayUtc) {

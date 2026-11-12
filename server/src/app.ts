@@ -14,6 +14,7 @@ import { authRouter } from './auth/routes';
 import { leaderboardRouter } from './routes/leaderboard';
 import { lookRouter } from './routes/look';
 import { Instances } from './rooms/instances';
+import { gmProcess } from './gm/commands';
 import type { Store } from './store/types';
 import { Parties } from './party/parties';
 import { Presence } from './rooms/presence';
@@ -172,6 +173,8 @@ export function createApp(opts: AppOptions): App {
     }
   }, opts.instances?.sweepMs ?? PARTY_SWEEP_MS);
   instanceSweep.unref();
+  // GM tools: the limits, the event and announce for the whole process (every zone room and instance).
+  const gm = gmProcess(() => [...rooms.values(), ...instances.rooms()]);
   // One shared room per saved zone; the Lampfall's rooms are instances, opened only by Instances.enter.
   const zones = new Map<ZoneId, ZoneDef>(SAVE_ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));
 
@@ -232,7 +235,7 @@ export function createApp(opts: AppOptions): App {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
         const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
         const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-        res.json({ ok: true, ...stats(), parties: parties.size, rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms });
+        res.json({ ok: true, ...stats(), parties: parties.size, rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms, event: gm.event });
       });
       if (opts.clientDir) app.use(express.static(opts.clientDir));
     },
@@ -256,7 +259,7 @@ export function createApp(opts: AppOptions): App {
       viewCap: opts.viewCap,
       parties,
       instances,
-      serverSeed, kits: opts.kits, lootAlways: opts.lootAlways, onInvWrite,
+      serverSeed, kits: opts.kits, lootAlways: opts.lootAlways, onInvWrite, gm,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }
@@ -279,7 +282,7 @@ export function createApp(opts: AppOptions): App {
       viewCap: opts.viewCap,
       parties,
       instances,
-      serverSeed, kits: opts.kits, lootAlways: opts.lootAlways, onInvWrite,
+      serverSeed, kits: opts.kits, lootAlways: opts.lootAlways, onInvWrite, gm,
       instance: { key: '', registry: instances, parties, startAt: opts.instances?.startAt, timings: opts.instances?.timings },
     };
     gameServer.define('lampfall', instanceRoomFor(roomOptions, opts.jwtSecret), roomOptions);

@@ -154,6 +154,13 @@ export class Instances {
     for (const info of this.byKeyMap.values()) info.heldFor.delete(accountId);
   }
 
+  /** The rooms of the open instances (a GM announce reaches each). */
+  rooms(): ZoneRoom[] {
+    const out: ZoneRoom[] = [];
+    for (const info of this.byKeyMap.values()) if (info.room) out.push(info.room);
+    return out;
+  }
+
   /** Instances open now (and opening). */
   get count(): number {
     return this.openCount;

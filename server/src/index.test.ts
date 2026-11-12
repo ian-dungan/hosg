@@ -190,3 +190,53 @@ describe('SG2_TEST_START_GOLD, SG2_TEST_LOOT and SG2_TEST_KIT (test servers only
     }
   }, 60_000);
 });
+
+/** Runs src/index.ts with `env` (memory store): registers alice, names her, joins and says "/gm help"; what came back. */
+async function gmHelpAnswer(env: Record<string, string>): Promise<'chat' | 'notice'> {
+  const { port, release } = await heldPort();
+  await release();
+  const child = spawn(process.execPath, ['--import', 'tsx', entry], {
+    env: { PATH: process.env.PATH ?? '', SG2_JWT_SECRET: SECRET, SG2_STORE: 'memory', SG2_PORT: String(port), ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    let out = '';
+    child.stdout.on('data', (chunk) => (out += chunk));
+    child.stderr.on('data', () => {});
+    await waitFor(() => out.includes('listening'), 15_000);
+    const url = `http://127.0.0.1:${port}`;
+    const post = async (path: string, body: object, token?: string) => (await fetch(`${url}/api${path}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body),
+    })).json() as Promise<any>;
+    const { token } = await post('/register', { username: 'alice', password: 'a-long-password-1' });
+    await post('/name', { name: 'Alice' }, token);
+    const room = await new Client(url).joinOrCreate('grove', { token });
+    let answer: 'chat' | 'notice' | undefined;
+    room.onMessage('*', (type: string | number) => { if (type === 'chat' || type === 'notice') answer ??= type; });
+    await waitFor(() => room.state.players?.get(room.sessionId), 5000);
+    room.send('chat', { text: '/gm help' });
+    await waitFor(() => answer, 5000);
+    await room.leave();
+    return answer!;
+  } finally {
+    child.kill('SIGTERM');
+  }
+}
+
+describe('SG2_TEST_GMS (test servers only)', () => {
+  it('is off by default (never set in Docker or docker-compose.yml), works only with the memory store, and exits with one line for anything else', async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const file of ['../../docker-compose.yml', '../../Dockerfile']) {
+      const text = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+      expect(text, file).not.toMatch(/SG2_TEST_GMS/);
+    }
+    expect(await gmHelpAnswer({})).toBe('chat'); // nobody is a game master: an ordinary chat line
+    expect(await gmHelpAnswer({ SG2_TEST_GMS: 'bob,alice' })).toBe('notice');
+    const bad = await runServer({ SG2_STORE: 'memory', SG2_TEST_GMS: 'a b' });
+    expect(bad.code).toBe(1);
+    expect(bad.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_GMS must be a comma-separated list of usernames (got "a b").');
+    const pg = await runServer({ SG2_TEST_GMS: 'alice', DATABASE_URL: 'postgres://nobody@127.0.0.1:1/none' });
+    expect(pg.code).toBe(1);
+    expect(pg.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_GMS works only with SG2_STORE=memory; with a database, use the role CLI (npm run gm -w server -- grant <username>).');
+  }, 60_000);
+});

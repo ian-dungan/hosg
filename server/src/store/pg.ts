@@ -8,6 +8,7 @@ import {
   AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, readInvLook,
   testKitInventory, type Account, type Adventurer, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
+import { grantByCas, type GrantStore } from '../gm/grant';
 
 const UNIQUE_VIOLATION = '23505';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -318,6 +319,37 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
         [Math.max(0, Math.floor(limit))],
       );
       return rows.map((r) => ({ at: r.at.toISOString(), gmAccount: r.gm_account, command: r.command, target: r.target, args: r.args, ok: r.ok, result: r.result }));
+    },
+
+    async setGm(username, on) {
+      if (typeof username !== 'string' || typeof on !== 'boolean') return false;
+      const { rowCount } = await pool.query(
+        `UPDATE accounts SET is_gm = $2 WHERE lower(username) = lower($1) AND (NOT is_guest OR NOT $2)`, [username, on],
+      );
+      return (rowCount ?? 0) > 0;
+    },
+
+    async listGms() {
+      const { rows } = await pool.query<{ username: string }>('SELECT username FROM accounts WHERE is_gm ORDER BY lower(username)');
+      return rows.map((r) => r.username);
+    },
+
+    async grantOffline(name, g) {
+      if (typeof name !== 'string') return 'unknown';
+      const { rows } = await pool.query<{ account_id: string }>('SELECT account_id FROM adventurers WHERE lower(name) = lower($1)', [name]);
+      if (!rows[0]) return 'unknown';
+      return grantByCas(this as unknown as GrantStore, rows[0].account_id, g);
+    },
+
+    async gmGoldToday(gmAccount, dayUtc) {
+      if (!UUID_RE.test(gmAccount) || !isUtcDay(dayUtc)) return 0;
+      const { rows } = await pool.query<{ sum: string | null }>(
+        `SELECT sum((args->>'amount')::bigint) AS sum FROM gm_audit
+         WHERE gm_account = $1 AND command = 'grant gold' AND ok AND jsonb_typeof(args->'amount') = 'number'
+           AND at >= $2::date AND at < $2::date + 1`,
+        [gmAccount, dayUtc],
+      );
+      return Number(rows[0]?.sum ?? 0);
     },
 
     async close() {

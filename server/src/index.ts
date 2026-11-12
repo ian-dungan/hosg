@@ -126,7 +126,22 @@ function testKit(): 1 | 2 | 3 | undefined {
   return Number(raw.slice(1)) as 1 | 2 | 3;
 }
 
+/**
+ * SG2_TEST_GMS=alice,bob (test servers only, never in Docker, off by default): with SG2_STORE=memory, accounts
+ * registered with those usernames are game masters. Refused with a database: there the role is set only by the
+ * role CLI (npm run gm -w server).
+ */
+function testGms(): string[] | undefined {
+  const raw = process.env.SG2_TEST_GMS;
+  if (raw === undefined || raw === '') return undefined;
+  if (process.env.SG2_STORE !== 'memory') fail('SG2_TEST_GMS works only with SG2_STORE=memory; with a database, use the role CLI (npm run gm -w server -- grant <username>).');
+  const names = raw.split(',').map((n) => n.trim());
+  if (names.some((n) => !/^[A-Za-z0-9_-]{1,64}$/.test(n))) fail(`SG2_TEST_GMS must be a comma-separated list of usernames (got "${raw}").`);
+  return names;
+}
+
 const port = positiveInt('SG2_PORT', 2570);
+const gms = testGms();
 const startGold = testStartGold();
 const lootAlways = testLoot();
 const startKit = testKit();
@@ -151,7 +166,7 @@ const clientDir = process.env.SG2_CLIENT_DIR || undefined;
 let store: Store;
 if (process.env.SG2_STORE === 'memory') {
   console.warn('Shady Grove 2 server: SG2_STORE=memory, nothing is saved across restarts.');
-  store = createMemoryStore({ start, newAdventurer });
+  store = createMemoryStore({ start, newAdventurer, ...(gms ? { testGms: gms } : {}) });
 } else {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) fail('DATABASE_URL is not set (or set SG2_STORE=memory to run without a database).');
@@ -180,6 +195,7 @@ if (dummyZones) console.log('Shady Grove 2 server: SG2_TEST_DUMMY=1; a Training 
 if (startGold !== undefined) console.log(`Shady Grove 2 server: SG2_TEST_START_GOLD=${startGold}; new adventurers start with that gold (test servers only).`);
 if (lootAlways) console.log('Shady Grove 2 server: SG2_TEST_LOOT=always; every credited kill drops an item (test servers only).');
 if (startKit) console.log(`Shady Grove 2 server: SG2_TEST_KIT=t${startKit}; new adventurers wear that tier's kit (test servers only).`);
+if (gms) console.log(`Shady Grove 2 server: SG2_TEST_GMS=${gms.join(',')}; those usernames are game masters when they register (test servers only).`);
 if (exitsOpen) console.log(`Shady Grove 2 server: SG2_OPEN_EXITS=${process.env.SG2_OPEN_EXITS}; those exits are open.`);
 console.log(
   trustProxy === undefined
