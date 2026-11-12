@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { DEFAULT_LOADOUT, MAX_HP, SPAWN, isZoneId, parseLoadout } from '@sg2/shared';
+import { DEFAULT_LOADOUT, MAX_HP, SPAWN, ZONE_IDS, isZoneId, parseLoadout } from '@sg2/shared';
 import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
@@ -187,10 +187,12 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
       const { id, x, z, facing, zone, hp, loadout } = checkedSave(a);
       // Like findAccountById: an id that is not a uuid is unknown, not a SQL error.
       if (!UUID_RE.test(id)) return false;
+      // A stored zone this server does not know reads as the grove (toAdventurer), so it counts as any
+      // expected zone here: whoever holds that adventurer may save it into a real one.
       const { rowCount } = await pool.query(
         `UPDATE adventurers SET x = $2, z = $3, facing = $4, zone = $5, hp = $6, loadout = $7::jsonb, updated_at = now()
-         WHERE id = $1 AND ($8::text IS NULL OR zone = $8)`,
-        [id, x, z, facing, zone, hp, JSON.stringify(loadout), expect?.zone ?? null],
+         WHERE id = $1 AND ($8::text IS NULL OR zone = $8 OR NOT (zone = ANY($9::text[])))`,
+        [id, x, z, facing, zone, hp, JSON.stringify(loadout), expect?.zone ?? null, ZONE_IDS],
       );
       return (rowCount ?? 0) > 0;
     },

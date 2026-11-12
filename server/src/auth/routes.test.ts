@@ -267,6 +267,18 @@ describe('GET /api/zone', () => {
     expect((await post(url, '/api/guest')).status).toBe(200); // the second of two
     expect((await post(url, '/api/guest')).status).toBe(429);
   });
+
+  it('has its own, more generous limit of 60 a minute from one address', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-11T12:00:00Z'));
+    const { url } = await startApp();
+    const { token } = (await post(url, '/api/guest')).body;
+    for (let i = 0; i < 60; i++) expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
+    expect(await zoneAs(url, `Bearer ${token}`)).toEqual({ status: 429, body: { error: 'Too many requests, wait a minute' } });
+    expect((await post(url, '/api/guest')).status).toBe(200); // the login limit is its own
+    vi.setSystemTime(new Date('2026-11-11T12:01:01Z'));
+    expect((await zoneAs(url, `Bearer ${token}`)).status).toBe(200);
+  });
 });
 
 describe('limits', () => {

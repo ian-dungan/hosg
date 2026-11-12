@@ -100,8 +100,6 @@ const MESSAGE_BURST = 4 * (TICK_HZ + 1);
 const ALLOWANCE_FORGET_MS = 2000;
 /** How often health is given back (ms). */
 const REGEN_EVERY_MS = 500;
-/** How long a room keeps a seat for an adventurer travelling to it (saved there, not yet joined), in ms. */
-const ARRIVAL_HOLD_MS = 15_000;
 /** The same notice is not sent to one adventurer again within this (ms), however often it walks into a full gate. */
 const NOTICE_REPEAT_MS = 2000;
 
@@ -123,8 +121,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private sessions = new Map<string, Session>(); // key: sessionId
   /** Accounts with a seat here (joining, in the room or away), by the session that holds it: accountId -> sessionId. */
   private sessionByAccount = new Map<string, string>();
-  /** Seats kept for travellers saved in this zone who have not joined yet: accountId -> until (ms). */
+  /**
+   * Seats kept for travellers saved in this zone who have not joined yet: accountId -> until (ms). A
+   * seat is kept for the reconnect window, which a slow phone loading the zone needs at most.
+   */
   private arrivals = new Map<string, number>();
+  /** Travels still being saved, by session id: they outlive the session if it is kicked or leaves meanwhile. */
+  private travels = new Map<string, Promise<void>>();
   private patchMeter = new PatchRateMeter(Date.now());
 
   onCreate(options: ZoneRoomOptions) {
@@ -258,9 +261,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     return this.sessionByAccount.size + held < this.maxPlayers;
   }
 
-  /** Keeps a seat for an account travelling here, for ARRIVAL_HOLD_MS or until it joins. */
+  /** Keeps a seat for an account travelling here, for the reconnect window or until it joins. */
   holdArrival(accountId: string): void {
-    this.arrivals.set(accountId, Date.now() + ARRIVAL_HOLD_MS);
+    this.arrivals.set(accountId, Date.now() + this.reconnectSeconds * 1000);
   }
 
   /** Gives back a seat kept by holdArrival (the travel did not happen). */
@@ -334,8 +337,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const sessionId = session.client.sessionId;
     const { x, z, facing } = exit.arrive;
     destination.holdArrival(session.accountId);
-    session.travelling = (async () => {
-      const saved = await this.save(session, { zone: exit.to, x, z, facing });
+    const travelling = (async () => {
+      const saved = (await this.save(session, { zone: exit.to, x, z, facing })) === 'saved';
       if (this.sessions.get(sessionId) !== session) {
         // Kicked or gone while saving: that ended the session already, without saving over the travel.
         // If the travel was not saved either, save it here as it is (kick waits for this).
@@ -365,7 +368,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         this.sendTo(session.client, 'travel', { zone: exit.to });
         session.client.leave(CloseCode.CONSENTED);
       }
-    })();
+    })().finally(() => this.travels.delete(sessionId));
+    session.travelling = travelling;
+    this.travels.set(sessionId, travelling);
   }
 
   /** Sends a notice line, unless the same one went to this adventurer within NOTICE_REPEAT_MS. */
@@ -432,8 +437,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    */
   async kick(sessionId: string) {
     const session = this.sessions.get(sessionId);
-    if (!session) return;
-    const travel = session.travelling;
+    const travel = this.travels.get(sessionId); // also for a session that already left mid-travel
+    if (!session) {
+      await travel;
+      return;
+    }
     // Away: end the reconnect window at once, which frees its reserved seat (Colyseus counts reserved
     // seats toward maxClients, so a window left open would let one account fill the room). Ended
     // before the save, so a reconnection cannot slip in meanwhile; a client that comes back finds
@@ -453,27 +461,57 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (!session) return;
     this.sessions.delete(sessionId);
     if (this.sessionByAccount.get(session.accountId) === sessionId) this.sessionByAccount.delete(session.accountId);
-    this.accounts.release(session.accountId, sessionId);
     this.state.players.delete(sessionId);
-    if (opts.save !== false && !session.travelling) await this.save(session);
+    if (session.travelling) {
+      // The account stays held until the travel's save settles, so a sign-in meanwhile (anywhere)
+      // kicks this claim and waits for that save, then loads the adventurer where it really is.
+      const release = () => this.accounts.release(session.accountId, sessionId);
+      void session.travelling.then(release, release);
+      return;
+    }
+    this.accounts.release(session.accountId, sessionId);
+    if (opts.save !== false) await this.save(session);
   }
 
+  /**
+   * Saves everyone here. A save the store refuses means the adventurer is no longer saved in this zone
+   * (a travel that was written although the call failed): that session is sent on rather than left
+   * playing unsaved; its client finds the right zone through GET /api/zone.
+   */
   private async saveAll() {
-    await Promise.all([...this.sessions.values()].filter((session) => !session.travelling).map((session) => this.save(session)));
+    const here = [...this.sessions.values()].filter((session) => !session.travelling);
+    await Promise.all(
+      here.map(async (session) => {
+        if ((await this.save(session)) !== 'refused') return;
+        if (this.sessions.get(session.client.sessionId) === session && !session.travelling) await this.sendOn(session);
+      }),
+    );
+  }
+
+  /** Ends a session whose adventurer is saved in another zone now, without saving, telling the client why. */
+  private async sendOn(session: Session) {
+    if (session.reconnection) session.reconnection.reject(new Error(REASON_ELSEWHERE));
+    await this.removeSession(session.client.sessionId, { save: false });
+    if (!session.reconnection) {
+      this.sendTo(session.client, 'notice', { text: REASON_ELSEWHERE });
+      this.sendTo(session.client, 'kicked', { reason: REASON_ELSEWHERE });
+      session.client.leave(CloseCode.CONSENTED);
+    }
   }
 
   /**
    * Saves the adventurer as it is in this room (or with `to`'s zone and spot, for a travel), only while
-   * it is still saved in this zone. True if it was written; a failure is logged and is false.
+   * it is still saved in this zone: 'saved' if written, 'refused' if the store says it is not (saved
+   * elsewhere, or unknown), 'failed' if the store threw (logged).
    */
-  private async save(session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>): Promise<boolean> {
+  private async save(session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>): Promise<'saved' | 'refused' | 'failed'> {
     const { x, z, facing, hp } = session.player;
     const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, loadout: session.loadout, ...to };
     try {
-      return await this.store.saveAdventurer(values, { zone: this.zone.id });
+      return (await this.store.saveAdventurer(values, { zone: this.zone.id })) ? 'saved' : 'refused';
     } catch (err) {
       console.error('Saving an adventurer failed:', err);
-      return false;
+      return 'failed';
     }
   }
 

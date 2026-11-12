@@ -1,6 +1,6 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_LOADOUT, MAX_HP, SPAWN } from '@sg2/shared';
+import { DEFAULT_LOADOUT, MAX_HP, SPAWN, isZoneId } from '@sg2/shared';
 import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 /** A copy that shares nothing with the stored adventurer (its loadout is copied too). */
@@ -74,7 +74,8 @@ export function createMemoryStore(opts: { start?: StartSpot } = {}): Store {
     async saveAdventurer(a, expect) {
       const { id, ...values } = checkedSave(a);
       const adventurer = adventurersById.get(id);
-      if (!adventurer || (expect && adventurer.zone !== expect.zone)) return false;
+      // As in PgStore: a stored zone that is not a known one (never written here) matches any `expect`.
+      if (!adventurer || (expect && adventurer.zone !== expect.zone && isZoneId(adventurer.zone))) return false;
       Object.assign(adventurer, values);
       return true;
     },

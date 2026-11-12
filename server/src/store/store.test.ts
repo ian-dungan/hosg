@@ -20,7 +20,10 @@ function saved(a: Adventurer, changes: Partial<Pick<Adventurer, 'x' | 'z' | 'fac
   return { id, x, z, facing, zone, hp, loadout, ...changes };
 }
 
-function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promise<Store>) {
+/** Writes a zone this server does not know straight into the stored row (only a database can hold one). */
+type SetRawZone = (adventurerId: string, zone: string) => Promise<void>;
+
+function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promise<Store>, setRawZone?: SetRawZone) {
   describe(label, () => {
     let store: Store;
     beforeAll(async () => {
@@ -192,6 +195,19 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       expect(await store.saveAdventurer({ ...saved(adventurer), id: '00000000-0000-4000-8000-000000000000' })).toBe(false);
     });
 
+    if (setRawZone) {
+      it('an adventurer stored in an unknown zone reads as the grove, and the grove can save it', async () => {
+        const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+        const adventurer = await store.getOrCreateAdventurer(account.id);
+        await setRawZone(adventurer.id, 'moon');
+        expect((await store.getOrCreateAdventurer(account.id)).zone).toBe('grove');
+        expect(await store.saveAdventurer(saved(adventurer, { x: 3 }), { zone: 'grove' })).toBe(true);
+        expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ zone: 'grove', x: 3 });
+        // Once it is in a known zone, the zone check applies again.
+        expect(await store.saveAdventurer(saved(adventurer, { x: 4 }), { zone: 'greenway' })).toBe(false);
+      });
+    }
+
     it('puts new adventurers at the start spot it was opened with', async () => {
       const start: StartSpot = { zone: 'greenway', x: 8, z: 3.5, facing: 1.5 };
       const other = await open({ start });
@@ -225,7 +241,15 @@ describe('PgStore pool', () => {
 });
 
 if (databaseUrl) {
-  storeSuite('PgStore', (opts) => createPgStore(databaseUrl, opts));
+  storeSuite('PgStore', (opts) => createPgStore(databaseUrl, opts), async (id, zone) => {
+    const db = new pg.Client({ connectionString: databaseUrl });
+    await db.connect();
+    try {
+      await db.query('UPDATE adventurers SET zone = $2 WHERE id = $1', [id, zone]);
+    } finally {
+      await db.end();
+    }
+  });
 
   describe('PgStore migrations', () => {
     it('runs each migration once, even when stores open at the same time', async () => {

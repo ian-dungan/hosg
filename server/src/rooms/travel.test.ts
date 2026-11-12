@@ -343,3 +343,117 @@ describe('stats', () => {
     expect((await health(url)).zones.grove.players).toBe(1);
   });
 });
+
+describe('travel edge cases', () => {
+  /** A store whose travel saves (zone greenway) wait for `release()` before they are written. */
+  function gatedStore() {
+    const memory = createMemoryStore();
+    let started!: () => void;
+    const saving = new Promise<void>((resolve) => (started = resolve));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const store: Store = {
+      ...memory,
+      saveAdventurer: async (a, only) => {
+        if (a.zone === 'greenway') {
+          started();
+          await gate;
+        }
+        return memory.saveAdventurer(a, only);
+      },
+    };
+    return { store, saving, release };
+  }
+
+  it('a session left behind by a travel saved despite an error is sent on, not left unsaved', async () => {
+    const memory = createMemoryStore();
+    // The travel save is written, but the call fails (say a database timeout after the commit).
+    const flaky: Store = {
+      ...memory,
+      saveAdventurer: async (a, only) => {
+        const written = await memory.saveAdventurer(a, only);
+        if (a.zone === 'greenway') throw new Error('timeout after commit');
+        return written;
+      },
+    };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { url } = await start({ ...withExit(), store: flaky, saveSeconds: 0.2 });
+    const alice = await accountFor(flaky, 'Alice');
+    const a = await joinGrove(url, alice.token);
+    const notices = collect(a.room, 'notice');
+    const kicked = collect(a.room, 'kicked');
+    const left = leftWith(a.room);
+    await walk(a.room, SPAWN, INTO_EXIT);
+    await waitFor(() => notices.length > 0);
+    expect(notices[0]).toEqual({ text: REASON_TRAVEL_FAILED });
+    // The next periodic save is refused (the store says greenway): the session is ended, with a reason.
+    expect(await left).toBe(CloseCode.CONSENTED);
+    expect(kicked).toEqual([{ reason: REASON_ELSEWHERE }]);
+    expect(notices.at(-1)).toEqual({ text: REASON_ELSEWHERE });
+    expect(await zoneOf(url, alice.token)).toEqual({ status: 200, body: { zone: 'greenway' } });
+    const b = await joinZone(url, alice.token, 'greenway');
+    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+  });
+
+  it('leaving while the travel is saved keeps the account held until the save settles', async () => {
+    const { store, saving, release } = gatedStore();
+    vi.spyOn(console, 'error').mockImplementation(() => {}); // the refused join is logged by Colyseus and the SDK
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { url } = await start({ ...withExit(), store });
+    const alice = await accountFor(store, 'Alice');
+    const a = await joinGrove(url, alice.token);
+    void walk(a.room, SPAWN, INTO_EXIT);
+    await saving;
+    await a.room.leave(); // consented, mid-travel
+    // A sign-in now (onAuth still sees the grove) must wait for the travel, then go to the greenway.
+    const again = new Client(url).joinOrCreate('grove', { token: alice.token });
+    let settled = false;
+    again.then(() => (settled = true), () => (settled = true));
+    await sleep(150);
+    expect(settled).toBe(false);
+    release();
+    await expect(again).rejects.toThrow(REASON_ELSEWHERE);
+    const b = await joinZone(url, alice.token, 'greenway');
+    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+  });
+
+  it('a travel saved while the client is in its reconnect window ends the window; the client then finds the next zone', async () => {
+    const { store, saving, release } = gatedStore();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { url } = await start({ ...withExit(), store, reconnectSeconds: 30 });
+    const alice = await accountFor(store, 'Alice');
+    const a = await joinGrove(url, alice.token);
+    void walk(a.room, SPAWN, INTO_EXIT);
+    await saving;
+    a.room.connection.close(); // dropped without consent: the server opens a reconnect window
+    await sleep(150);
+    release();
+    await waitFor(async () => (await store.getOrCreateAdventurer(alice.accountId)).zone === 'greenway');
+    await sleep(100);
+    await expect(a.client.reconnect(a.room.reconnectionToken)).rejects.toThrow();
+    expect(server!.app.stats().zones.grove.players).toBe(0);
+    expect(await zoneOf(url, alice.token)).toEqual({ status: 200, body: { zone: 'greenway' } });
+    const b = await joinZone(url, alice.token, 'greenway');
+    expect(me(b.room)).toMatchObject({ x: ENTRY.x, z: ENTRY.z });
+  });
+
+  it('the seat kept for a traveller lasts the reconnect window, then is freed; the traveller can still join while there is room', async () => {
+    const { url, store } = await start({ ...withExit(), maxPlayers: 1, reconnectSeconds: 0.4 });
+    const alice = await accountFor(store, 'Alice');
+    const a = await joinGrove(url, alice.token);
+    collect(a.room, 'travel');
+    const left = leftWith(a.room);
+    await walk(a.room, SPAWN, INTO_EXIT);
+    await left;
+    const bob = await accountFor(store, 'Bob');
+    await saveAs(store, bob.accountId, { zone: 'greenway', ...ENTRY });
+    expect(await refusal(url, bob.token, 'greenway')).toBe(zoneFullReason('greenway')); // still held
+    await sleep(500);
+    const b = await joinZone(url, bob.token, 'greenway'); // the hold ran out: the seat is free
+    await b.room.leave();
+    await waitFor(() => server!.app.stats().zones.greenway.players === 0);
+    const late = await joinZone(url, alice.token, 'greenway');
+    expect(me(late.room)).toMatchObject({ name: 'Alice', x: ENTRY.x, z: ENTRY.z });
+  });
+});

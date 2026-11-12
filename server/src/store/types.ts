@@ -93,8 +93,9 @@ export interface Store {
   /**
    * Saves position, facing, zone, hp and loadout together; resolves true if it was written. An unknown
    * id is ignored (false). With `expect`, it is written only while the stored zone is `expect.zone`
-   * (false otherwise): a room saves only adventurers that are still its own, so a session left behind
-   * after a travel can never pull the adventurer back. Throws a TypeError for values checkedSave refuses.
+   * (false otherwise; a stored zone that is not a known ZoneId, which reads as 'grove', always
+   * matches): a room saves only adventurers that are still its own, so a session left behind after
+   * a travel can never pull the adventurer back. Throws a TypeError for values checkedSave refuses.
    */
   saveAdventurer(a: AdventurerSave, expect?: { zone: ZoneId }): Promise<boolean>;
   close(): Promise<void>;

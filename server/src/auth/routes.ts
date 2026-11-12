@@ -19,7 +19,7 @@ function randomGuestName(): string {
   return `Guest-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
 }
 
-export function authRouter(store: Store, secret: string, opts: { ratePerMinute?: number } = {}): express.Router {
+export function authRouter(store: Store, secret: string, opts: { ratePerMinute?: number; zoneRatePerMinute?: number } = {}): express.Router {
   const router = express.Router();
   const session = async (account: Account) => ({
     token: signToken(account.id, secret),
@@ -37,8 +37,9 @@ export function authRouter(store: Store, secret: string, opts: { ratePerMinute?:
   };
 
   // Before the login limit: a client asks this before every join (and after each travel), which is
-  // not a login attempt. It needs a valid token, so it reveals nothing to a guesser.
-  router.get('/zone', async (req, res) => {
+  // not a login attempt. It needs a valid token, so it reveals nothing to a guesser. Its own, generous
+  // limit (60 a minute per address by default) keeps one client from querying the store without bound.
+  router.get('/zone', rateLimit(opts.zoneRatePerMinute ?? 60, 'Too many requests, wait a minute'), async (req, res) => {
     const account = await bearer(req);
     if (!account) {
       res.status(401).json({ error: SIGN_IN_AGAIN });
