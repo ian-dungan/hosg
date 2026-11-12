@@ -4,6 +4,7 @@ import { ABILITIES, legacyLoadout, type AbilityId, type Loadout, type WeaponId }
 import { deepFreeze } from './freeze';
 import { JOB_LEVEL_CAP, levelForXp, migrateStubXp, totalTo } from '../progression';
 import { validTalents } from '../talents';
+import { isCostumeId, type CostumeId } from '../costumes';
 // jobs.ts ⇄ abilities.ts import each other: neither may read the other's exports at the top level
 // (only inside functions). progression.ts and talents.ts import only types from here.
 
@@ -104,8 +105,6 @@ export const FUTURE_JOBS: Readonly<Record<FutureJobId, FutureJobData>> = deepFre
 const isFutureJobId = (v: unknown): v is FutureJobId => own(FUTURE_JOBS, v);
 
 // ───────── the per-job save ─────────
-/** A costume id (items.ts, Plan 5 Task 2, replaces this local alias). */
-type CostumeId = string;
 /** A job's outfit: the costume worn in each costume slot (ownership is checked by the server against the wardrobe), and whether the head piece is hidden. */
 export interface JobOutfit { body: CostumeId | null; head: CostumeId | null; back: CostumeId | null; hideHead: boolean }
 /**
@@ -146,8 +145,8 @@ function validPicks(job: JobId | FutureJobId, v: unknown): v is [AbilityId, Abil
 }
 const validXp = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= totalTo(JOB_LEVEL_CAP);
 const plainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-/** Costume ids are short: a slot holds null or a string of 1..64 characters. */
-const costumeRef = (v: unknown): v is string | null => v === null || (typeof v === 'string' && v.length >= 1 && v.length <= 64);
+/** A slot holds null or a known costume id (ownership is the server's check, against the wardrobe). */
+const costumeRef = (v: unknown): v is CostumeId | null => v === null || isCostumeId(v);
 const OUTFIT_KEYS = ['back', 'body', 'head', 'hideHead'];
 
 /** A clean outfit from `v` (exactly its four keys), or null. */

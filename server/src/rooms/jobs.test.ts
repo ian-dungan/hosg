@@ -252,7 +252,7 @@ describe('job switching', () => {
 
   it('a job or picks change keeps curve 2, xp, talents and outfit (the save passes isJobsSave)', async () => {
     const { url, store } = await start(zones());
-    const outfit = { body: 'orchard_smock', head: null, back: null, hideHead: true };
+    const outfit = { body: 'orchard_smock' as const, head: null, back: null, hideHead: true };
     const saved: JobsSave = {
       current: 'warrior', curve: 2,
       jobs: { warrior: { level: 7, xp: totalTo(7) + 5, picks: ['mend', 'bulwark'], talents: ['warrior_1b', 'warrior_2c'], outfit } },
