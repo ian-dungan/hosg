@@ -10,3 +10,5 @@ export * from './sight';
 export * from './abilities';
 export * from './enemies';
 export * from './fx';
+export * from './engine';
+export { isInCombat, adventurerInCombat, onAnyThreatTable } from './adventurer';
