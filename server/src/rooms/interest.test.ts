@@ -292,6 +292,24 @@ describe('enemies and telegraphs in view', () => {
     await waitFor(() => (a.room.state.telegraphs?.size ?? 0) === 0, 6000); // resolved: deleted from the view too
   });
 
+  it('a telegraph carries its start on the room clock, so a client first seeing it late knows how far along it is', async () => {
+    const clock = testClock(4);
+    const { url, store } = await start({ ...flatGrove([thornlingAt(0, 3)]), combatClock: clock.now });
+    const b = await joinAt(url, store, 'Bob', 0, 0); // aggroes it
+    await waitFor(() => b.room.state.telegraphs?.size > 0, 6000);
+    const tele = [...b.room.state.telegraphs.values()][0];
+    const c0 = b.room.state.clock;
+    expect(Number.isInteger(c0) && Number.isInteger(tele.at)).toBe(true);
+    expect(tele.at).toBeLessThanOrEqual(c0);
+    expect(c0 - tele.at).toBeLessThanOrEqual(Math.ceil(tele.total * TICK_HZ));
+    // a client that joins mid-wind-up reads the same start
+    const late = await joinAt(url, store, 'Cy', 0, -4);
+    await waitFor(() => late.room.state.telegraphs?.get(String(tele.id)) !== undefined || (b.room.state.telegraphs?.size ?? 0) === 0, 6000);
+    const seen = late.room.state.telegraphs?.get(String(tele.id));
+    if (seen) expect(seen.at).toBe(tele.at);
+    expect(late.room.state.clock).toBeGreaterThanOrEqual(c0);
+  });
+
   it('the targeted enemy stays in view however far (beyond the hysteresis band)', async () => {
     const { url, store } = await start(flatGrove([{ kind: 'dummy', x: 0, z: 30, facing: 0 }, { kind: 'dummy', x: 0, z: 100, facing: 0 }]));
     const a = await joinAt(url, store, 'Alice', 0, 0);

@@ -13,7 +13,7 @@
 import { Vector3 } from '@babylonjs/core';
 import {
   ABILITIES, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, DEATH_MIN_S, AUTO_RESPAWN_S, DODGE_CHARGES, DODGE_MIN_GAP_S, DODGE_REFILL_S,
-  ENEMY_ATTACKS, ENEMY_KINDS, FREE_POOL, MARK_BITS, MELEE_REACH, SPRINT_S, SPRINT_SCALE, TARGET_RANGE, TELEGRAPH_LEAD_S, WEAPONS,
+  ENEMY_ATTACKS, ENEMY_KINDS, FREE_POOL, MARK_BITS, SPRINT_S, SPRINT_SCALE, TARGET_RANGE, TELEGRAPH_LEAD_S, WEAPONS,
   dodgeDisplacement, simulateDisplacement,
   type AbilityId, type C2S, type EnemyAttackId, type EnemyKindId, type FxEvent, type MarkId, type S2C, type SelfView, type WeaponId,
 } from '@sg2/shared';
@@ -21,7 +21,7 @@ import type { HudApi, HudEvent, HudState, StatusId, TapInfo } from '../core/cont
 import type { Game } from '../boot';
 import type { Enemies } from '../net/enemies';
 import type { Remotes } from '../net/remotes';
-import type { EnemyStateView, PlayerView, ZoneRoom } from '../net/session';
+import { windupElapsedS, type EnemyStateView, type PlayerView, type ZoneRoom } from '../net/session';
 import { ABILITY_DEFS } from './abilityDefs';
 import { createTelegraphs, type Telegraphs } from './telegraphs';
 import { createOverheads, type Overheads } from './overheads';
@@ -91,6 +91,42 @@ export function markStatuses(bits: number): StatusId[] {
   return out;
 }
 
+/**
+ * Whether a `displaced`/`respawned` numbered `seq` is news to a client at `ack`. The server sends the last
+ * one again after a reconnect: one already applied must not pull the adventurer back to where it was.
+ */
+export function isNewSeq(ack: number, seq: number): boolean { return seq > ack; }
+
+/**
+ * Whether a walk toward an enemy (tap-to-walk) carries on: not when it could not start (no way there: give up
+ * instead of searching again every frame), nor once the player has steered themselves since it began.
+ */
+export function keepFollowing(started: boolean, followSince: number, walkOverriddenAt: number): boolean {
+  return started && !(walkOverriddenAt > followSince);
+}
+
+/** A `self` must arrive this long after a press (a round trip) before its `charge: null` means the charge is over, in ms. */
+export const CHARGE_SELF_LAG_MS = 300;
+/**
+ * Whether a Charged Shot this client pressed at `pressedAt` is still held as the server sees it: a `self`
+ * that arrived a round trip after the press and shows no charge says it is over (released, auto-released at
+ * 2.5 s, cancelled by a knock or a swap), whatever happened to the key or button.
+ */
+export function chargeStillHeld(pressedAt: number, self: { at: number; charge: number | null } | null): boolean {
+  return !(self && self.at > pressedAt + CHARGE_SELF_LAG_MS && self.charge === null);
+}
+
+/**
+ * Whether an ability refusal is for the Charged Shot press: refusals carry no slot, so only when the last
+ * ability this client pressed was that slot, within 600 ms.
+ */
+export function refusalIsForCharge(lastPress: { slot: number; at: number } | null, chargeSlot: number | null, nowMs: number): boolean {
+  return !!lastPress && chargeSlot !== null && lastPress.slot === chargeSlot && nowMs - lastPress.at < 600;
+}
+
+/** A dodge pressed while one is still waiting for its answer is rolled once that one is done, if within this, in ms. */
+export const DODGE_QUEUE_MS = 400;
+
 const REFUSAL_TEXT: Record<string, string> = {
   range: 'Out of range', cooldown: 'Not ready', momentum: 'Not enough Momentum', sight: "Can't see the target", 'no-target': 'No target',
   charges: 'No dodges left', air: "Can't dodge in the air", 'in-combat': 'Not during a fight',
@@ -143,6 +179,8 @@ export interface CombatController {
   onTap(tap: TapInfo): boolean;
   /** The server corrected the pose (online.ts places the body): any displacement in progress stops. */
   onCorrect(): void;
+  /** `travel` arrived: the adventurer is held still (move scale 0) until this room ends. */
+  onTravel(): void;
   /** Fills the HUD state; call every frame. */
   update(dt: number): void;
   readonly debug: CombatDebug;
@@ -174,7 +212,10 @@ export function createCombat(o: CombatOpts): CombatController {
   let target: number | null = null;
   /** The last view of the target, kept while it is briefly out of the state (interest edge), so the frame never flickers. */
   let targetSeen: { e: EnemyStateView; at: number } | null = null;
+  let targetCopy: Record<string, unknown> | null = null;
   let followEid: number | null = null;
+  /** When the current walk toward followEid began (a later walkOverriddenAt means the player steered away). */
+  let followSince = -Infinity;
   /** Tap-to-walk keeps the adventurer in range of this enemy (a tapped target) until the player moves themselves. */
   let chase: { eid: number; since: number } | null = null;
   let pending: { from: { x: number; z: number; y: number }; end: { x: number; z: number; y: number }; at: number } | null = null;
@@ -182,6 +223,12 @@ export function createCombat(o: CombatOpts): CombatController {
   /** Charges as this client counts them (the server's, less the dodges sent since). */
   let charges = DODGE_CHARGES, chargesSetAt = -Infinity;
   let chargePressedAt: number | null = null, releasedAt = -Infinity;
+  /** The slot the held Charged Shot was pressed on (its release goes to that slot, whatever the bar shows now). */
+  let chargeSlot: number | null = null;
+  let lastPress: { slot: number; at: number } | null = null;
+  /** A dodge pressed while another waited for its answer (rolled once that one is done, within DODGE_QUEUE_MS). */
+  let queuedDodge: { dir: { x: number; y: number } | null; at: number } | null = null;
+  let travelling = false;
   let sprintUntil = -Infinity;
   let deadSince: number | null = null;
   let deathScreen = false;
@@ -189,6 +236,7 @@ export function createCombat(o: CombatOpts): CombatController {
   const hurtAt = new Map<number, number>();
   const lastHp = new Map<number, number>();
   let disposed = false;
+  const myCast = { name: 'Charged Shot', frac: 0, mark: CHARGE_INTERRUPT_FRAC };
 
   const telegraphs: Telegraphs = createTelegraphs(game.scene, game.world, room);
   const overheads: Overheads = createOverheads(game.scene, room, o.enemies);
@@ -208,7 +256,7 @@ export function createCombat(o: CombatOpts): CombatController {
     if (tell) lastTargetSent = performance.now();
     if (target !== null) o.enemies.get(target)?.view.setTargeted(false);
     target = id;
-    targetSeen = null;
+    targetSeen = null; targetCopy = null;
     if (id !== null) o.enemies.get(id)?.view.setTargeted(true);
     if (tell) o.send('target', { id });
   };
@@ -218,7 +266,8 @@ export function createCombat(o: CombatOpts): CombatController {
     if (!d || !e || !isKind(e.kind)) return;
     const within = range() + ENEMY_KINDS[e.kind].radius - RANGE_MARGIN;
     followEid = eid;
-    game.walkTo(new Vector3(d.x, d.y, d.z), {
+    const since = performance.now();
+    const started = game.walkTo(new Vector3(d.x, d.y, d.z), {
       within,
       then: () => { followEid = null; },
       follow: () => {
@@ -227,12 +276,16 @@ export function createCombat(o: CombatOpts): CombatController {
         return new Vector3(v.x, v.y, v.z);
       },
     });
+    // no way there: stop following (and chasing), or it would search again (and toast) every frame
+    if (!keepFollowing(started, since, game.walkOverriddenAt)) { followEid = null; chase = null; }
+    else followSince = since;
   };
 
   // ── dodge ──
   const dodge = (dir: { x: number; y: number } | null) => {
     const r = rig();
-    if (isDead() || pending || r.displacing) return;
+    if (isDead()) return;
+    if (pending || r.displacing) { queuedDodge = { dir, at: performance.now() }; return; }
     if (!r.body.grounded) { toast(refusalText('air')); return; }
     const now = performance.now();
     if (now - lastDodgeAt < DODGE_MIN_GAP_S * 1000) return;
@@ -262,14 +315,18 @@ export function createCombat(o: CombatOpts): CombatController {
       case 'ability': {
         if (isDead()) return;
         const id = self?.slots[e.slot];
-        if (id === 'charged_shot') { if (chargePressedAt !== null) return; chargePressedAt = performance.now(); }
+        const now = performance.now();
+        if (id === 'charged_shot') { if (chargePressedAt !== null) return; chargePressedAt = now; chargeSlot = e.slot; }
+        lastPress = { slot: e.slot, at: now };
         o.send('ability', { slot: e.slot, phase: 'press' });
         break;
       }
       case 'abilityUp': {
-        if (self?.slots[e.slot] === 'charged_shot' && chargePressedAt !== null) {
+        // the slot it was pressed on, even if a swap or a loadout change has put something else there since
+        if (chargePressedAt !== null && e.slot === chargeSlot) {
           chargePressedAt = null; releasedAt = performance.now();
           o.send('ability', { slot: e.slot, phase: 'release' });
+          chargeSlot = null;
         }
         break;
       }
@@ -282,6 +339,7 @@ export function createCombat(o: CombatOpts): CombatController {
         break;
       }
       case 'clearTarget': setTarget(null); followEid = null; chase = null; break;
+      case 'respawn': if (isDead()) o.send('respawn', {} as Record<string, never>); break;
       case 'swapWeapon': if (!isDead()) o.send('swap', {} as Record<string, never>); break;
       case 'openLoadout': {
         if (!self || isDead()) return;
@@ -293,7 +351,6 @@ export function createCombat(o: CombatOpts): CombatController {
         });
         break;
       }
-      case 'respawn': if (isDead()) o.send('respawn', {} as Record<string, never>); break;
       default: break;
     }
   };
@@ -307,6 +364,7 @@ export function createCombat(o: CombatOpts): CombatController {
     if (m.charge === null && chargePressedAt === null) releasedAt = -Infinity;
   };
   const onDisplaced = (m: S2C['displaced']) => {
+    if (!isNewSeq(ack, m.seq)) return; // sent again after a reconnect: already applied
     debug.displaced++;
     note({ t: 'displaced', kind: m.kind, seq: m.seq });
     const wasFollowing = followEid;
@@ -325,6 +383,7 @@ export function createCombat(o: CombatOpts): CombatController {
     ack = m.seq;
   };
   const onRespawned = (m: S2C['respawned']) => {
+    if (!isNewSeq(ack, m.seq)) return; // sent again after a reconnect: already applied
     pending = null;
     game.walkTo(null);
     followEid = null;
@@ -341,7 +400,9 @@ export function createCombat(o: CombatOpts): CombatController {
       if (pending) { rollBack(pending.from); pending = null; }
       if (m.reason === 'charges') charges = 0;
     }
-    if (m.action === 'ability' && chargePressedAt !== null && performance.now() - chargePressedAt < 600) chargePressedAt = null;
+    if (m.action === 'ability' && chargePressedAt !== null && refusalIsForCharge(lastPress, chargeSlot, performance.now())) { chargePressedAt = null; chargeSlot = null; }
+    // a refused respawn (too early): the death screen comes back with its button
+    if (m.action === 'respawn' && deathScreen) { hud.dismissEndScreen(); deathScreen = false; }
     if (m.action === 'target' && target !== null) setTarget(null, false);
     // an ability pressed while it cools shakes its button already: no "Not ready" toast for it
     if (!(m.action === 'ability' && m.reason === 'cooldown')) toast(refusalText(m.reason));
@@ -368,6 +429,10 @@ export function createCombat(o: CombatOpts): CombatController {
 
     // a dodge answered by nothing for a second: send poses again (the server ignores them until its answer)
     if (pending && now - pending.at > DODGE_WAIT_MS) pending = null;
+    // a dodge pressed meanwhile rolls now (or is dropped when it waited too long)
+    if (queuedDodge && !pending && !r.displacing) { const q = queuedDodge; queuedDodge = null; if (now - q.at <= DODGE_QUEUE_MS) dodge(q.dir); }
+    // a charge the server says is over (released, auto-released, cancelled) is not held here either, whatever the key did
+    if (chargePressedAt !== null && !chargeStillHeld(chargePressedAt, self)) { chargePressedAt = null; chargeSlot = null; }
 
     // charges refill on the client's own clock between `self`s
     if (self && charges < DODGE_CHARGES && self.dodgeNextIn > 0 && now - self.at > self.dodgeNextIn * 1000 && charges === self.dodgeCharges) charges++;
@@ -384,14 +449,14 @@ export function createCombat(o: CombatOpts): CombatController {
     else if (charging) scale = CHARGE_SCALE;
     else if (now < sprintUntil) scale = SPRINT_SCALE;
     if (charging && now < sprintUntil) scale = CHARGE_SCALE * SPRINT_SCALE;
-    if (!room.reconnection.isReconnecting) r.setMoveScale(scale);
+    if (!room.reconnection.isReconnecting && !travelling) r.setMoveScale(scale); // a travel holds the adventurer still
 
     // death
     if (dead && deadSince === null) {
       deadSince = now;
       pending = null;
       game.walkTo(null); followEid = null;
-      if (chargePressedAt !== null) chargePressedAt = null;
+      if (chargePressedAt !== null) { chargePressedAt = null; chargeSlot = null; }
     }
     if (!dead && deadSince !== null) { deadSince = null; if (deathScreen) { hud.dismissEndScreen(); deathScreen = false; } }
     if (dead && !deathScreen && deadSince !== null) {
@@ -408,6 +473,8 @@ export function createCombat(o: CombatOpts): CombatController {
 
     // resume following the target once a knockback or roll has played; keep a chased target in range
     if (chase && (chase.eid !== target || game.walkOverriddenAt > chase.since || dead)) chase = null;
+    // the player steered themselves (keys, joystick) since the walk toward the target began: stop following
+    if (followEid !== null && game.walkOverriddenAt > followSince) followEid = null;
     if (followEid !== null && !r.displacing && !pending && target === followEid && !game.walking) followTarget(followEid);
     else if (chase && followEid === null && !r.displacing && !pending && !game.walking && hud.settings.tapToWalk) {
       const e = enemyView(chase.eid);
@@ -417,13 +484,18 @@ export function createCombat(o: CombatOpts): CombatController {
     // enemies: wind-up start times, hurt times, the target ring
     room.state.enemies?.forEach((e) => {
       const w = windupSince.get(e.eid);
-      if (e.windup && (!w || w.attack !== e.windup)) windupSince.set(e.eid, { attack: e.windup, at: now });
+      // its start by the server's clock (from its telegraph), so one first seen mid-wind-up shows how far along it is
+      if (e.windup && (!w || w.attack !== e.windup)) windupSince.set(e.eid, { attack: e.windup, at: now - windupElapsedS(room.state, e.eid) * 1000 });
       else if (!e.windup && w) windupSince.delete(e.eid);
       const was = lastHp.get(e.eid);
       if (was !== undefined && e.hp < was) hurtAt.set(e.eid, now);
       lastHp.set(e.eid, e.hp);
     });
     if (target !== null) o.enemies.get(target)?.view.setTargeted(true);
+    // forget enemies that left the view
+    for (const m of [windupSince, hurtAt, lastHp] as Map<number, unknown>[]) {
+      if (m.size > 0) for (const eid of m.keys()) if (!room.state.enemies?.get(String(eid))) m.delete(eid);
+    }
 
     // telegraphs (and the danger edge when standing in one)
     const inDanger = telegraphs.update(now, r.position.x, r.position.z);
@@ -441,16 +513,18 @@ export function createCombat(o: CombatOpts): CombatController {
     if (self) {
       const el = (now - self.at) / 1000;
       const refill = charges >= DODGE_CHARGES ? 1 : Math.max(0, Math.min(1, 1 - (self.dodgeNextIn - el) / DODGE_REFILL_S));
-      p.dodge = { charges: Math.max(0, charges), max: DODGE_CHARGES, refill };
+      const pd = (p.dodge ??= { charges: 0, max: DODGE_CHARGES, refill: 1 }); // reused: no per-frame objects
+      pd.charges = Math.max(0, charges); pd.max = DODGE_CHARGES; pd.refill = refill;
       const held = chargePressedAt !== null ? (now - chargePressedAt) / 1000 : self.charge !== null ? self.charge + el : null;
-      p.cast = held !== null && !dead ? { name: 'Charged Shot', frac: Math.min(1, held / CHARGE_FULL_S), mark: CHARGE_INTERRUPT_FRAC } : null;
+      if (held !== null && !dead) { myCast.frac = Math.min(1, held / CHARGE_FULL_S); p.cast = myCast; } else p.cast = null;
     }
     state.slots = slotView(self, now, dead);
     state.inCombat = !!self?.inCombat;
 
     // HUD: the target (kept from its last sight while briefly out of view)
     let t: EnemyStateView | undefined = target !== null ? enemyView(target) : undefined;
-    if (t) targetSeen = { e: { ...t }, at: now };
+    // a copy of its last sight, into one reused object (no per-frame allocation)
+    if (t) { targetCopy = Object.assign(targetCopy ?? {}, t); if (targetSeen) { targetSeen.e = targetCopy as unknown as EnemyStateView; targetSeen.at = now; } else targetSeen = { e: targetCopy as unknown as EnemyStateView, at: now }; }
     else if (target !== null && targetSeen && now - targetSeen.at < 3000) t = targetSeen.e;
     else if (target !== null && targetSeen && now - targetSeen.at >= 3000) { setTarget(null); }
     if (t && isKind(t.kind)) {
@@ -500,8 +574,9 @@ export function createCombat(o: CombatOpts): CombatController {
         const e = enemyView(tap.entityId)!, pos = rig().position;
         reach = Math.hypot(e.x - pos.x, e.z - pos.z) - (isKind(e.kind) ? ENEMY_KINDS[e.kind].radius : 0.5);
       }
-      const a = tapAction(tap, hud.settings, ids, reach, range() === MELEE_REACH ? MELEE_REACH : range());
-      if (a.target === undefined) return false; // the ground: boot.ts walks there (when the setting is on)
+      const a = tapAction(tap, hud.settings, ids, reach, range());
+      // the ground: boot.ts walks there (when the setting is on); walking toward an enemy stops
+      if (a.target === undefined) { followEid = null; chase = null; return false; }
       setTarget(a.target);
       // with tap-to-walk on, a tapped enemy is chased: kept in range while it moves (until the player moves themselves)
       chase = hud.settings.tapToWalk ? { eid: a.target, since: performance.now() } : null;
@@ -510,6 +585,7 @@ export function createCombat(o: CombatOpts): CombatController {
       return true;
     },
     onCorrect() { pending = null; },
+    onTravel() { travelling = true; queuedDodge = null; },
     update,
     debug,
     dispose() {

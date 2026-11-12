@@ -7,10 +7,12 @@ import { ENEMY_ATTACKS, ENEMY_KINDS, type EnemyAttackId, type EnemyKindId } from
 import type { WorldApi } from '../core/contracts';
 import { makeEnemy, type EnemyMode, type EnemyView } from '../combat/enemies';
 import { PoseBuffer, type DrawnPose } from './interp';
-import type { EnemyStateView, ZoneRoom } from './session';
+import { windupElapsedS, type EnemyStateView, type ZoneRoom } from './session';
 
 /** Speed (m/s) above which an enemy plays its run cycle. */
 const RUN_ABOVE = 0.6;
+/** An enemy first seen dead starts this far into its death (its fall and sinking done). */
+const DEAD_SETTLED_S = 10;
 /** A jump between two updates longer than this (m) is drawn at once, not slid through. */
 const SNAP_M = 5;
 
@@ -97,10 +99,13 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
     const changed = e.mode !== d.mode || e.windup !== d.windup;
     if (!changed) return;
     if (d.mode === 'windup' && e.mode !== 'windup' && windupReleased(e.mode)) d.view.strike();
+    const firstSight = d.mode === '';
     d.mode = e.mode; d.windup = e.windup;
-    // A wind-up seen as it starts plays from 0. One already under way when the enemy came into view has an
-    // unknown start (the state does not carry it): it plays from 0 too.
-    if (e.mode === 'windup' && isAttack(e.windup)) d.view.setMode('windup', e.windup, e.windupTotal > 0 ? e.windupTotal : undefined, 0);
+    // A wind-up plays from where the server's clock says it is (from its telegraph's start): 0 when seen as
+    // it starts, part way through for an enemy that came into view mid-wind-up.
+    if (e.mode === 'windup' && isAttack(e.windup)) d.view.setMode('windup', e.windup, e.windupTotal > 0 ? e.windupTotal : undefined, windupElapsedS(room.state, e.eid));
+    // one that comes into view already dead lies still (its fall played before it was seen)
+    else if (e.mode === 'dead' && firstSight) d.view.setMode('dead', undefined, undefined, DEAD_SETTLED_S);
     else d.view.setMode(viewMode(e.mode, d.moving));
   };
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ABILITIES, FINISHER_COST, TELEGRAPH_LEAD_S, type SelfView } from '@sg2/shared';
 import { ABILITY_DEFS } from './abilityDefs';
-import { cycleTarget, screenToWorld, slotView, tapAction, telegraphFill, type SelfSnap } from './controller';
+import { CHARGE_SELF_LAG_MS, chargeStillHeld, cycleTarget, isNewSeq, keepFollowing, refusalIsForCharge, screenToWorld, slotView, tapAction, telegraphFill, type SelfSnap } from './controller';
 
 const P = { x: 1, y: 0, z: 2 };
 
@@ -95,5 +95,32 @@ describe('screenToWorld', () => {
     expect(f.x).toBeCloseTo(1); expect(f.z).toBeCloseTo(0);
     const r = screenToWorld({ x: 1, y: 0 }, -Math.PI / 2, 0);
     expect(Math.hypot(r.x, r.z)).toBeCloseTo(1);
+  });
+});
+
+describe('Task 8 review round 1', () => {
+  it('a displaced/respawned sent again after a reconnect (seq already applied) is ignored; a newer one is not', () => {
+    expect(isNewSeq(3, 3)).toBe(false);
+    expect(isNewSeq(3, 2)).toBe(false);
+    expect(isNewSeq(3, 4)).toBe(true);
+    expect(isNewSeq(0, 1)).toBe(true);
+  });
+  it('a walk toward an enemy stops when there is no way there, or once the player steers themselves', () => {
+    expect(keepFollowing(false, 100, 0)).toBe(false); // no path: give up instead of searching every frame
+    expect(keepFollowing(true, 100, 50)).toBe(true);
+    expect(keepFollowing(true, 100, 150)).toBe(false); // keys or joystick since it began
+  });
+  it('a held Charged Shot ends when a self a round trip after the press shows no charge (blur, swap, auto-release)', () => {
+    const press = 1000;
+    expect(chargeStillHeld(press, null)).toBe(true);
+    expect(chargeStillHeld(press, { at: press + 50, charge: null })).toBe(true); // sent before the press reached the server
+    expect(chargeStillHeld(press, { at: press + CHARGE_SELF_LAG_MS + 1, charge: 0.4 })).toBe(true);
+    expect(chargeStillHeld(press, { at: press + CHARGE_SELF_LAG_MS + 1, charge: null })).toBe(false);
+  });
+  it('an ability refusal ends the pending charge only when the last press was the charge slot', () => {
+    expect(refusalIsForCharge({ slot: 2, at: 1000 }, 2, 1200)).toBe(true);
+    expect(refusalIsForCharge({ slot: 3, at: 1100 }, 2, 1200)).toBe(false); // a Mend pressed since
+    expect(refusalIsForCharge({ slot: 2, at: 1000 }, 2, 1700)).toBe(false);
+    expect(refusalIsForCharge(null, 2, 1000)).toBe(false);
   });
 });

@@ -213,6 +213,8 @@ export function createEffects(o: EffectsOpts): Effects {
         else if (act === 'charge') v.setPose('charge');
         else v.setPose('idle');
       });
+      // forget those no longer in the state (out of view, or gone): one that comes back is posed afresh
+      for (const sid of acts.keys()) if (!room.state.players?.get(sid)) acts.delete(sid);
     },
     dispose() {
       for (const s of arrows) s.m.dispose();

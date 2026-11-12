@@ -108,6 +108,8 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   root.addEventListener('dblclick', (e) => e.preventDefault());
 
   // ── keyboard ──
+  /** Ability digits held down (slot indices). */
+  const heldDigits = new Set<number>();
   window.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -119,7 +121,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
       return;
     }
     const d = /^(?:Digit|Numpad)([1-5])$/.exec(c);
-    if (d) { if (!e.repeat) { const i = +d[1] - 1; abar.flash(i); abar.press(i); } e.preventDefault(); return; }
+    if (d) { if (!e.repeat) { const i = +d[1] - 1; heldDigits.add(i); abar.flash(i); abar.press(i); } e.preventDefault(); return; }
     if (MOVE_KEYS[c]) {
       held.add(c);
       if (taps.down(c, performance.now(), e.repeat)) { const v = MOVE_KEYS[c]; abar.flash('dodge'); emit({ type: 'dodge', dir: { x: v[0], y: v[1] } }); }
@@ -140,9 +142,14 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   window.addEventListener('keyup', (e) => {
     held.delete(e.code);
     const d = /^(?:Digit|Numpad)([1-5])$/.exec(e.code);
-    if (d) emit({ type: 'abilityUp', slot: +d[1] - 1 });
+    if (d) { heldDigits.delete(+d[1] - 1); emit({ type: 'abilityUp', slot: +d[1] - 1 }); }
   });
-  window.addEventListener('blur', () => { held.clear(); taps.reset(); });
+  // a held 1–5 whose keyup the page never gets (the window lost focus): released, so a Charged Shot is loosed
+  window.addEventListener('blur', () => {
+    held.clear(); taps.reset();
+    for (const slot of heldDigits) emit({ type: 'abilityUp', slot });
+    heldDigits.clear();
+  });
 
   const cache = { boss: false, combat: false, hasParty: false };
 

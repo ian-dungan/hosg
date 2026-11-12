@@ -230,6 +230,7 @@ function boot(): void {
         if (travelTo) return;
         travelTo = m.zone;
         hud.dismissEndScreen();
+        combat?.onTravel(); // or its per-frame speed would let the adventurer walk during the fade
         rig.setMoveScale(0);
         game.walkTo(null);
         clearInterval(sendTimer);

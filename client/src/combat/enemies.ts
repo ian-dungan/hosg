@@ -531,6 +531,8 @@ const BLEND_S = 0.1;
 /** Drawn size per kind (the Thornling is drawn 1.3× so it fills its 0.5 m hit circle and reads at a distance). */
 const DRAW_SCALE: Partial<Record<EnemyKindId, number>> = { thornling: 1.3 };
 const STRIKE_LINGER_S = 0.4;
+/** A second strike() within this of the last one is the same swing (the hit fx and the wind-up end both report it), in s. */
+const STRIKE_DEDUPE_S = 0.3;
 
 /** Each kind's model (geometry in model space, rest pose, and its joints), built once and shared by every scene. */
 const MODELS = new Map<EnemyKindId, Model>();
@@ -663,11 +665,13 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       if (!applyMode(a, mode, attack, seconds, elapsed)) return;
       if (wasMode === 'windup' && wasAttack) lastWindup = { attack: wasAttack, endedAt: a.T };
       if (wasMode === 'dead' && mode !== 'dead') { spawnT = 0; a.hT = -1; a.sT = -1; root.setEnabled(true); }
-      if (mode === 'dead') { a.deadT = 0; a.sT = -1; }
+      if (mode === 'dead') { a.deadT = Number.isFinite(elapsed) ? Math.max(0, elapsed as number) : 0; a.sT = -1; }
       startBlend();
     },
     strike() {
       if (a.mode === 'dead') return;
+      // one swing, however many reports of it arrive (the hit fx and the wind-up's end)
+      if (a.sT >= 0 && a.sT < STRIKE_DEDUPE_S) return;
       let atk: EnemyAttackId | null = null;
       if (a.mode === 'windup' && a.attack) { atk = a.attack; lastWindup = { attack: atk, endedAt: a.T }; a.mode = 'idle'; a.attack = null; }
       else if (lastWindup && a.T - lastWindup.endedAt < STRIKE_LINGER_S) atk = lastWindup.attack;

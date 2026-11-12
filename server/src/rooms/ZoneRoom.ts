@@ -1382,6 +1382,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /** One pass over the engine's combatants: each enemy and each adventurer's state (only fields that changed are set). */
   private mirrorAll() {
+    const clock = this.clockSteps(worldOf(this.combat).now);
+    if (this.state.clock !== clock) this.state.clock = clock;
     for (const v of this.combat.all()) {
       if (v.team === 'enemy') this.mirrorEnemy(v);
       else {
@@ -1457,6 +1459,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         id: t.id, owner: t.owner, attack: t.attack, shape: s.kind, x: s.x, z: s.z,
         dir: s.kind === 'circle' ? 0 : s.dir, r: s.kind === 'line' ? s.length : s.r,
         width: s.kind === 'line' ? s.width : 0, angle: s.kind === 'cone' ? s.angle : 0, total: t.total,
+        at: this.clockSteps(worldOf(this.combat).now - (t.total - t.left)),
       }));
     }
     for (const [key, t] of [...this.state.telegraphs.entries()]) {
@@ -1464,6 +1467,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       this.state.telegraphs.delete(key);
       for (const session of this.sessions.values()) session.seen.delete(t); // gone from every view with the state
     }
+  }
+
+  /** A combat time (s) as a step count on the state's `clock` (never negative). */
+  private clockSteps(s: number): number {
+    return Math.max(0, Math.round(s * TICK_HZ));
   }
 
   private keyOf(id: number): string {

@@ -5,7 +5,7 @@
 // dev server proxies; see vite.config.ts). Production builds never read it: a crafted link must not
 // send the player's token to another server.
 import { Client, ErrorCode, type Room } from '@colyseus/sdk';
-import { isZoneId, type ZoneId } from '@sg2/shared';
+import { TICK_HZ, isZoneId, type ZoneId } from '@sg2/shared';
 
 /** One adventurer as the room state shows it (the server's PlayerState). */
 export interface PlayerView {
@@ -75,6 +75,8 @@ export interface TelegraphStateView {
   readonly angle: number;
   /** Wind-up length in s. */
   readonly total: number;
+  /** When the wind-up began, on the state's `clock` (steps of 1/TICK_HZ s). Missing from an older server. */
+  readonly at?: number;
 }
 
 /** A synchronised map in the room state (a Colyseus MapSchema as the client sees it). */
@@ -94,6 +96,25 @@ export interface ZoneState {
   readonly telegraphs?: StateMap<TelegraphStateView>;
   /** The zone's true head count (players holds only those within this client's interest radius). */
   readonly online?: number;
+  /** The combat clock in steps of 1/TICK_HZ s (telegraphs' `at` is on it). */
+  readonly clock?: number;
+}
+
+/**
+ * How far along a telegraph (and so its owner's wind-up) is, in s, by the state's clock: 0 when the
+ * server sends no clock. A client that first sees one late (it came into view mid-wind-up) starts its
+ * decal and the enemy's wind-up from here, not from 0.
+ */
+export function telegraphElapsedS(t: Pick<TelegraphStateView, 'at' | 'total'>, clock: number | undefined): number {
+  if (typeof t.at !== 'number' || typeof clock !== 'number') return 0;
+  return Math.max(0, Math.min(t.total, (clock - t.at) / TICK_HZ));
+}
+
+/** How far along enemy `eid`'s wind-up is, in s: from the telegraph it owns (every attack has one), else 0. */
+export function windupElapsedS(state: Pick<ZoneState, 'telegraphs' | 'clock'>, eid: number): number {
+  let el = 0;
+  state.telegraphs?.forEach((t) => { if (t.owner === eid) el = Math.max(el, telegraphElapsedS(t, state.clock)); });
+  return el;
 }
 
 export type ZoneRoom = Room<ZoneState>;

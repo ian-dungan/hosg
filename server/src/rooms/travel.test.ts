@@ -107,7 +107,7 @@ describe('travel through an open exit', () => {
     expect((await store.getOrCreateAdventurer(alice.accountId)).zone).toBe('grove');
   });
 
-  it('the server opens and shuts exits at run time; the grove\'s east gate is shut by default', async () => {
+  it('the server opens and shuts exits at run time (a test zone whose east gate starts shut)', async () => {
     const { url, store, app } = await start(withExit(false));
     expect(app.isExitOpen('grove', 'greenway')).toBe(false);
     expect(app.isExitOpen('greenway', 'grove')).toBe(true);

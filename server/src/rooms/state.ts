@@ -103,6 +103,12 @@ export const TelegraphState = schema(
     angle: t.float32(),
     /** Wind-up length in seconds. */
     total: t.float32(),
+    /**
+     * When the wind-up began, on the zone's `clock` (steps of 1/TICK_HZ s): a client that first sees it
+     * late knows how far along it is ((clock - at) / TICK_HZ s). An enemy's wind-up starts with its
+     * telegraph (every attack has one): the telegraph whose owner it is.
+     */
+    at: t.uint32(),
   },
   'TelegraphState',
 );
@@ -119,6 +125,8 @@ export const ZoneState = schema(
     enemies: t.map(EnemyState).view(),
     telegraphs: t.map(TelegraphState).view(),
     online: t.uint16(),
+    /** The combat clock in steps of 1/TICK_HZ s (TelegraphState.at is on it). */
+    clock: t.uint32(),
   },
   'ZoneState',
 );

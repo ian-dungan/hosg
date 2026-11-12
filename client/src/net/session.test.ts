@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SIGN_IN_AGAIN, UNREACHABLE, forgetToken, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, zoneFor } from './session';
+import { TICK_HZ } from '@sg2/shared';
+import { SIGN_IN_AGAIN, UNREACHABLE, forgetToken, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, telegraphElapsedS, windupElapsedS, zoneFor } from './session';
 
 const page = (search: string) => ({ origin: 'http://game.example:2570', search });
 
@@ -156,5 +157,20 @@ describe('zoneFor', () => {
     await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
     vi.stubGlobal('fetch', async () => { throw new TypeError('Failed to fetch'); });
     await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
+  });
+});
+
+describe('wind-up progress from the room clock (an enemy first seen mid-wind-up)', () => {
+  const map = <T,>(items: T[]) => ({ get: () => undefined, forEach: (cb: (v: T, k: string) => void) => items.forEach((v, i) => cb(v, String(i))), size: items.length });
+  it('a telegraph started 9 steps before the clock is 0.6 s along, capped at its length; 0 without a clock', () => {
+    expect(telegraphElapsedS({ at: 100, total: 1.5 }, 109)).toBeCloseTo(9 / TICK_HZ);
+    expect(telegraphElapsedS({ at: 100, total: 1.0 }, 200)).toBe(1.0);
+    expect(telegraphElapsedS({ at: 100, total: 1.0 }, undefined)).toBe(0);
+    expect(telegraphElapsedS({ total: 1.0 }, 105)).toBe(0);
+  });
+  it("an enemy's wind-up is as far along as the telegraph it owns", () => {
+    const telegraphs = map([{ owner: 7, at: 30, total: 2.2 }, { owner: 8, at: 40, total: 1 }]);
+    expect(windupElapsedS({ telegraphs: telegraphs as never, clock: 45 }, 7)).toBeCloseTo(1);
+    expect(windupElapsedS({ telegraphs: telegraphs as never, clock: 45 }, 9)).toBe(0);
   });
 });

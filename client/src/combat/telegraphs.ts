@@ -6,7 +6,7 @@
 import { Effect, Mesh, ShaderMaterial, VertexData, type Scene } from '@babylonjs/core';
 import { inShape, type Shape } from '@sg2/shared';
 import type { WorldApi } from '../core/contracts';
-import type { TelegraphStateView, ZoneRoom } from '../net/session';
+import { telegraphElapsedS, type TelegraphStateView, type ZoneRoom } from '../net/session';
 import { telegraphFill } from './controller';
 
 /** Height of the decal above the ground, in m (with a depth offset it never sinks into the terrain's facets). */
@@ -139,7 +139,9 @@ export function createTelegraphs(scene: Scene, world: WorldApi, room: ZoneRoom):
     mat.disableDepthWrite = true;
     mat.zOffset = -6;
     mesh.material = mat;
-    live.set(t.id, { mesh, mat, shape, seen: now, total: t.total > 0 ? t.total : 1 });
+    // first seen part way through (it came into view mid-wind-up): fill from where the server's clock says it is
+    const seen = now - telegraphElapsedS(t, room.state.clock) * 1000;
+    live.set(t.id, { mesh, mat, shape, seen, total: t.total > 0 ? t.total : 1 });
   };
 
   let count = 0;
