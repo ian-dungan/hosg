@@ -1,9 +1,10 @@
 // Marks left by finishers and primers. A finisher detonates every other live mark (a combo), then
 // leaves its own; a primer only sets (or refreshes) its own.
+import { deepFreeze } from './freeze';
 import { MARK_S } from './constants';
 
 export type MarkId = 'soaked' | 'burning' | 'marked' | 'rooted' | 'dazed';
-export const MARK_BITS: Record<MarkId, number> = { soaked: 1, burning: 2, marked: 4, rooted: 8, dazed: 16 };
+export const MARK_BITS: Readonly<Record<MarkId, number>> = deepFreeze({ soaked: 1, burning: 2, marked: 4, rooted: 8, dazed: 16 });
 /** Mark -> the time (s) it expires. */
 export type Marks = Partial<Record<MarkId, number>>;
 

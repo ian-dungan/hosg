@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ABILITIES, DEFAULT_LOADOUT, ENEMY_KINDS, FINISHER_COST, FREE_POOL, FUTURE_JOBS, JOBS, JOB_IDS, JOB_LEVEL_CAP, KILL_XP, MARK_BITS,
+  ABILITIES, BUFF_BITS, DEBUFF_BITS, DEFAULT_LOADOUT, ENEMY_KINDS, FINISHER_COST, FUTURE_JOBS, JOBS, JOB_IDS, JOB_LEVEL_CAP, KILL_XP, MARK_BITS,
   MARK_S, REACTIONS, WEAPONS, WEAPON_BARS, XP_PER_LEVEL, addJobXp, applyFinisherMark, applyPrimerMark, elementMult, isJobId,
   isJobsSave, legacyLoadout, levelForXp, liveMarks, loadoutOf, newJobsSave, parseJobsSave, parseLoadout, reactionFor, recordFor,
   plan3LoadoutOf, slotsFor, xpToNext, type AbilityId, type ElementId, type FutureJobId, type JobId, type JobsSave, type Marks,
@@ -16,7 +16,7 @@ describe('job data', () => {
     expect(jobs().map((j) => j.name)).toEqual(['Warrior', 'Ranger', 'Paladin', 'Dark Knight', 'Ninja', 'White Mage', 'Black Mage']);
     expect(jobs().map((j) => j.role)).toEqual(['damage', 'damage', 'tank', 'hybrid', 'damage', 'healer', 'damage']);
     expect(jobs().map((j) => j.weapon)).toEqual(['blade', 'bow', 'sword', 'greatsword', 'daggers', 'staff', 'staff']);
-    expect(jobs().map((j) => j.trait.id)).toEqual(['battle_rhythm', 'pinpoint', 'steadfast', 'blood_price', 'shadowstep', 'font', 'overflow']);
+    expect(jobs().map((j) => j.trait.id)).toEqual(['battle_rhythm', 'pinpoint', 'steadfast', 'crimson_tithe', 'dusk_slip', 'font', 'overflow']);
     for (const j of jobs()) { expect(j.trait.name.length).toBeGreaterThan(0); expect(j.trait.desc.length).toBeGreaterThan(0); }
     expect(jobs().filter((j) => j.brain.flank).map((j) => j.id)).toEqual(['ninja']);
     expect(isJobId('ninja')).toBe(true);
@@ -86,8 +86,27 @@ describe('job data', () => {
       }
     };
     check(Object.values(ABILITIES).map((a) => a.glyph));
-    check(jobs().map((j) => j.glyph));
+    // the job board shows starting and locked jobs together: one namespace
+    check([...jobs().map((j) => j.glyph), ...Object.values(FUTURE_JOBS).map((f) => f.glyph)]);
     expect(jobs().map((j) => j.glyph)).toEqual(['⚔', '➶', '⛨', '♆', '✕', '✙', '✺']);
+  });
+  it('the rule tables are frozen all the way down', () => {
+    const tables: unknown[] = [ABILITIES, JOBS, JOB_IDS, WEAPONS, FUTURE_JOBS, REACTIONS, KILL_XP, BUFF_BITS, DEBUFF_BITS, MARK_BITS, DEFAULT_LOADOUT];
+    const walk = (v: unknown, path: string) => {
+      if (typeof v !== 'object' || v === null) return;
+      expect(Object.isFrozen(v), path).toBe(true);
+      for (const [k, x] of Object.entries(v)) walk(x, `${path}.${k}`);
+    };
+    tables.forEach((t, i) => walk(t, `table ${i}`));
+    expect(() => { (ABILITIES.slash as { cooldown: number }).cooldown = 0; }).toThrow(TypeError);
+    expect(() => { (JOBS.ninja.pool as unknown as AbilityId[])[0] = 'slash'; }).toThrow(TypeError);
+    expect(() => { (DEFAULT_LOADOUT.picks as unknown as AbilityId[])[0] = 'slash'; }).toThrow(TypeError);
+    expect(ABILITIES.slash.cooldown).toBe(4);
+  });
+  it('every area or others effect has a radius', () => {
+    for (const a of Object.values(ABILITIES)) for (const e of a.effects) {
+      if ('on' in e && (e.on === 'area' || e.on === 'others')) expect('r' in e && typeof e.r === 'number' && e.r > 0, a.id).toBe(true);
+    }
   });
   it('only Staff jobs carry elements; every element has a reaction', () => {
     for (const a of Object.values(ABILITIES)) {
@@ -137,7 +156,7 @@ describe('job data', () => {
     expect(ABILITIES.kindred_spark).toMatchObject({ aim: 'other-ally', range: 15, cooldown: 20 });
     expect(ABILITIES.kindred_spark.effects).toEqual([{ k: 'momentum', amount: 30, on: 'aim' }, { k: 'momentum', amount: 10, on: 'self' }]);
     expect(ABILITIES.shelter).toMatchObject({ aim: 'other-ally', range: 12, ai: 'shelter' });
-    expect(ABILITIES.twin_fang).toMatchObject({ cooldown: 3.5, momentum: 20, mark: 'marked', primer: true });
+    expect(ABILITIES.crossed_fangs).toMatchObject({ cooldown: 3.5, momentum: 20, mark: 'marked', primer: true });
     expect(ABILITIES.sunder.effects).toEqual([{ k: 'damage', coef: 4.0 }]);
     expect(ABILITIES.parry.effects).toEqual([{ k: 'parry', s: 0.6 }]);
     expect(ABILITIES.sprint.effects).toEqual([{ k: 'sprint', scale: 1.4, s: 4 }]);
@@ -156,8 +175,7 @@ describe('weapons and the transitional shims', () => {
     expect(WEAPONS.staff).toMatchObject({ autoEvery: 1.6, autoCoef: 1.0, autoRange: 16 });
     expect(WEAPONS.sword).toMatchObject({ name: 'Sword and Shield', autoEvery: 1.4, autoCoef: 1.0 });
   });
-  it('FREE_POOL and WEAPON_BARS mirror the Warrior and Ranger', () => {
-    expect(FREE_POOL).toEqual(JOBS.warrior.pool);
+  it('WEAPON_BARS mirrors the Warrior and Ranger', () => {
     expect(WEAPON_BARS).toEqual({ blade: JOBS.warrior.bar, bow: JOBS.ranger.bar });
   });
   it('the engine keeps running Plan 3 loadouts until Task 2', () => {
@@ -175,7 +193,7 @@ describe('loadouts', () => {
     const bad: unknown[] = [
       null, 'ninja', {}, { job: 'ninja' },
       { job: 'ninja', picks: ['ashcloud', 'mend'] },          // another job's pick
-      { job: 'ninja', picks: ['twin_fang', 'ashcloud'] },     // a bar ability
+      { job: 'ninja', picks: ['crossed_fangs', 'ashcloud'] },     // a bar ability
       { job: 'ninja', picks: ['ashcloud', 'ashcloud'] },      // duplicate
       { job: 'monk', picks: ['ashcloud', 'mist_form'] },      // unknown job
       { job: 'toString', picks: ['ashcloud', 'mist_form'] },
@@ -261,6 +279,13 @@ describe('jobs save', () => {
     expect(s.jobs.warrior).toEqual(newJobsSave().jobs.warrior);
     expect(isJobsSave(s)).toBe(true);
     expect(isJobsSave({ ...s, current: 'monk' })).toBe(false);
+  });
+  it('recordFor always gives a copy', () => {
+    const s = newJobsSave('ranger');
+    const r = recordFor(s, 'ranger');
+    r.picks[0] = 'sprint'; r.talents.push('x'); r.xp = 99;
+    expect(s.jobs.ranger).toEqual({ level: 1, xp: 0, picks: ['field_dressing', 'pinning_shot'], talents: [], outfit: null });
+    expect(recordFor(s, 'ranger')).not.toBe(s.jobs.ranger);
   });
   it('recordFor gives a fresh record without storing it', () => {
     const s = newJobsSave();

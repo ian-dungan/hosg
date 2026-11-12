@@ -4,6 +4,9 @@ import { MELEE_REACH } from './constants';
 import type { ElementId } from './elements';
 import { JOBS, isJobId, type JobId } from './jobs';
 import type { MarkId } from './marks';
+import { deepFreeze } from './freeze';
+// abilities.ts ⇄ jobs.ts import each other: neither may read the other's exports at the top level
+// (only inside functions), or one of them would see the other uninitialised.
 
 export type WeaponId = 'blade' | 'bow' | 'sword' | 'greatsword' | 'daggers' | 'staff';
 export type AbilityId =
@@ -16,7 +19,7 @@ export type AbilityId =
   // Dark Knight
   | 'grim_rend' | 'nightfall' | 'crimson_pact' | 'bloodbond' | 'dread_howl' | 'umbral_brand' | 'grave_ward'
   // Ninja
-  | 'twin_fang' | 'hamstring' | 'ghost_edge' | 'ashcloud' | 'weak_point' | 'quickstep' | 'mist_form'
+  | 'crossed_fangs' | 'hamstring' | 'ghost_edge' | 'ashcloud' | 'weak_point' | 'quickstep' | 'mist_form'
   // Black Mage
   | 'cinder_dart' | 'skyfall_arc' | 'hearthfall' | 'kindred_spark' | 'bastion_stone' | 'rootbreak' | 'stormcage'
   // White Mage
@@ -27,46 +30,55 @@ export type Aim = 'enemy' | 'self' | 'ally' | 'other-ally' | 'dead-ally';
 export type BuffId = 'roar' | 'aegis' | 'aegis_ally' | 'sheltered' | 'rain' | 'pact' | 'mist' | 'bloodbond';
 export type DebuffId = 'blinded' | 'weakpoint';
 /** Buff flags on adventurers: aegis and aegis_ally share a bit. */
-export const BUFF_BITS: Record<BuffId, number> = { roar: 1, aegis: 2, aegis_ally: 2, sheltered: 4, rain: 8, pact: 16, mist: 32, bloodbond: 64 };
-export const DEBUFF_BITS: Record<DebuffId, number> = { blinded: 1, weakpoint: 2 };
+export const BUFF_BITS: Readonly<Record<BuffId, number>> = deepFreeze({ roar: 1, aegis: 2, aegis_ally: 2, sheltered: 4, rain: 8, pact: 16, mist: 32, bloodbond: 64 });
+export const DEBUFF_BITS: Readonly<Record<DebuffId, number>> = deepFreeze({ blinded: 1, weakpoint: 2 });
 
+/** An area effect counts from the caster, includes it (except 'others'), and needs no sight: `r` is required. */
 export type Effect =
-  | { k: 'damage'; coef: number; splash?: { r: number; frac: number }; behind?: true }
+  | { readonly k: 'damage'; readonly coef: number; readonly splash?: { readonly r: number; readonly frac: number }; readonly behind?: true }
   /** lowest: the lowest-hp adventurer within ALLY_RANGE, self included. */
-  | { k: 'heal'; amount: number; on: 'aim' | 'self' | 'lowest' }
-  | { k: 'shield'; amount: number; s: number; on: 'aim' | 'self' | 'area'; r?: number }
+  | { readonly k: 'heal'; readonly amount: number; readonly on: 'aim' | 'self' | 'lowest' }
+  | { readonly k: 'shield'; readonly amount: number; readonly s: number; readonly on: 'aim' | 'self' }
+  | { readonly k: 'shield'; readonly amount: number; readonly s: number; readonly on: 'area'; readonly r: number }
+  | { readonly k: 'buff'; readonly buff: BuffId; readonly s: number; readonly on: 'aim' | 'self' }
   /** others: the area without the caster. */
-  | { k: 'buff'; buff: BuffId; s: number; on: 'aim' | 'self' | 'area' | 'others'; r?: number }
+  | { readonly k: 'buff'; readonly buff: BuffId; readonly s: number; readonly on: 'area' | 'others'; readonly r: number }
+  | { readonly k: 'debuff'; readonly debuff: DebuffId; readonly s: number; readonly on: 'target' }
   /** area: live enemies within r of the caster. */
-  | { k: 'debuff'; debuff: DebuffId; s: number; on: 'target' | 'area'; r?: number }
-  | { k: 'momentum'; amount: number; on: 'aim' | 'self' }
-  | { k: 'taunt'; on: 'target' | 'area'; r?: number }
-  | { k: 'threat-drop'; r: number }
-  | { k: 'revive'; frac: number }
-  | { k: 'hp-cost'; amount: number }
-  | { k: 'dodge-refill'; charges: number }
-  | { k: 'parry'; s: number }
-  | { k: 'sprint'; scale: number; s: number }
-  | { k: 'charge' }
-  | { k: 'cleanse' };
+  | { readonly k: 'debuff'; readonly debuff: DebuffId; readonly s: number; readonly on: 'area'; readonly r: number }
+  | { readonly k: 'momentum'; readonly amount: number; readonly on: 'aim' | 'self' }
+  | { readonly k: 'taunt'; readonly on: 'target' }
+  | { readonly k: 'taunt'; readonly on: 'area'; readonly r: number }
+  | { readonly k: 'threat-drop'; readonly r: number }
+  | { readonly k: 'revive'; readonly frac: number }
+  | { readonly k: 'hp-cost'; readonly amount: number }
+  | { readonly k: 'dodge-refill'; readonly charges: number }
+  | { readonly k: 'parry'; readonly s: number }
+  | { readonly k: 'sprint'; readonly scale: number; readonly s: number }
+  | { readonly k: 'charge' }
+  | { readonly k: 'cleanse' };
 
 /** How the brain uses an ability. */
 export type AiUse = 'damage' | 'finisher' | 'charge' | 'never' | 'selfHeal' | 'allyHeal' | 'allyBigHeal' | 'healParty'
   | 'shieldSelf' | 'shieldAlly' | 'shieldParty' | 'buffParty' | 'selfBuff' | 'aegis' | 'revive' | 'tauntIfNotMe'
   | 'interrupt' | 'threatDrop' | 'momentumGift' | 'debuff' | 'dodgeRefill' | 'mist' | 'shelter';
 
+/**
+ * Element, reactions, weakness and OVERFLOW_MULT apply only to an ability's `damage` effects: an
+ * element on an ability that does no damage (Bastion Stone, Wellspring, Soft Rain, Mistveil) is cosmetic.
+ */
 export interface AbilityData {
-  id: AbilityId; name: string; glyph: string; desc: string; job: JobId;
-  role: 'quick' | 'finisher' | 'signature' | 'pick'; kind: 'damage' | 'heal' | 'defence' | 'utility';
+  readonly id: AbilityId; readonly name: string; readonly glyph: string; readonly desc: string; readonly job: JobId;
+  readonly role: 'quick' | 'finisher' | 'signature' | 'pick'; readonly kind: 'damage' | 'heal' | 'defence' | 'utility';
   /** needsTarget === (aim === 'enemy'). */
-  aim: Aim; needsTarget: boolean;
+  readonly aim: Aim; readonly needsTarget: boolean;
   /** range: 0 = self, MELEE_REACH = melee (to the edge of the target's radius). */
-  cooldown: number; range: number;
+  readonly cooldown: number; readonly range: number;
   /** cast: seconds (absent or 0 = instant). school: cosmetic only. */
-  cast?: number; element?: ElementId; school?: 'light';
+  readonly cast?: number; readonly element?: ElementId; readonly school?: 'light';
   /** momentum: built on use; cost: spent; primer: sets or refreshes `mark` without detonating anything. */
-  momentum?: number; cost?: number; mark?: MarkId; primer?: true; stagger?: number; interrupts?: boolean;
-  effects: readonly Effect[]; support?: true; ai: AiUse;
+  readonly momentum?: number; readonly cost?: number; readonly mark?: MarkId; readonly primer?: true; readonly stagger?: number; readonly interrupts?: boolean;
+  readonly effects: readonly Effect[]; readonly support?: true; readonly ai: AiUse;
 }
 
 // ───────── effect numbers the Plan 3 rows describe ─────────
@@ -99,7 +111,7 @@ export function chargedShot(heldS: number): { frac: number; coef: number; stagge
 }
 
 const M = MELEE_REACH;
-export const ABILITIES: Record<AbilityId, AbilityData> = {
+export const ABILITIES: Readonly<Record<AbilityId, AbilityData>> = deepFreeze({
   // ───────── Warrior ─────────
   slash: {
     id: 'slash', name: 'Slash', glyph: '⟋', desc: 'A quick cut that builds 20 Momentum.', job: 'warrior',
@@ -245,8 +257,8 @@ export const ABILITIES: Record<AbilityId, AbilityData> = {
     effects: [{ k: 'hp-cost', amount: 10 }, { k: 'shield', amount: 30, s: 6, on: 'self' }], ai: 'shieldSelf',
   },
   // ───────── Ninja ─────────
-  twin_fang: {
-    id: 'twin_fang', name: 'Twin Fang', glyph: '⋎', desc: 'A quick double cut that builds 20 Momentum and leaves the target Marked.', job: 'ninja',
+  crossed_fangs: {
+    id: 'crossed_fangs', name: 'Crossed Fangs', glyph: '⋎', desc: 'A quick double cut that builds 20 Momentum and leaves the target Marked.', job: 'ninja',
     role: 'quick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 3.5, range: M, momentum: 20, mark: 'marked', primer: true,
     effects: [{ k: 'damage', coef: 1.3 }], ai: 'damage',
   },
@@ -353,18 +365,18 @@ export const ABILITIES: Record<AbilityId, AbilityData> = {
     role: 'pick', kind: 'damage', aim: 'enemy', needsTarget: true, cooldown: 8, range: 18, cast: 0.8, school: 'light', momentum: 15,
     effects: [{ k: 'damage', coef: 2.2 }], ai: 'damage',
   },
-};
+});
 
 /** The bar belongs to the job (JOBS[id].bar). */
-export interface WeaponData { id: WeaponId; name: string; autoEvery: number; autoCoef: number; autoRange: number }
-export const WEAPONS: Record<WeaponId, WeaponData> = {
+export interface WeaponData { readonly id: WeaponId; readonly name: string; readonly autoEvery: number; readonly autoCoef: number; readonly autoRange: number }
+export const WEAPONS: Readonly<Record<WeaponId, WeaponData>> = deepFreeze({
   blade: { id: 'blade', name: 'Blade', autoEvery: 1.2, autoCoef: 1.0, autoRange: M },
   bow: { id: 'bow', name: 'Bow', autoEvery: 1.5, autoCoef: 1.1, autoRange: 18 },
   sword: { id: 'sword', name: 'Sword and Shield', autoEvery: 1.4, autoCoef: 1.0, autoRange: M },
   greatsword: { id: 'greatsword', name: 'Greatsword', autoEvery: 1.8, autoCoef: 1.2, autoRange: M },
   daggers: { id: 'daggers', name: 'Twin Daggers', autoEvery: 0.9, autoCoef: 0.6, autoRange: M },
   staff: { id: 'staff', name: 'Staff', autoEvery: 1.6, autoCoef: 1.0, autoRange: 16 },
-};
+});
 
 /** The damage coefficient of an ability's `damage` effect (0 if it has none). */
 export function damageCoef(ab: AbilityData): number {
@@ -374,11 +386,11 @@ export function damageCoef(ab: AbilityData): number {
 
 // ───────── loadouts ─────────
 export interface Loadout { job: JobId; picks: [AbilityId, AbilityId] }
-/** Treat as read-only: copy it (parseLoadout or a spread with new `picks`) before changing anything. */
-export const DEFAULT_LOADOUT: Loadout = { job: 'warrior', picks: ['mend', 'bulwark'] };
+/** Frozen: copy it (parseLoadout or a spread with new `picks`) to get one to change. */
+export const DEFAULT_LOADOUT: Readonly<Loadout> = deepFreeze<Loadout>({ job: 'warrior', picks: ['mend', 'bulwark'] });
 
 /** The five slots: the job's quick, finisher and signature, then the two picks. */
-export function slotsFor(l: Loadout): AbilityId[] {
+export function slotsFor(l: Readonly<Loadout>): AbilityId[] {
   return [...JOBS[l.job].bar, l.picks[0], l.picks[1]];
 }
 
@@ -409,8 +421,6 @@ export function legacyLoadout(v: unknown): Loadout | null {
 }
 
 // ───────── transitional (Task 2 deletes all of this) ─────────
-/** @deprecated The Warrior's pool (JOBS.warrior.pool), for callers not yet on jobs. */
-export const FREE_POOL: readonly AbilityId[] = ['rallying_roar', 'skullringer', 'mend', 'bulwark'];
 /** @deprecated The Warrior's and Ranger's bars, for callers that read Plan 3's WEAPONS[w].bar. */
 export const WEAPON_BARS: Record<'blade' | 'bow', readonly AbilityId[]> = {
   blade: ['slash', 'sunder', 'parry'],

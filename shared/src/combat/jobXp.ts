@@ -1,11 +1,12 @@
 // Per-job XP: a stub curve (Plan 5 replaces it). Each credited adventurer's current job gains a kill's
 // XP; in 3b a level changes nothing in combat.
+import { deepFreeze } from './freeze';
 import type { EnemyKindId } from './enemies';
 import { recordFor, type JobId, type JobsSave } from './jobs';
 
 export const XP_PER_LEVEL = 100;
 export const JOB_LEVEL_CAP = 10;
-export const KILL_XP: Record<EnemyKindId, number> = { thornling: 10, boar: 10, archer: 10, mossback: 40, dummy: 0 };
+export const KILL_XP: Readonly<Record<EnemyKindId, number>> = deepFreeze({ thornling: 10, boar: 10, archer: 10, mossback: 40, dummy: 0 });
 
 const clean = (xp: number) => (Number.isFinite(xp) && xp > 0 ? xp : 0);
 

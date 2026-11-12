@@ -1,5 +1,6 @@
 // Elements and reactions. Only Staff spells carry an element. An elemental hit on a target carrying
 // the element's reacting mark (other than the hit's own mark) consumes that mark and reacts.
+import { deepFreeze } from './freeze';
 import { ELEMENT_RESIST_MULT, ELEMENT_WEAK_MULT } from './constants';
 import type { EnemyKindData } from './enemies';
 import type { MarkId } from './marks';
@@ -8,12 +9,12 @@ export type ElementId = 'fire' | 'water' | 'lightning' | 'earth';
 export type ReactionId = 'blast' | 'conduct' | 'steam' | 'bedrock';
 
 /** Each element's reacting mark and the reaction it triggers. */
-export const REACTIONS: Record<ElementId, { mark: MarkId; reaction: ReactionId }> = {
+export const REACTIONS: Readonly<Record<ElementId, { readonly mark: MarkId; readonly reaction: ReactionId }>> = deepFreeze({
   fire: { mark: 'marked', reaction: 'blast' },
   lightning: { mark: 'soaked', reaction: 'conduct' },
   water: { mark: 'burning', reaction: 'steam' },
   earth: { mark: 'dazed', reaction: 'bedrock' },
-};
+});
 
 /** The reaction an `element` hit triggers against `liveMarks`, or null (no element, no reacting mark, or that mark is the hit's own). */
 export function reactionFor(element: ElementId | undefined, liveMarks: readonly MarkId[], ownMark?: MarkId): ReactionId | null {

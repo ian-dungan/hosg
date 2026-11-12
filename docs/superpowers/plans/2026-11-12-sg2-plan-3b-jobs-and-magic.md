@@ -247,8 +247,8 @@ Each reaction sends `react` fx, and a `mark … on: false` for the consumed mark
 | Warrior | **Battle Rhythm**: autos build more Momentum | `RHYTHM_AUTO_MOMENTUM = 15` (instead of `AUTO_MOMENTUM`) |
 | Ranger | **Pinpoint**: stronger against a target that is attacking someone else | `PINPOINT_MULT = 1.1` |
 | Paladin | **Steadfast**: takes less damage, draws more attention; Momentum from blocking | `STEADFAST_TAKEN = 0.85`, `STEADFAST_THREAT = 1.5` (× all threat it adds), `BLOCK_MOMENTUM = 5` per enemy hit landing on it (hp or shield) |
-| Dark Knight | **Blood Price**: ability damage heals; pain builds Momentum | `BLOOD_LIFESTEAL = 0.2` of ability damage dealt (not autos, not Burning) heals it; `BLOOD_MOMENTUM_PER_HP = 1/3` of enemy damage taken (after shields), floored per hit |
-| Ninja | **Shadowstep**: an extra dodge, strikes from behind, Momentum from close calls | `NINJA_DODGE_CHARGES = 3`; `BEHIND_MULT = 1.25` on autos and abilities; `EVASION_PERFECT_MOMENTUM = 25` per perfect dodge (instead of `PERFECT_DODGE_MOMENTUM`) |
+| Dark Knight | **Crimson Tithe**: ability damage heals; pain builds Momentum | `BLOOD_LIFESTEAL = 0.2` of ability damage dealt (not autos, not Burning) heals it; `BLOOD_MOMENTUM_PER_HP = 1/3` of enemy damage taken (after shields), floored per hit |
+| Ninja | **Dusk Slip**: an extra dodge, strikes from behind, Momentum from close calls | `NINJA_DODGE_CHARGES = 3`; `BEHIND_MULT = 1.25` on autos and abilities; `EVASION_PERFECT_MOMENTUM = 25` per perfect dodge (instead of `PERFECT_DODGE_MOMENTUM`) |
 | Black Mage | **Overflow**: elemental damage up; finished casts build Momentum | `OVERFLOW_MULT = 1.1`; `OVERFLOW_CAST_MOMENTUM = 10` per completed cast |
 | White Mage | **Font**: stronger heals on others; healing builds Momentum; quieter heals | `FONT_HEAL_MULT = 1.2` on heals to others; `FONT_MOMENTUM_PER_HP = 0.5`, at most `FONT_MOMENTUM_CAP = 20` per heal event; heal threat × `FONT_THREAT_MULT = 0.5` |
 
@@ -271,7 +271,7 @@ Each reaction sends `react` fx, and a `mark … on: false` for the consumed mark
 | `ranger` | Ranger | damage | bow | snap_shot, pitch_arrow, charged_shot | pinning_shot, field_dressing, sprint, barbed_rain | field_dressing, pinning_shot | pinning_shot, field_dressing | 2 | ➶ |
 | `paladin` | Paladin | tank | sword | shield_rap, bright_verdict, aegis | taunt, shelter, kindle, dawn_ward | kindle, dawn_ward | taunt, shelter | 2 | ⛨ |
 | `dark_knight` | Dark Knight | hybrid | greatsword | grim_rend, nightfall, crimson_pact | bloodbond, dread_howl, umbral_brand, grave_ward | grave_ward, umbral_brand | bloodbond, umbral_brand | 2 | ♆ |
-| `ninja` | Ninja | damage | daggers | twin_fang, hamstring, ghost_edge | ashcloud, weak_point, quickstep, mist_form | mist_form, ashcloud | weak_point, ashcloud | 3 | ✕ |
+| `ninja` | Ninja | damage | daggers | crossed_fangs, hamstring, ghost_edge | ashcloud, weak_point, quickstep, mist_form | mist_form, ashcloud | weak_point, ashcloud | 3 | ✕ |
 | `white_mage` | White Mage | healer | staff | tidelash, lantern_flare, wellspring | second_dawn, soft_rain, mistveil, sun_mote | soft_rain, sun_mote | second_dawn, soft_rain | 2 | ✙ |
 | `black_mage` | Black Mage | damage | staff | cinder_dart, skyfall_arc, hearthfall | kindred_spark, bastion_stone, rootbreak, stormcage | bastion_stone, rootbreak | kindred_spark, rootbreak | 2 | ✺ |
 
@@ -309,7 +309,7 @@ Task 1's data test checks the job glyphs. If one renders as an emoji on the targ
 | `dread_howl` S | Dread Howl | ⁂ | Dark Knight pick | 0 | 20 | self | — | — | taunt every live enemy within 8 m | `tauntIfNotMe` |
 | `umbral_brand` | Umbral Brand | ⌖ | Dark Knight pick | 0 | 10 | melee | — | dazed (primer) | damage 1.2 | `damage` |
 | `grave_ward` | Grave Ward | ▣ | Dark Knight pick | 0 | 18 | self | — | — | hp-cost 10; shield self 30 for 6 s | `shieldSelf` |
-| `twin_fang` | Twin Fang | ⋎ | Ninja 1 | 0 | 3.5 | melee | +20 | marked (primer) | damage 1.3 | `damage` |
+| `crossed_fangs` | Crossed Fangs | ⋎ | Ninja 1 | 0 | 3.5 | melee | +20 | marked (primer) | damage 1.3 | `damage` |
 | `hamstring` | Hamstring | ⊻ | Ninja 2 | 0 | 6 | melee | cost 50 | rooted | damage 3.2; stagger 10 | `finisher` |
 | `ghost_edge` | Ghost Edge | ⟁ | Ninja 3 | 0 | 8 | melee | +15 | — | damage 2.4, always counts as from behind | `damage` |
 | `ashcloud` S | Ashcloud | ≈ | Ninja pick | 0 | 24 | self | — | — | threat-drop r 6 (the Ninja's threat on each live enemy within 6 m becomes 0); debuff blinded 3 s on each of them | `threatDrop` |
@@ -531,7 +531,7 @@ export function legacyLoadout(v: unknown): Loadout | null;   // Plan 3 { weapon,
 export type JobId = 'warrior' | 'ranger' | 'paladin' | 'dark_knight' | 'ninja' | 'white_mage' | 'black_mage';
 export type FutureJobId = 'monk' | 'bard' | 'beastmaster' | 'sky_lancer';
 export type RoleTag = 'damage' | 'tank' | 'healer' | 'hybrid';
-export type TraitId = 'battle_rhythm' | 'pinpoint' | 'steadfast' | 'blood_price' | 'shadowstep' | 'overflow' | 'font';
+export type TraitId = 'battle_rhythm' | 'pinpoint' | 'steadfast' | 'crimson_tithe' | 'dusk_slip' | 'overflow' | 'font';
 export interface JobData {
   id: JobId; name: string; glyph: string; role: RoleTag; weapon: WeaponId;
   bar: readonly [AbilityId, AbilityId, AbilityId]; pool: readonly [AbilityId, AbilityId, AbilityId, AbilityId];
