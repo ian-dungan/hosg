@@ -12,6 +12,7 @@ import type { Shape } from './shapes';
 import type { StaggerBar } from './stagger';
 import type { Stats } from './stats';
 import { ThreatTable } from './threat';
+import { stepEnemies } from './enemyAi';
 import type { Displacement, DisplaceResult } from './displace';
 import {
   abilityIntent, applyCarry, carryOfState, currentAct, dodgeIntent, fallDamageTaken, liveShield, loadoutIntent, newAdventurer, removeFromThreat,
@@ -132,11 +133,8 @@ export interface CombatWorld {
   out: TickOut;
 }
 
-/**
- * Per-tick enemy behaviour, run after the adventurers and before enemy status (marks, burning,
- * stagger decay, stun end, respawns). Until the enemy AI exists, enemies stand at their camps.
- */
-function stepEnemies(_w: CombatWorld, _nowS: number, _dt: number): void {}
+// Per-tick enemy behaviour (enemyAi.ts) runs after the adventurers and before enemy status (marks,
+// burning, stagger decay, stun end, respawns).
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;

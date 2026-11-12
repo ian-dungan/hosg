@@ -12,3 +12,6 @@ export * from './enemies';
 export * from './fx';
 export * from './engine';
 export { isInCombat, adventurerInCombat, onAnyThreatTable } from './adventurer';
+export { enemyAiStats, enemyPassable, resolveHit, NO_TARGET_S, RETURN_MAX_S, RETURN_SPEED_SCALE } from './enemyAi';
+export * from './brain';
+export * from './sim';

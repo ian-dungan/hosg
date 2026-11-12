@@ -26,6 +26,9 @@ class Rig {
   readonly outs: TickOut[] = [];
   constructor(camps: CampSpawn[], walls: Wall[] = [], seed = 1) {
     this.c = createCombat(zone(camps, walls), { seed, nowS: 0 });
+    // These are the adventurer-side rules: enemies are held still (stunned for good), so the enemy AI
+    // (enemyAi.ts, tested in enemyAi.test.ts) neither moves them nor fights back.
+    for (const e of worldOf(this.c).enemies.values()) { e.act = 'stun'; e.actUntil = Infinity; }
   }
   get now() { return this.k / 15; }
   enemy(kind: EnemyKindId): number {
