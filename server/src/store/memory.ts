@@ -1,6 +1,6 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_LOADOUT, MAX_HP, SPAWN, isZoneId } from '@sg2/shared';
+import { PLAN3_DEFAULT_LOADOUT, MAX_HP, SPAWN, isZoneId } from '@sg2/shared';
 import { AlreadyNamedError, NameTakenError, checkedSave, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 /** A copy that shares nothing with the stored adventurer (its loadout is copied too). */
@@ -26,7 +26,7 @@ export function createMemoryStore(opts: { start?: StartSpot } = {}): Store {
         facing: start.facing,
         zone: start.zone,
         hp: MAX_HP,
-        loadout: { weapon: DEFAULT_LOADOUT.weapon, free: [DEFAULT_LOADOUT.free[0], DEFAULT_LOADOUT.free[1]] },
+        loadout: { weapon: PLAN3_DEFAULT_LOADOUT.weapon, free: [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]] },
         level: 1,
         xp: 0,
         gold: 0,

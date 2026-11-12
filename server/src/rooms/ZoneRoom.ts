@@ -44,7 +44,7 @@ import {
   type FxEvent,
   type Intent,
   type IntentAction,
-  type Loadout,
+  type Plan3Loadout,
   type Pose,
   type Refusal,
   type S2C,
@@ -208,7 +208,7 @@ interface Session {
   adventurerId: string;
   player: PlayerState;
   /** The equipped weapon and free picks, saved with the adventurer (changed only out of combat, from Task 6). */
-  loadout: Loadout;
+  loadout: Plan3Loadout;
   /** Last accepted position (exact: the state's copy is quantised). */
   lastGood: { x: number; z: number; y: number };
   /** Last accepted facing (exact, as sent). */
@@ -676,7 +676,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const session = this.actor(client);
     const free = (message as { free?: unknown } | null)?.free;
     if (!session || !Array.isArray(free) || free.length !== 2 || !free.every((f) => typeof f === 'string')) return;
-    if (this.intent(session, 'loadout', { t: 'loadout', free: [free[0], free[1]] as Loadout['free'] })) this.takeLoadout(session);
+    if (this.intent(session, 'loadout', { t: 'loadout', free: [free[0], free[1]] as Plan3Loadout['free'] })) this.takeLoadout(session);
   }
 
   /** The engine's loadout becomes the one saved with the adventurer. */

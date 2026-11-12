@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
-import { DEFAULT_LOADOUT, MAX_HP, SPAWN } from '@sg2/shared';
+import { PLAN3_DEFAULT_LOADOUT, MAX_HP, SPAWN } from '@sg2/shared';
 import { NameTakenError, type Adventurer, type Store } from './types';
 import { createMemoryStore } from './memory';
 import { createPgStore, createPool } from './pg';
@@ -97,7 +97,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
         xp: 0,
         gold: 0,
         hp: MAX_HP,
-        loadout: DEFAULT_LOADOUT,
+        loadout: PLAN3_DEFAULT_LOADOUT,
       });
       expect(first.hp).toBe(100);
     });
@@ -213,7 +213,7 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       const other = await open({ start });
       try {
         const account = await other.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
-        expect(await other.getOrCreateAdventurer(account.id)).toMatchObject({ ...start, hp: 100, loadout: DEFAULT_LOADOUT, name: null });
+        expect(await other.getOrCreateAdventurer(account.id)).toMatchObject({ ...start, hp: 100, loadout: PLAN3_DEFAULT_LOADOUT, name: null });
         expect(await other.nameAdventurer(account.id, uniqueName('Elowen'))).toMatchObject(start);
       } finally {
         await other.close();
@@ -353,7 +353,7 @@ if (databaseUrl) {
         const store = await createPgStore(url.href);
         try {
           expect(await store.getOrCreateAdventurer(accountId)).toMatchObject({
-            name: 'Hazel', x: 1.5, z: -9, facing: 0.5, zone: 'grove', hp: 100, loadout: DEFAULT_LOADOUT,
+            name: 'Hazel', x: 1.5, z: -9, facing: 0.5, zone: 'grove', hp: 100, loadout: PLAN3_DEFAULT_LOADOUT,
           });
         } finally {
           await store.close();
@@ -366,7 +366,7 @@ if (databaseUrl) {
           await again.query(`UPDATE adventurers SET hp = 55 WHERE account_id = $1`, [accountId]);
           await again.query(await sql('003_combat.sql'));
           const { rows } = await again.query(`SELECT hp, loadout, zone FROM adventurers WHERE account_id = $1`, [accountId]);
-          expect(rows).toEqual([{ hp: 55, loadout: DEFAULT_LOADOUT, zone: 'grove' }]);
+          expect(rows).toEqual([{ hp: 55, loadout: PLAN3_DEFAULT_LOADOUT, zone: 'grove' }]);
         } finally {
           await again.end();
         }
@@ -385,7 +385,7 @@ if (databaseUrl) {
         const adventurer = await store.getOrCreateAdventurer(account.id);
         for (const bad of ['{"weapon":"staff","free":["mend","bulwark"]}', '{"weapon":"blade","free":["mend","mend"]}', '[]', 'null', '"blade"']) {
           await db.query(`UPDATE adventurers SET loadout = $2::jsonb, zone = 'moon' WHERE id = $1`, [adventurer.id, bad]);
-          expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ loadout: DEFAULT_LOADOUT, zone: 'grove' });
+          expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ loadout: PLAN3_DEFAULT_LOADOUT, zone: 'grove' });
         }
       } finally {
         await db.end();

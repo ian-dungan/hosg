@@ -50,7 +50,7 @@ import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
   DEATH_MIN_S,
-  DEFAULT_LOADOUT,
+  PLAN3_DEFAULT_LOADOUT,
   DODGE_CHARGES,
   DODGE_MIN_GAP_S,
   ENEMY_ATTACKS,
@@ -74,7 +74,7 @@ import {
   isZoneId,
   makeAirTrack,
   makeBody,
-  slotsFor,
+  plan3Slots,
   newBrainMemory,
   simulateDisplacement,
   stepBody,
@@ -424,7 +424,7 @@ class Bot {
     this.hunter = fight && ELITE_HUNTERS.includes(index);
     this.sprinter = fight && index % 5 === SPRINTER;
     this.predictor = fight && index % 5 === PREDICTOR;
-    this.free = this.sprinter ? SPRINTER_FREE : [...DEFAULT_LOADOUT.free];
+    this.free = this.sprinter ? SPRINTER_FREE : [PLAN3_DEFAULT_LOADOUT.free[0], PLAN3_DEFAULT_LOADOUT.free[1]];
   }
 
   async join() {
@@ -750,7 +750,7 @@ class Bot {
   /** A fresh adventurer's own numbers (nothing used yet), with the weapon the state shows. */
   private freshSelf(weapon: string): SelfView {
     const w: WeaponId = weapon === 'bow' ? 'bow' : 'blade';
-    const slots = slotsFor({ weapon: w, free: this.free });
+    const slots = plan3Slots({ weapon: w, free: this.free });
     const localGcd = Math.max(0, GCD_S - (performance.now() - this.pressedAt) / 1000);
     return { momentum: 0, weapon: w, slots, cd: slots.map(() => 0), gcd: localGcd, swapCd: 0, swapLock: 0, dodgeCharges: DODGE_CHARGES, dodgeNextIn: 0, charge: null, inCombat: false };
   }

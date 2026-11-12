@@ -1,5 +1,5 @@
 // What the server keeps between sessions: accounts and their adventurers.
-import { isZoneId, parseLoadout, type Loadout, type ZoneId } from '@sg2/shared';
+import { isZoneId, parsePlan3Loadout, type Plan3Loadout, type ZoneId } from '@sg2/shared';
 
 export interface Account {
   id: string;
@@ -21,8 +21,9 @@ export interface Adventurer {
   zone: ZoneId;
   /** Health when last saved: a whole number (a room brings it inside 1..maxHp when the adventurer joins). */
   hp: number;
-  /** The equipped weapon and the two free picks. A stored one that parseLoadout refuses reads as DEFAULT_LOADOUT. */
-  loadout: Loadout;
+  /** The equipped weapon and the two free picks. A stored one that parsePlan3Loadout refuses reads as PLAN3_DEFAULT_LOADOUT
+   * (Plan 3's shape until Plan 3b Task 5/6 moves the server to jobs). */
+  loadout: Plan3Loadout;
   level: number;
   xp: number;
   gold: number;
@@ -60,12 +61,12 @@ export type AdventurerSave = Pick<Adventurer, 'id' | 'x' | 'z' | 'facing' | 'zon
 
 /**
  * Checks a save before it is written, the same way for every store: throws a TypeError for an
- * unknown zone, a loadout parseLoadout refuses, or a non-finite position or hp. Returns the values to
+ * unknown zone, a loadout parsePlan3Loadout refuses, or a non-finite position or hp. Returns the values to
  * write, with hp rounded to a whole number and a fresh copy of the loadout.
  */
 export function checkedSave(a: AdventurerSave): AdventurerSave {
   if (!isZoneId(a.zone)) throw new TypeError(`saveAdventurer: unknown zone ${String(a.zone)}`);
-  const loadout = parseLoadout(a.loadout);
+  const loadout = parsePlan3Loadout(a.loadout);
   if (!loadout) throw new TypeError('saveAdventurer: not a loadout');
   for (const k of ['x', 'z', 'facing', 'hp'] as const) {
     if (!Number.isFinite(a[k])) throw new TypeError(`saveAdventurer: ${k} is not a finite number`);
@@ -81,7 +82,7 @@ export interface Store {
   findAccountById(id: string): Promise<Account | null>;
   /**
    * One adventurer per account; a new one starts at the store's start spot (default the grove's SPAWN)
-   * with no name, hp MAX_HP, DEFAULT_LOADOUT, level 1, 0 xp and 0 gold.
+   * with no name, hp MAX_HP, PLAN3_DEFAULT_LOADOUT, level 1, 0 xp and 0 gold.
    */
   getOrCreateAdventurer(accountId: string): Promise<Adventurer>;
   /**

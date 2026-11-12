@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CloseCode, matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
 import {
-  DEFAULT_LOADOUT,
+  PLAN3_DEFAULT_LOADOUT,
   REASON_ELSEWHERE,
   REASON_TRAVEL_FAILED,
   SPAWN,
@@ -76,7 +76,7 @@ describe('travel through an open exit', () => {
     expect(travels).toEqual([{ zone: 'greenway' }]);
 
     expect(await store.getOrCreateAdventurer(alice.accountId)).toMatchObject({
-      zone: 'greenway', x: ENTRY.x, z: ENTRY.z, facing: ENTRY.facing, hp: 100, loadout: DEFAULT_LOADOUT,
+      zone: 'greenway', x: ENTRY.x, z: ENTRY.z, facing: ENTRY.facing, hp: 100, loadout: PLAN3_DEFAULT_LOADOUT,
     });
     expect(await zoneOf(url, alice.token)).toEqual({ status: 200, body: { zone: 'greenway' } });
     expect(await refusal(url, alice.token, 'grove')).toBe(REASON_ELSEWHERE);
