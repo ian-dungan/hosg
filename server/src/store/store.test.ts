@@ -330,6 +330,58 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       });
     }
 
+    it("Warden's Seals: one a UTC day (twice the same day, or racing, gives one), never touched by saves", async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      expect(a).toMatchObject({ seals: 0, sealDay: null, titles: [] });
+      expect(await store.awardSeal(a.id, '2026-11-12')).toEqual({ awarded: true, seals: 1 });
+      expect(await store.awardSeal(a.id, '2026-11-12')).toEqual({ awarded: false, seals: 1 });
+      const race = await Promise.all(Array.from({ length: 10 }, () => store.awardSeal(a.id, '2026-11-13')));
+      expect(race.filter((r) => r.awarded).length).toBe(1);
+      expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ seals: 2, sealDay: '2026-11-13' });
+      // a save (any zone, position, hp, jobs) leaves seals, the day and titles alone
+      expect(await store.saveAdventurer(saved(a, { x: 5 }))).toBe(true);
+      expect(await store.getOrCreateAdventurer(account.id)).toMatchObject({ seals: 2, sealDay: '2026-11-13', x: 5 });
+      await expect(store.awardSeal(a.id, 'yesterday')).rejects.toThrow(TypeError);
+      await expect(store.awardSeal(a.id, '2026-02-30')).rejects.toThrow(TypeError);
+      expect(await store.awardSeal('00000000-0000-4000-8000-000000000000', '2026-11-13')).toEqual({ awarded: false, seals: 0 });
+    });
+
+    it('titles: each once, in order; an unknown adventurer gets none', async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      expect(await store.addTitle(a.id, 'Lampbreaker')).toBe(true);
+      expect(await store.addTitle(a.id, 'Lampbreaker')).toBe(false);
+      expect(await store.addTitle(a.id, 'Other')).toBe(true);
+      expect((await store.getOrCreateAdventurer(account.id)).titles).toEqual(['Lampbreaker', 'Other']);
+      expect(await store.addTitle('00000000-0000-4000-8000-000000000000', 'Lampbreaker')).toBe(false);
+    });
+
+    it('boss kills: rank among the same boss and size; the leaderboard is the fastest ten; bad kills refused', async () => {
+      const boss = 'wickhound' as const, size = 2 + Math.floor(Math.random() * 3); // other runs on the same database share the table
+      const base = 1000 + Math.random() * 1000;
+      const at = new Date('2026-11-12T10:00:00Z');
+      const before = (await store.bossLeaderboard(boss, size, 100)).filter((e) => e.seconds < base).length;
+      expect(await store.recordBossKill({ boss, partySize: size, seconds: base + 50, names: ['A', 'B'], at })).toEqual({ rank: before + 1 });
+      expect(await store.recordBossKill({ boss, partySize: size, seconds: base + 10, names: ['C', 'D'], at })).toEqual({ rank: before + 1 });
+      expect(await store.recordBossKill({ boss, partySize: size, seconds: base + 30, names: ['E', 'F'], at })).toEqual({ rank: before + 2 });
+      const board = (await store.bossLeaderboard(boss, size, 100)).filter((e) => e.seconds >= base && e.seconds < base + 60);
+      expect(board.map((e) => e.names)).toEqual([['C', 'D'], ['E', 'F'], ['A', 'B']]);
+      expect(board[0]).toEqual({ names: ['C', 'D'], seconds: expect.closeTo(base + 10, 2), at: '2026-11-12T10:00:00.000Z' });
+      expect((await store.bossLeaderboard(boss, size)).length).toBeLessThanOrEqual(10);
+      for (const bad of [
+        { boss: 'moon', partySize: 1, seconds: 5, names: ['A'] }, { boss, partySize: 5, seconds: 5, names: ['A'] }, { boss, partySize: 0, seconds: 5, names: ['A'] },
+        { boss, partySize: 1, seconds: 0, names: ['A'] }, { boss, partySize: 1, seconds: NaN, names: ['A'] }, { boss, partySize: 1, seconds: 5, names: [] },
+      ]) await expect(store.recordBossKill({ ...bad, at } as never)).rejects.toThrow(TypeError);
+    });
+
+    it("refuses to save 'lampfall' (an instance is never a saved zone)", async () => {
+      const account = await store.createAccount({ username: uniqueName('Ellie'), passwordHash: 'h', isGuest: false });
+      const a = await store.getOrCreateAdventurer(account.id);
+      await expect(store.saveAdventurer(saved(a, { zone: 'lampfall' }))).rejects.toThrow(TypeError);
+      expect(() => checkedSave(saved(a, { zone: 'lampfall' }))).toThrow(TypeError);
+    });
+
     it('puts new adventurers at the start spot it was opened with', async () => {
       const start: StartSpot = { zone: 'greenway', x: 8, z: 3.5, facing: 1.5 };
       const other = await open({ start });
@@ -608,7 +660,7 @@ if (databaseUrl) {
           await db.query(await sql('004_jobs.sql'));
           expect(await raw()).toEqual(first);
           const { rows } = await db.query('SELECT name FROM schema_migrations ORDER BY name');
-          expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql']);
+          expect(rows.map((r) => r.name)).toEqual(['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql']);
           // A row made after 004 without jobs gets the column default (a new Warrior), and NULL is refused.
           const { rows: acc } = await db.query(`INSERT INTO accounts (username, password_hash, is_guest) VALUES ('New', 'h', false) RETURNING id`);
           const { rows: made } = await db.query(
@@ -617,6 +669,37 @@ if (databaseUrl) {
           );
           expect(made[0].jobs).toEqual(newJobsSave());
           await expect(db.query(`UPDATE adventurers SET jobs = NULL WHERE name = 'New'`)).rejects.toThrow();
+        } finally {
+          await db.end();
+        }
+      } finally {
+        await admin.query(`DROP DATABASE ${dbName} WITH (FORCE)`);
+        await admin.end();
+      }
+    });
+
+    it('migration 005 adds seals, titles and boss_kills to a 004 database, keeps every row, and is safe to run twice', async () => {
+      const dbName = `sg2_migrate_${Math.floor(Math.random() * 1e9)}`;
+      const admin = new pg.Client({ connectionString: databaseUrl });
+      await admin.connect();
+      await admin.query(`CREATE DATABASE ${dbName}`);
+      const url = new URL(databaseUrl);
+      url.pathname = `/${dbName}`;
+      const sql = async (file: string) => readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
+      try {
+        const db = new pg.Client({ connectionString: url.href });
+        await db.connect();
+        try {
+          for (const f of ['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql']) await db.query(await sql(f));
+          const { rows: acc } = await db.query(`INSERT INTO accounts (username, password_hash, is_guest) VALUES ('Old', 'h', false) RETURNING id`);
+          await db.query(`INSERT INTO adventurers (account_id, name, x, z, facing, zone, level, xp, gold, hp) VALUES ($1, 'Old', 1, 2, 0, 'greenway', 1, 0, 0, 70)`, [acc[0].id]);
+          await db.query(await sql('005_parties_and_warden.sql'));
+          await db.query(await sql('005_parties_and_warden.sql'));
+          const { rows } = await db.query('SELECT seals, seal_day, titles, zone, hp FROM adventurers');
+          expect(rows).toEqual([{ seals: 0, seal_day: null, titles: [], zone: 'greenway', hp: 70 }]);
+          const { rows: kills } = await db.query('SELECT count(*)::int AS n FROM boss_kills');
+          expect(kills[0].n).toBe(0);
+          await expect(db.query(`INSERT INTO boss_kills (boss, party_size, seconds, names) VALUES ('wickhound', 5, 1, '[]')`)).rejects.toThrow();
         } finally {
           await db.end();
         }

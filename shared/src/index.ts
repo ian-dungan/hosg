@@ -15,4 +15,5 @@ export { ZoneWalk } from './world/zoneWalk';
 export * from './world/limits';
 export { ZONE_IDS, isZoneId, SAVE_ZONE_IDS, isSaveZoneId, LAMPFALL_MOUTH, zoneDef, zoneFullReason, greenwayLayout, GROVE_EAST_GATE, GUILD_BOARD, REASON_JOB_NOT_HERE, jobSwitchAt, type ZoneId, type SaveZoneId, type ZoneExit, type ZoneDef, type Sanctuary } from './world/zones';
 export { LAMPFALL_RECIPE, SANCTUARY_R, generateDungeon, lampfallLayout, yawOf, DungeonWalk, type RoomId, type RoomSpec, type DungeonRecipe, type DungeonRoom, type DungeonCorridor, type DungeonLayout, type Gate } from './world/dungeon';
+export * from './world/lampGates';
 export * from './combat';

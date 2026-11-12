@@ -120,3 +120,22 @@ describe('server startup', () => {
     }
   }, 60_000);
 });
+
+describe('SG2_START_AT and SG2_TEST_INSTANCE_START (test servers only)', () => {
+  it('are off by default (never set in Docker or docker-compose.yml) and exit with one line for anything else', async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const file of ['../../docker-compose.yml', '../../Dockerfile']) {
+      const text = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+      expect(text, file).not.toMatch(/SG2_START_AT|SG2_TEST_INSTANCE_START/);
+    }
+    const at = await runServer({ SG2_STORE: 'memory', SG2_START_AT: 'moon' });
+    expect(at.code).toBe(1);
+    expect(at.stderr.trim()).toBe('Shady Grove 2 server: SG2_START_AT must be lampfall-mouth or empty (got "moon").');
+    const clash = await runServer({ SG2_STORE: 'memory', SG2_START_AT: 'lampfall-mouth', SG2_START_ZONE: 'grove' });
+    expect(clash.code).toBe(1);
+    expect(clash.stderr.trim()).toBe('Shady Grove 2 server: SG2_START_AT=lampfall-mouth starts in the Greenway; SG2_START_ZONE must be greenway or empty (got "grove").');
+    const inst = await runServer({ SG2_STORE: 'memory', SG2_TEST_INSTANCE_START: 'rim' });
+    expect(inst.code).toBe(1);
+    expect(inst.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_INSTANCE_START must be landing or empty (got "rim").');
+  }, 60_000);
+});

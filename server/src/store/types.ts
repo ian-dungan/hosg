@@ -38,6 +38,38 @@ export interface Adventurer {
   level: number;
   xp: number;
   gold: number;
+  /** Warden's Seals held (one a UTC day, for a Warden kill; Plan 5 exchanges them). */
+  seals: number;
+  /** The UTC day ('YYYY-MM-DD') of the last Seal, or null. */
+  sealDay: string | null;
+  /** Titles held (for example 'Lampbreaker'), each once, in the order won. */
+  titles: string[];
+}
+
+/** One boss kill for the leaderboard: the party size, seconds from the boss's wake to its death, the credited names. */
+export interface BossKill { boss: 'wickhound' | 'fallen_warden'; partySize: number; seconds: number; names: string[]; at: Date }
+
+/** The bosses the leaderboard keeps. */
+export const BOSS_KILL_BOSSES: readonly BossKill['boss'][] = ['wickhound', 'fallen_warden'];
+
+/** Checks a kill before it is recorded (both stores): a known boss, a party size of 1..4, seconds > 0, 1..4 names. */
+export function checkedKill(k: BossKill): BossKill {
+  if (!BOSS_KILL_BOSSES.includes(k.boss)) throw new TypeError(`recordBossKill: unknown boss ${String(k.boss)}`);
+  if (!Number.isInteger(k.partySize) || k.partySize < 1 || k.partySize > 4) throw new TypeError('recordBossKill: party size must be 1..4');
+  if (!Number.isFinite(k.seconds) || !(k.seconds > 0)) throw new TypeError('recordBossKill: seconds must be > 0');
+  if (!Array.isArray(k.names) || k.names.length < 1 || k.names.length > 4 || !k.names.every((n) => typeof n === 'string')) throw new TypeError('recordBossKill: 1..4 names');
+  if (!(k.at instanceof Date) || !Number.isFinite(k.at.getTime())) throw new TypeError('recordBossKill: at must be a date');
+  return { boss: k.boss, partySize: k.partySize, seconds: k.seconds, names: [...k.names], at: new Date(k.at.getTime()) };
+}
+
+/** A UTC day as 'YYYY-MM-DD' (what awardSeal takes). */
+export const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Whether `day` is a 'YYYY-MM-DD' string. */
+export function isUtcDay(day: unknown): day is string {
+  if (typeof day !== 'string' || !DAY_RE.test(day)) return false;
+  const t = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(t) && utcDay(t) === day;
 }
 
 /** Whether a stored jobs value reads only after repair (isJobsSave refuses it as stored). */
@@ -112,5 +144,17 @@ export interface Store {
    * a travel can never pull the adventurer back. Throws a TypeError for values checkedSave refuses.
    */
   saveAdventurer(a: AdventurerSave, expect?: { zone: ZoneId }): Promise<boolean>;
+  /**
+   * One Warden's Seal for the adventurer, atomically, only when its sealDay is not `dayUtc` ('YYYY-MM-DD'):
+   * awarded false (and nothing changed) when it already had that day's Seal, or for an unknown id. seals:
+   * the count after. Never touched by saveAdventurer.
+   */
+  awardSeal(adventurerId: string, dayUtc: string): Promise<{ awarded: boolean; seals: number }>;
+  /** Adds a title to the adventurer, atomically; false if it already holds it (or the id is unknown). */
+  addTitle(adventurerId: string, title: string): Promise<boolean>;
+  /** Records a boss kill; rank: 1 + the kills of the same boss and size that were faster (ties share the better rank). */
+  recordBossKill(k: BossKill): Promise<{ rank: number }>;
+  /** The fastest kills of a boss at a party size (at most `limit`, default 10, fastest first; ties by time). */
+  bossLeaderboard(boss: BossKill['boss'], partySize: number, limit?: number): Promise<{ names: string[]; seconds: number; at: string }[]>;
   close(): Promise<void>;
 }

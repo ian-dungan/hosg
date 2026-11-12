@@ -4,7 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave } from '@sg2/shared';
-import { AlreadyNamedError, NameTakenError, checkedSave, jobsNeedRepair, type Account, type Adventurer, type StartSpot, type Store } from './types';
+import { AlreadyNamedError, NameTakenError, checkedKill, checkedSave, isUtcDay, jobsNeedRepair, type Account, type Adventurer, type StartSpot, type Store } from './types';
 
 const UNIQUE_VIOLATION = '23505';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,10 +68,14 @@ interface AdventurerRow {
   level: number;
   xp: number;
   gold: number;
+  seals: number;
+  /** The date column as 'YYYY-MM-DD' text (to_char in ADVENTURER_COLUMNS: never a Date in the server's time zone). */
+  seal_day: string | null;
+  titles: unknown;
 }
 
 const ACCOUNT_COLUMNS = 'id, username, password_hash, is_guest, is_gm';
-const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold';
+const ADVENTURER_COLUMNS = 'id, account_id, name, x, z, facing, zone, hp, jobs, loadout, level, xp, gold, seals, to_char(seal_day, \'YYYY-MM-DD\') AS seal_day, titles';
 
 function toAccount(r: AccountRow): Account {
   return { id: r.id, username: r.username, passwordHash: r.password_hash, isGuest: r.is_guest, isGm: r.is_gm };
@@ -94,8 +98,12 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     level: r.level,
     xp: r.xp,
     gold: r.gold,
+    seals: r.seals ?? 0,
+    sealDay: r.seal_day ?? null,
+    titles: Array.isArray(r.titles) ? r.titles.filter((t): t is string => typeof t === 'string') : [],
   };
 }
+
 
 /**
  * A pool that survives losing idle connections (Postgres restart, idle kill): node-postgres emits
@@ -198,6 +206,48 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
         [id, x, z, facing, zone, hp, JSON.stringify(jobs), expect?.zone ?? null, ZONE_IDS],
       );
       return (rowCount ?? 0) > 0;
+    },
+
+    async awardSeal(adventurerId, dayUtc) {
+      if (!isUtcDay(dayUtc)) throw new TypeError(`awardSeal: not a day: ${String(dayUtc)}`);
+      if (!UUID_RE.test(adventurerId)) return { awarded: false, seals: 0 };
+      // One statement: only a row whose seal_day is not that day gains one (two kills, a retry, two
+      // processes: at most one Seal a UTC day).
+      const { rows } = await pool.query<{ seals: number }>(
+        `UPDATE adventurers SET seals = seals + 1, seal_day = $2::date WHERE id = $1 AND seal_day IS DISTINCT FROM $2::date RETURNING seals`,
+        [adventurerId, dayUtc],
+      );
+      if (rows[0]) return { awarded: true, seals: rows[0].seals };
+      const { rows: now } = await pool.query<{ seals: number }>('SELECT seals FROM adventurers WHERE id = $1', [adventurerId]);
+      return { awarded: false, seals: now[0]?.seals ?? 0 };
+    },
+
+    async addTitle(adventurerId, title) {
+      if (typeof title !== 'string' || title === '') throw new TypeError('addTitle: not a title');
+      if (!UUID_RE.test(adventurerId)) return false;
+      const { rowCount } = await pool.query(
+        `UPDATE adventurers SET titles = titles || to_jsonb($2::text) WHERE id = $1 AND NOT (titles ? $2)`,
+        [adventurerId, title],
+      );
+      return (rowCount ?? 0) > 0;
+    },
+
+    async recordBossKill(k) {
+      const kill = checkedKill(k);
+      const { rows } = await pool.query<{ rank: string }>(
+        `WITH ins AS (INSERT INTO boss_kills (boss, party_size, seconds, names, at) VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING seconds)
+         SELECT 1 + (SELECT count(*) FROM boss_kills WHERE boss = $1 AND party_size = $2 AND seconds < (SELECT seconds FROM ins)) AS rank`,
+        [kill.boss, kill.partySize, kill.seconds, JSON.stringify(kill.names), kill.at],
+      );
+      return { rank: Number(rows[0]!.rank) };
+    },
+
+    async bossLeaderboard(boss, partySize, limit = 10) {
+      const { rows } = await pool.query<{ names: unknown; seconds: number; at: Date }>(
+        `SELECT names, seconds, at FROM boss_kills WHERE boss = $1 AND party_size = $2 ORDER BY seconds, at, id LIMIT $3`,
+        [boss, partySize, Math.max(0, Math.floor(limit))],
+      );
+      return rows.map((r) => ({ names: Array.isArray(r.names) ? r.names.filter((n): n is string => typeof n === 'string') : [], seconds: r.seconds, at: r.at.toISOString() }));
     },
 
     async close() {

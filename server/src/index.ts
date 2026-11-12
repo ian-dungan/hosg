@@ -1,5 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type ZoneId } from '@sg2/shared';
+import { LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -76,8 +76,36 @@ function testDummy(): Partial<Record<ZoneId, { camps: CampSpawn[] }>> | undefine
   return { grove: { camps: [...zoneDef('grove').camps, { kind: 'dummy', x: 3, z: -11, facing: 0 }] } };
 }
 
+/**
+ * SG2_START_AT=lampfall-mouth (test servers only, never in Docker): new adventurers start in the Greenway
+ * at the crater mouth (LAMPFALL_MOUTH.arrive; it implies SG2_START_ZONE=greenway); unset or empty: the
+ * start zone's spawn.
+ */
+function startAt(): 'lampfall-mouth' | undefined {
+  const raw = process.env.SG2_START_AT;
+  if (raw === undefined || raw === '') return undefined;
+  if (raw !== 'lampfall-mouth') fail(`SG2_START_AT must be lampfall-mouth or empty (got "${raw}").`);
+  const zone = process.env.SG2_START_ZONE;
+  if (zone !== undefined && zone !== '' && zone !== 'greenway') fail(`SG2_START_AT=lampfall-mouth starts in the Greenway; SG2_START_ZONE must be greenway or empty (got "${zone}").`);
+  return raw;
+}
+
+/**
+ * SG2_TEST_INSTANCE_START=landing (test servers only, never in Docker): new Lampfall instances start with
+ * the packs and the Wickhound already dead and the checkpoint at the Keeper's Landing (scripted Warden runs).
+ */
+function testInstanceStart(): CheckpointId | undefined {
+  const raw = process.env.SG2_TEST_INSTANCE_START;
+  if (raw === undefined || raw === '') return undefined;
+  if (raw !== 'landing') fail(`SG2_TEST_INSTANCE_START must be landing or empty (got "${raw}").`);
+  return raw;
+}
+
 const port = positiveInt('SG2_PORT', 2570);
+const mouthStart = startAt();
+const instanceStart = testInstanceStart();
 const start = (() => {
+  if (mouthStart) return { zone: 'greenway' as const, ...LAMPFALL_MOUTH.arrive };
   const zone = startZone();
   const { x, z, facing } = zoneDef(zone).spawn;
   return { zone, x, z, facing };
@@ -105,7 +133,10 @@ if (process.env.SG2_STORE === 'memory') {
   }
 }
 
-const app = createApp({ store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones });
+const app = createApp({
+  store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones,
+  ...(instanceStart ? { instances: { startAt: instanceStart } } : {}),
+});
 try {
   await app.listen(port);
 } catch (err) {
@@ -113,7 +144,9 @@ try {
   fail(inUse ? `port ${port} is already in use; stop whatever uses it or set SG2_PORT to another port.` : `cannot listen on port ${port}: ${reason(err)}.`);
 }
 console.log(`Shady Grove 2 server listening on port ${port}${clientDir ? `, serving ${clientDir}` : ''}.`);
-if (start.zone !== 'grove') console.log(`Shady Grove 2 server: SG2_START_ZONE=${start.zone}; new adventurers start there.`);
+if (mouthStart) console.log('Shady Grove 2 server: SG2_START_AT=lampfall-mouth; new adventurers start at the crater mouth (test servers only).');
+else if (start.zone !== 'grove') console.log(`Shady Grove 2 server: SG2_START_ZONE=${start.zone}; new adventurers start there.`);
+if (instanceStart) console.log('Shady Grove 2 server: SG2_TEST_INSTANCE_START=landing; new instances start at the landing (test servers only).');
 if (dummyZones) console.log('Shady Grove 2 server: SG2_TEST_DUMMY=1; a Training Dummy stands in the grove (test servers only).');
 if (exitsOpen) console.log(`Shady Grove 2 server: SG2_OPEN_EXITS=${process.env.SG2_OPEN_EXITS}; those exits are open.`);
 console.log(

@@ -20,6 +20,7 @@ import {
   DEATH_MIN_S,
   DISPLACE_FUZZ_M,
   DODGE_CHARGES,
+  DODGE_DISTANCE,
   DODGE_MIN_GAP_S,
   DODGE_REFILL_S,
   INTEREST_MAX_ADVENTURERS,
@@ -81,14 +82,45 @@ import {
   type ZoneDef,
   type ZoneExit,
   type ZoneId,
+  AUTO_RELEASE_S,
+  BOSSES,
+  INSTANCE_EVICT_S,
+  INSTANCE_RECONNECT_S,
+  LAMPFALL_MOUTH,
+  PARTY_MAX,
+  REASON_ARENA_SEALED,
+  REASON_INSTANCES_FULL,
+  REASON_LEFT_PARTY,
+  RELEASE_MIN_S,
+  SEAL_DELAY_S,
+  WIPE_DELAY_S,
+  GATE_PIT,
+  GATE_WICK,
+  GATE_WICK_EXIT,
+  gatedSight,
+  gatedSurface,
+  lampfallArena,
+  lampfallGates,
+  lampfallLayout,
+  roomSideOf,
+  shutGateOnStep,
+  yawOf,
+  type ArenaEncounter,
+  type BossEvent,
+  type CampSpawn,
+  type CheckpointId,
+  type EncounterId,
+  type InstanceView,
+  type VictoryView,
 } from '@sg2/shared';
 import { verifyToken } from '../auth/tokens';
 import type { MemberStatus, Parties } from '../party/parties';
-import type { Adventurer, AdventurerSave, Store } from '../store/types';
+import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../store/types';
+import { REASON_IN_COMBAT, type InstanceInfo, type Instances } from './instances';
 import { Grid, dist2, interested, telegraphInterested } from './interest';
 import { PatchRateMeter } from './patchRate';
 import type { Allowance, Presence } from './presence';
-import { EnemyState as EnemySchema, PlayerState, TelegraphState as TelegraphSchema, ZoneState } from './state';
+import { EnemyState as EnemySchema, FieldState as FieldSchema, PlayerState, TelegraphState as TelegraphSchema, ZoneState } from './state';
 
 export interface ZoneRoomOptions {
   store: Store;
@@ -121,6 +153,49 @@ export interface ZoneRoomOptions {
   viewCap?: { max: number; slack: number };
   /** The process's party registry, shared by every room. */
   parties: Parties;
+  /** The process's Lampfall instances (the Greenway's crater mouth opens them; the party accept checks them). */
+  instances?: Instances;
+  /** This room is a Lampfall instance (its key is the party's, or 'solo:' + accountId). */
+  instance?: { key: string; registry: Instances; parties?: Parties; startAt?: CheckpointId; timings?: Partial<InstanceTimings> };
+}
+
+/** An instance's timings (s): the Numbers by default, shorter in tests. */
+export interface InstanceTimings { reconnectS: number; evictS: number; wipeS: number; releaseMinS: number; autoReleaseS: number; sealS: number }
+const INSTANCE_TIMINGS: InstanceTimings = {
+  reconnectS: INSTANCE_RECONNECT_S, evictS: INSTANCE_EVICT_S, wipeS: WIPE_DELAY_S, releaseMinS: RELEASE_MIN_S, autoReleaseS: AUTO_RELEASE_S, sealS: SEAL_DELAY_S,
+};
+
+/** The Lampfall's gate bits of each boss room's entry gate. */
+const ENTRY_GATE: Record<ArenaEncounter, number> = { wickhound: GATE_WICK, warden: GATE_PIT };
+/** A boss kind's encounter and leaderboard id. */
+const BOSS_OF: Partial<Record<EnemyKindId, { encounter: ArenaEncounter; boss: 'wickhound' | 'fallen_warden' }>> = {
+  wickhound: { encounter: 'wickhound', boss: 'wickhound' }, fallen_warden: { encounter: 'warden', boss: 'fallen_warden' },
+};
+/** The solo Warden title (Numbers → Rewards). */
+const SOLO_TITLE = 'Lampbreaker';
+/** An enemy fighting within this long (s) before the last death makes it a wipe. */
+const WIPE_FIGHT_S = 5;
+
+/** A running instance: its checkpoint, cleared encounters, gates, seal, wipe, lamp-lift and evictions. */
+interface InstanceRun {
+  key: string;
+  registry: Instances;
+  t: InstanceTimings;
+  cleared: Set<EncounterId>;
+  /** Shut gates (bits): the walls of the instance's surface. */
+  gates: number;
+  sealed: ArenaEncounter | null;
+  arenas: Record<ArenaEncounter, (x: number, z: number) => boolean>;
+  /** Each camp enemy's encounter (adds have none). */
+  encounterOf: Map<number, EncounterId>;
+  /** Each boss: when it woke (combat s), when its gate shuts, and the most adventurers inside since it woke. */
+  bosses: Map<number, { encounter: ArenaEncounter; boss: 'wickhound' | 'fallen_warden'; wokeAt: number | null; sealAt: number | null; most: number }>;
+  wipeAt: number | null;
+  lastFightAt: number;
+  lift: boolean;
+  /** accountId -> when it is sent out (combat s): it left or was kicked from the party. */
+  evictAt: Map<string, number>;
+  startedAt: number;
 }
 
 /** Where the dead get up again: the statue in this zone. */
@@ -346,13 +421,17 @@ interface Session {
   partySentAt: number;
   /** The party as this client last heard it (a full view, with every `partyStatus` since applied), or null. */
   partySent: PartyView | null;
+  /** The party the engine has it in (an instance's sealed arena splits a party: outside is not allied). */
+  engineParty: string | null;
+  /** What its last `instance` message said (its discrete parts), '' = none yet. */
+  instanceSent: string;
   statusAt: number;
 }
 
 const NO_ENEMIES: readonly EnemySchema[] = [];
 
 /** Something a client's view can hold. */
-type Viewed = PlayerState | EnemySchema | TelegraphSchema;
+type Viewed = PlayerState | EnemySchema | TelegraphSchema | FieldSchema;
 
 /** What a successful onAuth attaches to the client (`client.auth`). */
 interface JoinAuth {
@@ -443,17 +522,30 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private parties!: Parties;
   /** How long a traveller stays online and named between this room and the next (ms). */
   private travelKeepMs = 30_000;
+  /** The process's instances (the crater mouth, party accepts). */
+  private instances?: Instances;
+  /** Set when this room is a Lampfall instance. */
+  private inst?: InstanceRun;
 
-  onCreate(options: ZoneRoomOptions) {
-    // Never a second room for a zone (Colyseus would open one if it ever saw this one as full).
-    if (options.rooms.has(options.zone.id)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(options.zone.id));
-    this.zone = options.zone;
+  onCreate(options: ZoneRoomOptions & { instanceKey?: string }) {
+    this.instances = options.instances ?? options.instance?.registry;
+    if (options.instance) {
+      // a Lampfall instance: never in `rooms`; its key comes with the create call
+      const key = typeof options.instanceKey === 'string' ? options.instanceKey : options.instance.key;
+      // only Instances.enter opens one (a client's joinOrCreate('lampfall') or create is refused)
+      if (!options.instance.registry.expects(key)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+      this.setupInstance(options, key);
+    } else {
+      // Never a second room for a zone (Colyseus would open one if it ever saw this one as full).
+      if (options.rooms.has(options.zone.id)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(options.zone.id));
+      this.zone = options.zone;
+    }
     this.store = options.store;
-    this.maxPlayers = options.maxPlayers;
+    this.maxPlayers = this.inst ? PARTY_MAX : options.maxPlayers;
     // Admission is decided by canAdmit, so Colyseus must never see the room as full (it would open
     // a second one): leave room for an account's new session joining before its old one is kicked.
-    this.maxClients = options.maxPlayers * 2;
-    this.reconnectSeconds = options.reconnectSeconds;
+    this.maxClients = this.maxPlayers * 2;
+    this.reconnectSeconds = this.inst ? this.inst.t.reconnectS : options.reconnectSeconds;
     this.travelKeepMs = options.reconnectSeconds * 1000;
     this.accounts = options.presence;
     this.rooms = options.rooms;
@@ -467,8 +559,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.clockS = options.combatClock ?? (() => (performance.now() - createdAt) / 1000);
     this.lastTickAt = this.clockS();
     this.combat = createCombat(this.zone, { seed: options.combatSeed, nowS: this.lastTickAt });
+    if (this.inst) this.tagEncounters();
     this.mirrorZone();
-    this.rooms.set(this.zone.id, this);
+    if (this.inst) {
+      this.state.instance = this.roomId ?? '';
+      this.mirrorInstance();
+      this.inst.registry.attach(this.inst.key, this);
+    } else this.rooms.set(this.zone.id, this);
     this.setPatchRate(1000 / TICK_HZ);
 
     this.onMessage('move', this.guard('move', (client, message) => this.onMove(client, message)));
@@ -482,6 +579,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.onMessage('loadout', this.guard('loadout', (client, message) => this.onLoadout(client, message)));
     this.onMessage('respawn', this.guard('respawn', (client) => this.onRespawn(client)));
     this.onMessage('party', this.guard('party', (client, message) => this.onParty(client, message)));
+    this.onMessage('release', this.guard('release', (client) => this.onRelease(client)));
+    this.onMessage('leaveInstance', this.guard('leaveInstance', (client) => this.onLeaveInstance(client)));
     // (intents spend the intent budget, every other message the message budget: see guard)
     this.clock.setInterval(() => {
       this.forgetIdleAllowances();
@@ -497,6 +596,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(this.zone.id));
     // Claim the account before any await, in every room at once, so a later join of the same account
     // (here or in another zone) kicks this one; and kick the session that held it, wherever it is.
+    // An older session of this account in this instance (a fresh sign-in after a drop): the new one
+    // stands where it stood (alive), so a relog never moves anyone out of a fight or into a sealed one.
+    const before = this.inst ? this.sessionOf(accountId) : undefined;
+    const prevSpot = before && !before.dead ? { ...before.lastGood, facing: before.facing } : undefined;
     const previous = this.accounts.claim(accountId, this, sessionId);
     this.sessionByAccount.set(accountId, sessionId);
     const giveUp = () => {
@@ -517,8 +620,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (this.accounts.get(accountId)?.sessionId !== sessionId) {
         throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_SIGNED_IN_ELSEWHERE);
       }
-      // It travelled (or was moved) to another zone after onAuth looked: that zone's room takes it.
-      if (adventurer.zone !== this.zone.id) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+      // It travelled (or was moved) to another zone after onAuth looked: that zone's room takes it. An
+      // instance's adventurers are saved in the Greenway (at the crater mouth), and must be allowed in.
+      if (adventurer.zone !== this.homeZone) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+      if (this.inst && !this.instanceInfo()?.allowed.has(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
     } catch (err) {
       giveUp();
       throw err;
@@ -529,8 +634,11 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // the account's air track says it is still falling there (a re-join mid-air in this zone): then it
     // carries on falling. An air track from another zone means nothing here.
     const surface = this.zone.surface;
-    const savedY = surface(adventurer.x, adventurer.z);
-    const start = savedY === null ? this.zone.spawn : adventurer;
+    // (in an instance: where it stood, or the current checkpoint)
+    const from = this.inst ? (prevSpot ?? this.checkpointSpot()) : adventurer;
+    const savedY = surface(from.x, from.z);
+    const start = savedY === null ? this.zone.spawn : from;
+    if (this.inst) this.inst.registry.release(accountId); // seated now: no hold needed
     const movement = this.allowanceFor(accountId);
     if (savedY === null || movement.air.grounded || movement.zone !== this.zone.id) {
       movement.air = makeAirTrack(savedY ?? surface(start.x, start.z) ?? 0);
@@ -596,6 +704,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       partyDue: false,
       partySentAt: -Infinity,
       partySent: null,
+      engineParty: null,
+      instanceSent: '',
       statusAt: -Infinity,
     };
     this.sessions.set(sessionId, session);
@@ -658,6 +768,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   async onDispose() {
     this.disposed = true;
+    if (this.inst) this.inst.registry.disposed(this.roomId);
     if (this.rooms.get(this.zone.id) === this) this.rooms.delete(this.zone.id);
     await Promise.all([...this.sessions.keys()].map((sessionId) => this.removeSession(sessionId)));
   }
@@ -673,6 +784,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (until <= now) this.arrivals.delete(id);
       else if (!this.sessionByAccount.has(id)) held++;
     }
+    // an instance admits only its allowed accounts (the party), PARTY_MAX at most
+    if (this.inst && !this.instanceInfo()?.allowed.has(accountId)) return false;
     if (this.sessionByAccount.has(accountId) || this.arrivals.has(accountId)) return true;
     // Someone who died (saved as respawned here) always gets up at the statue, however full it is.
     if (this.zone.id === RESPAWN_ZONE && (this.accounts.respawns.get(accountId) ?? -Infinity) > this.wallMs()) return true;
@@ -739,6 +852,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const { result, landedDrop } = checkPose(session.lastGood, movement.air, pose, now, movement.metres, this.zone.surface);
     if (result !== 'ok') {
       this.correct(session, now);
+      // into a shut lamp-gate (its circle is a wall): say why
+      if (this.inst && shutGateOnStep(this.inst.gates, session.lastGood, pose)) this.notice(session, REASON_ARENA_SEALED, now);
       return false;
     }
     // Into an open exit (by the server's own, just-checked position): the move stands only if the
@@ -749,7 +864,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       this.correct(session, now); // the dead never travel (a death is saved as respawned, at the statue)
       return false;
     }
-    if (exit && !destination?.canAdmit(session.accountId)) {
+    // the crater mouth: into the party's instance (alive, out of combat, and one free or its own open)
+    if (exit?.instance && !this.mayEnterMouth(session, now)) return false;
+    if (exit && !exit.instance && !destination?.canAdmit(session.accountId)) {
       this.correct(session, now);
       this.notice(session, zoneFullReason(exit.to), now);
       return false;
@@ -763,7 +880,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.combat.setPose(session.eid, pose.x, pose.z, pose.y, pose.facing);
     const damage = fallDamage(landedDrop);
     if (damage > 0) this.fall(session, damage);
-    if (exit && destination) this.travel(session, { to: exit.to, arrive: exit.arrive }, destination, before);
+    if (exit?.instance) this.enterInstance(session, before);
+    else if (exit && destination) this.travel(session, { to: exit.to, arrive: exit.arrive }, destination, before);
     return true;
   }
 
@@ -871,7 +989,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   /** The current job gains a kill's xp: `jobXp` always (0 from the Training Dummy), `jobs` when it changed. */
-  private gainXp(session: Session, kind: EnemyKindId) {
+  private gainXp(session: Session, kind: EnemyKindId): number {
     const job = session.jobs.current;
     const had = recordFor(session.jobs, job).xp;
     const { save, level, levelUp } = addJobXp(session.jobs, job, KILL_XP[kind] ?? 0);
@@ -879,6 +997,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const xp = recordFor(session.jobs, job).xp;
     this.sendTo(session.client, 'jobXp', { job, gained: xp - had, xp, level, levelUp });
     if (xp !== had) this.sendJobs(session);
+    return xp - had;
   }
 
   /**
@@ -919,6 +1038,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (gapWait > DODGE_GAP_TOLERANCE_S) return this.refuse(session, 'dodge', 'cooldown');
     if (!this.acceptPose(session, pose, this.wallMs())) return this.refuse(session, 'dodge', 'stale');
     if (session.travelling) return;
+    // a roll into a shut lamp-gate (its end): refused, corrected to the pose it was sent from, with the notice
+    if (this.inst && this.inst.gates !== 0) {
+      const l = Math.hypot(dx, dz), from = session.lastGood;
+      const end = l > 0 ? { x: from.x + (dx / l) * DODGE_DISTANCE, z: from.z + (dz / l) * DODGE_DISTANCE } : from;
+      if (shutGateOnStep(this.inst.gates, from, end)) {
+        this.refuse(session, 'dodge', 'invalid');
+        this.correct(session, this.wallMs());
+        this.notice(session, REASON_ARENA_SEALED, this.wallMs());
+        return;
+      }
+    }
     const wait = Math.max(gapWait, chargeWait);
     if (wait > 1e-6 && wait <= DODGE_GAP_TOLERANCE_S) {
       session.pendingDodge = { dx, dz, due: now + wait + 1e-6 };
@@ -947,14 +1077,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private onRespawn(client: Client) {
     const session = this.actor(client);
     if (!session) return;
-    if (!session.dead) return this.refuse(session, 'respawn', 'invalid');
+    // an instance has no statue: `release` takes its place
+    if (!session.dead || this.inst) return this.refuse(session, 'respawn', 'invalid');
     if (this.nowS() - session.deadAt < DEATH_MIN_S - 1e-6 || this.wallMs() < session.respawnRetryAt) return this.refuse(session, 'respawn', 'cooldown');
     this.respawn(session);
   }
 
   /** The open exit whose circle holds (x, z), if any. */
   private exitAt(x: number, z: number): ZoneExit | undefined {
-    return this.zone.exits.find((e) => (x - e.x) * (x - e.x) + (z - e.z) * (z - e.z) <= e.r * e.r && this.isExitOpen(this.zone.id, e.to));
+    return this.zone.exits.find((e, i) => (x - e.x) * (x - e.x) + (z - e.z) * (z - e.z) <= e.r * e.r
+      // an instance's exits: the stair always, the lamp-lift once the Warden fell (server state, per instance)
+      && (this.inst ? i === 0 || this.inst.lift : this.isExitOpen(this.zone.id, e.to)));
   }
 
   /**
@@ -963,14 +1096,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
    * saving again. Until then its moves are ignored and a seat is kept in the next zone. If the save
    * fails, it stays here, back at `before` (its last pose outside the exit), with a notice.
    */
-  private travel(session: Session, exit: Pick<ZoneExit, 'to' | 'arrive'>, destination: ZoneRoom, before: Session['lastGood'], respawn = false) {
+  private travel(session: Session, exit: Pick<ZoneExit, 'to' | 'arrive'>, destination: ZoneRoom, before: Session['lastGood'], respawn = false, into?: string) {
     const sessionId = session.client.sessionId;
     const { x, z, facing } = exit.arrive;
     destination.holdArrival(session.accountId);
+    // into an instance (room id `into`): saved in the Greenway at the crater mouth, never in the Lampfall
+    const savedAs: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'> = into ? { zone: 'greenway', ...LAMPFALL_MOUTH.arrive } : { zone: exit.to, x, z, facing };
     const travelling = (async () => {
       // A respawn elsewhere: the death may have been saved as respawned already (that is this travel's save).
       if (respawn) await session.deathSave;
-      const result = respawn && session.respawnSaved ? 'saved' : await this.save(session, { zone: exit.to, x, z, facing });
+      const result = respawn && session.respawnSaved ? 'saved' : await this.save(session, savedAs);
       const saved = result === 'saved';
       if (this.sessions.get(sessionId) !== session) {
         // Kicked or gone while saving: that ended the session already, without saving over the travel.
@@ -1002,7 +1137,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       // Died while the travel was being saved (alive, in the next zone): saved again, as respawned.
       // Never left saved alive: tried again (with the respawn backoff) until written or no longer there.
       if (session.dead && !respawn) {
-        while ((await this.save(session, undefined, exit.to)) === 'failed' && !this.disposed) {
+        while ((await this.save(session, undefined, savedAs.zone)) === 'failed' && !this.disposed) {
           await new Promise((resolve) => setTimeout(resolve, this.respawnRetryMs));
         }
       }
@@ -1014,7 +1149,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         // fail, and the client's fresh join then asks GET /api/zone and finds the next zone.
         session.reconnection.reject(new Error('travelled'));
       } else {
-        this.sendTo(session.client, 'travel', { zone: exit.to });
+        this.sendTo(session.client, 'travel', into ? { zone: 'lampfall', instance: into } : { zone: exit.to });
         session.client.leave(CloseCode.CONSENTED);
       }
     })().finally(() => this.travels.delete(sessionId));
@@ -1126,6 +1261,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         break;
       }
       case 'accept': {
+        if (this.inOtherInstance(session.accountId, op.partyId)) {
+          refusal = 'in-instance';
+          break;
+        }
         const r = this.parties.accept(session.accountId, me.name, op.partyId);
         if (typeof r === 'string') refusal = r;
         break;
@@ -1165,7 +1304,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const session = this.sessionOf(accountId);
     if (!session) return;
     const party = this.parties.partyOf(accountId);
-    this.combat.setParty(session.eid, party?.id || null);
+    this.applyParty(session);
     // A new member's status is not known yet: read now, and the members who already got a view without it hear soon.
     if (party && this.parties.setStatus(accountId, this.statusOf(session))) {
       session.statusAt = this.wallMs();
@@ -1417,14 +1556,16 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private async write(
     session: Session, to?: Pick<AdventurerSave, 'zone' | 'x' | 'z' | 'facing'>, expectZone?: ZoneId,
   ): Promise<'saved' | 'refused' | 'failed'> {
-    const expect = expectZone ?? (session.respawnSaved && !session.dead ? RESPAWN_ZONE : this.zone.id);
+    const expect = expectZone ?? (this.inst ? this.homeZone : session.respawnSaved && !session.dead ? RESPAWN_ZONE : this.zone.id);
     // Where it really is (the state's copy is quantised, and mid-displacement shows the path).
     const { x, z } = session.lastGood, facing = session.facing;
     // Health as a whole number rounded down (at least 1): a relog never gains the fraction.
     const hp = Math.max(1, Math.floor(session.hpExact));
     // The dead are always saved as respawned: at the statue, with full health.
     const dead = session.dead;
-    const as = dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: MAX_HP } : to;
+    // In an instance: always at the crater mouth in the Greenway (a crash or restart puts it there); the dead at full health.
+    const as = this.inst ? { zone: 'greenway' as const, ...LAMPFALL_MOUTH.arrive, ...(dead ? { hp: MAX_HP } : {}), ...to }
+      : dead ? { zone: RESPAWN_ZONE, ...this.respawnSpot(), hp: MAX_HP } : to;
     const values: AdventurerSave = { id: session.adventurerId, x, z, facing, zone: this.zone.id, hp, jobs: session.jobs, ...as };
     let result: 'saved' | 'refused' | 'failed';
     try {
@@ -1433,6 +1574,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       this.logFailure('save', 'Saving an adventurer failed', err);
       return 'failed';
     }
+    if (this.inst) return result; // never saved as respawned
     if (result === 'saved' && dead) {
       this.accounts.respawns.set(session.accountId, this.wallMs() + RESPAWN_ADMIT_MS);
       session.respawnSaved = true; // (also when it was revived meanwhile: the store holds the statue until it is saved alive)
@@ -1481,6 +1623,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.anim = undefined;
     session.pendingDodge = undefined;
     session.player.moving = false;
+    if (this.inst) return; // no statue in an instance: it lies here until revived or released (saved at the mouth)
     if (session.travelling) return; // the travel saves it again as respawned once it has landed
     session.deathSave = this.write(session); // write() marks it respawnSaved
   }
@@ -1530,6 +1673,445 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.sendTo(session.client, 'respawned', message);
   }
 
+  // ───────── Lampfall instances ─────────
+
+  /** The zone this room's adventurers are saved in: its own, or for an instance the Greenway (at the crater mouth). */
+  private get homeZone(): ZoneId {
+    return this.inst ? 'greenway' : this.zone.id;
+  }
+
+  /**
+   * An instance: its own surface, ground and sight over the shared frozen def (each shut gate circle a
+   * wall and blind: P4-b), its camps from the def with each boss camp's arena (P4-c), the Wick Den's way
+   * on shut until the Wickhound is cleared (P4-a), and with startAt 'landing' (a test start) only the
+   * Warden left.
+   */
+  private setupInstance(options: ZoneRoomOptions, key: string) {
+    const opt = options.instance!;
+    const base = options.zone;
+    const layout = lampfallLayout();
+    const encounterAt = (x: number, z: number): EncounterId | undefined => {
+      const i = layout.rooms.findIndex((r) => (x - r.x) * (x - r.x) + (z - r.z) * (z - r.z) <= r.r * r.r);
+      return i < 0 ? undefined : layout.recipe.rooms[i].encounter;
+    };
+    const arenas = { wickhound: lampfallArena('wickhound'), warden: lampfallArena('warden') };
+    const landing = opt.startAt === 'landing';
+    const cleared = new Set<EncounterId>();
+    const camps: CampSpawn[] = [];
+    for (const c of base.camps) {
+      const enc = encounterAt(c.x, c.z);
+      if (landing && enc !== 'warden') {
+        if (enc) cleared.add(enc);
+        continue;
+      }
+      camps.push(enc === 'wickhound' || enc === 'warden' ? { ...c, arena: arenas[enc] } : { ...c });
+    }
+    this.inst = {
+      key, registry: opt.registry, t: { ...INSTANCE_TIMINGS, ...opt.timings }, cleared,
+      gates: cleared.has('wickhound') ? 0 : GATE_WICK_EXIT, sealed: null, arenas, encounterOf: new Map(), bosses: new Map(),
+      wipeAt: null, lastFightAt: -Infinity, lift: false, evictAt: new Map(), startedAt: (options.wallClock ?? Date.now)(),
+    };
+    const mask = () => this.inst?.gates ?? 0;
+    this.zone = { ...base, surface: gatedSurface(base.surface, mask), ground: gatedSurface(base.ground, mask), sight: gatedSight(base.sight, mask), camps, jobSwitch: base.jobSwitch };
+    this.autoDispose = false; // the registry closes it
+  }
+
+  /** Each camp enemy's encounter (by the room its camp is in), and the bosses' records. */
+  private tagEncounters() {
+    const inst = this.inst!;
+    const layout = lampfallLayout();
+    for (const e of worldOf(this.combat).enemies.values()) {
+      const i = layout.rooms.findIndex((r) => (e.camp.x - r.x) * (e.camp.x - r.x) + (e.camp.z - r.z) * (e.camp.z - r.z) <= r.r * r.r);
+      const enc = i < 0 ? undefined : layout.recipe.rooms[i].encounter;
+      if (enc) inst.encounterOf.set(e.id, enc);
+      const boss = BOSS_OF[e.kind];
+      if (boss) inst.bosses.set(e.id, { ...boss, wokeAt: null, sealAt: null, most: 0 });
+    }
+  }
+
+  private instanceInfo(): InstanceInfo | undefined {
+    return this.inst?.registry.byRoom(this.roomId);
+  }
+
+  /** The current checkpoint: the rim, or the landing once the Wickhound is cleared (P4-a). */
+  private get checkpoint(): CheckpointId {
+    return this.inst?.cleared.has('wickhound') ? 'landing' : 'rim';
+  }
+
+  /** Where the current checkpoint stands an adventurer: its room's centre, facing on into the dungeon. */
+  private checkpointSpot(): { x: number; z: number; facing: number } {
+    const layout = lampfallLayout();
+    const id = this.checkpoint;
+    const i = layout.rooms.findIndex((r) => r.checkpoint === id);
+    const room = layout.rooms[i], next = layout.rooms[i + 1] ?? room;
+    return { x: room.x, z: room.z, facing: next === room ? room.entryDir : yawOf(next.x - room.x, next.z - room.z) };
+  }
+
+  /** The account has a seat here: a session (in the room or away within its window) or a traveller's held seat. */
+  hasSeat(accountId: string): boolean {
+    return this.sessionByAccount.has(accountId) || (this.arrivals.get(accountId) ?? -Infinity) > Date.now();
+  }
+
+  /** Travellers are on their way in. */
+  hasArrivals(): boolean {
+    const now = Date.now();
+    for (const until of this.arrivals.values()) if (until > now) return true;
+    return false;
+  }
+
+  /** The account left or was kicked from the party: told now, sent to the mouth after INSTANCE_EVICT_S. */
+  evict(accountId: string): void {
+    const inst = this.inst;
+    if (!inst || inst.evictAt.has(accountId)) return;
+    inst.evictAt.set(accountId, this.nowS() + inst.t.evictS);
+    const session = this.sessionOf(accountId);
+    if (session && !session.reconnection) this.notice(session, REASON_LEFT_PARTY, this.wallMs());
+  }
+
+  /** The registry gave this instance a new key (a party formed around it, or dissolved). */
+  rekeyed(key: string): void {
+    if (this.inst) this.inst.key = key;
+  }
+
+  /** Closing: everyone is sent to the mouth (with `reason`), then the room disconnects. */
+  async closeInstance(reason?: string): Promise<void> {
+    const now = this.wallMs();
+    for (const session of [...this.sessions.values()]) {
+      if (session.travelling) continue;
+      if (reason && !session.reconnection) this.notice(session, reason, now);
+      this.travelOut(session);
+    }
+    this.arrivals.clear();
+    await Promise.allSettled([...this.travels.values()]);
+    if (!this.disposed) await this.disconnect();
+  }
+
+  /** Walking into the crater mouth: refused (corrected, with a notice) mid-fight or when every instance is taken. */
+  private mayEnterMouth(session: Session, now: number): boolean {
+    const reg = this.instances;
+    const refuse = (text: string) => {
+      this.correct(session, now);
+      this.notice(session, text, now);
+      return false;
+    };
+    if (!reg) return refuse(REASON_INSTANCES_FULL);
+    if (this.combat.self(session.eid)?.inCombat) return refuse(REASON_IN_COMBAT);
+    if (!reg.canEnter(reg.keyFor(session.accountId, this.parties))) return refuse(REASON_INSTANCES_FULL);
+    return true;
+  }
+
+  /**
+   * Into the party's instance (opened now if it has none): its seat is held, the adventurer is saved at
+   * the crater mouth in the Greenway, and the client is told to join the instance by id. If it cannot
+   * get in after all (the last instance went to another party meanwhile), it is put back with the notice.
+   */
+  private enterInstance(session: Session, before: Session['lastGood']) {
+    const reg = this.instances!;
+    const sessionId = session.client.sessionId;
+    const key = reg.keyFor(session.accountId, this.parties);
+    const members = this.parties.partyOf(session.accountId)?.members.map((m) => m.accountId) ?? [];
+    const entering = (async () => {
+      let r: InstanceInfo | 'full';
+      try {
+        r = await reg.enter(key, session.accountId, members);
+      } catch (err) {
+        this.logFailure('instance', 'Opening an instance failed', err);
+        r = 'full';
+      }
+      const room = r === 'full' ? null : r.room;
+      if (this.sessions.get(sessionId) !== session) {
+        await this.save(session); // kicked or gone meanwhile: saved here as it is
+        return;
+      }
+      if (r === 'full' || !room || !room.canAdmit(session.accountId)) {
+        session.travelling = undefined;
+        session.lastGood = before;
+        Object.assign(session.player, before, { moving: false });
+        this.combat.setPose(session.eid, before.x, before.z, before.y, session.facing);
+        this.correct(session, this.wallMs());
+        this.notice(session, REASON_INSTANCES_FULL, this.wallMs());
+        return;
+      }
+      reg.hold(session.accountId, room.roomId, room.reconnectSeconds * 1000);
+      session.travelling = undefined;
+      this.travel(session, { to: 'lampfall', arrive: LAMPFALL_MOUTH.arrive }, room, before, false, room.roomId);
+      await session.travelling;
+    })().finally(() => { if (this.travels.get(sessionId) === entering) this.travels.delete(sessionId); });
+    session.travelling = entering;
+    this.travels.set(sessionId, entering);
+  }
+
+  /** Out of the instance to the crater mouth (the stair, the lamp-lift, leaveInstance, an eviction, a close). */
+  private travelOut(session: Session) {
+    const greenway = this.rooms.get('greenway');
+    if (!greenway || session.travelling) return;
+    this.leaveFight(session);
+    this.travel(session, { to: 'greenway', arrive: LAMPFALL_MOUTH.arrive }, greenway, session.lastGood);
+  }
+
+  /** `release`: dead in an instance, from RELEASE_MIN_S on: up at the checkpoint (else refused as a respawn would be). */
+  private onRelease(client: Client) {
+    const session = this.actor(client);
+    if (!session) return;
+    if (!this.inst || !session.dead) return this.refuse(session, 'respawn', 'invalid');
+    if (this.nowS() - session.deadAt < this.inst.t.releaseMinS - 1e-6) return this.refuse(session, 'respawn', 'cooldown');
+    this.release(session);
+  }
+
+  /** `leaveInstance`: alive in an instance, out to the crater mouth. */
+  private onLeaveInstance(client: Client) {
+    const session = this.actor(client);
+    if (!session || !this.inst) return;
+    if (session.dead) return this.refuse(session, 'respawn', 'dead');
+    this.travelOut(session);
+  }
+
+  /** Up at the instance's checkpoint at full health (a release, or the end of a wipe). */
+  private release(session: Session) {
+    const { x, z, facing } = this.checkpointSpot();
+    this.standUp(session, x, z, facing);
+  }
+
+  /** Revived at (x, z) with full health, a new ack (`respawned`), and nothing of the death left. */
+  private standUp(session: Session, x: number, z: number, facing: number) {
+    const y = (this.zone.surface(x, z) ?? 0) + 0; // + 0: never -0
+    this.combat.revive(session.eid, { x, z, y }, this.nowS());
+    this.combat.setPose(session.eid, x, z, y, facing);
+    Object.assign(session, {
+      dead: false, deadAt: -Infinity, respawnSaved: false, deathSave: undefined, anim: undefined, awaitingDisplace: false,
+      pendingDodge: undefined, respawnRetryAt: -Infinity, lastDisplaceKind: 'respawn',
+    });
+    session.lastGood = { x, z, y };
+    session.facing = facing;
+    session.movement.air = makeAirTrack(y);
+    session.movement.zone = this.zone.id;
+    Object.assign(session.player, { x, z, y, facing, moving: false });
+    const message: S2C['respawned'] = { x, z, y, seq: ++session.displaceSeq };
+    session.lastSeqMessage = { type: 'respawned', message };
+    this.mirrorPlayer(session);
+    if (!session.reconnection) this.sendTo(session.client, 'respawned', message);
+  }
+
+  /**
+   * The party the engine has the adventurer in: its party's id; in an instance while an arena is sealed,
+   * those outside it are put apart (`id#out`), so no automatic or area heal, buff or revive reaches in
+   * (an explicit one needs sight, which a shut gate blocks): ruling P4-c.
+   */
+  private applyParty(session: Session) {
+    const id = this.parties.partyOf(session.accountId)?.id || null;
+    const sealed = this.inst?.sealed;
+    const want = id && sealed && !this.inst!.arenas[sealed](session.lastGood.x, session.lastGood.z) ? `${id}#out` : id;
+    if (want === session.engineParty && this.combat.get(session.eid)) return;
+    session.engineParty = want;
+    this.combat.setParty(session.eid, want);
+  }
+
+  /** Accepting `partyId` would put the account in a party whose instance is not the one it stands in ('in-instance'). */
+  private inOtherInstance(accountId: string, partyId: string): boolean {
+    const reg = this.instances;
+    const mine = reg?.instanceOf(accountId);
+    if (!reg || !mine) return false;
+    const inviter = this.parties.inviterOf(partyId, accountId);
+    const theirs = this.parties.get(partyId) ? reg.byKey(partyId) : inviter !== undefined ? reg.instanceOf(inviter) : undefined;
+    return theirs !== undefined && theirs !== mine;
+  }
+
+  /** A kill inside: nothing respawns; an encounter whose enemies are all dead is cleared; a boss's death opens its gates and rewards. */
+  private instanceKill(kill: TickOut['kills'][number], xp: Map<Session, number>, nowS: number) {
+    const inst = this.inst!;
+    const e = worldOf(this.combat).enemies.get(kill.enemy);
+    if (e) e.respawnAt = Infinity; // killed enemies stay dead
+    const enc = inst.encounterOf.get(kill.enemy);
+    if (enc && !inst.cleared.has(enc)) {
+      const w = worldOf(this.combat);
+      const left = [...inst.encounterOf].some(([id, en]) => en === enc && w.enemies.get(id)?.alive);
+      if (!left) inst.cleared.add(enc);
+    }
+    const boss = inst.bosses.get(kill.enemy);
+    if (!boss) return;
+    inst.bosses.delete(kill.enemy);
+    this.unseal(boss.encounter);
+    if (boss.encounter === 'wickhound') inst.gates &= ~GATE_WICK_EXIT; // on to the landing (its checkpoint counts now)
+    else {
+      inst.lift = true;
+      inst.registry.markCleared(this.roomId);
+    }
+    const credited = [...xp].map(([session, gained]) => ({ session, xp: gained }));
+    const seconds = Math.max(0.1, Math.round((nowS - (boss.wokeAt ?? nowS)) * 10) / 10);
+    const most = Math.max(boss.most, this.sessions.size);
+    void this.bossFallen(boss.boss, seconds, most, credited).catch((err) => this.logFailure('rewards', 'A boss reward failed', err));
+  }
+
+  /** A boss woke (its gate shuts SEAL_DELAY_S later) or reset (its gate opens again). */
+  private bossEvent(b: BossEvent) {
+    const inst = this.inst!;
+    const boss = inst.bosses.get(b.enemy);
+    if (!boss) return;
+    if (b.event === 'wake') {
+      boss.wokeAt = b.atS;
+      boss.sealAt = b.atS + inst.t.sealS;
+      boss.most = this.sessions.size;
+    } else if (b.event === 'reset') {
+      boss.wokeAt = null;
+      boss.sealAt = null;
+      boss.most = 0;
+      this.unseal(boss.encounter);
+    }
+  }
+
+  /** The gate shuts: a wall now; anyone standing in its circle is put on the room side (a `displaced` resync). */
+  private seal(encounter: ArenaEncounter) {
+    const inst = this.inst!;
+    inst.sealed = encounter;
+    inst.gates |= ENTRY_GATE[encounter];
+    for (const g of lampfallGates()) {
+      if ((inst.gates & g.bit) === 0) continue;
+      for (const session of this.sessions.values()) {
+        const p = session.lastGood;
+        if ((p.x - g.x) * (p.x - g.x) + (p.z - g.z) * (p.z - g.z) > g.r * g.r || session.travelling) continue;
+        const to = roomSideOf(g);
+        this.placeAt(session, to.x, to.z);
+      }
+    }
+    for (const session of this.sessions.values()) this.applyParty(session);
+  }
+
+  /** Puts the adventurer at (x, z) on the surface: a `displaced` resync (a new ack; its client is put there). */
+  private placeAt(session: Session, x: number, z: number) {
+    const y = (this.zone.surface(x, z) ?? session.lastGood.y) + 0;
+    this.combat.setPose(session.eid, x, z, y, session.facing);
+    Object.assign(session.player, { x, z, y, moving: false });
+    session.anim = undefined;
+    session.pendingDodge = undefined;
+    session.awaitingDisplace = false;
+    const at = { x, z, y };
+    this.displace(session, {
+      id: session.eid, kind: 'resync' as 'dodge', from: at, d: { vx: 0, vz: 0, vy: 0, seconds: 0 },
+      result: { ...at, drop: 0, drops: [], fallHp: 0, seconds: 0, grounded: true, path: [{ t: 0, ...at }] },
+    });
+  }
+
+  /** Test-only (in-process tests): puts a session's adventurer at (x, z); the ack its moves carry from now on. */
+  testPlace(sessionId: string, x: number, z: number): number {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error('no such session');
+    this.placeAt(session, x, z);
+    return session.displaceSeq;
+  }
+
+  private unseal(encounter: ArenaEncounter) {
+    const inst = this.inst!;
+    for (const boss of inst.bosses.values()) if (boss.encounter === encounter) boss.sealAt = null;
+    inst.gates &= ~ENTRY_GATE[encounter];
+    if (inst.sealed === encounter) inst.sealed = null;
+    for (const session of this.sessions.values()) this.applyParty(session);
+  }
+
+  /** Each step in an instance: seals due, evictions due, the wipe rule, the party split, and the instance state and views. */
+  private stepInstance(now: number) {
+    const inst = this.inst!;
+    if (!this.state.instance && this.roomId) this.state.instance = this.roomId;
+    for (const boss of inst.bosses.values()) {
+      if (boss.wokeAt !== null) boss.most = Math.max(boss.most, this.sessions.size);
+      if (boss.sealAt !== null && now >= boss.sealAt) {
+        boss.sealAt = null;
+        this.seal(boss.encounter);
+      }
+    }
+    const info = this.instanceInfo();
+    for (const [accountId, at] of inst.evictAt) {
+      if (info?.allowed.has(accountId)) {
+        inst.evictAt.delete(accountId); // back in the party in time
+        continue;
+      }
+      if (now < at) continue;
+      inst.evictAt.delete(accountId);
+      const session = this.sessionOf(accountId);
+      if (session) this.travelOut(session);
+    }
+    // a fight is on while any enemy targets someone
+    for (const e of this.state.enemies.values()) if (e.target >= 0 || e.mode === 'windup') { inst.lastFightAt = now; break; }
+    const everyone = [...this.sessions.values()].filter((s) => !s.travelling);
+    if (inst.wipeAt === null && everyone.length > 0 && everyone.every((s) => s.dead) && now - inst.lastFightAt <= WIPE_FIGHT_S) {
+      inst.wipeAt = now + inst.t.wipeS;
+      for (const v of this.combat.all()) if (v.team === 'enemy' && v.alive) this.combat.resetEnemy(v.id, now);
+    }
+    if (inst.wipeAt !== null && now >= inst.wipeAt) {
+      inst.wipeAt = null;
+      for (const v of this.combat.all()) if (v.team === 'enemy' && v.alive) this.combat.resetEnemy(v.id, now);
+      for (const session of this.sessions.values()) if (session.dead && !session.travelling) this.release(session);
+    }
+    for (const session of this.sessions.values()) this.applyParty(session);
+    this.mirrorInstance();
+    for (const session of this.sessions.values()) this.sendInstance(session);
+  }
+
+  /** The instance's state: its room id, sealed arena, shut gates, wipe clock and lamp-lift. */
+  private mirrorInstance() {
+    const inst = this.inst!, st = this.state;
+    const sealed = inst.sealed ?? '', wipeAt = inst.wipeAt === null ? 0 : this.clockSteps(inst.wipeAt);
+    if (st.sealed !== sealed) st.sealed = sealed;
+    if (st.gates !== inst.gates) st.gates = inst.gates;
+    if (st.wipeAt !== wipeAt) st.wipeAt = wipeAt;
+    if (st.lift !== inst.lift) st.lift = inst.lift;
+  }
+
+  /** The instance as this adventurer sees it, sent when any of its parts changes (the countdowns are sent as they stand then). */
+  private sendInstance(session: Session) {
+    if (session.reconnection) return;
+    const inst = this.inst!, now = this.nowS();
+    const view: InstanceView = {
+      checkpoint: this.checkpoint, cleared: [...inst.cleared], sealed: inst.sealed,
+      wipeIn: inst.wipeAt === null ? null : round2(Math.max(0, inst.wipeAt - now)),
+      releaseIn: session.dead ? round2(Math.max(0, session.deadAt + inst.t.releaseMinS - now)) : null,
+      partySize: this.parties.get(inst.key)?.members.length ?? 1, startedAt: inst.startedAt,
+    };
+    const key = JSON.stringify({ ...view, wipeIn: view.wipeIn !== null, releaseIn: session.dead ? session.deadAt : null });
+    if (key === session.instanceSent) return;
+    session.instanceSent = key;
+    this.sendTo(session.client, 'instance', view);
+  }
+
+  /**
+   * A boss fell: the kill on the leaderboard (with its rank), and for each credited adventurer its
+   * victory: the xp it got, for the Warden one Seal a UTC day (awardSeal is atomic: a retry, a reconnect
+   * or a second kill that day gives none) and, for a solo kill, the title.
+   */
+  private async bossFallen(boss: 'wickhound' | 'fallen_warden', seconds: number, most: number, credited: { session: Session; xp: number }[]) {
+    if (credited.length === 0) return;
+    const names = credited.map((c) => c.session.player.name).slice(0, PARTY_MAX);
+    const partySize = Math.min(PARTY_MAX, Math.max(1, credited.length, most));
+    const solo = credited.length === 1 && most <= 1;
+    const rank = await this.retry('boss kill', () => this.store.recordBossKill({ boss, partySize, seconds, names, at: new Date(this.wallMs()) }));
+    const day = utcDay(this.wallMs());
+    await Promise.all(credited.map(async ({ session, xp }) => {
+      let seal = false, seals = 0, title: string | null = null;
+      if (boss === 'fallen_warden') {
+        const r = await this.retry('seal', () => this.store.awardSeal(session.adventurerId, day));
+        if (r) ({ awarded: seal, seals } = r);
+        if (solo && (await this.retry('title', () => this.store.addTitle(session.adventurerId, SOLO_TITLE))) !== undefined) title = SOLO_TITLE;
+      } else {
+        seals = (await this.retry('seals', () => this.store.getOrCreateAdventurer(session.accountId)))?.seals ?? 0;
+      }
+      const victory: VictoryView = { boss, seconds, partySize, xp, seal, seals, title, rank: rank?.rank ?? null, lore: BOSSES[boss].lore.victory };
+      const claim = this.accounts.get(session.accountId);
+      claim?.room.deliver(claim.sessionId, 'victory', victory);
+    }));
+  }
+
+  /** A store call, tried up to three times (logged when it gives up): undefined if it never succeeded. */
+  private async retry<T>(what: string, call: () => Promise<T>): Promise<T | undefined> {
+    for (let i = 0; i < 3; i++) {
+      try {
+        return await call();
+      } catch (err) {
+        if (i === 2) this.logFailure('rewards', `A reward (${what}) could not be saved`, err);
+        else await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    return undefined;
+  }
+
   // ───────── the step ─────────
 
   /** The combat clock now (seconds). */
@@ -1573,7 +2155,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       let out: TickOut | undefined;
       this.safely('tick', () => { out = this.combat.tick(w0 + ((target - w0) * k) / n); });
       if (!out) break;
-      this.handle(out);
+      this.handle(out, w0 + ((target - w0) * k) / n);
       for (const e of out.fx) fx.push(e);
     }
     this.lastTickAt = target;
@@ -1584,10 +2166,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         if (session.anim) this.animate(session);
         if (session.awaitingDisplace && !session.pendingDodge && target - session.awaitingSince > DISPLACE_RESYNC_S) this.resync(session);
         if (!session.dead && this.combat.get(session.eid)?.alive === false) this.died(session); // a death the step lost
-        if (session.dead && !session.travelling && target - session.deadAt >= this.autoRespawnSeconds && wall >= session.respawnRetryAt) this.respawn(session);
+        if (this.inst) {
+          if (session.dead && !session.travelling && target - session.deadAt >= this.inst.t.autoReleaseS) this.release(session);
+        } else if (session.dead && !session.travelling && target - session.deadAt >= this.autoRespawnSeconds && wall >= session.respawnRetryAt) this.respawn(session);
         if (session.jobsDue && !session.reconnection) this.sendJobs(session);
       });
     }
+    if (this.inst) this.safely('instance', () => this.stepInstance(target));
     this.safely('mirror', () => this.mirrorAll());
     this.safely('party', () => this.relayPartyStatus(wall));
     this.safely('views', () => this.updateViews());
@@ -1598,7 +2183,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   }
 
   /** A tick's displacements, deaths and kills, each on its own (one that throws does not stop the rest). */
-  private handle(out: TickOut) {
+  private handle(out: TickOut, nowS: number) {
     for (const d of out.displaced) {
       const session = this.sessionByEid.get(d.id);
       if (session) this.safely('displace', () => this.displace(session, d));
@@ -1607,14 +2192,19 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       const session = this.sessionByEid.get(id);
       if (session && !session.dead) this.safely('death', () => this.died(session));
     }
+    // (kills before despawned: an add that died this tick is still in the state for its credit)
     for (const kill of out.kills) {
+      const xp = new Map<Session, number>();
       for (const session of this.creditedFor(kill)) {
         this.safely('credit', () => {
           this.sendTo(session.client, 'credit', { kind: kill.kind });
-          this.gainXp(session, kill.kind);
+          xp.set(session, this.gainXp(session, kill.kind));
         });
       }
+      if (this.inst) this.safely('instance kill', () => this.instanceKill(kill, xp, nowS));
     }
+    for (const b of out.boss ?? []) if (this.inst) this.safely('boss', () => this.bossEvent(b));
+    for (const id of out.despawned ?? []) this.safely('despawn', () => this.dropEnemy(id));
     for (const r of out.revived ?? []) {
       const session = this.sessionByEid.get(r.id);
       if (session) this.safely('revive', () => this.revived(session, r));
@@ -1788,6 +2378,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       seen.add(item);
       view.add(item);
     };
+    for (const f of this.state.fields.values()) show(f); // every field, whatever the radius
     for (const t of this.state.telegraphs.values()) {
       const owner = this.state.enemies.get(this.keyOf(t.owner));
       if (!seen.has(t) && !telegraphInterested(me, t) && !(owner && seen.has(owner))) continue;
@@ -1832,7 +2423,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     }
     for (const p of keep) show(p);
     for (const item of seen) {
-      if (item instanceof TelegraphSchema) continue;
+      if (item instanceof TelegraphSchema || item instanceof FieldSchema) continue;
       if (item instanceof EnemySchema) {
         if (interested(dist2(me, item), true) || item === target || item.target === me.eid || owners.has(item.eid)) continue;
       } else if (keep.has(item as PlayerState) || pinned.includes(item as PlayerState)) continue;
@@ -1877,6 +2468,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       }
     }
     this.mirrorTelegraphs();
+    this.mirrorFields();
   }
 
   private mirrorPlayerView(session: Session, v: CombatantView) {
@@ -1897,6 +2489,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (p.weapon !== weapon) p.weapon = weapon;
     const buffs = v.buffs ?? 0;
     if ((p.buffs ?? 0) !== buffs) p.buffs = buffs;
+    const searing = v.searing ?? 0;
+    if ((p.searing ?? 0) !== searing) p.searing = searing;
     const cast = v.cast ?? null;
     if (cast) {
       const startS = worldOf(this.combat).now - (cast.total - cast.left);
@@ -1917,6 +2511,38 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private mirrorZone() {
     for (const v of this.combat.all()) if (v.team === 'enemy') this.mirrorEnemy(v);
     this.mirrorTelegraphs();
+    this.mirrorFields();
+  }
+
+  /** Fields onto the state (every client gets every one): added once, deleted when gone. */
+  private mirrorFields() {
+    let live: Set<string> | undefined;
+    for (const f of this.combat.fields()) {
+      const key = this.keyOf(f.id);
+      (live ??= new Set()).add(key);
+      if (this.state.fields.has(key)) continue;
+      const s = f.shape;
+      this.state.fields.set(key, new FieldSchema({
+        id: f.id, owner: f.owner, field: f.field, shape: s.kind, x: s.x, z: s.z,
+        r: s.kind === 'circle' || s.kind === 'ring' || s.kind === 'cone' ? s.r : s.length, inner: s.kind === 'ring' ? s.inner : 0,
+        raw: byte(f.raw), at: this.clockSteps(f.startedAt),
+      }));
+    }
+    if (this.state.fields.size === 0) return;
+    for (const [key, f] of [...this.state.fields.entries()]) {
+      if (live?.has(key)) continue;
+      this.state.fields.delete(key);
+      for (const session of this.sessions.values()) session.seen.delete(f); // gone from every view with the state
+    }
+  }
+
+  /** An enemy that left the engine (despawned, or a dead add pruned): out of the state and every view. */
+  private dropEnemy(id: number) {
+    const key = this.keyOf(id);
+    const e = this.state.enemies.get(key);
+    if (!e) return;
+    this.state.enemies.delete(key);
+    for (const session of this.sessions.values()) session.seen.delete(e);
   }
 
   /** An enemy onto the state: fields set only when changed. */
@@ -1930,6 +2556,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           eid: v.id, kind: v.kind, x: v.x, z: v.z, y: v.y, facing: v.facing, hp: Math.ceil(v.hp), maxHp: u16(v.maxHp), stagger: 0,
           maxStagger: u16(v.maxStagger), marks: 0, mode: 'idle', target: -1, windup: '', windupTotal: 0, surging: false, staggerImmune: 0,
         });
+        // (unset for an ordinary enemy, read as 'ordinary': most enemies cost nothing for it)
+        if (v.tier && v.tier !== 'ordinary') e.tier = v.tier;
         this.state.enemies.set(key, e);
       }
       const hp = Math.ceil(v.hp), stagger = u16(v.stagger), maxStagger = u16(v.maxStagger), mode = enemyMode(v), target = v.targetId ?? -1;
@@ -1953,6 +2581,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       if (e.staggerImmune !== staggerImmune) e.staggerImmune = staggerImmune;
       const debuffs = v.debuffs ?? 0;
       if ((e.debuffs ?? 0) !== debuffs) e.debuffs = debuffs; // (unset until its first debuff)
+      // a boss: its phase, ward and enrage clock (unset, read as 0 and false, for everything else)
+      const phase = v.phase ?? 0, warded = v.warded === true;
+      if ((e.phase ?? 0) !== phase) e.phase = phase;
+      if ((e.warded ?? false) !== warded) e.warded = warded;
+      const now = worldOf(this.combat).now;
+      const enrageIn = v.enrageIn ?? null;
+      const enrageAt = enrageIn === null ? 0 : enrageIn > 0 ? this.clockSteps(now + enrageIn) : (e.enrageAt || this.clockSteps(now));
+      if (Math.abs((e.enrageAt ?? 0) - enrageAt) > 1 || (enrageAt === 0) !== ((e.enrageAt ?? 0) === 0)) e.enrageAt = enrageAt;
     }
   }
 
@@ -1964,12 +2600,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       live.add(key);
       if (this.state.telegraphs.has(key)) continue;
       const s = t.shape;
-      this.state.telegraphs.set(key, new TelegraphSchema({
+      const props = {
         id: t.id, owner: t.owner, attack: t.attack, shape: s.kind, x: s.x, z: s.z,
         dir: s.kind === 'circle' ? 0 : s.dir, r: s.kind === 'line' ? s.length : s.r,
         width: s.kind === 'line' ? s.width : 0, angle: s.kind === 'cone' ? s.angle : 0, total: t.total,
         at: this.clockSteps(worldOf(this.combat).now - (t.total - t.left)),
-      }));
+      };
+      // inner only on rings (unset, read as 0, elsewhere: no bytes for every other telegraph)
+      this.state.telegraphs.set(key, new TelegraphSchema((s.kind === 'ring' ? { ...props, inner: s.inner } : props) as typeof props & { inner: number }));
     }
     for (const [key, t] of [...this.state.telegraphs.entries()]) {
       if (live.has(key)) continue;
@@ -2070,6 +2708,25 @@ export function zoneRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof
       if (adventurer.zone !== zone) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
       const room = options.rooms.get(zone);
       if (room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(zone));
+      return auth;
+    }
+  };
+}
+
+/**
+ * The room class for the Lampfall's instances (one room per party, opened by Instances.enter with
+ * `{ instanceKey }`). Joins are checked in the room (onAuth with the room at hand): a bad token, an
+ * adventurer without a name, one not saved in the Greenway (where everyone inside is saved), or an
+ * account not allowed in this instance (another party's) is refused with REASON_ELSEWHERE.
+ */
+export function instanceRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof ZoneRoom {
+  return class extends ZoneRoom {
+    async onAuth(_client: Client, joinOptions: unknown, _context: AuthContext) {
+      const auth = await authenticate(options.store, jwtSecret, joinOptions);
+      if (!auth) return false;
+      const adventurer = await options.store.getOrCreateAdventurer(auth.accountId);
+      if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
+      if (adventurer.zone !== 'greenway' || !this.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
       return auth;
     }
   };

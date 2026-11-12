@@ -5,12 +5,17 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, SAVE_ZONE_IDS, jobSwitchAt, zoneDef, type SaveZoneId, type ZoneDef, type ZoneId } from '@sg2/shared';
+import {
+  AUTO_RESPAWN_S, INSTANCE_EMPTY_S, INSTANCE_MAX_S, MAX_INSTANCES, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, SAVE_ZONE_IDS, jobSwitchAt, zoneDef,
+  type CheckpointId, type SaveZoneId, type ZoneDef, type ZoneId,
+} from '@sg2/shared';
 import { authRouter } from './auth/routes';
+import { leaderboardRouter } from './routes/leaderboard';
+import { Instances } from './rooms/instances';
 import type { Store } from './store/types';
 import { Parties } from './party/parties';
 import { Presence } from './rooms/presence';
-import { zoneRoomFor, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
+import { instanceRoomFor, zoneRoomFor, type InstanceTimings, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
 
 export interface AppOptions {
   store: Store;
@@ -42,7 +47,17 @@ export interface AppOptions {
   respawnRetryMs?: number;
   /** Test-only: the view cap (default INTEREST_MAX_ADVENTURERS, with INTEREST_RANK_HYSTERESIS of slack). */
   viewCap?: { max: number; slack: number };
+  /**
+   * Lampfall instances: at most `max` open (MAX_INSTANCES), closed `emptyS` after the last adventurer
+   * left (INSTANCE_EMPTY_S) or past `maxS` (INSTANCE_MAX_S), swept every `sweepMs` (5000); shorter
+   * timings inside (test-only); and `startAt` 'landing' (SG2_TEST_INSTANCE_START: packs and the Wickhound
+   * already dead, the checkpoint at the landing).
+   */
+  instances?: { max?: number; emptyS?: number; maxS?: number; sweepMs?: number; startAt?: CheckpointId; timings?: Partial<InstanceTimings> };
 }
+
+/** The instances' numbers in stats() and /healthz: open now, adventurers inside, and the worst instance step p95 (ms). */
+export interface InstanceStats { open: number; players: number; tickMsP95Max: number }
 
 /** One zone's numbers in stats() and /healthz. */
 export interface ZoneStats { players: number; tickHz: number; tickMs: number; patchMs: number; stepErrors: number }
@@ -57,7 +72,9 @@ export interface App {
    * state patches (one encode per client's view); stepErrors counts the failures its steps and
    * handlers caught (and carried on from) since it started.
    */
-  stats(): { players: number; tickHz: number; zones: Record<SaveZoneId, ZoneStats> };
+  stats(): { players: number; tickHz: number; zones: Record<SaveZoneId, ZoneStats>; instances: InstanceStats };
+  /** The process's Lampfall instances. */
+  instances: Instances;
   /** Whether the exits from `from` to `to` are open now. */
   isExitOpen(from: ZoneId, to: ZoneId): boolean;
   /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
@@ -85,6 +102,15 @@ export function createApp(opts: AppOptions): App {
   // reaches every member's session wherever it is.
   const parties = new Parties();
   const presence = new Presence({ onOnline: (accountId, online) => parties.setOnline(accountId, online) });
+  // Instances follow their parties (members allowed in, a member taken out sent to the mouth), before
+  // the rooms relay the change (so a room's view of who is allowed is already up to date).
+  const instances = new Instances({
+    max: opts.instances?.max ?? MAX_INSTANCES,
+    emptyMs: (opts.instances?.emptyS ?? INSTANCE_EMPTY_S) * 1000,
+    maxMs: (opts.instances?.maxS ?? INSTANCE_MAX_S) * 1000,
+    open: async (instanceKey) => (await matchMaker.createRoom('lampfall', { instanceKey })).roomId,
+  });
+  parties.onChange((partyId, accountIds, left) => instances.partyChanged(partyId, accountIds, left, parties));
   parties.onChange((_partyId, accountIds) => {
     for (const accountId of accountIds) presence.get(accountId)?.room.partyChanged(accountId);
   });
@@ -103,7 +129,20 @@ export function createApp(opts: AppOptions): App {
     }
   }, PARTY_SWEEP_MS);
   partySweep.unref();
-  // One shared room per saved zone; the Lampfall's rooms are instances (Plan 4 Task 7), never made here.
+  // Empty, cleared and expired instances are closed (their rooms send everyone out and disconnect).
+  const instanceSweep = setInterval(() => {
+    try {
+      instances.sweep();
+    } catch (err) {
+      const now = Date.now();
+      if (now - sweepLoggedAt >= 60_000) {
+        sweepLoggedAt = now;
+        console.error('The instance sweep failed (logged at most once a minute):', err);
+      }
+    }
+  }, opts.instances?.sweepMs ?? PARTY_SWEEP_MS);
+  instanceSweep.unref();
+  // One shared room per saved zone; the Lampfall's rooms are instances, opened only by Instances.enter.
   const zones = new Map<ZoneId, ZoneDef>(SAVE_ZONE_IDS.map((id) => [id, mergedZone(id, opts.zones?.[id])]));
 
   // Open gates by "from>to": each exit's own default, then openExits.
@@ -142,6 +181,7 @@ export function createApp(opts: AppOptions): App {
       players: SAVE_ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),
       tickHz: busy.length > 0 ? Math.min(...busy) : perZone.grove.tickHz,
       zones: perZone,
+      instances: { open: instances.count, players: instances.players, tickMsP95Max: Math.round(instances.tickMsP95Max * 100) / 100 },
     };
   };
 
@@ -152,7 +192,8 @@ export function createApp(opts: AppOptions): App {
     gracefullyShutdown: false, // index.ts handles signals and calls close()
     express: (app) => {
       if (opts.trustProxy !== undefined) app.set('trust proxy', opts.trustProxy); // before the login limit reads req.ip
-      app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute }));
+      app.use('/api/leaderboard', leaderboardRouter(opts.store));
+      app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute, instanceOf: (accountId) => instances.heldRoom(accountId) }));
       app.get('/healthz', (_req, res) => {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
         const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
@@ -180,8 +221,32 @@ export function createApp(opts: AppOptions): App {
       respawnRetryMs: opts.respawnRetryMs,
       viewCap: opts.viewCap,
       parties,
+      instances,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
+  }
+  // The Lampfall: no shared room; Instances.enter opens one per party (matchMaker.createRoom('lampfall', { instanceKey })).
+  {
+    const roomOptions: ZoneRoomOptions = {
+      store: opts.store,
+      reconnectSeconds: opts.reconnectSeconds ?? RECONNECT_SECONDS,
+      saveSeconds: opts.saveSeconds ?? SAVE_SECONDS,
+      maxPlayers: opts.maxPlayers ?? MAX_PLAYERS,
+      zone: mergedZone('lampfall', opts.zones?.lampfall),
+      presence,
+      rooms,
+      isExitOpen,
+      combatSeed: opts.combatSeed ?? Math.floor(Math.random() * 2 ** 31),
+      combatClock: opts.combatClock,
+      autoRespawnSeconds: opts.autoRespawnSeconds ?? AUTO_RESPAWN_S,
+      wallClock: opts.wallClock,
+      respawnRetryMs: opts.respawnRetryMs,
+      viewCap: opts.viewCap,
+      parties,
+      instances,
+      instance: { key: '', registry: instances, parties, startAt: opts.instances?.startAt, timings: opts.instances?.timings },
+    };
+    gameServer.define('lampfall', instanceRoomFor(roomOptions, opts.jwtSecret), roomOptions);
   }
 
   return {
@@ -214,10 +279,12 @@ export function createApp(opts: AppOptions): App {
       await closed;
       clearInterval(loopTimer);
       clearInterval(partySweep);
+      clearInterval(instanceSweep);
       loop.disable();
     },
 
     stats,
+    instances,
     isExitOpen,
     setExitOpen(from, to, open) {
       if (open) openGates.add(gate(from, to));

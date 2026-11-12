@@ -57,6 +57,8 @@ export const PlayerState = schema(
     castAt: t.uint32(),
     /** Live buffs as bits (BUFF_BITS); unset (read as 0) until the first buff. */
     buffs: t.uint8(),
+    /** Searing stacks (0–5; the Warden's autos); unset (read as 0) until the first. */
+    searing: t.uint8(),
   },
   'PlayerState',
 );
@@ -91,6 +93,14 @@ export const EnemyState = schema(
     staggerImmune: t.float32(),
     /** Live debuffs as bits (DEBUFF_BITS); unset (read as 0) until the first debuff. */
     debuffs: t.uint8(),
+    /** The kind's tier: 'elite' | 'boss' | 'mega'; unset (read as '' or undefined) for 'ordinary'. */
+    tier: t.string(),
+    /** A boss's phase, 0-based (lore.phases[phase] is its banner); during a transition already the next one. Unset (0) otherwise. */
+    phase: t.uint8(),
+    /** A ward add lives: the boss takes reduced damage. */
+    warded: t.boolean(),
+    /** When the boss enrages (or enraged), on the zone's `clock`; 0 = no enrage clock running (asleep, no enrage, not a boss). */
+    enrageAt: t.uint32(),
   },
   'EnemyState',
 );
@@ -103,14 +113,16 @@ export const TelegraphState = schema(
     /** The enemy's engine id. */
     owner: t.int32(),
     attack: t.string(),
-    /** 'circle' | 'cone' | 'line'. */
+    /** 'circle' | 'cone' | 'line' | 'ring'. */
     shape: t.string(),
     x: t.float32(),
     z: t.float32(),
     /** Direction (cone, line), as `facing`: 0 points +Z. */
     dir: t.float32(),
-    /** Radius (circle, cone) or length (line). */
+    /** Radius (circle, cone, the ring's outer edge) or length (line). */
     r: t.float32(),
+    /** A ring's inner radius (inside when inner ≤ d ≤ r: the Cinder Ring's safe middle); unset (0) for other shapes. */
+    inner: t.float32(),
     /** Line width. */
     width: t.float32(),
     /** Cone full width (rad). */
@@ -128,6 +140,31 @@ export const TelegraphState = schema(
 );
 export type TelegraphState = SchemaType<typeof TelegraphState>;
 
+/** A standing hazard (a boss's fire ring): added when it starts, never changed, deleted when it ends. Every client gets every one. */
+export const FieldState = schema(
+  {
+    id: t.int32(),
+    /** The enemy's engine id. */
+    owner: t.int32(),
+    /** The FieldId ('lampfire', 'lampfire_deep'). */
+    field: t.string(),
+    /** 'ring' | 'circle' (the Shape kind, in world coordinates). */
+    shape: t.string(),
+    x: t.float32(),
+    z: t.float32(),
+    /** Outer radius. */
+    r: t.float32(),
+    /** A ring's inner radius (0 for a circle). */
+    inner: t.float32(),
+    /** Raw damage of each tick (one a second from `at` + 1 s). */
+    raw: t.uint8(),
+    /** When it started, on the zone's `clock`. */
+    at: t.uint32(),
+  },
+  'FieldState',
+);
+export type FieldState = SchemaType<typeof FieldState>;
+
 /**
  * The three maps are filtered per client (`.view()`): each client's StateView holds itself and what is
  * within its interest radius (see interest.ts), so its `players` is NOT everyone in the zone; `online`
@@ -141,6 +178,24 @@ export const ZoneState = schema(
     online: t.uint16(),
     /** The combat clock in steps of 1/TICK_HZ s (TelegraphState.at is on it). */
     clock: t.uint32(),
+    /**
+     * Standing hazards: every client's view holds every one (a view map all the same: an unfiltered map
+     * beside the filtered ones made every patch dearer, about +10% in the clustered grove).
+     */
+    fields: t.map(FieldState).view(),
+    /** A Lampfall instance's room id ('' in a shared zone room). */
+    instance: t.string(),
+    /** The boss room whose gate is sealed now (an EncounterId: 'wickhound' | 'warden'), or ''. */
+    sealed: t.string(),
+    /**
+     * Shut lamp-gates as bits (GATE_WICK, GATE_WICK_EXIT, GATE_PIT from @sg2/shared): each shut gate
+     * circle is a wall (gatedSurface), for prediction exactly as the server applies it. 0 outside instances.
+     */
+    gates: t.uint8(),
+    /** During a wipe: the clock step when everyone gets up at the checkpoint; 0 = none. */
+    wipeAt: t.uint32(),
+    /** The lamp-lift (the Lens Pit's exit) is open: the Warden has fallen in this instance. */
+    lift: t.boolean(),
   },
   'ZoneState',
 );

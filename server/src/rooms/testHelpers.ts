@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
-import { TICK_HZ, groveTownSurface, worldOf as worldOfCombat, type Surface, type ZoneId } from '@sg2/shared';
+import { LAMPFALL_MOUTH, TICK_HZ, groveTownSurface, worldOf as worldOfCombat, zoneDef, type Surface, type ZoneId } from '@sg2/shared';
 import { createApp, type AppOptions } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
@@ -54,6 +54,17 @@ export async function joinGrove(url: string, token: string): Promise<{ client: C
 export async function joinZone(url: string, token: string, zone: ZoneId = 'grove'): Promise<{ client: Client; room: Room<any, any> }> {
   const client = new Client(url);
   const room = await client.joinOrCreate(zone, { token });
+  return tracked(client, room);
+}
+
+/** Joins a Lampfall instance by its room id and waits until the client sees itself in the state. */
+export async function joinInstance(url: string, token: string, roomId: string): Promise<{ client: Client; room: Room<any, any> }> {
+  const client = new Client(url);
+  const room = await client.joinById(roomId, { token });
+  return tracked(client, room);
+}
+
+async function tracked(client: Client, room: Room<any, any>): Promise<{ client: Client; room: Room<any, any> }> {
   room.reconnection.enabled = false;
   // Messages a test does not collect (fx, self, ...) are kept for collectFromJoin, else dropped quietly.
   const early = new Map<string, any[]>();
@@ -108,12 +119,13 @@ export async function walk(
   from: { x: number; z: number },
   to: { x: number; z: number },
   surface: Surface = groveTownSurface,
+  ack = 0,
 ): Promise<void> {
   const steps = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / 0.4);
   for (let i = 1; i <= steps; i++) {
     const x = i === steps ? to.x : from.x + ((to.x - from.x) * i) / steps;
     const z = i === steps ? to.z : from.z + ((to.z - from.z) * i) / steps;
-    room.send('move', { x, z, y: surface(x, z) ?? 0, facing: 0, moving: i < steps });
+    room.send('move', { x, z, y: surface(x, z) ?? 0, facing: 0, moving: i < steps, ack });
     await sleep(1000 / TICK_HZ);
   }
 }
@@ -181,4 +193,25 @@ export function engineParty(room: Room<any, any>): string | null | undefined {
   const eid = room.state.players.get(room.sessionId)?.eid;
   const adventurer = server?.combat ? worldOfCombat(server.combat).adventurers.get(eid) : undefined;
   return adventurer ? adventurer.party : undefined;
+}
+
+/**
+ * The account's adventurer saved in the Greenway at the crater mouth's arrival point, joined there, walked
+ * into the mouth, and joined into the instance it is sent to: the instance room, its id, and the
+ * Greenway room it left (`greenway`, already left).
+ */
+export async function intoLampfall(url: string, store: Store, account: { accountId: string; token: string }, opts: { saved?: boolean } = {}) {
+  if (opts.saved !== false) await saveAs(store, account.accountId, { zone: 'greenway', ...LAMPFALL_MOUTH.arrive });
+  const greenway = await joinZone(url, account.token, 'greenway');
+  const travels = collect(greenway.room, 'travel');
+  await walk(greenway.room, LAMPFALL_MOUTH.arrive, { x: LAMPFALL_MOUTH.x, z: LAMPFALL_MOUTH.z }, zoneDef('greenway').surface);
+  const travel = await waitFor(() => travels[0], 4000);
+  const joined = await joinInstance(url, account.token, travel.instance);
+  return { ...joined, roomId: travel.instance as string, greenway, travel };
+}
+
+/** Test-only: puts the client's adventurer at (x, z) on the server (a `displaced` resync); the ack its moves must carry from now on. */
+export function place(room: Room<any, any>, x: number, z: number): number {
+  const server = serverRoom(room) as unknown as { testPlace(sessionId: string, x: number, z: number): number };
+  return server.testPlace(room.sessionId, x, z);
 }

@@ -1,6 +1,6 @@
 // Accounts API: register, log in or play as a guest (each answers {token, name} or {error}, where name
 // is the adventurer's name, null until chosen), name your adventurer (answers {name} or {error}), and
-// ask which zone it is in (GET /zone answers {zone}: the room to join).
+// ask which zone it is in (GET /zone answers {zone}, or {zone: 'lampfall', instance} inside an instance: the room to join).
 import argon2 from 'argon2';
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
@@ -19,7 +19,10 @@ function randomGuestName(): string {
   return `Guest-${String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0')}`;
 }
 
-export function authRouter(store: Store, secret: string, opts: { ratePerMinute?: number; zoneRatePerMinute?: number; zoneIpRatePerMinute?: number } = {}): express.Router {
+export function authRouter(
+  store: Store, secret: string,
+  opts: { ratePerMinute?: number; zoneRatePerMinute?: number; zoneIpRatePerMinute?: number; instanceOf?: (accountId: string) => string | undefined } = {},
+): express.Router {
   const router = express.Router();
   const session = async (account: Account) => ({
     token: signToken(account.id, secret),
@@ -53,6 +56,12 @@ export function authRouter(store: Store, secret: string, opts: { ratePerMinute?:
     const account = verified && (await store.findAccountById(verified.accountId));
     if (!account) {
       res.status(401).json({ error: SIGN_IN_AGAIN });
+      return;
+    }
+    // Inside a Lampfall instance (a seat held there: a drop, another tab, a travel on its way in): its room by id.
+    const instance = opts.instanceOf?.(account.id);
+    if (instance) {
+      res.json({ zone: 'lampfall', instance });
       return;
     }
     res.json({ zone: (await store.getOrCreateAdventurer(account.id)).zone });

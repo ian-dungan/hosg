@@ -225,6 +225,19 @@ on the server saves only the jobs. So, for that update only:
    made since (the old server reads only the old weapon column, which is no longer written). To
    really go back, restore the backup from step 1 instead.
 
+**The update that brings parties and the Fallen Warden (database migration 005) is not one-way.** It
+only adds: three new adventurer columns (Warden's Seals, the day of the last Seal, titles) with
+defaults, and a new `boss_kills` table for the leaderboard. Nothing existing is changed, and it is safe
+to run again. So:
+
+1. A backup first is still good practice (see "Back up the database" below), but no special steps are
+   needed: `git pull` and `docker compose up -d --build` as usual.
+2. Going back to an older version afterwards works: the older server ignores the new columns and the
+   table. Seals, titles and leaderboard entries won while on the older version are simply not
+   recorded, and come back into use when you update again.
+3. Nobody is ever saved inside the Lampfall: an adventurer in a dungeon run is saved at the crater mouth
+   in the Greenway, so a restart (or going back) puts it there.
+
 ### Back up the database
 
 ```
