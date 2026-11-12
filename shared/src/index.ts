@@ -26,3 +26,4 @@ export * from './loot';
 export * from './inventory';
 export * from './quests';
 export * from './story/spots';
+export * from './story/lines';
