@@ -1,10 +1,14 @@
-// Load test: `count` guest adventurers join the grove, run about at TICK_HZ with the shared character
-// controller (over the grove's height surface, jumping now and then) and chat every 20 s. Prints the
-// patch rate the bots saw and the server's peak memory, and exits non-zero unless every bot stayed
-// connected, the mean patch rate is at least 14 Hz, no legal step was corrected, no bot was ever
-// left in the air without a pose it could send, and none was stuck for a second or more.
-// The first few corrections are printed in full, with the pose the bot had sent.
-//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60
+// Load test: `count` guest adventurers join `--zone` (the grove by default; the Greenway for a server
+// started with SG2_START_ZONE=greenway; GET /api/zone allows only 60 a minute per address), run about at TICK_HZ with the shared character
+// controller (over that zone's height surface, jumping now and then) and chat every 20 s. With
+// --stand they stand still instead (they still chat). Prints the patch rate the bots saw, the bytes a
+// second each received (state patches and messages), the server's peak memory and step time (p95),
+// and exits non-zero unless every bot stayed connected, the mean patch rate is at least 14 Hz, no
+// legal step was corrected, no bot was ever left in the air without a pose it could send, and none
+// was stuck for a second or more. The first few corrections are printed in full, with the pose the
+// bot had sent (with --stand the patch rate is not checked: an unchanged state sends none). Bots do not fight; a knockback or a respawn only moves them (they adopt its ack), and
+// one that dies stands still until it gets up.
+//   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand]
 // The server's auth limiter allows 10 logins per IP a minute by default: start it with a higher
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
 import { parseArgs } from 'node:util';
@@ -13,12 +17,16 @@ import {
   RUN_SPEED,
   TICK_HZ,
   checkPose,
-  groveTownSurface,
+  isZoneId,
   makeAirTrack,
   makeBody,
   stepBody,
+  zoneDef,
   type AirTrack,
   type Body,
+  type S2C,
+  type Surface,
+  type ZoneId,
 } from '@sg2/shared';
 
 const MIN_MEAN_HZ = 14;
@@ -36,8 +44,16 @@ const { values } = parseArgs({
     url: { type: 'string', default: 'http://localhost:2570' },
     count: { type: 'string', default: '100' },
     seconds: { type: 'string', default: '60' },
+    stand: { type: 'boolean', default: false },
+    zone: { type: 'string', default: 'grove' },
   },
 });
+if (!isZoneId(values.zone)) {
+  console.error('--zone must be grove or greenway');
+  process.exit(2);
+}
+const zoneId: ZoneId = values.zone;
+const stand = values.stand;
 const url = values.url.replace(/\/$/, '');
 const count = Number(values.count);
 const seconds = Number(values.seconds);
@@ -53,6 +69,7 @@ interface Health {
   tickHz: number;
   rssMb: number;
   peakRssMb: number;
+  zones?: Record<string, { players: number; tickHz: number; tickMs?: number }>;
 }
 
 async function health(): Promise<Health> {
@@ -86,7 +103,17 @@ class Bot {
   private lastStepAt = 0;
   chatsHeard = 0;
   disconnected: string | null = null;
-  private body: Body = makeBody(0, 0, groveTownSurface);
+  /** Bytes received while measuring (patches and messages). */
+  bytes = 0;
+  displacements = 0;
+  deaths = 0;
+  /** Sent on to another zone (a respawn from the Greenway): not a failure. */
+  travelled = false;
+  zone: ZoneId = 'grove';
+  private surface: Surface = zoneDef('grove').surface;
+  /** The last displacement the server numbered: every pose carries it. */
+  private ack = 0;
+  private body: Body = makeBody(0, 0, this.surface);
   /** The server's view of this bot's height, so it only sends poses the server accepts. */
   private air: AirTrack = makeAirTrack(0);
   private heading = Math.random() * 2 * Math.PI;
@@ -102,13 +129,31 @@ class Bot {
       throw new Error(`guest login failed: ${res.status} ${body.error ?? ''}${hint}`);
     }
     this.name = body.name ?? `bot ${this.index}`;
-    this.room = await new Client(url).joinOrCreate('grove', { token: body.token });
+    this.zone = zoneId;
+    this.surface = zoneDef(this.zone).surface;
+    this.room = await new Client(url).joinOrCreate(this.zone, { token: body.token });
     this.room.reconnection.enabled = false; // a drop is a failure, not something to ride out
+    const connection = this.room.connection as unknown as { events: { onmessage?: (ev: { data: ArrayBuffer | string }) => void } };
+    const onmessage = connection.events.onmessage;
+    connection.events.onmessage = (ev) => {
+      if (this.patches !== null) this.bytes += typeof ev.data === 'string' ? ev.data.length : ev.data.byteLength;
+      onmessage?.(ev);
+    };
+    this.room.onMessage('*', () => {}); // fx, self, credit, refused: not used by bots
+    const moved = (to: { x: number; z: number; y: number }, seq: number) => {
+      this.ack = seq;
+      this.body = makeBody(to.x, to.z, this.surface);
+      this.body.y = to.y;
+      this.air = makeAirTrack(to.y);
+    };
+    this.room.onMessage('displaced', (m: S2C['displaced']) => { this.displacements++; moved(m.to, m.seq); });
+    this.room.onMessage('respawned', (m: S2C['respawned']) => moved(m, m.seq));
+    this.room.onMessage('travel', () => { this.travelled = true; });
     this.room.onMessage('correct', (m: { x: number; z: number; y: number }) => {
       this.corrections++;
       if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}`);
       // go where the server says, standing, as the browser does
-      this.body = makeBody(m.x, m.z, groveTownSurface);
+      this.body = makeBody(m.x, m.z, this.surface);
       this.body.y = m.y;
       this.air = makeAirTrack(m.y);
     });
@@ -119,9 +164,13 @@ class Bot {
     this.room.onMessage('chat', () => this.chatsHeard++);
     this.room.onMessage('kicked', (m: { reason: string }) => (this.disconnected ??= `kicked: ${m.reason}`));
     this.room.onDrop((code) => (this.disconnected ??= `dropped (code ${code})`));
-    this.room.onLeave((code) => (this.disconnected ??= `left (code ${code})`));
+    this.room.onLeave((code) => { if (!this.travelled) this.disconnected ??= `left (code ${code})`; });
+    let wasDead = false;
     this.room.onStateChange(() => {
       if (this.patches !== null) this.patches++;
+      const dead = this.room.state.players?.get(this.room.sessionId)?.dead === true;
+      if (dead && !wasDead) this.deaths++;
+      wasDead = dead;
     });
     const deadline = Date.now() + 10_000;
     let me;
@@ -129,8 +178,12 @@ class Bot {
       if (Date.now() > deadline) throw new Error(`${this.name} never appeared in the room`);
       await sleep(20);
     }
-    this.body = makeBody(me.x, me.z, groveTownSurface);
+    this.body = makeBody(me.x, me.z, this.surface);
     this.air = makeAirTrack(this.body.y);
+  }
+
+  private get dead(): boolean {
+    return this.room.state.players?.get(this.room.sessionId)?.dead === true;
   }
 
   start() {
@@ -153,27 +206,30 @@ class Bot {
    * a client would, and the server's correction puts it right.
    */
   private step() {
+    if (stand || this.travelled || this.dead) return;
     const now = Date.now();
     const sinceLastStep = now - this.lastStepAt;
     const dt = this.lastStepAt ? sinceLastStep / 1000 : 1 / TICK_HZ;
     this.lastStepAt = now;
     const refusals: string[] = [];
-    let first: { body: Body; next: { x: number; z: number; y: number; facing: number; moving: boolean }; heading: number } | null = null;
+    let first: { body: Body; next: { x: number; z: number; y: number; facing: number; moving: boolean; ack: number }; heading: number } | null = null;
     for (let attempt = 0; attempt < 12; attempt++) {
       const heading = attempt === 0 ? this.heading + (Math.random() - 0.5) * 0.4 : Math.random() * 2 * Math.PI;
       const body = { ...this.body };
       const jump = attempt === 0 && Math.random() < JUMP_CHANCE;
-      const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, dt, groveTownSurface);
+      const stepped = stepBody(body, { vx: Math.sin(heading) * RUN_SPEED, vz: Math.cos(heading) * RUN_SPEED, jump }, dt, this.surface);
       const moved = Math.hypot(body.x - this.body.x, body.z - this.body.z);
       // stuck against something (in the air it carries on regardless, so its fall keeps up with the clock)
       if (body.grounded && moved < RUN_SPEED * Math.min(dt, 0.25) * 0.5) continue;
-      const next = { x: body.x, z: body.z, y: body.y, facing: heading, moving: true };
+      // bots stay in their zone: they turn away from its exits as from walls
+      if (zoneDef(this.zone).exits.some((e) => Math.hypot(body.x - e.x, body.z - e.z) < e.r + 1.5)) continue;
+      const next = { x: body.x, z: body.z, y: body.y, facing: heading, moving: true, ack: this.ack };
       first ??= { body, next, heading };
       const air = { ...this.air };
       // running speed is well inside the server's allowance, so only the height check can refuse it
-      const checked = checkPose(this.body, air, next, now, Infinity, groveTownSurface);
+      const checked = checkPose(this.body, air, next, now, Infinity, this.surface);
       if (checked.result !== 'ok') {
-        refusals.push(`${checked.result} y ${body.y.toFixed(2)} surface ${groveTownSurface(body.x, body.z)?.toFixed(2)}`);
+        refusals.push(`${checked.result} y ${body.y.toFixed(2)} surface ${this.surface(body.x, body.z)?.toFixed(2)}`);
         continue;
       }
       this.heading = heading;
@@ -200,6 +256,7 @@ class Bot {
   }
 
   private chat() {
+    if (this.travelled) return;
     this.room.send('chat', { text: `${this.name} says hello at ${new Date().toISOString().slice(11, 19)}` });
   }
 
@@ -223,7 +280,8 @@ try {
   process.exit(1);
 }
 bots.forEach((bot) => bot.start());
-console.log(`All ${count} joined; walking and chatting for ${seconds} s.`);
+const zones = [...new Set(bots.map((bot) => bot.zone))].join(', ');
+console.log(`All ${count} joined (${zones}); ${stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
 await sleep(WARMUP_MS);
 
 const healthSamples: Health[] = [];
@@ -245,6 +303,12 @@ const airStalls = bots.reduce((n, bot) => n + bot.airStalls, 0);
 const longestStall = Math.max(...bots.map((bot) => bot.longestStall));
 const hurts = bots.reduce((n, bot) => n + bot.hurts, 0);
 const hurtHp = bots.reduce((n, bot) => n + bot.hurtHp, 0);
+const byteRates = bots.map((bot) => bot.bytes / measured);
+const displacements = bots.reduce((n, bot) => n + bot.displacements, 0);
+const deaths = bots.reduce((n, bot) => n + bot.deaths, 0);
+const travelled = bots.filter((bot) => bot.travelled).length;
+const tickMs = (h: Health) => Math.max(0, ...Object.values(h.zones ?? {}).map((z) => z.tickMs ?? 0));
+const tickSamples = healthSamples.map(tickMs);
 await Promise.all(bots.map((bot) => bot.stop()));
 
 const mean = rates.reduce((a, b) => a + b, 0) / rates.length;
@@ -256,6 +320,10 @@ console.log(`players: ${final.players}`);
 console.log(`patch rate seen by bots: mean ${mean.toFixed(2)} Hz, min ${min.toFixed(2)} Hz (over ${measured.toFixed(1)} s)`);
 if (serverHz.length) console.log(`server patch rate (/healthz, 5 s window): min ${Math.min(...serverHz)} Hz, max ${Math.max(...serverHz)} Hz`);
 console.log(`server peak RSS: ${peakRss} MB`);
+if (tickSamples.length) console.log(`server step time p95 (/healthz tickMs, 5 s window): max ${Math.max(...tickSamples)} ms, last ${tickMs(final)} ms`);
+const sortedBytes = [...byteRates].sort((a, b) => a - b);
+console.log(`received per bot: mean ${(byteRates.reduce((a, b) => a + b, 0) / byteRates.length / 1024).toFixed(1)} KiB/s, p95 ${(sortedBytes[Math.floor(sortedBytes.length * 0.95)] / 1024).toFixed(1)} KiB/s, max ${(sortedBytes[sortedBytes.length - 1] / 1024).toFixed(1)} KiB/s`);
+console.log(`displacements: ${displacements}; deaths: ${deaths}; sent on to another zone: ${travelled}`);
 console.log(`corrections: ${corrections}; disconnected bots: ${lost.length}; chat lines heard: ${chatsHeard}; jumps: ${jumps}`);
 console.log(`falls that hurt: ${hurts} (${hurtHp} hp in all)`);
 console.log(`ticks with no sendable pose: ${stalledTicks} (${airStalls} in the air); longest run: ${longestStall} ticks`);
@@ -264,7 +332,8 @@ for (const line of bots.flatMap((bot) => bot.airStallLog ?? []).slice(0, 5)) con
 
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);
-if (!(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
+// Standing bots change nothing, and an unchanged state sends no patches: the rate means nothing then.
+if (!stand && !(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
 if (corrections) failures.push(`${corrections} legal steps were corrected`);
 if (airStalls) failures.push(`${airStalls} ticks in the air had no pose the server would accept`);
 if (longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);

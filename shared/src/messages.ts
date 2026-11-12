@@ -1,5 +1,10 @@
 // Message shapes between client and server, keyed by message type, and the reasons the server
 // gives when it refuses a join or ends a session (the client recognises them by exact text).
+import type { AbilityId } from './combat/abilities';
+import type { Displacement } from './combat/displace';
+import type { Refusal, SelfView } from './combat/engine';
+import type { EnemyKindId } from './combat/enemies';
+import type { FxEvent } from './combat/fx';
 import type { Pose } from './movement';
 import type { ZoneId } from './world/zones';
 
@@ -21,7 +26,22 @@ export const REASON_TRAVEL_FAILED = 'The way is blocked for now, try again soon'
 export type C2S = {
   move: Pose;
   chat: { text: string };
+  /** Target an enemy by engine id, or clear the target (null). */
+  target: { id: number | null };
+  /** An ability slot (0..4: quick, finisher, signature, free, free): press, or release (Charged Shot). */
+  ability: { slot: number; phase: 'press' | 'release' };
+  /** Blade ⇄ Bow (only out of combat). */
+  swap: Record<string, never>;
+  /** A dodge roll: the pose it starts from (checked like a move; its ack must be the latest displacement) and a direction. */
+  dodge: Pose & { dx: number; dz: number };
+  /** The two free picks (only out of combat). */
+  loadout: { free: [AbilityId, AbilityId] };
+  /** Get up again after dying (from DEATH_MIN_S on). */
+  respawn: Record<string, never>;
 };
+
+/** What a refused intent was. */
+export type IntentAction = 'target' | 'ability' | 'swap' | 'dodge' | 'loadout' | 'respawn';
 
 /** Server → client. */
 export type S2C = {
@@ -38,4 +58,22 @@ export type S2C = {
   travel: { zone: ZoneId };
   /** A short line to show the player (for example why an exit refused them). */
   notice: { text: string };
+  /** Combat events near this adventurer (or involving it), once per tick, only when there are any. */
+  fx: { events: FxEvent[] };
+  /**
+   * The server moved this adventurer (a dodge it asked for, or a knockback): it is at `to` now. From
+   * now on every pose the client sends carries `ack: seq`; poses with an older ack are ignored.
+   */
+  displaced: { seq: number; kind: 'dodge' | 'knock'; from: { x: number; z: number; y: number }; d: Displacement; to: { x: number; z: number; y: number } };
+  /** An intent the server refused; 'stale': a dodge whose pose was refused (a `correct` comes with it) or carried an old ack. */
+  refused: { action: IntentAction; reason: Refusal | 'stale' };
+  /** The adventurer's own combat numbers, at most 5 times a second, only when they changed. */
+  self: SelfView;
+  /** This adventurer shares the kill of an enemy of this kind. */
+  credit: { kind: EnemyKindId };
+  /**
+   * Revived in this room at the statue, at full health. Like a displacement it starts a new ack:
+   * poses from now on carry `ack: seq`.
+   */
+  respawned: { x: number; z: number; y: number; seq: number };
 };

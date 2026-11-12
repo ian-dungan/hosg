@@ -4,7 +4,7 @@ import type { Server as HttpServer } from 'node:http';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { HP_REGEN_DELAY_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, ZONE_IDS, zoneDef, type ZoneDef, type ZoneId } from '@sg2/shared';
+import { AUTO_RESPAWN_S, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, ZONE_IDS, zoneDef, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { authRouter } from './auth/routes';
 import type { Store } from './store/types';
 import { Presence } from './rooms/presence';
@@ -25,8 +25,12 @@ export interface AppOptions {
   zones?: Partial<Record<ZoneId, Partial<ZoneDef>>>;
   /** Exits to open at start, beside those open by default: from zone -> destinations (SG2_OPEN_EXITS). */
   openExits?: Partial<Record<ZoneId, readonly ZoneId[]>>;
-  /** Test-only: seconds after a fall before health comes back (default HP_REGEN_DELAY_S). */
-  hpRegenDelaySeconds?: number;
+  /** Seed of each zone's combat engine (fixed in tests; random by default). */
+  combatSeed?: number;
+  /** Test-only: the rooms' combat clock in seconds, monotonic (default: each room's own performance.now()). */
+  combatClock?: () => number;
+  /** Test-only: seconds after a death before an adventurer gets up by itself (default AUTO_RESPAWN_S). */
+  autoRespawnSeconds?: number;
 }
 
 export interface App {
@@ -35,8 +39,9 @@ export interface App {
   /**
    * Adventurers online, and state patches sent per second over the last 5 s: in all, and per zone.
    * The overall tickHz is the lowest among zones with adventurers (the grove's when none have any).
+   * Each zone's tickMs is the p95 of its room step's time over the last 5 s.
    */
-  stats(): { players: number; tickHz: number; zones: Record<ZoneId, { players: number; tickHz: number }> };
+  stats(): { players: number; tickHz: number; zones: Record<ZoneId, { players: number; tickHz: number; tickMs: number }> };
   /** Whether the exits from `from` to `to` are open now. */
   isExitOpen(from: ZoneId, to: ZoneId): boolean;
   /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
@@ -65,9 +70,9 @@ export function createApp(opts: AppOptions): App {
     const perZone = Object.fromEntries(
       ZONE_IDS.map((id) => {
         const room = rooms.get(id);
-        return [id, { players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0) }];
+        return [id, { players: room?.playerCount ?? 0, tickHz: round(room?.measuredPatchHz ?? 0), tickMs: Math.round((room?.tickMsP95 ?? 0) * 100) / 100 }];
       }),
-    ) as Record<ZoneId, { players: number; tickHz: number }>;
+    ) as Record<ZoneId, { players: number; tickHz: number; tickMs: number }>;
     const busy = ZONE_IDS.filter((id) => perZone[id].players > 0).map((id) => perZone[id].tickHz);
     return {
       players: ZONE_IDS.reduce((n, id) => n + perZone[id].players, 0),
@@ -104,7 +109,9 @@ export function createApp(opts: AppOptions): App {
       presence,
       rooms,
       isExitOpen,
-      hpRegenDelaySeconds: opts.hpRegenDelaySeconds ?? HP_REGEN_DELAY_S,
+      combatSeed: opts.combatSeed ?? Math.floor(Math.random() * 2 ** 31),
+      combatClock: opts.combatClock,
+      autoRespawnSeconds: opts.autoRespawnSeconds ?? AUTO_RESPAWN_S,
     };
     gameServer.define(zone.id, zoneRoomFor(roomOptions, opts.jwtSecret), roomOptions); // room name = zone id
   }

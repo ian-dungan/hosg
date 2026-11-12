@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CloseCode, matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
-import { CLIENT_RECONNECTION, SPAWN, TICK_HZ, fallDamage, groveTownSurface, makeBody, stepBody, type Body, type Surface } from '@sg2/shared';
+import { CLIENT_RECONNECTION, HP_REGEN_DELAY_S, SPAWN, TICK_HZ, fallDamage, groveTownSurface, makeBody, stepBody, type Body, type Surface } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
 import type { Store } from '../store/types';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { signToken } from '../auth/tokens';
-import { SECRET, accountFor, collect, joinGrove, saveAs, sleep, startServer, waitFor, walk, type TestServer } from './testHelpers';
+import { SECRET, accountFor, collect, joinGrove, saveAs, sleep, startServer, testClock, waitFor, walk, type TestServer } from './testHelpers';
 
 let server: TestServer | undefined;
 
@@ -590,19 +590,24 @@ describe('height', () => {
   }, 15_000);
 
   it('health comes back HP_REGEN_PER_S a second once the regen delay has passed since the last fall', async () => {
-    const { url, store } = await start({ zones: { grove: { surface: testSurface } }, hpRegenDelaySeconds: 1 });
+    // the regen delay is the engine's (HP_REGEN_DELAY_S): the combat clock is jumped over it
+    const clock = testClock(1);
+    const { url, store } = await start({ zones: { grove: { surface: testSurface } }, combatClock: clock.now });
     const a = await joinAt(url, store, 'Alice', 0, RAMP_Z);
     const hurts = collect(a.room, 'hurt');
     const me = () => a.room.state.players.get(a.room.sessionId);
     await sendPoses(a.room, [...rampPoses(), { x: RAMP_END + 0.4, z: RAMP_Z, y: 0, facing: 0, moving: true }]);
     await waitFor(() => hurts.length === 1);
-    const hurtAt = Date.now();
+    const hurtAt = clock.now();
     await waitFor(() => me().hp === 100 - fallDamage(10));
     await sleep(600);
     expect(me().hp).toBe(100 - fallDamage(10)); // still inside the delay
+    clock.skip(HP_REGEN_DELAY_S - 1);
+    await sleep(300);
+    expect(me().hp).toBe(100 - fallDamage(10)); // still inside it, just
+    clock.skip(1);
     await waitFor(() => me().hp >= 100 - fallDamage(10) + 2, 2500);
-    const regenFrom = Date.now() - hurtAt;
-    expect(regenFrom).toBeGreaterThan(900);
+    expect(clock.now() - hurtAt).toBeGreaterThan(HP_REGEN_DELAY_S);
     const hp = me().hp;
     await sleep(1000);
     expect(me().hp - hp).toBeGreaterThanOrEqual(1);

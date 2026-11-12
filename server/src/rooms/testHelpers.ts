@@ -1,12 +1,14 @@
 // Shared helpers for the room tests: boot an app on a free port and connect SDK clients to it.
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
+import { matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
 import { TICK_HZ, groveTownSurface, type Surface, type ZoneId } from '@sg2/shared';
 import { createApp, type AppOptions } from '../app';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
 import type { Adventurer, Store } from '../store/types';
+import type { ZoneRoom } from './ZoneRoom';
 
 export const SECRET = 'test-secret-that-is-at-least-32-characters';
 
@@ -52,6 +54,7 @@ export async function joinZone(url: string, token: string, zone: ZoneId = 'grove
   const client = new Client(url);
   const room = await client.joinOrCreate(zone, { token });
   room.reconnection.enabled = false;
+  room.onMessage('*', () => {}); // messages a test does not collect (fx, self, ...) are dropped quietly
   await waitFor(() => room.state.players?.get(room.sessionId));
   return { client, room };
 }
@@ -103,4 +106,23 @@ export async function saveAs(
 ): Promise<void> {
   const { id, x, z, facing, zone, hp, loadout } = await store.getOrCreateAdventurer(accountId);
   await store.saveAdventurer({ id, x, z, facing, zone, hp, loadout, ...changes });
+}
+
+/**
+ * A combat clock for tests (seconds, monotonic): runs at `rate` × real time, can be sped up or slowed
+ * down with setRate, and jumped ahead with skip. Pass `now` as the app's `combatClock`.
+ */
+export function testClock(rate = 1) {
+  let base = 0, from = performance.now(), r = rate;
+  const now = () => base + ((performance.now() - from) / 1000) * r;
+  return {
+    now,
+    setRate(k: number) { base = now(); from = performance.now(); r = k; },
+    skip(seconds: number) { base += seconds; },
+  };
+}
+
+/** The server-side room object behind a client's room (same process). */
+export function serverRoom(room: Room<any, any>): ZoneRoom {
+  return matchMaker.getLocalRoomById(room.roomId) as unknown as ZoneRoom;
 }

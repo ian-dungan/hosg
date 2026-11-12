@@ -1,6 +1,6 @@
 // Which session holds each account, across every zone room: an account is online in one room at a
 // time, and the newest join wins (the room it is in kicks the older session).
-import type { AirTrack, ZoneId } from '@sg2/shared';
+import type { AirTrack, Carry, ZoneId } from '@sg2/shared';
 import type { ZoneRoom } from './ZoneRoom';
 
 /**
@@ -24,6 +24,12 @@ export class Presence {
   private claims = new Map<string, Claim>(); // key: accountId
   /** Movement allowances by account id, shared by every room (see Allowance). */
   readonly allowances = new Map<string, Allowance>();
+  /**
+   * Combat state an account's last session left with (cooldowns, dodge charges, Momentum) and when
+   * (ms), by account id, shared by every room: the next join, in any zone, picks it up, so relogging
+   * resets nothing. Forgotten once taken, or once everything would have been ready anyway.
+   */
+  readonly carries = new Map<string, { carry: Carry; at: number }>();
 
   /** The session that holds the account now, if any (a copy). */
   get(accountId: string): Claim | undefined {
