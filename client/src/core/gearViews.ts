@@ -119,7 +119,8 @@ export interface CharSheetView {
   /** The kit's stats (the server's), each as a label and its value; the specials say what they do. */
   stats: { key: StatDelta['key']; label: string; value: string; hint: string }[];
   /** The current job's eight slots (the off-hand is null for a weapon that takes none). */
-  slots: { slot: GearSlot; label: string; item: ItemView | null; none: string | null }[];
+  /** takeOff: whether the worn piece can be taken off now (the starter piece goes on), and why not. */
+  slots: { slot: GearSlot; label: string; item: ItemView | null; none: string | null; takeOff: { ok: boolean; why: string | null } }[];
   sets: SetProgress[];
   /** The named weapon's line, when one is worn. */
   named: string | null;

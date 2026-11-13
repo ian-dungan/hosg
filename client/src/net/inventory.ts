@@ -310,7 +310,8 @@ export function charSheetView(v: InventoryView, c: GearCtx): CharSheetView {
     const i = worn[slot];
     let none: string | null = null;
     if (!i && slot === 'offhand' && !OFFHAND_FOR[job.weapon]) none = job.weapon === 'daggers' ? 'A pair of daggers: no off-hand' : 'Two-handed: no off-hand';
-    return { slot, label: SLOT_LABEL[slot], item: i ? itemView(v, i, c, 'slot') : null, none };
+    const why = stateBlock(c);
+    return { slot, label: SLOT_LABEL[slot], item: i ? itemView(v, i, c, 'slot') : null, none, takeOff: { ok: why === null, why } };
   });
   const level = Math.min(JOB_LEVEL_CAP, Math.max(1, c.level));
   const top = level >= JOB_LEVEL_CAP;

@@ -186,7 +186,8 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
     else h('div', 'sg-gs-empty', box, sv.none ?? 'Nothing worn here.');
     if (sv.item && sv.item.icon.tier > 0 && slot !== 'weapon' && slot !== 'offhand') {
       const row = h('div', 'sg-card-acts', box);
-      opBtn(acts, row, 'Take off (wear the starter piece)', { op: 'unequip', slot }, send, '', !v.slots.find((s) => s.slot === slot)?.item?.equip?.why);
+      opBtn(acts, row, 'Take off (wear the starter piece)', { op: 'unequip', slot }, send, '', sv.takeOff.ok);
+      if (sv.takeOff.why) h('div', 'sg-gs-why', box, sv.takeOff.why);
     }
     const fitting = [...v.bag, ...v.wornElsewhere].filter((i) => i.equip?.slot === slot && i.equip.cmp);
     const hd = h('div', 'sg-gs-h', box, 'From your bag');

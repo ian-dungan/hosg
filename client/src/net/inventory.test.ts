@@ -232,6 +232,17 @@ describe('sheets and stalls', () => {
     expect(v.stats.find((s) => s.key === 'power')!.value).toBe(String(st.view().stats.power));
   });
 
+  it('taking off a worn piece is gated like an equip: off with the reason in a sealed arena, in a fight, knocked out (live: it was always on)', () => {
+    const st = serverState('ranger');
+    st.apply({ op: 'buy', stall: 'smithy', item: 'thornrunner_chest' });
+    st.apply({ op: 'equip', uid: uidOf(st.view(), 'thornrunner_chest'), slot: 'chest' }, CTX);
+    const chest = (extra: Partial<GearCtx>) => charSheetView(st.view(), ctxOf(st, extra)).slots.find((s) => s.slot === 'chest')!;
+    expect(chest({}).takeOff).toEqual({ ok: true, why: null });
+    expect(chest({ sealed: true }).takeOff).toEqual({ ok: false, why: 'Not inside a sealed boss arena' });
+    expect(chest({ inCombat: true }).takeOff).toEqual({ ok: false, why: 'Not while fighting' });
+    expect(chest({ dead: true }).takeOff).toEqual({ ok: false, why: 'Not while knocked out' });
+  });
+
   it('the smithy: prices from the data, owned and affordable states, comparison for the job', () => {
     const st = serverState('ranger', 60);
     st.apply({ op: 'buy', stall: 'smithy', item: 'thornrunner_feet' }); // 40 gold: 20 left
