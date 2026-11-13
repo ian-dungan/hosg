@@ -1555,7 +1555,8 @@ class Bot {
       return e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5 ? e : attacker;
     }
     // the odd bot of a duo takes its leader's target (the leader never follows, so they never chase each other's)
-    const leader = this.partner !== null && (this.ri & 1) === 1 ? bots[this.partner] : null;
+    // (--quest: a duo partner in its leader's party takes the leader's target, so their kills are shared)
+    const leader = this.partner !== null && (this.ri & 1) === 1 ? bots[this.partner] : this.questFollow && this.inParty ? bots[this.index - 1] ?? null : null;
     if (leader && leader.zone === this.zone && !leader.switching && leader.target !== null) {
       const e = findEnemy(this.room, leader.target);
       if (e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5) return e;
