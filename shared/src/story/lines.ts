@@ -105,7 +105,7 @@ const STEP_TEXT: Readonly<Record<QuestId, Readonly<Record<string, StepText>>>> =
       objectives: [
         'Tap a Thornling, then stay close. You attack by yourself.',
         'When your Momentum bar is half full, press your finisher (button 2, or key 2).',
-        'Finisher marks a foe; a second, different finisher on that mark is a combo.',
+        'A finisher sets off another mark on a foe: a combo. Warriors, put Skullringer on a pick to leave that first mark.',
         { touch: 'Tap Dodge, or double-tap a direction, to roll.', desktop: 'Press Shift to roll.' },
       ],
     },
