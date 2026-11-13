@@ -326,6 +326,48 @@ describe('Lampfall instances', () => {
     expect(await zoneOf(url, a.token)).toEqual({ zone: 'greenway' });
   }, 20000);
 
+  it('a burst of joinById calls reserves no seat for a non-member and at most one for a member; the party still gets in', async () => {
+    const { url, store } = await start();
+    const a = await accountFor(store, 'Alice'), b = await accountFor(store, 'Bob'), c = await accountFor(store, 'Carol');
+    const m = await accountFor(store, 'Mallory');
+    for (const x of [a, b, c, m]) await saveAs(store, x.accountId, { zone: 'greenway', ...LAMPFALL_MOUTH.arrive });
+    const ga = await joinZone(url, a.token, 'greenway'), gb = await joinZone(url, b.token, 'greenway'), gc = await joinZone(url, c.token, 'greenway');
+    await partyUp(ga.room, gb.room, 'Bob');
+    await partyUp(ga.room, gc.room, 'Carol');
+    await ga.room.leave();
+    const ia = await intoLampfall(url, store, a, { saved: false });
+    const instance = serverRoom(ia.room) as any;
+    /** A raw matchmake call by room id, as a script would (no socket opened afterwards). */
+    const byId = async (token: string) => {
+      const res = await fetch(`${url}/matchmake/joinById/${ia.roomId}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }) });
+      return { status: res.status, body: await res.text() };
+    };
+    // Mallory (no party, never at the mouth): 50 at once; none reserves a seat, none locks the room
+    const flood = await Promise.all(Array.from({ length: 50 }, () => byId(m.token)));
+    expect(flood.filter((r) => r.status === 200)).toEqual([]);
+    expect(flood.some((r) => r.body.includes('locked'))).toBe(false);
+    expect(Object.keys(instance._reservedSeats)).toEqual([]);
+    // Bob walks into the mouth and gets in as normal
+    const travelsB = collect(gb.room, 'travel');
+    await walk(gb.room, LAMPFALL_MOUTH.arrive, { x: LAMPFALL_MOUTH.x, z: LAMPFALL_MOUTH.z }, greenwaySurface);
+    const tb = await waitFor(() => travelsB[0], 4000);
+    const ib = await joinInstance(url, b.token, tb.instance);
+    await waitFor(() => ia.room.state.players.size === 2);
+    // Carol (a member, a held seat) floods: one pending seat at most
+    const travelsC = collect(gc.room, 'travel');
+    await walk(gc.room, LAMPFALL_MOUTH.arrive, { x: LAMPFALL_MOUTH.x, z: LAMPFALL_MOUTH.z }, greenwaySurface);
+    await waitFor(() => travelsC[0], 4000);
+    const burst = await Promise.all(Array.from({ length: 50 }, () => byId(c.token)));
+    const seats = burst.filter((r) => r.status === 200);
+    expect(seats.length).toBe(1);
+    expect(Object.keys(instance._reservedSeats).length).toBe(1);
+    // her one seat is hers to take: she gets in, and so the party has all three inside
+    const { Client } = await import('@colyseus/sdk');
+    await new Client(url).consumeSeatReservation(JSON.parse(seats[0]!.body));
+    await waitFor(() => ia.room.state.players.size === 3);
+    expect(ib.room.connection.isOpen).toBe(true);
+  }, 30000);
+
   it('review: an allowed member cannot join by id from the Greenway (only through the mouth); after the hold, no rejoin by id', async () => {
     const { url, store } = await start();
     const a = await accountFor(store, 'Alice'), b = await accountFor(store, 'Bob');

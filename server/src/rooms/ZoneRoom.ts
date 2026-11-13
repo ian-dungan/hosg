@@ -3993,20 +3993,43 @@ export function zoneRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof
   };
 }
 
+/** The room id a `POST /matchmake/joinById/<roomId>` call names (the matchmaker's static onAuth is not told it). */
+export function joinByIdTarget(context: AuthContext | undefined): string | undefined {
+  const url = (context?.req as { url?: unknown } | undefined)?.url;
+  if (typeof url !== 'string') return undefined;
+  let path: string;
+  try { path = new URL(url, 'http://x').pathname; } catch { return undefined; }
+  const m = /\/matchmake\/joinById\/([^/]+)\/?$/.exec(path);
+  return m ? decodeURIComponent(m[1]!) : undefined;
+}
+
 /**
  * The room class for the Lampfall's instances (one room per party, opened by Instances.enter with
- * `{ instanceKey }`). Joins are checked in the room (onAuth with the room at hand): a bad token, an
- * adventurer without a name, one not saved in the Greenway (where everyone inside is saved), or an
- * account not allowed in this instance (another party's) is refused with REASON_ELSEWHERE.
+ * `{ instanceKey }`). Joins are checked during matchmaking (static onAuth), before any seat is reserved, so a
+ * burst of calls can never fill a party's instance with pending seats: a bad token, an adventurer without a
+ * name, one not saved in the Greenway (where everyone inside is saved), or an account without a seat in this
+ * instance (another party's, or never through the mouth) is refused with REASON_ELSEWHERE; and, as for the
+ * zones, at most one matchmade seat is pending per account (REASON_JOINING). The room's onJoin checks again.
  */
 export function instanceRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof ZoneRoom {
+  const registry = options.instance?.registry;
   return class extends ZoneRoom {
-    async onAuth(_client: Client, joinOptions: unknown, _context: AuthContext) {
+    static async onAuth(_token: string, joinOptions: unknown, context: AuthContext) {
       const auth = await authenticate(options.store, jwtSecret, joinOptions);
       if (!auth) return false;
-      const adventurer = await options.store.getOrCreateAdventurer(auth.accountId);
-      if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
-      if (adventurer.zone !== 'greenway' || !this.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+      // The instance asked for (joinById over HTTP names it); without one, the instance the account has a seat in.
+      const target = joinByIdTarget(context);
+      const room = target !== undefined ? registry?.byRoom(target)?.room : registry?.instanceOf(auth.accountId)?.room;
+      if (!room || !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+      if (!options.presence.beginJoin(auth.accountId, SEAT_RESERVATION_S * 1000)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_JOINING);
+      try {
+        const adventurer = await options.store.getOrCreateAdventurer(auth.accountId);
+        if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
+        if (adventurer.zone !== 'greenway' || !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+      } catch (err) {
+        options.presence.endJoin(auth.accountId);
+        throw err;
+      }
       return auth;
     }
   };
