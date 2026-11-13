@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { GOLD_MAX, MAX_HP, SPAWN, ZONE_IDS, isZoneId, newJobsSave, parseJobsSave, parseLook } from '@sg2/shared';
+import { GOLD_MAX, MAX_HP, SPAWN, ZONE_IDS, isZoneId, parseJobsSave, parseLook } from '@sg2/shared';
 import {
   AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, readInvLook, readQuests,
-  testKitInventory, type Account, type Adventurer, type NewAdventurerOpts, type StartSpot, type Store,
+  newAdventurerJobs, testKitInventory, type Account, type Adventurer, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
 import { grantByCas, type GrantStore } from '../gm/grant';
 
@@ -161,7 +161,7 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
        VALUES ($1, NULL, $2, $3, $4, $5, $6, $7::jsonb, 1, 0, $8, $9::jsonb)
        ON CONFLICT (account_id) DO NOTHING`,
       [
-        accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(newJobsSave()), opts.newAdventurer?.gold ?? 0,
+        accountId, start.x, start.z, start.facing, start.zone, MAX_HP, JSON.stringify(newAdventurerJobs(opts.newAdventurer?.xp)), opts.newAdventurer?.gold ?? 0,
         opts.newAdventurer?.kit ? JSON.stringify(testKitInventory(opts.newAdventurer.kit)) : null,
       ],
     );

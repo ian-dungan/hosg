@@ -1,9 +1,9 @@
 // In-memory Store for tests and for running without a database. Data is lost on restart.
 import { randomUUID } from 'node:crypto';
-import { MAX_HP, SPAWN, isZoneId, newJobsSave, parseJobsSave, parseLook } from '@sg2/shared';
+import { MAX_HP, SPAWN, isZoneId, parseJobsSave, parseLook } from '@sg2/shared';
 import {
   AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, readInvLook, readQuests,
-  testKitInventory, type Account, type Adventurer, type BossKill, type GmAuditRow, type NewAdventurerOpts, type StartSpot, type Store,
+  newAdventurerJobs, testKitInventory, type Account, type Adventurer, type BossKill, type GmAuditRow, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
 import { grantByCas } from '../gm/grant';
 
@@ -55,7 +55,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
         facing: start.facing,
         zone: start.zone,
         hp: MAX_HP,
-        jobs: newJobsSave(),
+        jobs: newAdventurerJobs(opts.newAdventurer?.xp),
         level: 1,
         xp: 0,
         gold: opts.newAdventurer?.gold ?? 0,

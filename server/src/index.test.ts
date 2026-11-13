@@ -140,8 +140,8 @@ describe('SG2_START_AT and SG2_TEST_INSTANCE_START (test servers only)', () => {
   }, 60_000);
 });
 
-/** Runs src/index.ts with `env` until it listens; a guest's first inventory view in the grove, then it is stopped. */
-async function guestInventory(env: Record<string, string>): Promise<any> {
+/** Runs src/index.ts with `env` until it listens; a guest's first `type` message (its inventory view) in the grove, then it is stopped. */
+async function guestInventory(env: Record<string, string>, type = 'inventory'): Promise<any> {
   const { port, release } = await heldPort();
   await release();
   const child = spawn(process.execPath, ['--import', 'tsx', entry], {
@@ -157,7 +157,7 @@ async function guestInventory(env: Record<string, string>): Promise<any> {
     const { token } = (await (await fetch(`${url}/api/guest`, { method: 'POST' })).json()) as { token: string };
     const room = await new Client(url).joinOrCreate('grove', { token });
     let view: any;
-    room.onMessage('*', (type: string | number, message: any) => { if (type === 'inventory') view ??= message; });
+    room.onMessage('*', (t: string | number, message: any) => { if (t === type) view ??= message; });
     await waitFor(() => view, 5000);
     await room.leave();
     return view;
@@ -303,9 +303,27 @@ describe('SG2_TEST_QUEST (test servers only)', () => {
   }, 90_000);
 });
 
+describe('SG2_TEST_START_XP (test servers only)', () => {
+  it("is off by default, starts a new adventurer's Warrior at that xp (and its level) when set, and exits with one line for anything else", async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const file of ['../../docker-compose.yml', '../../Dockerfile']) {
+      const text = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+      expect(text, file).not.toMatch(/SG2_TEST_START_XP/);
+    }
+    expect((await guestInventory({}, 'jobs')).jobs.warrior).toMatchObject({ level: 1 });
+    // 429 xp: level 3, one xp short of level 4 (the first talent row)
+    expect((await guestInventory({ SG2_TEST_START_XP: '429' }, 'jobs')).jobs.warrior).toMatchObject({ level: 3 });
+    for (const value of ['-1', '3181', 'lots']) {
+      const r = await runServer({ SG2_STORE: 'memory', SG2_TEST_START_XP: value });
+      expect(r.code, value).toBe(1);
+      expect(r.stderr.trim()).toBe(`Shady Grove 2 server: SG2_TEST_START_XP must be a whole number of xp from 0 to 3180, or empty (got "${value}").`);
+    }
+  }, 60_000);
+});
+
 describe('test switches in production (final review I4)', () => {
   const switches: Record<string, string> = {
-    SG2_TEST_KIT: 't2', SG2_TEST_START_GOLD: '1000', SG2_TEST_LOOT: 'always', SG2_TEST_DUMMY: '1', SG2_TEST_INSTANCE_START: 'landing',
+    SG2_TEST_KIT: 't2', SG2_TEST_START_GOLD: '1000', SG2_TEST_START_XP: '429', SG2_TEST_LOOT: 'always', SG2_TEST_DUMMY: '1', SG2_TEST_INSTANCE_START: 'landing',
     SG2_START_AT: 'lampfall-mouth', SG2_START_ZONE: 'greenway', SG2_OPEN_EXITS: 'grove:greenway',
   };
   it('each is refused with one line when NODE_ENV=production', async () => {

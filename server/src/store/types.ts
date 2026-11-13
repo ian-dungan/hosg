@@ -1,6 +1,6 @@
 // What the server keeps between sessions: accounts and their adventurers.
 import {
-  GOLD_MAX, JOB_IDS, defaultLook, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook,
+  GOLD_MAX, JOB_IDS, defaultLook, newJobsSave, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook,
   parseQuests, type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type QuestSave, type ZoneId,
 } from '@sg2/shared';
 
@@ -186,7 +186,18 @@ export function testKitInventory(tier: 1 | 2 | 3, dyes: [DyeId, DyeId] = [0, 0])
  * How a store makes new adventurers beyond the start spot (test-only switches: SG2_TEST_START_GOLD, SG2_TEST_KIT,
  * and SG2_TEST_QUEST with the memory store: what a NULL quests value reads as).
  */
-export interface NewAdventurerOpts { gold?: number; kit?: 1 | 2 | 3; quests?: (day: string) => QuestSave }
+export interface NewAdventurerOpts { gold?: number; kit?: 1 | 2 | 3; quests?: (day: string) => QuestSave; xp?: number }
+
+/** A new adventurer's jobs: the Warrior, fresh, or with `xp` (a test server's SG2_TEST_START_XP) and the level it makes. */
+export function newAdventurerJobs(xp?: number): JobsSave {
+  const jobs = newJobsSave();
+  if (xp !== undefined && xp > 0) {
+    const r = jobs.jobs[jobs.current]!;
+    r.xp = xp;
+    r.level = levelForXp(xp);
+  }
+  return jobs;
+}
 
 /** One boss kill for the leaderboard: the party size, seconds from the boss's wake to its death, the credited names. */
 export interface BossKill { boss: 'wickhound' | 'fallen_warden'; partySize: number; seconds: number; names: string[]; at: Date }

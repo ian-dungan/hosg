@@ -1,5 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { GOLD_MAX, JOIN_RATE_PER_MIN, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type QuestId, type ZoneId } from '@sg2/shared';
+import { GOLD_MAX, JOB_LEVEL_CAP, JOIN_RATE_PER_MIN, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, levelForXp, totalTo, zoneDef, type CampSpawn, type CheckpointId, type QuestId, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -127,6 +127,15 @@ function testStartGold(): number | undefined {
   return n;
 }
 
+/** SG2_TEST_START_XP=<n> (test servers only, never in Docker): new adventurers' first job (the Warrior) starts with n xp (a level-up a kill away, talents to try). */
+function testStartXp(): number | undefined {
+  const raw = testSwitch('SG2_TEST_START_XP');
+  if (raw === undefined) return undefined;
+  const n = Number(raw), max = totalTo(JOB_LEVEL_CAP);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n > max) fail(`SG2_TEST_START_XP must be a whole number of xp from 0 to ${max}, or empty (got "${raw}").`);
+  return n;
+}
+
 /** SG2_TEST_LOOT=always (test servers only, never in Docker): every credited kill on a row with items drops one (the roll still picks which). */
 function testLoot(): boolean {
   const raw = testSwitch('SG2_TEST_LOOT');
@@ -176,10 +185,11 @@ function testQuest(): { quest: QuestId; step: number } | undefined {
 const port = positiveInt('SG2_PORT', 2570);
 const gms = testGms();
 const startGold = testStartGold();
+const startXp = testStartXp();
 const lootAlways = testLoot();
 const startKit = testKit();
 const startQuest = testQuest();
-const newAdventurer = { ...(startGold !== undefined ? { gold: startGold } : {}), ...(startKit ? { kit: startKit } : {}) };
+const newAdventurer = { ...(startGold !== undefined ? { gold: startGold } : {}), ...(startKit ? { kit: startKit } : {}), ...(startXp ? { xp: startXp } : {}) };
 const mouthStart = startAt();
 const instanceStart = testInstanceStart();
 const start = (() => {
@@ -235,6 +245,7 @@ if (mouthStart) console.log('Shady Grove 2 server: SG2_START_AT=lampfall-mouth; 
 else if (start.zone !== 'grove') console.log(`Shady Grove 2 server: SG2_START_ZONE=${start.zone}; new adventurers start there.`);
 if (instanceStart) console.log('Shady Grove 2 server: SG2_TEST_INSTANCE_START=landing; new instances start at the landing (test servers only).');
 if (dummyZones) console.log('Shady Grove 2 server: SG2_TEST_DUMMY=1; a Training Dummy stands in the grove (test servers only).');
+if (startXp !== undefined) console.log(`Shady Grove 2 server: SG2_TEST_START_XP=${startXp}; new adventurers' Warrior starts with that xp (level ${levelForXp(startXp)}; test servers only).`);
 if (startGold !== undefined) console.log(`Shady Grove 2 server: SG2_TEST_START_GOLD=${startGold}; new adventurers start with that gold (test servers only).`);
 if (lootAlways) console.log('Shady Grove 2 server: SG2_TEST_LOOT=always; every credited kill drops an item (test servers only).');
 if (startKit) console.log(`Shady Grove 2 server: SG2_TEST_KIT=t${startKit}; new adventurers wear that tier's kit (test servers only).`);
