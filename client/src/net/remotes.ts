@@ -2,11 +2,12 @@
 // health bar once hurt, a cast bar while they cast), and movement (and height: jumps, falls, platforms)
 // smoothed between server updates. Their meshes carry their engine id, so a tap on one can focus them.
 import { Matrix, Vector3, type Scene } from '@babylonjs/core';
-import { ABILITIES, BUFF_BITS, JOBS, TICK_HZ, WEAPONS, isJobId, type AbilityId, type WeaponId } from '@sg2/shared';
+import { ABILITIES, BUFF_BITS, EMOTES, JOBS, TICK_HZ, WEAPONS, isJobId, type AbilityId, type EmoteId, type WeaponId } from '@sg2/shared';
 import type { CharacterView, WorldApi } from '../core/contracts';
 import { capeFor, makeCharacter } from '../player/character';
 import { PoseBuffer } from './interp';
 import type { ZoneRoom } from './session';
+import { emoteToPlay, type LookCache } from './looks';
 
 /** Speed (m/s) above which a remote adventurer plays the run cycle. */
 const RUN_ABOVE = 0.8;
@@ -61,6 +62,9 @@ interface Remote {
   running: boolean;
   /** False until the first pose is drawn (so a newcomer does not appear to sprint in from where it was parked). */
   placed: boolean;
+  /** The look drawn (LookCache version for its eid; 0: none yet) and the last emote's clock step seen. */
+  lookVer: number;
+  emoteAt: number;
 }
 
 export interface Remotes {
@@ -107,7 +111,7 @@ function injectStyles(): void {
   document.head.appendChild(s);
 }
 
-export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, mySessionId: string): Remotes {
+export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, mySessionId: string, looks?: LookCache): Remotes {
   injectStyles();
   useScene(scene);
   const layer = document.createElement('div');
@@ -145,7 +149,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     label.append(top, hpEl, castEl);
     layer.appendChild(label);
     const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, castId: '', castAt: 0, castTotal: 1, castSince: 0,
-      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', shadow: true, hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false };
+      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', shadow: true, hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false, lookVer: 0, emoteAt: -1 };
     remotes.set(sessionId, r);
     return r;
   }
@@ -157,7 +161,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     r.label.remove();
     if (scene.isDisposed || spareScene !== scene) { r.view.dispose(); return; }
     // a spare view goes back to the plain look: the next adventurer to use it gets their own on its first frame
-    r.view.setWeapon('sword'); r.view.setCape(null); r.view.setCasting(false); r.view.setFade(1); r.view.setCastShadow(true);
+    r.view.setWeapon('sword'); r.view.setCape(null); r.view.setCasting(false); r.view.setFade(1); r.view.setCastShadow(true); r.view.emote(null);
     r.view.root.position.copyFrom(PARK);
     r.view.root.setEnabled(false);
     spare.push(r.view);
@@ -175,7 +179,14 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
       r.buf.push(now, p.x, p.z, p.facing, p.y);
       if (p.name !== r.name) { r.name = p.name; r.nameEl.textContent = p.name; }
       const eid = p.eid ?? -1;
-      if (eid !== r.eid) { r.eid = eid; if (eid >= 0) r.view.setEntityId(eid); r.label.classList.toggle('focus', eid === focus && eid >= 0); }
+      if (eid !== r.eid) { r.eid = eid; r.lookVer = 0; if (eid >= 0) r.view.setEntityId(eid); r.label.classList.toggle('focus', eid === focus && eid >= 0); }
+      // an emote: played when it changes (a stale one seen on arrival is not news; sit holds until they move)
+      const emAt = p.emoteAt ?? 0;
+      if (emAt !== r.emoteAt) {
+        const e = r.emoteAt < 0 ? emoteToPlay(0, p.emote, emAt, room.state.clock, TICK_HZ) : emoteToPlay(r.emoteAt, p.emote, emAt, undefined, TICK_HZ);
+        r.emoteAt = emAt;
+        if (e && (EMOTES as readonly string[]).includes(e) && !p.dead) r.view.emote(e as EmoteId);
+      }
       const job = p.job ?? '';
       if (job !== r.job) { r.job = job; r.jobEl.textContent = isJobId(job) ? JOBS[job].glyph : ''; r.jobEl.title = isJobId(job) ? JOBS[job].name : ''; }
       // the look: the job's weapon (the state's `weapon`, else the job's), the staff's tint from the job
@@ -228,6 +239,11 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
         r.placed = true;
         const running = speed > RUN_ABOVE;
         if (running !== r.running) { r.running = running; r.view.setPose(running ? 'run' : 'idle'); }
+        // the look and gear (from `looks` messages, by engine id): one queued rebuild when they change
+        if (looks && r.eid >= 0) {
+          const v = looks.ver(r.eid);
+          if (v !== r.lookVer) { r.lookVer = v; const e = looks.get(r.eid); if (e) r.view.setAppearance(e.look, e.gear); }
+        }
         const wa = r.want, dr = r.drawn;
         if (wa.weapon !== dr.weapon || wa.tint !== dr.tint || r.job !== dr.job) {
           dr.weapon = wa.weapon; dr.tint = wa.tint; dr.job = r.job;

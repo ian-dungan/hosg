@@ -9,9 +9,9 @@ exports[`town stalls > TOWN_STALLS stand on grove ground 12–20 m from the stat
       "z": 16,
     },
     "lampwright": {
-      "facing": -3.142,
-      "x": 0,
-      "z": 20,
+      "facing": 2.094,
+      "x": -12.124,
+      "z": 7,
     },
     "smithy": {
       "facing": -2.094,
@@ -24,9 +24,9 @@ exports[`town stalls > TOWN_STALLS stand on grove ground 12–20 m from the stat
       "z": 13.523,
     },
     "vault": {
-      "facing": 2.094,
-      "x": -12.124,
-      "z": 7,
+      "facing": 0,
+      "x": -0,
+      "z": -15,
     },
   },
   "spots": {
@@ -35,8 +35,8 @@ exports[`town stalls > TOWN_STALLS stand on grove ground 12–20 m from the stat
       16,
     ],
     "lampwright": [
-      90,
-      20,
+      150,
+      14,
     ],
     "smithy": [
       30,
@@ -47,8 +47,8 @@ exports[`town stalls > TOWN_STALLS stand on grove ground 12–20 m from the stat
       14,
     ],
     "vault": [
-      150,
-      14,
+      270,
+      15,
     ],
   },
 }

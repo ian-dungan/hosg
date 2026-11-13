@@ -19,8 +19,13 @@ import {
   StandardMaterial, MeshBuilder, BoundingInfo, Quaternion, DynamicTexture, FresnelParameters,
   CreateBoxVertexData, CreateCylinderVertexData, CreateIcoSphereVertexData,
 } from '@babylonjs/core';
-import type { CharacterOpts, CharacterView, MakeCharacter, Pose, WeaponId, EntityKind } from '../core/contracts';
+import type { CharacterOpts, CharacterView, MakeCharacter, Pose, WeaponId, EntityKind, Quality } from '../core/contracts';
 import { PALETTE } from '../core/contracts';
+import { DYES, type EmoteId, type GearLook, type Look as AdventurerLook } from '@sg2/shared';
+import { bodyParams, faceParams, lookColours, makeWarp, stanceParams, walkParams, type BodyParams, type StanceParams, type WalkParams, type Warp, type WarpRegion } from './look';
+import { buildHead, buildTail, furPaint, pawPaint } from './faces';
+import { buildFacialHair, buildHair, LONG_HAIR } from './hair';
+import { EMOTE_S, emotePose } from './emotes';
 
 // ───────────────────────── colours (all derived from PALETTE) ─────────────────────────
 const hex = (h: string) => Color3.FromHexString(h);
@@ -56,7 +61,7 @@ const JOINTS = ['base', 'hips', 'torso', 'head', 'eyes', 'hair', 'capeA', 'capeB
   'uArmL', 'fArmL', 'uArmR', 'fArmR', 'thighL', 'shinL', 'thighR', 'shinR',
   'bladeHand', 'shieldArm', 'bowHand', 'prop', 'propL', 'bladeHip', 'shieldBack', 'bowBack',
   'gsHand', 'gsBack', 'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'bladeBack',
-  'cueW', 'cueR', 'cueP', 'cueD', 'cueDh', 'cueN', 'cueWM', 'cueBM'] as const;
+  'cueW', 'cueR', 'cueP', 'cueD', 'cueDh', 'cueN', 'cueWM', 'cueBM', 'hairB', 'tailA', 'tailB'] as const;
 type Joint = typeof JOINTS[number];
 const PARENT: Record<Joint, Joint | null> = {
   base: null, hips: 'base', torso: 'hips', head: 'torso', eyes: 'head', hair: 'head',
@@ -69,8 +74,10 @@ const PARENT: Record<Joint, Joint | null> = {
   staffWHand: 'fArmR', staffBHand: 'fArmR', staffWBack: 'capeA', staffBBack: 'capeA', bladeBack: 'capeA',
   // each job's own silhouette cue (buildJobCues): shown for that job only
   cueW: 'torso', cueR: 'head', cueP: 'head', cueD: 'torso', cueDh: 'head', cueN: 'head', cueWM: 'head', cueBM: 'head',
+  // the look: long hair swings from the nape; the Brindlekin's tail hangs from the small of the back
+  hairB: 'head', tailA: 'hips', tailB: 'tailA',
 };
-type V3 = [number, number, number];
+export type V3 = [number, number, number];
 type Pivots = Record<Joint, V3>;
 
 /** Pivots of the 1.8 m stylised humanoid (about four heads tall). */
@@ -86,6 +93,7 @@ function humanPivots(sh = 0.235): Pivots {
     gsHand: [sh + 0.025, 0.73, 0.02], gsBack: [0, 1.3, -0.14], dagR: [sh + 0.025, 0.73, 0.02], dagL: [-sh - 0.025, 0.73, 0.02], dagBack: [0, 0.98, -0.2],
     staffWHand: [sh + 0.025, 0.73, 0.02], staffBHand: [sh + 0.025, 0.73, 0.02], staffWBack: [0, 1.3, -0.14], staffBBack: [0, 1.3, -0.14], bladeBack: [0, 1.3, -0.14],
     cueW: [0, 1.28, 0], cueR: [0, 1.6, 0], cueP: [0, 1.6, 0], cueD: [0, 1.28, 0], cueDh: [0, 1.6, 0], cueN: [0, 1.5, 0], cueWM: [0, 1.6, 0], cueBM: [0, 1.6, 0],
+    hairB: [0, 1.52, -0.18], tailA: [0, 0.9, -0.14], tailB: [0.1, 0.58, -0.44],
   };
 }
 /** The old compact layout, kept for the (minimal) enemy models. */
@@ -100,13 +108,14 @@ function legacyPivots(): Pivots {
     gsHand: [0.3, 0.6, 0.02], gsBack: [0, 0.9, -0.2], dagR: [0.3, 0.6, 0.02], dagL: [-0.3, 0.6, 0.02], dagBack: [0, 0.7, -0.15],
     staffWHand: [0.3, 0.6, 0.02], staffBHand: [0.3, 0.6, 0.02], staffWBack: [0, 0.9, -0.2], staffBBack: [0, 0.9, -0.2], bladeBack: [0, 0.9, -0.2],
     cueW: [0, 1.1, 0], cueR: [0, 1.4, 0], cueP: [0, 1.4, 0], cueD: [0, 1.1, 0], cueDh: [0, 1.4, 0], cueN: [0, 1.3, 0], cueWM: [0, 1.4, 0], cueBM: [0, 1.4, 0],
+    hairB: [0, 1.3, -0.15], tailA: [0, 0.62, -0.1], tailB: [0, 0.5, -0.3],
   };
 }
 
 // ───────────────────────── geometry ─────────────────────────
 /** A skinning group: a fixed joint, or a limb/body region split between two bones by height. */
 type Group = Joint | 'armL' | 'armR' | 'legL' | 'legR' | 'body' | 'cape';
-type Paint = (w: Vector3, uv: [number, number], l: Vector3) => Color3 | undefined;
+export type Paint = (w: Vector3, uv: [number, number], l: Vector3) => Color3 | undefined;
 interface Occ { c: Vector3; r: number; prim: number }
 
 class Geo {
@@ -120,11 +129,20 @@ class Geo {
   occ: Occ[] = [];
   primCount = 0;
   heightScale = 1;
+  /** The look's warp (canonical m in, in place) by skinning group, and the uniform scale positions arrive in. */
+  warp: ((g: Group, p: Vector3) => void) | null = null;
+  scale = 1;
   constructor(private resolve: (g: Group, p: Vector3) => [number, number, number], private jitter = 0.035) {}
 
   /** Append a primitive. `out` gives each vertex's outward reference direction (fixes triangle winding). */
   add(P: Vector3[], out: Vector3[], tris: number[], cols: Color3[], group: Group, flat: boolean, occ: { c: Vector3; r: number }[]) {
     const prim = this.primCount++;
+    if (this.warp) {
+      const w = this.warp, k = this.scale;
+      const at = (p: Vector3) => { const q = p.scale(1 / k); w(group, q); return q.scaleInPlace(k); };
+      P = P.map(at);
+      occ = occ.map((o) => ({ c: at(o.c), r: o.r }));
+    }
     for (const o of occ) this.occ.push({ c: o.c, r: o.r, prim });
     // orient each triangle so (c-a)x(b-a) points outward (renders front-facing in Babylon)
     const t = tris.slice();
@@ -190,6 +208,14 @@ class Geo {
   }
   get empty() { return this.pos.length === 0; }
   get triangles() { return this.idx.length / 3; }
+  /** Replaces a built mesh's vertex data with this one's (a new look on the same mesh: its shadow and outline registrations stay). */
+  applyTo(mesh: Mesh) {
+    const vd = new VertexData();
+    vd.positions = this.pos; vd.normals = this.nrm; vd.colors = this.col; vd.indices = this.idx;
+    vd.matricesIndices = this.mi; vd.matricesWeights = this.mw;
+    vd.applyToMesh(mesh, false);
+    if (this.tag.some((t) => t > 0)) mesh.setVerticesData('color', this.col, true);
+  }
   build(name: string, scene: Scene): Mesh {
     const mesh = new Mesh(name, scene);
     const vd = new VertexData();
@@ -218,7 +244,10 @@ const rotQ = (rot?: V3) => (rot ? Quaternion.RotationYawPitchRoll(rot[1], rot[0]
 
 /** Shape kit: builds primitives into a Geo (uniform scale `s`). */
 class Kit {
+  /** Level of detail: segment counts are scaled by it (1: as written; adventurers at med and low use less). */
+  detail = 1;
   constructor(public g: Geo, public glow: Geo, public s: number) {}
+  private n(v: number, min: number) { return this.detail === 1 ? v : Math.max(min, Math.round(v * this.detail)); }
   private place(at: V3, rot?: V3) {
     const q = rotQ(rot), s = this.s, o = new Vector3(at[0], at[1], at[2]);
     return (v: Vector3) => { const r = new Vector3(); v.rotateByQuaternionToRef(q, r); return r.addInPlace(o).scaleInPlace(s); };
@@ -230,7 +259,7 @@ class Kit {
 
   /** Ellipsoid (optionally boxy via `power` < 1, and freely deformed in unit space). */
   ellip(g: Group, at: V3, rad: V3, col: Color3, o: EllipOpts = {}) {
-    const seg = o.seg ?? 12, lat = o.lat ?? Math.max(4, Math.round(seg * 0.6));
+    const seg = this.n(o.seg ?? 12, 4), lat = this.n(o.lat ?? Math.max(4, Math.round((o.seg ?? 12) * 0.6)), 3);
     const L: Vector3[] = [], uv: [number, number][] = [];
     const pw = o.power ?? 1;
     const sp = (x: number) => Math.sign(x) * Math.pow(Math.abs(x), pw);
@@ -273,10 +302,10 @@ class Kit {
 
   /** Surface of revolution around local Y. profile: [y, radius][] from bottom to top. */
   lathe(g: Group, at: V3, profile0: [number, number][], col: Color3, o: LatheOpts = {}) {
-    const seg = o.seg ?? 12, sx = o.sx ?? 1, sz = o.sz ?? 1;
+    const seg = this.n(o.seg ?? 12, 5), sx = o.sx ?? 1, sz = o.sz ?? 1;
     // painted surfaces need rows close together so colour bands stay crisp
     const profile: [number, number][] = [];
-    const step = o.paint ? 0.028 : 1e9;
+    const step = o.paint ? 0.028 / (this.detail * this.detail) : 1e9;
     profile0.forEach((p, i) => {
       if (i > 0) {
         const q = profile0[i - 1];
@@ -332,7 +361,7 @@ class Kit {
 
   /** Swept tube through points (model space) with per-point radius. */
   tube(g: Group, pts: V3[], radii: number | number[], col: Color3, o: TubeOpts = {}) {
-    const seg = o.seg ?? 6;
+    const seg = this.n(o.seg ?? 6, 3);
     const R = (i: number) => (Array.isArray(radii) ? radii[i] : radii);
     const V = pts.map((p) => new Vector3(...p));
     const T = V.map((_, i) => V[Math.min(V.length - 1, i + 1)].subtract(V[Math.max(0, i - 1)]).normalize());
@@ -373,7 +402,11 @@ class Kit {
   }
 
   /** A thick cloth sheet from a grid of points (rows x cols, model space). */
-  sheet(g: Group, grid: V3[][], thick: number, col: Color3, o: PrimOpts = {}) {
+  sheet(g: Group, grid0: V3[][], thick: number, col: Color3, o: PrimOpts = {}) {
+    // below full detail, every other row and column (the last four rows stay: hems and trims live there)
+    const grid = this.detail >= 0.75 ? grid0 : grid0
+      .filter((_, i) => i % 2 === 0 || i >= grid0.length - 4)
+      .map((r) => r.filter((_, j) => j % 2 === 0 || j === r.length - 1));
     const rN = grid.length, cN = grid[0].length;
     const G = grid.map((r) => r.map((p) => new Vector3(...p)));
     const nAt = (i: number, j: number) => {
@@ -447,6 +480,9 @@ class Kit {
   }
 }
 
+/** The shape kit the look's builders (faces.ts, hair.ts, Plan 5 Task 9's gear) draw with. */
+export type ShapeKit = Kit;
+
 // ───────────────────────── humanoid design spec ─────────────────────────
 type HairStyle = 'hero' | 'braid' | 'bun' | 'pony' | 'short' | 'bald' | 'bob' | 'none';
 type Hat = 'none' | 'cap' | 'straw' | 'kerchief' | 'witch';
@@ -469,6 +505,11 @@ interface HumanSpec {
   beard?: 'full' | 'moustache' | 'stubble';
   glasses?: boolean;
   pouch?: boolean;
+  /** The look: skin painted per vertex (fur patterns, bark flecks) on the arms and neck, and per hand (paws). */
+  skinPaint?: Paint;
+  handPaint?: (side: number) => Paint | undefined;
+  /** The look: builds the head, face, ears, hair and facial hair in place of the fixed ones. */
+  customHead?: (k: Kit) => void;
 }
 
 function headPaint(skin: Color3, blush: number): Paint {
@@ -557,7 +598,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
     k.tube('body', [[-0.14, 0.95, z0 - 0.02], [-0.2, 0.95, -0.05], [0, 0.96, -0.16], [0.2, 0.95, -0.05], [0.14, 0.95, z0 - 0.02]], 0.012, sp.apron, { seg: 4, noOcc: true });
   }
   // neck
-  k.lathe('head', [0, 0, 0], [[1.3, 0.058], [1.42, 0.054]], shade(sp.skin, 0.93), { seg: 8, caps: false, noOcc: true });
+  k.lathe('head', [0, 0, 0], [[1.3, 0.058], [1.42, 0.054]], shade(sp.skin, 0.93), { seg: 8, caps: false, noOcc: true, paint: sp.skinPaint });
 
   // ── arms ──
   for (const [g, side] of [['armL', -1], ['armR', 1]] as [Group, number][]) {
@@ -571,16 +612,19 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
       const cuffY = sp.sleeves === 'short' ? 1.1 : 0.99;
       k.lathe(g, [ax, 0, 0], [[cuffY - 0.02, 0.066], [cuffY, 0.072], [1.26, 0.074]], sleeve, { seg: 9, caps: false });
       if (sp.sleeves === 'rolled') k.lathe(g, [ax, 0, 0], [[0.965, 0.07], [0.99, 0.078], [1.03, 0.07]], shade(sleeve, 1.06), { seg: 9 });
-      k.lathe(g, [ax, 0, 0], [[0.77, 0.043], [0.88, 0.048], [1.02, 0.05], [cuffY + 0.01, 0.056]], sp.skin, { seg: 8, caps: false });
+      k.lathe(g, [ax, 0, 0], [[0.77, 0.043], [0.88, 0.048], [1.02, 0.05], [cuffY + 0.01, 0.056]], sp.skin, { seg: 8, caps: false, paint: sp.skinPaint });
       if (sp.sleeves === 'short' && sp.cape) k.lathe(g, [ax, 0, 0], [[0.79, 0.052], [0.8, 0.056], [0.93, 0.056], [0.94, 0.052]], C.leatherLight, { seg: 8 }); // bracer
     }
     // hand: palm + thumb
     const hy = 0.715;
-    k.ellip(g, [side * (sh + 0.028), hy, 0.01], [0.042, 0.06, 0.05], sp.skin, { seg: 8, lat: 6, power: 0.85 });
-    k.ellip(g, [side * (sh + 0.01), hy + 0.02, 0.045], [0.018, 0.034, 0.018], sp.skin, { seg: 6, lat: 4, rot: [0.4, 0, side * 0.3], noOcc: true });
+    const hp = sp.handPaint?.(side) ?? sp.skinPaint;
+    k.ellip(g, [side * (sh + 0.028), hy, 0.01], [0.042, 0.06, 0.05], sp.skin, { seg: 8, lat: 6, power: 0.85, paint: hp });
+    k.ellip(g, [side * (sh + 0.01), hy + 0.02, 0.045], [0.018, 0.034, 0.018], sp.skin, { seg: 6, lat: 4, rot: [0.4, 0, side * 0.3], noOcc: true, paint: hp });
   }
 
   // ── head ──
+  if (sp.customHead) sp.customHead(k);
+  else {
   k.ellip('head', [0, HY, 0.01], [0.195, 0.205, 0.185], sp.skin, { seg: 18, lat: 12, paint: headPaint(sp.skin, sp.beard === 'full' ? 0.4 : 1),
     deform: (l) => {
       if (l.y < 0) { const t = -l.y; l.x *= 1 - 0.16 * t; l.z *= 1 - 0.05 * t; l.z += 0.06 * t * Math.max(0, l.z); } // softer jaw
@@ -673,6 +717,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
     for (const sx of [-1, 1]) k.ellip('head', [sx * 0.17, HY + 0.02, -0.07], [0.07, 0.09, 0.11], hc, { seg: 9, lat: 6 });
     k.ellip('head', [0, HY + 0.0, -0.15], [0.15, 0.1, 0.07], hc, { seg: 10, lat: 6 });
   }
+  } // (the fixed head)
 
   // ── hats ──
   const hcol = sp.hatColor ?? C.leather;
@@ -1071,8 +1116,32 @@ function strHash(s: string): number {
   return h >>> 0;
 }
 
-function design(kind: EntityKind | 'npc', color: string | undefined): Design {
+/** The adventurer's body from a look: its free colours, the outfit's two dyes, and the look's head, hair and tail. */
+function adventurerSpec(l: AdventurerLook, detail: number): HumanSpec {
+  const col = lookColours(l), bp = bodyParams(l), fp = faceParams(l);
+  const dye = (d: number, undyed: Color3) => (d > 0 && d < DYES.length ? hex(DYES[d]!.hex) : undyed);
+  const tunic = dye(l.outfit.dye1, P.teal), legs = dye(l.outfit.dye2, C.cream);
+  const fur = l.fur;
+  const skinPaint: Paint | undefined = fur ? furPaint(col.skin, col.fur2!, fur.pattern)
+    : l.people === 'larchfolk' ? (w) => (Math.sin(w.y * 64 + Math.sin(w.x * 30) * 2) > 0.88 ? shade(col.skin, 0.86) : undefined) : undefined;
+  const tie = l.outfit.dye2 > 0 ? shade(legs, 0.8) : P.roof;
+  return {
+    skin: col.skin, hair: col.hair, hairStyle: 'none', top: tunic, topTrim: P.gold, hem: 0.66, flare: 0.05, girth: 1,
+    sleeves: 'short', legs, boots: C.leather, belt: C.leather, buckle: P.gold, pouch: true,
+    cape: { color: P.skyDeep, trim: P.gold, len: 0.66 }, scarf: P.roof, hat: 'none',
+    skinPaint, handPaint: fur ? (side) => pawPaint(col.skin, col.fur2!, fur.pattern, side) : undefined,
+    customHead: (k) => {
+      buildHead(k, { fp, col, furPattern: fur ? fur.pattern : null, ear: bp.ear, earLen: bp.earLen, facial: l.hair.facial, bark: l.people === 'larchfolk', detail });
+      buildHair(k, l.hair.style, col.hair, tie);
+      buildFacialHair(k, l.hair.facial, col.facial, fur ? 0.06 : 0, tie);
+      if (fur) buildTail(k, fur.tail, col.skin, col.fur2!, fur.pattern);
+    },
+  };
+}
+
+function design(kind: EntityKind | 'npc', color: string | undefined, look: AdventurerLook | null = null, detail = 1): Design {
   const base = { hunch: 0, scale: 1, shoulder: 0.235, prop: null, stride: 1 } as const;
+  if (kind === 'player' && look) return { ...base, idle: 'hero', spec: adventurerSpec(look, detail) };
   if (kind === 'player') {
     const tunic = color ? hex(color) : P.teal;
     return { ...base, idle: 'hero', spec: {
@@ -1170,7 +1239,7 @@ const DEFAULT_WEAPON: Record<EntityKind | 'npc', WeaponId | 'none'> = {
 };
 
 // ───────────────────────── pose / animation ─────────────────────────
-const ANIM: Joint[] = ['base', 'hips', 'torso', 'head', 'hair', 'capeA', 'capeB', 'scarf', 'uArmL', 'fArmL', 'uArmR', 'fArmR', 'thighL', 'shinL', 'thighR', 'shinR', 'prop', 'propL'];
+const ANIM: Joint[] = ['base', 'hips', 'torso', 'head', 'hair', 'capeA', 'capeB', 'scarf', 'uArmL', 'fArmL', 'uArmR', 'fArmR', 'thighL', 'shinL', 'thighR', 'shinR', 'prop', 'propL', 'hairB', 'tailA', 'tailB'];
 type Ch = string;
 const CH: Ch[] = [...ANIM.flatMap((j) => [`${j}.rx`, `${j}.ry`, `${j}.rz`]), 'base.py', 'hips.py', 'hips.px'];
 type PoseVals = Record<Ch, number>;
@@ -1181,7 +1250,9 @@ const ONE_SHOT_DUR = 0.42;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const ease = (x: number) => x * x * (3 - 2 * x);
 
-interface AnimCtx { T: number; t: number; phase: number; speed: number; tr: Traits; d: Design; weapon: WeaponId | 'none'; drawn: boolean; shift: number; humanoid: boolean; stabLeft?: boolean }
+interface AnimCtx { T: number; t: number; phase: number; speed: number; tr: Traits; d: Design; weapon: WeaponId | 'none'; drawn: boolean; shift: number; humanoid: boolean; stabLeft?: boolean;
+  /** The look's stance and walk (null: the default adventurer, as before). */
+  st: StanceParams | null; wk: WalkParams | null }
 
 /** The arms holding a drawn weapon at rest (over the idle arms). */
 function drawnArms(o: PoseVals, c: AnimCtx, br: number) {
@@ -1252,7 +1323,8 @@ function computePose(o: PoseVals, pose: Pose, c: AnimCtx) {
   const hunch = d.hunch;
   const idle = () => {
     // breathing + slow weight shift onto one leg
-    const w = c.shift;
+    const st = c.st;
+    const w = c.shift * (st ? st.shift : 1);
     o['hips.py'] = -0.008 * (1 + br) - Math.abs(w) * 0.012;
     o['hips.px'] = w * 0.035;
     o['hips.rz'] = -w * 0.06;
@@ -1267,6 +1339,16 @@ function computePose(o: PoseVals, pose: Pose, c: AnimCtx) {
       // the hand-on-the-hilt rest is for a sword at the hip: other weapons hang the left arm loose
       o['uArmL.rx'] = 0.02 + Math.sin(T * 0.9) * 0.03; o['uArmL.rz'] = -0.1 - 0.025 * br; o['fArmL.rx'] = -0.22; o['fArmL.ry'] = 0; o['fArmL.rz'] = 0;
     }
+    if (st) {
+      // the look's stance: offsets on spine and arms (and the weight shift above), layered on the idle pose
+      const bob = st.bounce * Math.abs(Math.sin(T * 2.6));
+      o['torso.rx'] += st.spine + st.chest; o['hips.rx'] -= st.chest * 0.5; o['head.rx'] += st.head;
+      o['uArmL.rz'] -= st.armOut; o['uArmR.rz'] += st.armOut;
+      o['uArmR.rx'] += st.armFwd * 0.45; o['fArmR.rx'] += st.armFwd * 1.5;
+      if (!(d.idle === 'hero' && sword)) { o['uArmL.rx'] += st.armFwd * 0.45; o['fArmL.rx'] += st.armFwd * 1.5; }
+      o['thighL.rz'] -= st.feet; o['thighR.rz'] += st.feet;
+      o['hips.py'] += 0.014 * bob; o['head.rz'] += st.bounce * 0.04 * Math.sin(T * 1.3);
+    }
     if (c.drawn) drawnArms(o, c, br);
   };
   switch (pose) {
@@ -1274,14 +1356,16 @@ function computePose(o: PoseVals, pose: Pose, c: AnimCtx) {
     case 'run': {
       const ph = c.phase * Math.PI * 2;
       const sn = Math.sin(ph), cs = Math.cos(ph);
-      const amp = Math.min(1, 0.45 + c.speed / 6 * 0.55) * tr.stride * d.stride;
+      const wk = c.wk;
+      const amp = Math.min(1, 0.45 + c.speed / 6 * 0.55) * tr.stride * d.stride * (wk ? wk.stride : 1);
       o['thighL.rx'] = -sn * amp; o['thighR.rx'] = sn * amp;
       o['shinL.rx'] = 0.15 + 1.2 * amp * Math.max(0, cs) ** 1.5; o['shinR.rx'] = 0.15 + 1.2 * amp * Math.max(0, -cs) ** 1.5;
-      o['hips.py'] = -tr.bob * Math.cos(2 * ph) * 0.5 - tr.bob * 0.3;
-      o['hips.ry'] = sn * 0.16; o['hips.rz'] = cs * 0.04;
-      o['torso.rx'] = tr.lean + hunch * 0.6 + 0.03 * Math.cos(2 * ph); o['torso.ry'] = -sn * 0.24;
-      o['head.rx'] = -tr.lean * 0.7 - hunch * 0.5; o['head.ry'] = sn * 0.12;
-      const as = tr.armSwing * Math.min(1, 0.5 + amp);
+      const bob = tr.bob * (wk ? wk.bounce : 1), lean = tr.lean * (wk ? wk.lean : 1), sway = wk ? wk.sway : 1;
+      o['hips.py'] = -bob * Math.cos(2 * ph) * 0.5 - bob * 0.3;
+      o['hips.ry'] = sn * 0.16 * sway; o['hips.rz'] = cs * 0.04 * sway;
+      o['torso.rx'] = lean + hunch * 0.6 + 0.03 * Math.cos(2 * ph); o['torso.ry'] = -sn * 0.24;
+      o['head.rx'] = -lean * 0.7 - hunch * 0.5; o['head.ry'] = sn * 0.12;
+      const as = tr.armSwing * Math.min(1, 0.5 + amp) * (wk ? wk.armSwing : 1);
       o['uArmL.rx'] = sn * as; o['uArmR.rx'] = -sn * as;
       o['uArmL.rz'] = -0.2; o['uArmR.rz'] = 0.2;
       o['fArmL.rx'] = -1.25 - 0.3 * Math.max(0, sn); o['fArmR.rx'] = -1.25 - 0.3 * Math.max(0, -sn);
@@ -1450,38 +1534,111 @@ function shared(scene: Scene): Shared {
   return m;
 }
 
+// ───────────────────────── the look's warp, per skinning group ─────────────────────────
+/** Joints whose geometry scales with the head (round the neck). */
+const HEAD_GROUPS = new Set<Group>(['head', 'eyes', 'hair', 'hairB', 'cueR', 'cueP', 'cueDh', 'cueN', 'cueWM', 'cueBM']);
+const ARM_GROUPS = new Set<Group>(['armL', 'armR', 'uArmL', 'fArmL', 'uArmR', 'fArmR']);
+const LEG_GROUPS = new Set<Group>(['legL', 'legR', 'thighL', 'shinL', 'thighR', 'shinR']);
+const SHOULDER_GROUPS = new Set<Group>(['cueW', 'cueD']);
+/** Rigid joints (weapons, props, the tail): they keep their shape and follow their pivot, which rides the arm or the torso. */
+const RIGID_ARM = new Set<Group>(['bladeHand', 'shieldArm', 'bowHand', 'prop', 'propL', 'gsHand', 'dagR', 'dagL', 'staffWHand', 'staffBHand']);
+const RIGID_TORSO = new Set<Group>(['bladeHip', 'shieldBack', 'bowBack', 'gsBack', 'staffWBack', 'staffBBack', 'bladeBack', 'dagBack', 'tailA', 'tailB']);
+function regionOf(g: Group): WarpRegion {
+  if (HEAD_GROUPS.has(g)) return 'head';
+  if (ARM_GROUPS.has(g) || RIGID_ARM.has(g)) return 'arm';
+  if (LEG_GROUPS.has(g)) return 'leg';
+  if (SHOULDER_GROUPS.has(g)) return 'shoulder';
+  return 'torso';
+}
+
+// ───────────────────────── level of detail and the rebuild queue ─────────────────────────
+/** Segment scale for look-driven adventurers by quality (the default adventurer is always built as written). */
+const DETAIL: Record<Quality, number> = { high: 1, med: 0.55, low: 0.38 };
+let detailNow: Quality = 'high';
+/** The quality new (and rebuilt) look-driven bodies are built at. */
+export function setCharacterDetail(q: Quality): void { detailNow = q; }
+/** At most this many look rebuilds per rendered frame (the rest wait their turn): changing a look is off the hot path. */
+export const REBUILDS_PER_FRAME = 2;
+const rebuildBudget = new WeakMap<Scene, { frame: number; left: number }>();
+function takeRebuild(scene: Scene): boolean {
+  let b = rebuildBudget.get(scene);
+  if (!b) { b = { frame: -1, left: 0 }; rebuildBudget.set(scene, b); }
+  const f = scene.getEngine().frameId;
+  if (f !== b.frame) { b.frame = f; b.left = REBUILDS_PER_FRAME; }
+  if (b.left <= 0) return false;
+  b.left--;
+  return true;
+}
+
+/**
+ * Task 9's hook: builds the worn gear and costumes into the body (canonical human space, on the skinning groups:
+ * see the report's attachment points). Called on every build that has a gear look; the look's warp fits it.
+ */
+export type GearBuilder = (k: ShapeKit, gear: GearLook, look: AdventurerLook) => void;
+let gearBuilder: GearBuilder | null = null;
+export function setGearBuilder(fn: GearBuilder | null): void { gearBuilder = fn; }
+
 // ───────────────────────── factory ─────────────────────────
 let charCounter = 0;
-/** Triangle count of the most recently built character body (diagnostics / dev harness). */
 /** lastTriangles: everything a character was built with; lastActiveTriangles: what the last weapon or job change left in its index buffer. */
-export const characterStats = { lastTriangles: 0, lastActiveTriangles: 0 };
+export const characterStats = { lastTriangles: 0, lastActiveTriangles: 0, lastBuildMs: 0, rebuilds: 0 };
+/** The pick capsule every adventurer carries: one size for all peoples and builds (the gameplay hit size is fixed). */
+const PICK_H = 1.88 * 0.95, PICK_D = 0.7;
+const HIDEABLE = new Set<Joint>(['bladeHand', 'shieldArm', 'bladeHip', 'bladeBack', 'shieldBack', 'bowHand', 'bowBack', 'gsHand', 'gsBack',
+  'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'prop', 'propL', ...CUE_JOINTS]);
+const LOOPING_EMOTES_SET: ReadonlySet<EmoteId> = new Set<EmoteId>(['sit']);
 
 export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts): CharacterView => {
   const kind = opts.kind;
   const tr = TRAITS[kind];
   const id = ++charCounter;
   const mats = shared(scene);
-  const des = design(kind, opts.color);
+  let look: AdventurerLook | null = kind === 'player' ? opts.look ?? null : null;
+  let gear: GearLook | null = kind === 'player' ? opts.gear ?? null : null;
+  const detailOf = () => DETAIL[opts.detail ?? detailNow];
+  let des = design(kind, opts.color, look, detailOf());
   const humanoid = !!des.spec;
   const root = new TransformNode(`char_${kind}_${id}`, scene);
   const rigRoot = new TransformNode(`rig_${id}`, scene);
   rigRoot.parent = root;
 
-  const piv = humanoid ? humanPivots(des.shoulder) : legacyPivots();
-  if (kind === 'brute') { piv.uArmL = [-0.42, 1.03, 0]; piv.uArmR = [0.42, 1.03, 0]; piv.fArmL = [-0.42, 0.8, 0]; piv.fArmR = [0.42, 0.8, 0]; piv.thighL = [-0.14, 0.62, 0]; piv.thighR = [0.14, 0.62, 0]; piv.bladeHand = [0.42, 0.45, 0.05]; piv.bowHand = [-0.42, 0.45, 0.05]; }
-  if (kind === 'warden') { piv.uArmL = [-0.38, 1.05, 0]; piv.uArmR = [0.38, 1.05, 0]; piv.fArmL = [-0.38, 0.8, 0]; piv.fArmR = [0.38, 0.8, 0]; piv.thighL = [-0.13, 0.62, 0]; piv.thighR = [0.13, 0.62, 0]; piv.head = [0, 1.16, 0]; }
-  const s = humanoid ? des.scale : tr.legacyScale;
-  const height = humanoid ? tr.height * des.scale : tr.height;
+  // ── layout: the pivots (warped by the look), the uniform scale and the height ──
+  let piv!: Pivots, canon!: Pivots, s = 1, height = 0, bp: BodyParams | null = null, warp: Warp | null = null;
+  let stance: StanceParams | null = null, walk: WalkParams | null = null;
+  const layout = () => {
+    canon = humanoid ? humanPivots(des.shoulder) : legacyPivots();
+    if (kind === 'brute') { canon.uArmL = [-0.42, 1.03, 0]; canon.uArmR = [0.42, 1.03, 0]; canon.fArmL = [-0.42, 0.8, 0]; canon.fArmR = [0.42, 0.8, 0]; canon.thighL = [-0.14, 0.62, 0]; canon.thighR = [0.14, 0.62, 0]; canon.bladeHand = [0.42, 0.45, 0.05]; canon.bowHand = [-0.42, 0.45, 0.05]; }
+    if (kind === 'warden') { canon.uArmL = [-0.38, 1.05, 0]; canon.uArmR = [0.38, 1.05, 0]; canon.fArmL = [-0.38, 0.8, 0]; canon.fArmR = [0.38, 0.8, 0]; canon.thighL = [-0.13, 0.62, 0]; canon.thighR = [0.13, 0.62, 0]; canon.head = [0, 1.16, 0]; }
+    piv = { ...canon };
+    if (look && humanoid) {
+      bp = bodyParams(look); warp = makeWarp(bp); s = warp.s; height = bp.height * 1.06;
+      stance = stanceParams(look); walk = walkParams(look);
+      const q = { x: 0, y: 0, z: 0 };
+      for (const j of JOINTS) {
+        const c = canon[j]; q.x = c[0]; q.y = c[1]; q.z = c[2];
+        warp.apply(regionOf(j), q);
+        piv[j] = [q.x, q.y, q.z];
+      }
+    } else {
+      bp = null; warp = null; stance = null; walk = null;
+      s = humanoid ? des.scale : tr.legacyScale;
+      height = humanoid ? tr.height * des.scale : tr.height;
+    }
+  };
+  layout();
 
   const skeleton = new Skeleton(`skel_${id}`, `skel_${id}`, scene);
   const nodes = {} as Record<Joint, TransformNode>;
   const jIdx = {} as Record<Joint, number>;
   const rest = {} as Record<Joint, Vector3>;
   const bones = {} as Record<Joint, Bone>;
+  const localOf = (j: Joint) => {
+    const par = PARENT[j], p = piv[j], pp = par ? piv[par] : [0, 0, 0];
+    return new Vector3((p[0] - pp[0]) * s, (p[1] - pp[1]) * s, (p[2] - pp[2]) * s);
+  };
   JOINTS.forEach((j, i) => {
     const par = PARENT[j];
-    const p = piv[j], pp = par ? piv[par] : [0, 0, 0];
-    const local = new Vector3((p[0] - pp[0]) * s, (p[1] - pp[1]) * s, (p[2] - pp[2]) * s);
+    const local = localOf(j);
     rest[j] = local;
     const node = new TransformNode(`${j}_${id}`, scene);
     node.parent = par ? nodes[par] : rigRoot;
@@ -1491,6 +1648,18 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     bones[j].linkTransformNode(node);
     jIdx[j] = i;
   });
+  /** A new layout's bind pose: every bone's rest and bind matrices move to the warped pivots. */
+  const rebind = () => {
+    for (const j of JOINTS) {
+      const local = localOf(j);
+      rest[j] = local;
+      nodes[j].position.copyFrom(local);
+      const m = Matrix.Translation(local.x, local.y, local.z);
+      bones[j].setRestMatrix(m);
+      bones[j].updateMatrix(m, false, false);
+    }
+    for (const j of JOINTS) if (!PARENT[j]) (bones[j] as unknown as { _updateAbsoluteBindMatrices(): void })._updateAbsoluteBindMatrices();
+  };
 
   // skinning groups: split limbs by height with a soft blend band at the joint
   const split = (upper: Joint, lower: Joint, jointY: number, band: number, y: number): [number, number, number] => {
@@ -1510,90 +1679,121 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       default: return [jIdx[g], jIdx[g], 1];
     }
   };
-  const geo = new Geo(resolve);
-  const glowGeo = new Geo(resolve, 0);
-  const kit = new Kit(geo, glowGeo, s);
-  const cloth = opts.color ? hex(opts.color) : P.rock;
-  if (des.spec) {
-    buildHuman(kit, des.spec, piv);
-    // (the player's shield is white and gold: a blue one read as the Black Mage's cape from behind)
-    if (kind !== 'npc') buildWeapons(kit, kind === 'player' ? P.cloud : P.teal, false);
-    buildProps(kit, des.prop);
-  } else {
-    switch (kind) {
-      case 'grunt': buildGrunt(kit, cloth); break;
-      case 'archer': buildArcher(kit, cloth); break;
-      case 'brute': buildBrute(kit, cloth); break;
-      case 'warden': buildWarden(kit); break;
+  /** The look's warp for one vertex (canonical m, in place): rigid joints follow their warped pivot. */
+  const warpVertex = (g: Group, p: Vector3) => {
+    if (!warp) return;
+    if (RIGID_ARM.has(g) || RIGID_TORSO.has(g)) {
+      const c = canon[g as Joint], w = piv[g as Joint];
+      p.x += w[0] - c[0]; p.y += w[1] - c[1]; p.z += w[2] - c[2];
+      return;
     }
-    if (kind !== 'warden') buildWeapons(kit, shade(P.rock, 1.2), true);
-  }
-  geo.heightScale = s;
-  geo.bakeAO(humanoid ? 0.7 : 0.4);
-  characterStats.lastTriangles = geo.triangles + glowGeo.triangles;
+    warp.apply(regionOf(g), p);
+  };
+  const cloth = opts.color ? hex(opts.color) : P.rock;
 
+  // ── the body's geometry (built now, and again on a new look) ──
   const pickables: Mesh[] = [];
-  const body = geo.build(`body_${id}`, scene);
-  // the job-coloured cloth: its vertices, their baked colours and the colour they were built in
-  const capeIdx: number[] = [];
-  geo.tag.forEach((t, i) => { if (t) capeIdx.push(i); });
-  const capeBase = Float32Array.from(capeIdx.flatMap((i) => [geo.col[i * 4], geo.col[i * 4 + 1], geo.col[i * 4 + 2]]));
-  const capeKind = Uint8Array.from(capeIdx.map((i) => geo.tag[i]));   // (copied: the Geo itself is not kept)
-  const capeFrom = des.spec?.cape?.color ?? null, scarfFrom = des.spec?.scarf ?? null;
-  // only the vertex range that holds the cloth is kept and uploaded (not a copy of every colour)
-  const capeLo = capeIdx.length ? capeIdx[0] : 0, capeHi = capeIdx.length ? capeIdx[capeIdx.length - 1] + 1 : 0;
-  const colors = capeIdx.length ? Float32Array.from(geo.col.slice(capeLo * 4, capeHi * 4)) : null;
-  // Triangles by the joint they ride (weapons and job cues sit on joints of their own): only the body and what is shown
-  // are in the index buffer (one upload when that changes, still one draw call), so hidden weapons cost nothing.
-  const HIDEABLE = new Set<Joint>(['bladeHand', 'shieldArm', 'bladeHip', 'bladeBack', 'shieldBack', 'bowHand', 'bowBack', 'gsHand', 'gsBack',
-    'dagR', 'dagL', 'dagBack', 'staffWHand', 'staffBHand', 'staffWBack', 'staffBBack', 'prop', 'propL', ...CUE_JOINTS]);
-  const baseTris: number[] = [];
-  const jointTris = new Map<Joint, number[]>();
-  for (let t = 0; t < geo.idx.length; t += 3) {
-    const j = JOINTS[geo.mi[geo.idx[t] * 4]];
-    const list = HIDEABLE.has(j) && geo.mw[geo.idx[t] * 4] === 1 ? (jointTris.get(j) ?? (jointTris.set(j, []), jointTris.get(j)!)) : baseTris;
-    list.push(geo.idx[t], geo.idx[t + 1], geo.idx[t + 2]);
-  }
-  const vertexCount = geo.pos.length / 3;
+  let body: Mesh | null = null;
+  let glowMat: StandardMaterial | null = null;
+  let capeIdx: number[] = [], capeBase = new Float32Array(0), capeKind = new Uint8Array(0);
+  let capeFrom: Color3 | null = null, scarfFrom: Color3 | null = null, capeLo = 0;
+  let colors: Float32Array | null = null;
+  let baseTris: number[] = [];
+  let jointTris = new Map<Joint, number[]>();
+  let vertexCount = 0;
+  let bounds = new BoundingInfo(Vector3.Zero(), Vector3.One());
+  let blobBase = 1;
+  const buildBody = (): Mesh => {
+    const t0 = performance.now();
+    const geo = new Geo(resolve);
+    const glowGeo = new Geo(resolve, 0);
+    if (warp) { geo.warp = warpVertex; geo.scale = s; glowGeo.warp = warpVertex; glowGeo.scale = s; }
+    const kit = new Kit(geo, glowGeo, s);
+    if (look) kit.detail = detailOf();
+    if (des.spec) {
+      buildHuman(kit, des.spec, canon);
+      // (the player's shield is white and gold: a blue one read as the Black Mage's cape from behind)
+      if (kind !== 'npc') buildWeapons(kit, kind === 'player' ? P.cloud : P.teal, false);
+      buildProps(kit, des.prop);
+      if (look && gear && gearBuilder) gearBuilder(kit, gear, look);
+    } else {
+      switch (kind) {
+        case 'grunt': buildGrunt(kit, cloth); break;
+        case 'archer': buildArcher(kit, cloth); break;
+        case 'brute': buildBrute(kit, cloth); break;
+        case 'warden': buildWarden(kit); break;
+      }
+      if (kind !== 'warden') buildWeapons(kit, shade(P.rock, 1.2), true);
+    }
+    geo.heightScale = s * (warp ? warp.y(1.7) / 1.7 : 1);
+    geo.bakeAO(humanoid ? 0.7 : 0.4);
+    characterStats.lastTriangles = geo.triangles + glowGeo.triangles;
+    const mesh = body ?? geo.build(`body_${id}`, scene);
+    if (body) geo.applyTo(body);
+    // the job-coloured cloth: its vertices, their baked colours and the colour they were built in
+    capeIdx = [];
+    geo.tag.forEach((t, i) => { if (t) capeIdx.push(i); });
+    capeBase = Float32Array.from(capeIdx.flatMap((i) => [geo.col[i * 4], geo.col[i * 4 + 1], geo.col[i * 4 + 2]]));
+    capeKind = Uint8Array.from(capeIdx.map((i) => geo.tag[i]));   // (copied: the Geo itself is not kept)
+    capeFrom = des.spec?.cape?.color ?? null; scarfFrom = des.spec?.scarf ?? null;
+    // only the vertex range that holds the cloth is kept and uploaded (not a copy of every colour)
+    capeLo = capeIdx.length ? capeIdx[0] : 0;
+    const capeHi = capeIdx.length ? capeIdx[capeIdx.length - 1] + 1 : 0;
+    colors = capeIdx.length ? Float32Array.from(geo.col.slice(capeLo * 4, capeHi * 4)) : null;
+    // Triangles by the joint they ride (weapons and job cues sit on joints of their own): only the body and what is shown
+    // are in the index buffer (one upload when that changes, still one draw call), so hidden weapons cost nothing.
+    baseTris = [];
+    jointTris = new Map<Joint, number[]>();
+    for (let t = 0; t < geo.idx.length; t += 3) {
+      const j = JOINTS[geo.mi[geo.idx[t] * 4]];
+      const list = HIDEABLE.has(j) && geo.mw[geo.idx[t] * 4] === 1 ? (jointTris.get(j) ?? (jointTris.set(j, []), jointTris.get(j)!)) : baseTris;
+      list.push(geo.idx[t], geo.idx[t + 1], geo.idx[t + 2]);
+    }
+    vertexCount = geo.pos.length / 3;
+    const R = Math.max(height, 1.2);
+    bounds = new BoundingInfo(new Vector3(-R, -0.2, -R), new Vector3(R, height * 1.3, R));
+    mesh.setBoundingInfo(bounds);
+    blobBase = humanoid ? 0.95 * s * (bp ? Math.sqrt(Math.max(1, bp.hip * bp.bulk * bp.fit)) : 1) : tr.ringR * 1.7;
+    if (!glowGeo.empty && !glowMat) {
+      const glow = glowGeo.build(`glow_${id}`, scene);
+      glow.parent = rigRoot;
+      glow.skeleton = skeleton;
+      glow.numBoneInfluencers = 1;
+      glow.setBoundingInfo(new BoundingInfo(bounds.minimum.clone(), bounds.maximum.clone()));
+      glowMat = new StandardMaterial(`glowMat_${id}`, scene);
+      glowMat.disableLighting = true;
+      glowMat.emissiveColor = Color3.White();
+      glow.material = glowMat;
+      pickables.push(glow);
+    }
+    characterStats.lastBuildMs = performance.now() - t0;
+    return mesh;
+  };
+  const bodyMesh: Mesh = buildBody();
+  body = bodyMesh;
+
   let capeNow = '';
-  body.parent = rigRoot;
-  body.metadata = { noShadow: false };
-  body.material = mats.body;
-  body.skeleton = skeleton;
-  body.numBoneInfluencers = 2;
-  body.receiveShadows = true;
-  const R = Math.max(height, 1.2);
-  const bounds = new BoundingInfo(new Vector3(-R, -0.2, -R), new Vector3(R, height * 1.3, R));
-  body.setBoundingInfo(bounds);
+  bodyMesh.parent = rigRoot;
+  bodyMesh.metadata = { noShadow: false };
+  bodyMesh.material = mats.body;
+  bodyMesh.skeleton = skeleton;
+  bodyMesh.numBoneInfluencers = 2;
+  bodyMesh.receiveShadows = true;
   // Adventurers are picked by a body-sized capsule, never by their skinned mesh: picking reads the bind pose, where the
   // sheathed and drawn weapons all stand full size (an invisible bow or greatsword would catch taps meant for others).
+  // The capsule is one size for every people and build: the gameplay hit size never depends on the look.
   if (kind === 'player') {
-    body.isPickable = false;
-    const pick = MeshBuilder.CreateCylinder(`pick_${id}`, { height: height * 0.95, diameter: 0.7 * s, tessellation: 8 }, scene);
-    pick.parent = root; pick.position.y = height * 0.475; pick.visibility = 0; pick.isPickable = true;
+    bodyMesh.isPickable = false;
+    const pick = MeshBuilder.CreateCylinder(`pick_${id}`, { height: PICK_H, diameter: PICK_D, tessellation: 8 }, scene);
+    pick.parent = root; pick.position.y = PICK_H / 2; pick.visibility = 0; pick.isPickable = true;
     pick.doNotSyncBoundingInfo = true;
-    pickables.push(pick);
-  } else pickables.push(body);
-
-  let glowMat: StandardMaterial | null = null;
-  if (!glowGeo.empty) {
-    const glow = glowGeo.build(`glow_${id}`, scene);
-    glow.parent = rigRoot;
-    glow.skeleton = skeleton;
-    glow.numBoneInfluencers = 1;
-    glow.setBoundingInfo(new BoundingInfo(bounds.minimum.clone(), bounds.maximum.clone()));
-    glowMat = new StandardMaterial(`glowMat_${id}`, scene);
-    glowMat.disableLighting = true;
-    glowMat.emissiveColor = Color3.White();
-    glow.material = glowMat;
-    pickables.push(glow);
-  }
+    pickables.unshift(pick);
+  } else pickables.unshift(bodyMesh);
 
   // blob contact shadow (instanced => batched; transparent => never rendered into shadow maps)
   const blob = mats.blob.createInstance(`blob_${id}`);
   blob.parent = root;
   blob.isPickable = false;
-  const blobBase = (humanoid ? 0.95 : tr.ringR * 1.7) * (humanoid ? s : 1);
   blob.scaling.set(blobBase, 1, blobBase * 0.9);
   blob.position.y = 0.02;
   blob.setEnabled(blobsEnabled);
@@ -1604,7 +1804,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   let targeted = false;
   /** Time into a hit flash (−1 = none): a white overlay on the body (the body material is shared by everyone). */
   let flashT = -1;
-  body.overlayColor = new Color3(1, 1, 1);
+  bodyMesh.overlayColor = new Color3(1, 1, 1);
 
   // weapon visibility via bone scaling (keeps one draw call)
   let weapon: WeaponId | 'none' = opts.weapon ?? DEFAULT_WEAPON[kind];
@@ -1612,7 +1812,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   let drawn = !humanoid;
   let lastCombat = -1e9;
   let cueJob = '';
-  let shownKey = '';
+  /** The joints whose triangles are in the index buffer ('-': not built yet, so the first call always builds it). */
+  let shownKey = '-';
   const shown = new Set<Joint>();
   const applyWeapon = () => {
     const show = (j: Joint, on: boolean) => { nodes[j].scaling.setAll(on ? 1 : 0); if (on) shown.add(j); else shown.delete(j); };
@@ -1651,18 +1852,49 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     idx.set(baseTris, 0);
     let at = baseTris.length;
     for (const j of shown) { const l = jointTris.get(j); if (l) { idx.set(l, at); at += l.length; } }
-    body.setIndices(idx, vertexCount);
-    body.setBoundingInfo(bounds);
+    bodyMesh.setIndices(idx, vertexCount);
+    bodyMesh.setBoundingInfo(bounds);
     characterStats.lastActiveTriangles = n / 3;
   };
   applyWeapon();
+  /** Colours the job cloth (cape, hood, tabard, scarf) `capeNow` over the colours it was built in, keeping the shading. */
+  const recolourCape = () => {
+    if (!colors || !capeFrom) return;
+    const c = capeNow, built = capeFrom;
+    const ratio = (from: Color3 | null) => {
+      const f = from ?? built, to = c ? hex(c) : f;
+      return [to.r / Math.max(0.02, f.r), to.g / Math.max(0.02, f.g), to.b / Math.max(0.02, f.b)];
+    };
+    const rc = ratio(capeFrom), rs = ratio(scarfFrom), col = colors;
+    capeIdx.forEach((v0, k) => {
+      const r = capeKind[k] === 2 ? rs : rc, v = v0 - capeLo;
+      col[v * 4] = Math.min(1, capeBase[k * 3] * r[0]); col[v * 4 + 1] = Math.min(1, capeBase[k * 3 + 1] * r[1]); col[v * 4 + 2] = Math.min(1, capeBase[k * 3 + 2] * r[2]);
+    });
+    bodyMesh.getVertexBuffer('color')?.updateDirectly(col, capeLo * 4);
+  };
+
+  // ── a new look: rebuilt at most REBUILDS_PER_FRAME a frame (queued), never mid-way through anything else ──
+  let pending: { look: AdventurerLook; gear: GearLook | null } | null = null;
+  const rebuild = () => {
+    if (!pending) return;
+    look = pending.look; gear = pending.gear; pending = null;
+    des = design(kind, opts.color, look, detailOf());
+    layout();
+    rebind();
+    buildBody();
+    shownKey = '-';
+    applyWeapon();
+    recolourCape();
+    blob.scaling.set(blobBase, 1, blobBase * 0.9);
+    characterStats.rebuilds++;
+  };
 
   // animation state
   let looping: Pose = 'idle';
   let pose: Pose = 'idle';
   let poseT = 0;
   let T = Math.random() * 10;
-  const cur = zeroPose(), from = zeroPose(), out = zeroPose();
+  const cur = zeroPose(), from = zeroPose(), out = zeroPose(), emo = zeroPose();
   let blend = 1;
   const BLEND_TIME = 0.2;
   /** Casting a spell (looped while the state says so) and its weight, blended over the upper body. */
@@ -1672,13 +1904,18 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   let phase = Math.random();
   // idle life
   let shiftTarget = 0, shift = 0, shiftTimer = 2 + Math.random() * 3;
-  let lookTarget = 0, look = 0, lookTimer = 1 + Math.random() * 3, lookPitch = 0;
+  let lookTarget = 0, lookYaw = 0, lookTimer = 1 + Math.random() * 3, lookPitch = 0;
   let blinkTimer = 1 + Math.random() * 3, blinkT = -1;
+  // the emote playing (null: none), its time, and its weight (it eases out once it ends)
+  let emote: EmoteId | null = null, emoteT = 0, emoteW = 0;
   // root motion tracking
   const prevPos = new Vector3(NaN, 0, 0);
   let prevYaw = 0, speed = 0, yawRate = 0, vy = 0;
   let airborne = false, groundY = 0, airW = 0;
-  const springs = { capeA: new Spring(55, 8), capeB: new Spring(45, 6), capeZ: new Spring(40, 6), scarf: new Spring(60, 6), scarfZ: new Spring(50, 6), hair: new Spring(90, 9), hairZ: new Spring(80, 8) };
+  const springs = { capeA: new Spring(55, 8), capeB: new Spring(45, 6), capeZ: new Spring(40, 6), scarf: new Spring(60, 6), scarfZ: new Spring(50, 6), hair: new Spring(90, 9), hairZ: new Spring(80, 8),
+    hairB: new Spring(50, 6), hairBZ: new Spring(45, 6), tailA: new Spring(40, 5), tailAZ: new Spring(35, 4), tailB: new Spring(30, 4) };
+  // one context object reused every frame (no per-frame allocation)
+  const ctx: AnimCtx = { T: 0, t: 0, phase: 0, speed: 0, tr, d: des, weapon, drawn, shift: 0, humanoid, stabLeft: false, st: null, wk: null };
 
   const startPose = (p: Pose) => {
     for (const c of CH) from[c] = out[c];
@@ -1688,7 +1925,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
 
   const view: CharacterView = {
     root,
-    height,
+    get height() { return height; },
     setEntityId(eid: number) {
       for (const m of pickables) m.metadata = { ...(m.metadata ?? {}), entityId: eid };
       root.metadata = { ...(root.metadata ?? {}), entityId: eid };
@@ -1714,26 +1951,24 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       const c = color ?? '';
       if (c === capeNow || !colors || !capeFrom) return;
       capeNow = c;
-      // each vertex keeps its baked shading: scaled by the new colour over the one it was built in
-      const ratio = (from: Color3 | null) => {
-        const to = c ? hex(c) : from ?? capeFrom;
-        const f = from ?? capeFrom;
-        return [to.r / Math.max(0.02, f.r), to.g / Math.max(0.02, f.g), to.b / Math.max(0.02, f.b)];
-      };
-      const rc = ratio(capeFrom), rs = ratio(scarfFrom);
-      capeIdx.forEach((v0, k) => {
-        const r = capeKind[k] === 2 ? rs : rc, v = v0 - capeLo;
-        colors[v * 4] = Math.min(1, capeBase[k * 3] * r[0]); colors[v * 4 + 1] = Math.min(1, capeBase[k * 3 + 1] * r[1]); colors[v * 4 + 2] = Math.min(1, capeBase[k * 3 + 2] * r[2]);
-      });
-      body.getVertexBuffer('color')?.updateDirectly(colors, capeLo * 4);
+      recolourCape();
       // the job's silhouette cue follows its cloth colour (capeFor(job)); none for the default look
       cueJob = '';
       for (const j in JOB_CAPE) if (JOB_CAPE[j] === c) cueJob = j;
       applyWeapon();
     },
+    setAppearance(l, g) {
+      if (kind !== 'player') return;
+      pending = { look: l, gear: g };
+    },
+    emote(e) {
+      if (e === null) { emote = null; return; }
+      if (looping === 'dead') return;
+      emote = e; emoteT = 0;
+    },
     setCastShadow(on) {
       // read by the shadow generator's customAllowRendering (world/look.ts): no re-registration, nothing allocated
-      (body.metadata as { noShadow?: boolean }).noShadow = !on;
+      (bodyMesh.metadata as { noShadow?: boolean }).noShadow = !on;
     },
     setCasting(on) {
       if (on === casting) return;
@@ -1742,11 +1977,11 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     },
     setFade(a) {
       const v = Math.max(0.05, Math.min(1, a));
-      if (v === body.visibility) return;
-      body.visibility = v;   // per mesh, so the material shared by every character is untouched
-      for (const m of pickables) if (m !== body && m.visibility > 0) m.visibility = v;
+      if (v === bodyMesh.visibility) return;
+      bodyMesh.visibility = v;   // per mesh, so the material shared by every character is untouched
+      for (const m of pickables) if (m !== bodyMesh && m.visibility > 0) m.visibility = v;
     },
-    flash() { flashT = 0; body.renderOverlay = true; body.overlayAlpha = 0.85; },
+    flash() { flashT = 0; bodyMesh.renderOverlay = true; bodyMesh.overlayAlpha = 0.85; },
     setTargeted(on: boolean) {
       targeted = on;
       if (on && !ring) {
@@ -1756,6 +1991,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       if (ring) ring.setEnabled(on);
     },
     update(rawDt: number) {
+      if (pending && takeRebuild(scene)) rebuild();
       const dt = Math.min(0.1, Math.max(0, rawDt));
       T += dt; poseT += dt;
       // ── root motion → speed, turn rate, vertical velocity, airborne ──
@@ -1791,19 +2027,32 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         lookTarget = Math.random() < 0.35 ? 0 : (Math.random() * 2 - 1) * (kind === 'npc' ? 0.7 : 0.55);
         lookPitch = (Math.random() - 0.4) * 0.15;
       }
-      look += (lookTarget - look) * Math.min(1, dt * 4);
+      lookYaw += (lookTarget - lookYaw) * Math.min(1, dt * 4);
       blinkTimer -= dt;
       if (blinkTimer <= 0) { blinkT = 0; blinkTimer = 2 + Math.random() * 3.5; if (Math.random() < 0.2) blinkTimer = 0.25; }
       let eyeY = 1;
       if (blinkT >= 0) { blinkT += dt; const q = blinkT / 0.14; eyeY = q < 1 ? 1 - 0.9 * Math.sin(q * Math.PI) : 1; if (q >= 1) blinkT = -1; }
       if (looping === 'dead') eyeY = 0.12;
       // ── pose ──
-      if (pose === 'run') phase += dt * (speed > 0.5 ? 0.9 + speed * 0.13 : tr.cadence);
+      if (pose === 'run') phase += dt * (speed > 0.5 ? 0.9 + speed * 0.13 : tr.cadence) * (walk ? walk.cadence : 1);
       if (!LOOPING.includes(pose) && poseT >= ONE_SHOT_DUR) startPose(looping);
       blend = Math.min(1, blend + dt / BLEND_TIME);
-      computePose(cur, pose, { T, t: poseT, phase, speed, tr, d: des, weapon, drawn, shift, humanoid, stabLeft });
+      ctx.T = T; ctx.t = poseT; ctx.phase = phase; ctx.speed = speed; ctx.d = des; ctx.weapon = weapon; ctx.drawn = drawn; ctx.shift = shift; ctx.stabLeft = stabLeft;
+      ctx.st = stance; ctx.wk = walk;
+      computePose(cur, pose, ctx);
       const b = ease(blend);
       for (const c of CH) out[c] = from[c] + (cur[c] - from[c]) * b;
+      // ── an emote over the idle pose: a move, a fight, a cast or a fall ends it ──
+      if (emote && (pose !== 'idle' || looping !== 'idle' || speed > 0.6 || airborne || casting)) emote = null;
+      if (emote) {
+        emoteT += dt;
+        if (!LOOPING_EMOTES_SET.has(emote) && emoteT >= EMOTE_S) emote = null;
+      }
+      if (emote) {
+        for (const c of CH) emo[c] = out[c];
+        emoteW = emotePose(emo, emote, emoteT, bp ? bp.limb : 1);
+      } else emoteW = Math.max(0, emoteW - dt * 6);
+      if (emoteW > 0.001) for (const c of CH) out[c] += (emo[c] - out[c]) * emoteW;
       // ── the cast loop: the staff raised, the free hand forward (over whatever the legs are doing) ──
       castW += ((casting && looping !== 'dead' ? 1 : 0) - castW) * Math.min(1, dt * 10);
       if (castW > 0.001 && humanoid) {
@@ -1814,8 +2063,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         set('torso.rx', -0.06); set('head.rx', -0.12);
       }
       // ── additive layers ──
-      const idleW = pose === 'idle' ? b : 0;
-      out['head.ry'] += look * idleW;
+      const idleW = pose === 'idle' ? b * (1 - emoteW) : 0;
+      out['head.ry'] += lookYaw * idleW;
       out['head.rx'] += lookPitch * idleW;
       if (airW > 0.001) {
         const a = airW, up = vy > 0 ? 1 : 0;
@@ -1826,7 +2075,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         out['fArmL.rx'] += (-0.6 - out['fArmL.rx']) * a; out['fArmR.rx'] += (-0.6 - out['fArmR.rx']) * a;
         out['torso.rx'] += 0.08 * a; out['head.rx'] -= 0.1 * a;
       }
-      // ── secondary motion (cape, scarf, hair) from actual root motion ──
+      // ── secondary motion (cape, scarf, hair, tail) from actual root motion ──
       const runPh = pose === 'run' ? Math.cos(phase * Math.PI * 4) : 0;
       const sp = Math.min(1.4, speed / 6);
       const fall = airborne ? Math.max(-1, Math.min(1, -vy / 8)) : 0;
@@ -1839,6 +2088,19 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       out['scarf.rz'] += springs.scarfZ.step(-yawRate * 0.12 + Math.sin(T * 5.7) * 0.06 * sp, dt);
       out['hair.rx'] += springs.hair.step(sp * 0.35 + runPh * 0.1 * sp - fall * 0.3 - out['head.rx'] * 0.5, dt);
       out['hair.rz'] += springs.hairZ.step(-yawRate * 0.06 - out['head.rz'] * 0.5, dt);
+      if (look) {
+        // long hair swings like the cape; the tail wags (faster when cheering) and lifts at a run
+        const long = LONG_HAIR.has(look.hair.style) ? 1 : 0.4;
+        out['hairB.rx'] += springs.hairB.step((sp * 0.6 + runPh * 0.12 * sp - fall * 0.5 - out['head.rx'] * 0.8 - out['torso.rx'] * 0.6) * long, dt);
+        out['hairB.rz'] += springs.hairBZ.step((-yawRate * 0.1 - out['head.rz'] * 0.6) * long, dt);
+        if (look.fur) {
+          const cheer = emote === 'cheer';
+          const wag = Math.sin(T * (cheer ? 9 : 2.2)) * (cheer ? 0.5 : 0.18);
+          out['tailA.rx'] += springs.tailA.step(-0.25 + sp * 0.5 - fall * 0.4 + runPh * 0.1 * sp + (emote === 'sit' ? 0.9 * emoteW : 0), dt);
+          out['tailA.ry'] += springs.tailAZ.step(wag - yawRate * 0.15, dt);
+          out['tailB.rx'] += springs.tailB.step(-0.35 + sp * 0.3 + Math.sin(T * 1.7) * 0.08, dt);
+        }
+      }
       // ── apply ──
       for (const j of ANIM) nodes[j].rotation.set(out[`${j}.rx`], out[`${j}.ry`], out[`${j}.rz`]);
       nodes.base.position.y = rest.base.y + out['base.py'] * s;
@@ -1855,8 +2117,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       }
       if (flashT >= 0) {
         flashT += dt;
-        body.overlayAlpha = Math.max(0, 1 - flashT / 0.18) * 0.85;
-        if (flashT > 0.18) { flashT = -1; body.renderOverlay = false; }
+        bodyMesh.overlayAlpha = Math.max(0, 1 - flashT / 0.18) * 0.85;
+        if (flashT > 0.18) { flashT = -1; bodyMesh.renderOverlay = false; }
       }
       if (ring && targeted) {
         ring.rotation.y += dt * 1.2;

@@ -264,10 +264,18 @@ describe('town stalls', () => {
     expect(stallAt('grove', TOWN_STALLS.smithy.x + 3.6, TOWN_STALLS.smithy.z)).toBeNull();
     expect(stallAt('grove', SPAWN.x, SPAWN.z)).toBeNull();
     expect(stallAt('grove', NaN, 0)).toBeNull();
-    // between the Barber and the Lampwright (4 m apart), the nearer one answers
-    const b = TOWN_STALLS.barber, l = TOWN_STALLS.lampwright;
+    // between the Tailor and the Barber (the closest pair, about 4.4 m apart), the nearer one answers
+    const b = TOWN_STALLS.barber, l = TOWN_STALLS.tailor;
+    expect(Math.hypot(b.x - l.x, b.z - l.z)).toBeLessThan(2 * STALL_REACH);
     expect(stallAt('grove', b.x + (l.x - b.x) * 0.4, b.z + (l.z - b.z) * 0.4)).toBe('barber');
-    expect(stallAt('grove', b.x + (l.x - b.x) * 0.6, b.z + (l.z - b.z) * 0.6)).toBe('lampwright');
+    expect(stallAt('grove', b.x + (l.x - b.x) * 0.6, b.z + (l.z - b.z) * 0.6)).toBe('tailor');
+  });
+  it('no two stalls stand on one line from the statue (neither hides the other)', () => {
+    for (const a of STALL_IDS) for (const c of STALL_IDS) {
+      if (a >= c) continue;
+      const d = Math.atan2(TOWN_STALLS[a].z, TOWN_STALLS[a].x) - Math.atan2(TOWN_STALLS[c].z, TOWN_STALLS[c].x);
+      expect(Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) * 180 / Math.PI, `${a} ${c}`).toBeGreaterThanOrEqual(12);
+    }
   });
 });
 

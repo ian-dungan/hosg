@@ -24,7 +24,14 @@ import {
   type S2C,
   type VictoryView,
   type ZoneId,
+  type EmoteId,
+  validateAdventurerName,
 } from '@sg2/shared';
+import { setCharacterDetail } from './player/character';
+import { setCreatorPreview } from './hud/creator';
+import { createCreatorPreview } from './player/creatorPreview';
+import { LookCache, barberHook, barberRefusal, creatorPlan } from './net/looks';
+import { fetchLookInfo, saveLook, startingLook } from './net/lookApi';
 import type { HudState } from './core/contracts';
 import { bootGame, isZoneBuilt } from './boot';
 import { h } from './hud/dom';
@@ -80,6 +87,8 @@ const CSS = /* css */ `
 .sg-online:empty{display:none}
 .sg-modal-open ~ .sg-hud .sg-online,.sg-modal-open ~ div .sg-chat-btn{opacity:0;pointer-events:none}
 .sg-net-off{display:none}
+.sg-emote-btn{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g) + 116px);width:48px;height:48px;border-radius:24px;
+  border:1px solid rgba(255,226,160,.35);background:rgba(16,18,42,.55);color:#fff6e6;font-size:22px;cursor:pointer;pointer-events:auto}
 .sg-travel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;pointer-events:none;
   font:600 18px/1.3 var(--sans,system-ui,sans-serif);color:#fff6e6;letter-spacing:.04em;text-shadow:0 1px 6px rgba(0,0,0,.6);
   opacity:0;transition:opacity .3s}
@@ -132,6 +141,14 @@ interface NetDebug {
   corrections: number;
   /** Edge markers shown now (party members off screen). */
   edges: number;
+  /** Plan 5: this adventurer's look code ('' until the room sends it), whether the free creator visit is unused, whether
+   *  the creator (or the Barber) is open, and every look code the room has sent (engine id → code). */
+  look: string;
+  lookFree: boolean;
+  creatorOpen: boolean;
+  remoteLooks: Record<number, string>;
+  /** Gold, as the last `inventory` said (the Barber's price check). */
+  gold: number;
 }
 /** What ended a connection: a reason for the login screen, or a travel to another zone (an instance by id). */
 type Ended = { reason: string } | { travel: ZonePlace };
@@ -168,6 +185,7 @@ function boot(): void {
     remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0,
     jobs: null, refusals: [], allyFocus: null, guildBoard: { x: GUILD_BOARD.x, z: GUILD_BOARD.z },
     party: null, invites: [], partyRefusals: [], instance: null, roomId: '', boss: null, victory: null, chatLog: [], screen: '', corrections: 0, edges: 0,
+    look: '', lookFree: false, creatorOpen: false, remoteLooks: {}, gold: 0,
   };
   const logChat = (from: string, text: string, channel: string) => { net.chatLog.push({ from, text, channel }); if (net.chatLog.length > 50) net.chatLog.shift(); };
   // ── Plan 4: the party (it outlives each room), invites, party chat ──
@@ -202,6 +220,44 @@ function boot(): void {
     });
   };
   hud.on((e) => { if (e.type === 'openParty') openPartySheet(); else combat?.onHud(e); });
+  // Plan 5: looks. The cache holds every adventurer's look by engine id for the room (cleared on leaving it).
+  const lookCache = new LookCache();
+  let ownLookVer = 0;
+  setCreatorPreview(createCreatorPreview);
+  setCharacterDetail(game.quality);
+  /** This adventurer's own look onto its rig, when the room has sent a new one. */
+  const applyOwnLook = () => {
+    const me = room?.state.players?.get(room.sessionId);
+    const e = me && typeof me.eid === 'number' ? lookCache.get(me.eid) : undefined;
+    if (!e || e.ver === ownLookVer) return;
+    ownLookVer = e.ver;
+    net.look = e.code;
+    game.rig.view.setAppearance(e.look, e.gear);
+  };
+  /** The Barber (Task 10's stall tap calls barberHook.open): the creator in Barber mode, then a `look` for the server to price. */
+  const openBarber = async () => {
+    const r = room;
+    if (!r || net.creatorOpen) return;
+    const me = r.state.players?.get(r.sessionId);
+    const e = me && typeof me.eid === 'number' ? lookCache.get(me.eid) : undefined;
+    if (!e) return;
+    net.creatorOpen = true;
+    const res = await hud.creator({ look: e.look, mode: 'barber', needsName: false, gold: net.gold, free: lookCache.free === true, validateName: validateAdventurerName });
+    net.creatorOpen = false;
+    if (res && room === r) send(r, 'look', { look: res.look });
+  };
+  barberHook.open = openBarber;
+  (window as unknown as Record<string, unknown>).__sg2barber = openBarber; // browser checks: the Barber without its stall
+  // the emote button (the wheel: wave, bow, cheer, laugh, sit, point); played here at once, and sent for the others
+  const emoteBtn = h('button', 'sg-emote-btn', netUi, '☺');
+  emoteBtn.setAttribute('aria-label', 'Emotes');
+  emoteBtn.addEventListener('click', () => {
+    void hud.emoteWheel().then((e: EmoteId | null) => {
+      if (!e || !room) return;
+      game.rig.view.emote(e);
+      send(room, 'emote', { emote: e });
+    });
+  });
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
   // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
   // Getters: a zone change replaces the scene, world and rig.
@@ -383,6 +439,15 @@ function boot(): void {
           if (i === 0 && room === r) send(r, 'leaveInstance', {} as Record<string, never>);
         });
       });
+      // Plan 5: looks by engine id (own included), the free creator visit, the Barber's refusals, gold
+      r.onMessage('looks', (m: S2C['looks']) => {
+        if (lookCache.handle(m).length === 0) return;
+        net.remoteLooks = lookCache.codes();
+        if (room === r) applyOwnLook();
+      });
+      r.onMessage('lookFree', (m: S2C['lookFree']) => { lookCache.handleFree(m); net.lookFree = lookCache.free === true; });
+      r.onMessage('invRefused', (m: S2C['invRefused']) => { const line = barberRefusal(m); if (line) hud.toast(line); });
+      r.onMessage('inventory', (m: S2C['inventory']) => { if (typeof m?.gold === 'number') net.gold = m.gold; });
       // combat messages: forwarded to the controller once it exists (it is made on entering the room)
       const early: [typeof COMBAT_MESSAGES[number], unknown][] = [];
       for (const type of COMBAT_MESSAGES) r.onMessage(type, (m: unknown) => { if (combat) combat.message(type, m); else early.push([type, m]); });
@@ -431,7 +496,10 @@ function boot(): void {
         rig.place(new Vector3(me.x, me.y, me.z)); // a re-join in mid-air carries on falling from there
         Object.assign(sent, { x: me.x, z: me.z, y: me.y, facing: me.facing, moving: false });
         room = r;
-        remotes = createRemotes(game.scene, game.world, r, r.sessionId);
+        setCharacterDetail(game.quality);
+        remotes = createRemotes(game.scene, game.world, r, r.sessionId, lookCache);
+        ownLookVer = 0;
+        applyOwnLook();
         enemies = createEnemies(game.scene, game.world, r);
         combat = createCombat({ game, hud, room: r, state, remotes, enemies, zone, social: socialView, send: (type, message) => send(r, type, message) });
         net.combat = combat.debug;
@@ -485,6 +553,10 @@ function boot(): void {
         enemies?.dispose();
         enemies = null;
         room = null;
+        // engine ids belong to the room: every look goes with it (the next room sends its own)
+        lookCache.clear();
+        ownLookVer = 0;
+        net.remoteLooks = {};
         net.remotes = [];
         net.enemies = [];
         rig.setMoveScale(0);
@@ -520,6 +592,32 @@ function boot(): void {
         forgetToken();
         notice = err.message;
         return false;
+      }
+    };
+    /**
+     * The one free creator visit (new and existing adventurers alike): GET /api/look, and when it is unused the creator
+     * opens (asking for the name when a named account has none), then POST /api/look. Returns false when the player
+     * must sign in again (`notice` says why), with the name the adventurer has after it (null: still none).
+     */
+    const creatorStep = async (token: string): Promise<{ ok: boolean; name: string | null | undefined }> => {
+      const got = await fetchLookInfo(token);
+      if (got.kind === 'signIn') { forgetToken(); notice = got.error; return { ok: false, name: undefined }; }
+      if (got.kind === 'error') return { ok: true, name: undefined }; // the game goes on; the creator waits for next time
+      net.lookFree = got.info.free;
+      const plan = creatorPlan(got.info);
+      if (!plan.open) return { ok: true, name: got.info.name };
+      let look = startingLook(got.info, token), line: string | undefined;
+      for (;;) {
+        net.creatorOpen = true;
+        const res = await hud.creator({ look, mode: 'create', needsName: plan.needsName, gold: 0, free: true, validateName: validateAdventurerName, notice: line });
+        net.creatorOpen = false;
+        if (!res) return { ok: true, name: got.info.name };
+        look = res.look;
+        const saved = await saveLook(token, res.look, plan.needsName ? res.name : undefined);
+        if (saved.kind === 'saved') { net.lookFree = false; if (saved.info.name) rememberName(saved.info.name); return { ok: true, name: saved.info.name }; }
+        if (saved.kind === 'notFree') return { ok: true, name: got.info.name };
+        if (saved.kind === 'signIn') { forgetToken(); notice = saved.error; return { ok: false, name: undefined }; }
+        line = saved.error; // a refused name (or a hiccup): the creator opens again with the line
       }
     };
     /** Builds `zone` if it is not the one loaded. */
@@ -559,7 +657,15 @@ function boot(): void {
       if (!token) {
         const session = await showLogin(hudRoot, notice, savedAccount());
         token = session.token;
-        if (session.name === null && !(await chooseName(token))) continue;
+        // the creator first (it asks for the name too); the old name screen only when the name is still missing
+        const made = await creatorStep(token);
+        if (!made.ok) continue;
+        const name = made.name === undefined ? session.name : made.name;
+        if (name === null && !(await chooseName(token))) continue;
+      } else if (!arriving) {
+        // a reload: a creator visit still unused opens now
+        const made = await creatorStep(token);
+        if (!made.ok) continue;
       }
       let joined: { r: ZoneRoom; zone: ZoneId };
       connecting = true;

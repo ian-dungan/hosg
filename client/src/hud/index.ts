@@ -13,6 +13,7 @@ import { FloatText } from './float';
 import { Overlays } from './overlays';
 import { Settings } from './settings';
 import { createDoubleTap } from '../combat/doubleTap';
+import { openCreator, openEmoteWheel } from './creator';
 
 /** Movement keys as a screen-space direction (x right, y up), for a dodge. */
 const MOVE_KEYS: Record<string, [number, number]> = {
@@ -278,6 +279,8 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     titleScreen: () => overlays.titleScreen(),
     loadout: (pool, current, title, count) => overlays.loadout(pool, current, title, count),
     jobs: (view) => overlays.jobs(view),
+    creator: (o) => openCreator(host, o).done,
+    emoteWheel: () => openEmoteWheel(host),
     endScreen: (kind, lines, buttons, opts) => overlays.endScreen(kind, lines, buttons, opts),
     partyInvite: (from, size, seconds = 60) => invites.open(from, size, seconds),
     closeInvite: (from) => invites.close(from),

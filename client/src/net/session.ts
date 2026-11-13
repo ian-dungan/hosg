@@ -29,6 +29,9 @@ export interface PlayerView {
   readonly shield?: number;
   /** Jobs (Plan 3b): the current job (a JobId). */
   readonly job?: string;
+  /** Plan 5: the last emote (an EmoteId; unset until the first) and its `clock` step (a change plays it; a move ends it). */
+  readonly emote?: string;
+  readonly emoteAt?: number;
   /**
    * The ability being cast ('' none), its full cast time in s and when it began on the state's `clock`. Like
    * `buffs` (BUFF_BITS), unset until the adventurer's first cast (or buff): read them as '' and 0.

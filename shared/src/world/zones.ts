@@ -220,7 +220,7 @@ export const STALL_REACH = 3.5;
  * the first spot searchStallSpots() finds for it (zones.test.ts checks they agree, and snapshots them).
  */
 const STALL_SPOTS: Readonly<Record<StallId, readonly [number, number]>> = Object.freeze({
-  smithy: [30, 17], tailor: [75, 14], barber: [90, 16], lampwright: [90, 20], vault: [150, 14],
+  smithy: [30, 17], tailor: [75, 14], barber: [90, 16], lampwright: [150, 14], vault: [270, 15],
 });
 const STALL_NAMES: Readonly<Record<StallId, { name: string; keeper: string }>> = Object.freeze({
   smithy: { name: 'Kettleworth Smithy', keeper: 'Hob Kettleworth' },
@@ -263,7 +263,8 @@ export function segmentDistance(px: number, pz: number, ax: number, az: number, 
 }
 
 /** The placement rule's distances (m). */
-export const STALL_RULE = Object.freeze({ rMin: 12, rMax: 20, clear: 4, offLine: 3, groundR: 1 });
+/** bearing: two stalls never stand on (nearly) one line from the statue, so neither hides the other from the plaza (degrees). */
+export const STALL_RULE = Object.freeze({ rMin: 12, rMax: 20, clear: 4, offLine: 3, groundR: 1, bearing: 12 });
 
 /** Whether (x, z) meets the placement rule against the grove and the stalls already placed. */
 export function stallSpotOk(x: number, z: number, placed: readonly { x: number; z: number }[]): boolean {
@@ -278,6 +279,11 @@ export function stallSpotOk(x: number, z: number, placed: readonly { x: number; 
   if (Math.hypot(x - GUILD_BOARD.x, z - GUILD_BOARD.z) < STALL_RULE.clear || Math.hypot(x - SPAWN.x, z - SPAWN.z) < STALL_RULE.clear) return false;
   for (const e of grove.exits) if (segmentDistance(x, z, SPAWN.x, SPAWN.z, e.x, e.z) < STALL_RULE.offLine) return false;
   for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < STALL_RULE.clear) return false;
+  const bearing = (bx: number, bz: number) => Math.atan2(bz, bx);
+  for (const p of placed) {
+    const d = Math.abs(Math.atan2(Math.sin(bearing(x, z) - bearing(p.x, p.z)), Math.cos(bearing(x, z) - bearing(p.x, p.z))));
+    if (d < (STALL_RULE.bearing * Math.PI) / 180) return false;
+  }
   return true;
 }
 
