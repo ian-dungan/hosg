@@ -260,7 +260,7 @@ describe('inventory', () => {
       expect(s.gold).toBe(expectGold); expect(s.seals).toBe(expectSeals);
     }
     expect(applied).toBeGreaterThan(1000); // most sequences really change something
-  });
+  }, 60_000); // (about 5 s alone on a busy machine: the 5 s default timed it out)
 
   it('an op with a client operation id applies once: a resend is a no-op (dup), whatever the context', () => {
     const s = state();
