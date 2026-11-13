@@ -2146,6 +2146,9 @@ class Bot {
   /** --gear in the Greenway: every GEAR_SWAP_MS, out of combat, the worn T1 piece off and on again. */
   private gearSwap(sv: SelfView, now: number) {
     if (!gearMode || !this.inv || sv.inCombat || sv.cast || sv.charge !== null || now - this.swapAt < GEAR_SWAP_MS || this.opBusy(now)) return;
+    // (at full health only: a swap sent in the moment a bleed or a stray hit takes the last hp is refused 'dead')
+    const me = this.room.state.players?.get(this.room.sessionId);
+    if (!me || me.dead || me.hp < me.maxHp) return;
     this.swapAt = now;
     const uid = this.worn('chest');
     if (uid === null) return;
@@ -2162,7 +2165,7 @@ class Bot {
     const key = JSON.stringify(act);
     if (this.questAct && this.questAct.key === key && now - this.questAct.at < QUEST_RETRY_MS) return;
     const me = this.room.state.players?.get(this.room.sessionId);
-    if (!me || me.dead || me.hp <= 0) return; // (a dead adventurer's act is refused 'dead')
+    if (!me || me.dead || me.hp < me.maxHp * 0.5) return; // (a dead adventurer's act is refused 'dead': not at low health)
     this.questAct = { key, at: now };
     this.room.send('quest', act);
     questStats.acts++;
