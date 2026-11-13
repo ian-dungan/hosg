@@ -313,8 +313,9 @@ const { values } = parseArgs({
     quest: { type: 'boolean', default: false },
   },
 });
-// --quest implies fighting (in the Greenway when a step needs it); --gear runs with --fight only
-if (values.quest) values.fight = true;
+// --quest with --fight: quest followers (they walk, talk, jump and fight in the Greenway as their steps need); --quest alone:
+// walkers (or --cluster walkers) that carry quest state (their views) and do a step only where they happen to stand
+// (talk, use, a hop): the walkers' bandwidth with quests on.
 if (values.gear && !(values.fight || values.cycle)) {
   console.error('--gear runs with --fight (or --cycle, or --quest)');
   process.exit(2);
@@ -1277,6 +1278,12 @@ class Bot {
    */
   private step() {
     if (stand || this.travelled || this.dead) return;
+    if (questMode && this.quests && Date.now() - this.walkerQuestAt > 1000) {
+      // a walker with quests: a talk, use or hop its step asks for, when it happens to be there (no walking for it)
+      this.walkerQuestAt = Date.now();
+      const g = questGoal(this.quests, { zone: this.zone, x: this.body.x, z: this.body.z, job: this.jobNow.job, inParty: false, index: this.index });
+      if (g.g === 'talk' || g.g === 'use') this.sendQuest(g.g === 'talk' ? { act: 'talk', npc: g.npc } : { act: 'use', prop: g.prop }, performance.now());
+    }
     const now = Date.now();
     const sinceLastStep = now - this.lastStepAt;
     const dt = this.lastStepAt ? sinceLastStep / 1000 : 1 / TICK_HZ;
@@ -2237,6 +2244,7 @@ class Bot {
   }
   private questNudge: readonly string[] | null = null;
   private nudgeAt = 0;
+  private walkerQuestAt = 0;
   private campKinds = '';
 
   // ───────── --dungeon, --warden ─────────

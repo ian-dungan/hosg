@@ -1,6 +1,6 @@
 // Browser smoke test of a running Shady Grove 2 server (Playwright, headless Chromium).
 //   node server/scripts/smoke.mjs <url> [--kill "<command that kills the server>"] [--no-combat]
-// Two desktop guests and one iPhone 13 guest see "Adventurers online: 3"; A walks and B sees A move
+// Two desktop guests and one iPhone 13 guest (each through the character creator, its default look, Done) see "Adventurers online: 3"; A walks and B sees A move
 // more than 2 m; A jumps (Space) and B sees A more than 0.5 m up; A's markup-laden chat line reaches B
 // as plain text; signing in to A's account from a new browser shows "Signed in somewhere else" on A;
 // killing the server shows "Connection lost".
@@ -128,6 +128,9 @@ async function playAsGuest({ page }) {
   ]);
   const body = await response.json();
   if (!body.name) throw new Error(`guest login failed: ${JSON.stringify(body)}`);
+  // Plan 5: a new adventurer passes the character creator first (its default look, Done)
+  await page.waitForSelector('.sg-cr-foot button.done:not([disabled])', { timeout: WAIT_MS });
+  await page.click('.sg-cr-foot button.done', { timeout: WAIT_MS });
   return body.name;
 }
 
@@ -150,7 +153,9 @@ const onlineIs = (n) => new RegExp(`Adventurers online: ${n}$`).test(document.qu
 const loginError = (expected) => document.querySelector('.sg-login-err')?.textContent === expected;
 
 let step = 'start';
-let minHp = 100;
+let minHp = Infinity;
+/** A's max hp (its kit's: 82 at level 1), read once it is in its room. */
+let maxHpA = 100;
 const pages = [];
 async function check(name, fn) {
   step = name;
@@ -190,6 +195,7 @@ try {
     // ("Cannot reach the server", the account kept): "Continue as" joins again, at most four times.
     await Promise.all([a, b, c].map(rejoinIfStarved));
     for (const { page } of [a, b, c]) await page.waitForFunction(onlineIs, 3, { timeout: WAIT_MS });
+    maxHpA = await a.page.evaluate(() => { const r = window.__sg2.room; return r.state.players.get(r.sessionId).maxHp; });
   });
 
   await check('A walks and B sees A move more than 2 m', async () => {
@@ -310,7 +316,7 @@ try {
       for (;;) {
         const s = await a.page.evaluate((eid) => {
           const e = window.__sg2net.enemies.find((v) => v.eid === eid);
-          return { dead: e?.mode === 'dead', hp: window.__sg2net.self?.hp ?? 100 };
+          return { dead: e?.mode === 'dead', hp: window.__sg2net.self?.hp ?? Infinity };
         }, thornling.eid);
         minHp = Math.min(minHp, s.hp);
         if (s.dead || (await credits()) > creditsBefore) break;
@@ -383,13 +389,14 @@ try {
       // the button wakes after DEATH_MIN_S
       await a.page.waitForSelector('.sg-end-btn:not(.waiting):has-text("Return to the statue")', { timeout: WAIT_MS });
       await a.page.click('.sg-end-btn:has-text("Return to the statue")', { timeout: WAIT_MS });
-      await a.page.waitForFunction(() => window.__sg2net?.zone === 'grove' && window.__sg2net.self?.hp === 100 && !window.__sg2net.self.dead,
+      // (full health: the kit's max hp, 82 for a level-1 adventurer since Plan 5)
+      await a.page.waitForFunction(() => { const r = window.__sg2.room, me = r?.state.players?.get(r.sessionId); return window.__sg2net?.zone === 'grove' && !!me && window.__sg2net.self?.hp === me.maxHp && !window.__sg2net.self.dead; },
         null, { timeout: WAIT_MS, polling: 500 });
     });
 
     await check('A took damage in the fights', async () => {
       // (the helpers often kill the first Thornling before it lands a hit; A falls at the next camp in any case)
-      if (!(minHp < 100)) throw new Error(`A's health never went below 100 (lowest ${minHp})`);
+      if (!(minHp < maxHpA)) throw new Error(`A's health never went below its max ${maxHpA} (lowest ${minHp})`);
     });
 
     await check('in the grove A taps the Guild Board, walks over and it opens; becoming a White Mage shows its badge and Tidelash on slot 1', async () => {
