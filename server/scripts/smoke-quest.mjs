@@ -69,6 +69,17 @@ async function readDialogue(p, why) {
   }
   return speaker;
 }
+/** Pages through any dialogue that opens (a step's done line, Marrow's words round the Beacon) until none has been open for `quiet` ms. */
+async function settle(p, quiet = 3000, ms = 60_000) {
+  const until = Date.now() + ms;
+  let lastOpen = Date.now();
+  while (Date.now() < until) {
+    if (!(await ev(p, () => !!document.querySelector('.sg-dlg')))) { if (Date.now() - lastOpen > quiet) return; await p.page.waitForTimeout(400); continue; }
+    lastOpen = Date.now();
+    await ev(p, () => { const el = document.querySelector('.sg-dlg-sheet .sg-dlg-panel') ?? document.querySelector('.sg-dlg'); el?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+    await p.page.waitForTimeout(700);
+  }
+}
 /** Taps story spot `id` on A's screen (where screenOf puts it, `up` m above the ground). */
 async function tapSpot(p, id, up = 1) {
   const at = await waitFor(p, ([sid, h]) => {
@@ -119,6 +130,7 @@ try {
     const who = await readDialogue(a, 'Old Marrow');
     if (!/Marrow/.test(who)) throw new Error(`the dialogue is by "${who}", not Old Marrow`);
     await stepIs(a, 'pim_find');
+    await settle(a);
   });
 
   await check('A taps the pointer chip and arrives at the tavern; Pim\'s call shows; A taps Jump: step pim', async () => {
@@ -129,6 +141,7 @@ try {
     console.log(`     the call on arriving is by "${who}"`);
     if (!/Pim/.test(who)) throw new Error(`the call is by "${who}", not Pim`);
     await stepIs(a, 'pim_hop');
+    await settle(a);
     await shot(a, '4-pim-hop');
     for (let n = 0; n < 6; n++) {
       await a.page.locator('.sg-ab-jump').first().tap({ timeout: WAIT_MS });
@@ -143,6 +156,7 @@ try {
     const who = await readDialogue(a, 'Pim');
     if (!/Pim/.test(who)) throw new Error(`the dialogue is by "${who}", not Pim`);
     await stepIs(a, 'plaque');
+    await settle(a);
     await shot(a, '5-plaque-step');
   });
 
@@ -159,6 +173,8 @@ try {
     await readDialogue(a, 'the plaque');
     await waitFor(a, () => window.__sg2net.questDone.some((g) => g.scene === 'beacon') || null, null, WAIT_MS, 'no questDone with scene beacon');
     plaqueAt = Date.now();
+    // Old Marrow speaks before the Beacon scene (and after it): paged through; the Beacon is up once the scene has played
+    await settle(a, 5000, WAIT_MS);
     await waitFor(a, () => window.__sg2net.beaconRaised || null, null, WAIT_MS, 'the Beacon was not raised');
     await shot(a, '6-beacon');
   });
