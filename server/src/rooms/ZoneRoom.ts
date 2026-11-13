@@ -147,6 +147,7 @@ import {
   type Look,
   BAG_SLOTS,
   MAIN_QUEST,
+  QUESTS,
   QUEST_EVENTS_PER_STEP,
   QUEST_OPS_PER_S,
   QUEST_TEXT,
@@ -169,7 +170,7 @@ import type { MemberStatus, Parties } from '../party/parties';
 import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../store/types';
 import { InventoryQueue, TokenBucket, WriteLock, type InvSnapshot, type InvTask, type TaskResult } from './inventoryQueue';
 import { applyLoot, clearXp, itemName, killXp, talentRowFor, type LootAward } from './rewards';
-import { actsFromFx, jumpCounts, payQuests, placeEvents, questDay, watchEither, type QuestPay, type QuestWatch } from './quests';
+import { actsFromFx, jumpCounts, payQuests, placeEvents, questDay, questWatch, watchEither, type QuestPay, type QuestWatch } from './quests';
 import type { InstanceInfo, Instances } from './instances';
 import { gmVerb, isGmLine, runGmLine, type GmHost, type GmProcess } from '../gm/commands';
 import { applyGrant, grantThing, type GmGrant, type GrantOutcome } from '../gm/grant';
@@ -672,6 +673,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   private killCounter = 0;
   /** Each engaged enemy's threat table (adventurer ids) as last seen alive: who fought it but got no credit (at most one entry an enemy). */
   private threatSeen = new Map<number, number[]>();
+  /** The UTC day of the last step ('' before the first): views are sent again when it turns. */
+  private questDayNow = '';
   /** Per pack encounter of an instance: the accounts credited for any of its kills (its clear's reward). */
   private encounterCredit = new Map<string, Set<string>>();
 
@@ -1445,7 +1448,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       settle: (r) => {
         if (r.status === 'unchanged') this.lookChanged(session, wasFree && !r.snapshot.lookFree);
         this.settleInv(session, null, r as TaskResult<unknown>);
-        if (r.status === 'unchanged') this.refreshKit(session);
+        if (r.status === 'unchanged') {
+          this.refreshKit(session);
+          this.questSettled(session, r as TaskResult<unknown>, undefined);
+        }
       },
     });
     return true;
@@ -1492,7 +1498,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       settle: (r) => {
         this.questSettled(session, r, r.status === 'applied' ? r.info.quest : undefined);
         if (r.status === 'failed' || r.status === 'stale') {
-          if (r.status === 'failed') this.logFailure('loot', 'A loot write failed', r.error);
+          if (r.status === 'failed') {
+            this.logFailure('loot', 'A loot write failed', r.error);
+            if (ran) this.recoverQuestXp(session, ran.pay);
+          }
           // tried again a little later (a kill key is rewarded once however often it is tried); then given up.
           // A failed write may have landed: its combat acts are not tried again (a count could double); kills keep
           // their keys, and places, jumps, jobs and equips count once whatever happens.
@@ -1505,9 +1514,9 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           return;
         }
         if (r.status === 'dropped') {
-          // the session ended first: loot is written for the adventurer all the same (its quest events are not:
-          // progress may be lost, never paid twice)
+          // the session ended first: its loot and quest events are written for the adventurer all the same
           if (awards.length > 0) this.offlineLoot(session, awards);
+          if (events.length > 0) this.offlineQuests(session, events);
           return;
         }
         if (r.status === 'refused') {
@@ -1550,6 +1559,59 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       return;
     }
     session.questEvents.push(ev);
+  }
+
+  /**
+   * Quest events of a session that ended before they were written (a travel, a kick, a second tab): a queue of its
+   * own on the stored truth, under the session's write lock (after its last save), with its xp added to the session's
+   * jobs (the ones that save wrote). Kill keys and step keys keep everything once; a rejoin waits for it.
+   */
+  private offlineQuests(session: Session, events: QuestEvent[]) {
+    let ran: QuestOut | undefined;
+    const queue = this.makeQueue(session.queue.snapshot, session.lock, session.adventurerId, session.accountId, () => session.jobs);
+    queue.markStale();
+    const flight = queue.push<null>({
+      retries: LOOT_STALE_RETRIES,
+      unbounded: true,
+      run: (s, jobs) => {
+        ran = undefined;
+        const q = applyQuestEvents(s.quests, events, questDay(s.quests, utcDay(this.wallMs())));
+        if (!q.changed) return { kind: 'none', info: null };
+        const pay = payQuests({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, q.done, jobs.current);
+        if (!pay) return { kind: 'none', info: null };
+        ran = { pay, changed: true };
+        return {
+          kind: 'write', info: null,
+          write: { inventory: pay.state.inv, ...(pay.xp > 0 ? { jobs: pay.state.jobs } : {}), dGold: pay.dGold, dSeals: 0, quests: q.save },
+          next: { ...pay.state, look: s.look, lookFree: s.lookFree, quests: q.save },
+        };
+      },
+      landed: () => { if (ran) this.questXp(session, ran.pay); },
+      settle: (r) => {
+        this.questSettled(session, r, r.status === 'applied' ? ran : undefined);
+        if (r.status === 'failed' || r.status === 'stale') {
+          this.logFailure('quests', 'Quest progress for an adventurer who left could not be written', r.status === 'failed' ? r.error : new Error(r.status));
+          if (r.status === 'failed' && ran) this.recoverQuestXp(session, ran.pay);
+        }
+        // back online already: its session hears the truth
+        if (r.status === 'applied') this.accounts.get(session.accountId)?.room.refreshInventory(session.accountId);
+      },
+    });
+    this.accounts.inventoryInFlight(session.accountId, flight.then(() => {}));
+  }
+
+  /**
+   * A quest write threw: it may have committed (the store wrote it, the answer was lost) and its landed hook never ran.
+   * Read afresh under the write lock; if every step key it paid is stored, its xp goes onto the session's jobs now (so
+   * the next save keeps it).
+   */
+  private recoverQuestXp(session: Session, pay: QuestPay) {
+    if (pay.xp <= 0 || pay.keys.length === 0) return;
+    const check = session.lock.run(async () => {
+      const a = await this.store.getOrCreateAdventurer(session.accountId);
+      if (pay.keys.every((k) => a.inventory.recentKills.includes(k))) this.questXp(session, pay);
+    }).catch((err) => this.logFailure('quests', 'Checking a failed quest write failed', err));
+    this.accounts.inventoryInFlight(session.accountId, check);
   }
 
   /** A task computed new quests (its write is on its way): events and watch flags follow them meanwhile too. */
@@ -1596,10 +1658,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     for (const g of quest?.pay.given ?? []) {
       if (g.title) void this.store.addTitle(session.adventurerId, g.title).catch((err) => this.logFailure('quests', 'Adding a quest title failed', err));
     }
-    if (!session.queue.busy) session.questAhead = undefined;
-    session.questWatch = watchEither(session.queue.snapshot.quests, session.questAhead);
+    // (settle runs before the next task's run: what a later task computes, it sets again then)
+    session.questAhead = undefined;
+    session.questWatch = questWatch(session.queue.snapshot.quests);
     if (this.sessions.get(session.client.sessionId) !== session) return;
-    if (!session.reconnection) for (const g of quest?.pay.given ?? []) this.sendTo(session.client, 'questDone', g);
+    if (!session.reconnection) {
+      for (const g of quest?.pay.given ?? []) {
+        this.sendTo(session.client, 'questDone', g);
+        const lost = (QUESTS[g.quest]?.steps[g.step]?.reward?.gold ?? 0) - g.gold;
+        if (lost > 0) this.sendTo(session.client, 'notice', { text: purseFullText(lost) });
+      }
+    }
     this.sendQuests(session);
   }
 
@@ -1675,9 +1744,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
             return;
           case 'stale':
           case 'failed':
-            if (r.status === 'failed') this.logFailure('quests', 'A quest write failed', r.error);
+            if (r.status === 'failed') {
+              this.logFailure('quests', 'A quest write failed', r.error);
+              if (quest) this.recoverQuestXp(session, quest.pay);
+            }
             this.refuseQuest(session, act.act, 'save');
-            this.sendInventory(session); // the stored truth (its quests went out above)
+            this.refreshInventory(session.accountId); // the stored truth, read afresh (quests and inventory)
             return;
           default:
             return;
@@ -2479,6 +2551,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // Its inventory queue: the write in flight lands (once; the account's next join waits for it), the rest is
     // dropped; loot rolled this step but not written yet is written for it all the same.
     if (session.loot.length > 0) this.offlineLoot(session, session.loot.splice(0));
+    // ...and quest events queued this step (a place, a kill): written for it on the stored truth too
+    if (session.questEvents.length > 0) this.offlineQuests(session, session.questEvents.splice(0));
     session.queue.close();
     this.accounts.inventoryInFlight(session.accountId, session.queue.idle());
     this.leaveFight(session);
@@ -3232,6 +3306,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.lastTickAt = target;
     this.steps++;
     const wall = this.wallMs();
+    // the UTC day turned: every view again (its `today` and offers change; sent only where they did)
+    const dayNow = utcDay(wall);
+    if (dayNow !== this.questDayNow) {
+      if (this.questDayNow !== '') for (const session of this.sessions.values()) session.questDue = true;
+      this.questDayNow = dayNow;
+    }
     for (const session of this.sessions.values()) {
       this.safely('session', () => {
         if (session.anim) this.animate(session);

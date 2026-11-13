@@ -2,6 +2,7 @@
 // bounded, a death save never raced into a kick, a knock in a long fall charging the whole fall, and a
 // held dodge a knock replaces being refused rather than dropped.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { matchMaker } from '@colyseus/core';
 import type { Room } from '@colyseus/sdk';
 import { ENEMY_KINDS, SPAWN, TICK_HZ, fallDamage, worldOf, type CampSpawn, type Surface, type ZoneDef, type ZoneId } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
@@ -36,15 +37,17 @@ describe('elite stagger bar with more than one adventurer (I1)', () => {
     const clock = testClock(0);
     server = await startServer({ combatSeed: 7, combatClock: clock.now, zones: { grove: flatZone([MOSSBACK]) } });
     const { url, store } = server;
+    // the grove room steps only by hand from before anyone joins: nobody engages it before the first read
+    const listing = (await matchMaker.query({ name: 'grove' }))[0]!;
+    const zr = matchMaker.getLocalRoomById(listing.roomId) as any;
+    zr.setSimulationInterval(undefined);
     const joined: Awaited<ReturnType<typeof joinAt>>[] = [];
     for (const [i, [x, z]] of [[0, -17.6], [2.4, -20], [-2.4, -20], [0, -22.4]].entries()) joined.push(await joinAt(url, store, `A${i}`, x, z));
     const room = joined[0].room;
-    const zr = serverRoom(room) as any;
-    zr.setSimulationInterval(undefined);
+    expect(serverRoom(room)).toBe(zr);
     const moss = await waitFor(() => enemyOf(room, 'mossback'));
-    // the unscaled bar and health come from the data: the state may already show them scaled for however many
-    // adventurers have engaged by the time it is read (the joins run while the room still steps by itself)
     expect(ENEMY_KINDS.mossback).toMatchObject({ hp: 750, stagger: 100 });
+    expect(moss).toMatchObject({ maxHp: 750, maxStagger: 100 }); // the state starts unscaled
     for (const j of joined) j.room.send('target', { id: moss.eid }); // in reach: their autos put them all on its threat table
     await waitFor(() => joined.every((j) => j.room.state.players.get(j.room.sessionId)?.target === moss.eid));
     const engine = [...worldOf(zr.combat).enemies.values()].find((x) => x.kind === 'mossback')!;

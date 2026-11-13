@@ -5,7 +5,7 @@
 //
 // Everything here works from the server's own state: the engine's fx, accepted poses and the stored quest save.
 import {
-  JOBS, JUMP_MIN_M, MAIN_QUEST, QUESTS, QUEST_IDS, grantQuestRewards, isQuestId, newQuestSave, objectiveTarget,
+  JOBS, JUMP_MIN_M, MAIN_QUEST, QUESTS, QUEST_IDS, grantQuestRewards, isQuestId, newQuestSave, objectiveTarget, questRewardKey,
   type AbilityId, type FxEvent, type InvState, type JobId, type QuestEvent, type QuestGiven, type QuestId, type QuestSave, type StepDone, type ZoneId,
 } from '@sg2/shared';
 
@@ -85,26 +85,34 @@ export const watchEither = (a: QuestSave, b: QuestSave | undefined): QuestWatch 
  * offer a daily again, or pay it twice, on a day it was already done: like Seals, `<` comparisons only).
  */
 export function questDay(s: QuestSave, today: string): string {
+  // (at most tomorrow: a day further ahead is a broken clock's or a forged save's, and would lock a daily for good)
+  const t = Date.parse(`${today}T00:00:00Z`);
+  const tomorrow = Number.isFinite(t) ? new Date(t + 86_400_000).toISOString().slice(0, 10) : today;
   let day = today;
   for (const id of QUEST_IDS) {
     const d = s.done[id]?.day;
-    if (d && d > day) day = d;
+    if (d && d > day && d <= tomorrow) day = d;
   }
   return day;
 }
 
 /** What a quest change pays: the inventory state after it, its gold, xp (to `job`) and what to tell the owner. */
-export interface QuestPay { state: InvState; dGold: number; xp: number; job: JobId; given: QuestGiven[] }
+export interface QuestPay {
+  state: InvState; dGold: number; xp: number; job: JobId; given: QuestGiven[];
+  /** The reward keys (questRewardKey) of the steps it paid: in the stored recentKills once its write landed. */
+  keys: string[];
+}
 
 /**
  * Pays the steps a quest change completed (grantQuestRewards on `state`, xp to `job`): null when the bag cannot take
  * the items (nothing is paid then). With nothing to pay, the state as it is.
  */
 export function payQuests(state: InvState, done: readonly StepDone[], job: JobId): QuestPay | null {
-  if (done.length === 0) return { state, dGold: 0, xp: 0, job, given: [] };
+  if (done.length === 0) return { state, dGold: 0, xp: 0, job, given: [], keys: [] };
   const r = grantQuestRewards(state, done, job);
   if ('refusal' in r) return null;
-  return { state: r.state, dGold: r.dGold, xp: r.xp, job, given: r.given };
+  const keys = r.given.flatMap((g) => { const d = done.find((x) => x.quest === g.quest && x.step === g.step); return d ? [questRewardKey(d)] : []; });
+  return { state: r.state, dGold: r.dGold, xp: r.xp, job, given: r.given, keys };
 }
 
 // ───────── SG2_TEST_QUEST (test servers only) ─────────
