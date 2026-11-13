@@ -162,6 +162,8 @@ interface NetDebug {
   lookFree: boolean;
   creatorOpen: boolean;
   remoteLooks: Record<number, string>;
+  /** Every gear code the room has sent (engine id → code), for browser checks. */
+  remoteGear: Record<number, string>;
   /** Gold, as the last `inventory` said (the Barber's price check). */
   gold: number;
   /** Plan 5 (Task 10): the last `inventory`, the last loot, the last 20 refusal lines, the kit's stats, level-ups, the open stall sheet. */
@@ -251,7 +253,7 @@ function boot(): void {
     remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0,
     jobs: null, refusals: [], allyFocus: null, guildBoard: { x: GUILD_BOARD.x, z: GUILD_BOARD.z },
     party: null, invites: [], partyRefusals: [], instance: null, roomId: '', boss: null, victory: null, chatLog: [], screen: '', corrections: 0, edges: 0,
-    look: '', lookFree: false, creatorOpen: false, remoteLooks: {}, gold: 0,
+    look: '', lookFree: false, creatorOpen: false, remoteLooks: {}, remoteGear: {}, gold: 0,
     inventory: null, lastLoot: null, invRefusals: inv.refusals, stats: null, levelUps: inv.levelUps, stall: null,
     quests: null, questDone: [], questRefusals: [], tracker: null, pointer: null,
     get dialogueOpen() { return !!document.querySelector('.sg-hud.sg-dialogue-open'); },
@@ -531,6 +533,7 @@ function boot(): void {
       });
       // Plan 5: looks by engine id (own included), the free creator visit, the Barber's refusals, gold
       r.onMessage('looks', (m: S2C['looks']) => {
+        for (const [eid, , gear] of m.a) net.remoteGear[eid] = gear;
         if (lookCache.handle(m).length === 0) return;
         net.remoteLooks = lookCache.codes();
         if (room === r) applyOwnLook();
@@ -700,6 +703,7 @@ function boot(): void {
         lookCache.clear();
         ownLookVer = 0;
         net.remoteLooks = {};
+        net.remoteGear = {};
         net.remotes = [];
         net.enemies = [];
         rig.setMoveScale(0);
