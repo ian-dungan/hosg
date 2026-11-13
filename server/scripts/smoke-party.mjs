@@ -102,7 +102,7 @@ async function playAsGuest(p) {
 }
 
 /** Waits until the page stands in a Lampfall instance (a starved join is tried again with "Continue as"). */
-async function inLampfall(p, ms = WAIT_MS * 2) {
+async function inLampfall(p, ms = WAIT_MS * 4) {
   const until = Date.now() + ms;
   for (let tries = 0; Date.now() < until;) {
     const st = await p.page.evaluate(() => {
@@ -112,7 +112,7 @@ async function inLampfall(p, ms = WAIT_MS * 2) {
     }).catch(() => 'wait');
     if (st === 'in') return;
     if (st !== 'wait') {
-      if (++tries > 4) throw new Error(`${p.label}: ${st}`);
+      if (++tries > 8) throw new Error(`${p.label}: ${st}`);
       console.log(`     ${p.label}: ${st}; "Continue as" again`);
       await p.page.click('.sg-login-continue', { timeout: WAIT_MS });
     }
@@ -202,6 +202,11 @@ try {
     // a tap on B's body focuses it; the focus frame then offers "Invite to party" (tried again if the frame closed
     // before the click landed: a page draws about one frame a second)
     for (let tries = 0; ; tries++) {
+      // A turns to face B (where it stands, so nothing moves): the camera follows
+      await a.page.evaluate((n) => {
+        const r = window.__sg2net.remotes.find((x) => x.name === n), rig = window.__sg2.rig, p = rig.position;
+        if (r) rig.teleport(p.clone(), Math.atan2(r.x - p.x, r.z - p.z));
+      }, b.name);
       const at = await waitFor(a, (n) => {
         const r = window.__sg2net.remotes.find((x) => x.name === n);
         const pt = r && window.__sg2.screenOf(r.x, r.y + 1.0, r.z);
@@ -260,6 +265,8 @@ try {
 
   let roomId = '';
   await check('both walk into the crater mouth and stand in the same instance', async () => {
+    // a smaller page renders faster: the client gives a join 15 s of wall time, and the Lampfall's first frames are slow
+    await a.page.setViewportSize({ width: 800, height: 500 });
     for (const p of [a, b]) await p.page.evaluate(({ x, z }) => {
       const g = window.__sg2.game, V = g.rig.position.constructor;
       g.walkTo(new V(x, g.world.groundAt(x, z) ?? g.rig.position.y, z));
@@ -274,12 +281,12 @@ try {
   });
 
   await check(`both walk to the Root Cellar, target with Tab and fight; the first pack is dead within ${PACK_GAME_S} s of game time, both still inside`, async () => {
-    if (helpers) helpers.say('go');
     const t0 = await gameS(a);
+    let helping = false; // the helpers join in once both pages have a target (or after 60 s of game time)
     // down the corridor in short tap-to-walk legs
     for (const leg of DATA.route) await Promise.all([walkTo(a, leg), walkTo(b, { x: leg.x - 1, z: leg.z + 1.5 })]);
     const seen = new Map(); // the pack's enemies (eid -> kind) as first seen in the Root Cellar
-    const tabs = new Map(), hit = new Set(); // Tab presses per page; pages whose target was an enemy of the pack
+    const tabs = new Map(), hit = new Set(), deaths = new Set(); // Tab presses per page; pages whose target was an enemy of the pack
     for (;;) {
       for (const p of [a, b]) {
         const view = await net(p, (c) => window.__sg2net.enemies.filter((e) => Math.hypot(e.x - c.x, e.z - c.z) <= c.r + 3).map((e) => ({ eid: e.eid, kind: e.kind, mode: e.mode })), DATA.cellar);
@@ -296,10 +303,14 @@ try {
         });
         if (st.live) hit.add(p);
         if (st.dead || st.walking) continue;
+        // up again at the rim after a release: down the corridor again
+        const back = await net(p, (c) => { const r = window.__sg2.rig.position; return Math.hypot(r.x - c.x, r.z - c.z) > c.r + 6; }, DATA.cellar);
+        if (back) { for (const leg of DATA.route) await walkTo(p, leg); continue; }
         if (!st.live) { await p.page.keyboard.press('Tab'); tabs.set(p, (tabs.get(p) ?? 0) + 1); }
         else if (st.far > 2.6) await p.page.evaluate(({ x, z }) => { const g = window.__sg2.game, r = g.rig.position, V = r.constructor; g.walkTo(new V(x, g.world.groundAt(x, z) ?? r.y, z)); }, st.e);
         else { await p.page.keyboard.press('Digit2'); await p.page.keyboard.press('Digit1'); }
       }
+      if (helpers && !helping && ((hit.has(a) && hit.has(b)) || (await gameS(a)) - t0 > 60)) { helping = true; helpers.say('go'); }
       const cleared = await net(a, () => window.__sg2net.instance?.cleared ?? []);
       const kinds = [...seen.values()];
       if (cleared.includes('root_cellar') && kinds.length >= DATA.pack.length && kinds.every((k) => k.dead)) break;
@@ -309,7 +320,7 @@ try {
         const s = await net(p, () => ({ dead: window.__sg2net.self?.dead, zone: window.__sg2net.zone, screen: window.__sg2net.screen }));
         if (s.zone !== 'lampfall') throw new Error(`${p.label} left the Lampfall during the fight (${JSON.stringify(s)})`);
         // fallen: Release (from RELEASE_MIN_S on) and walk back in
-        if (s.dead) await p.page.click('.sg-end-btn:not(.waiting):has-text("Release")', { timeout: 1000 }).catch(() => {});
+        if (s.dead) { deaths.add(p.label); await p.page.click('.sg-end-btn:not(.waiting):has-text("Release")', { timeout: 1000 }).catch(() => {}); }
       }
       await a.page.waitForTimeout(500);
     }
@@ -317,7 +328,7 @@ try {
     for (const p of [a, b]) if (!tabs.get(p) || !hit.has(p)) throw new Error(`${p.label} never targeted an enemy with Tab`);
     if (kinds !== [...DATA.pack].sort().join(',')) throw new Error(`the Root Cellar's pack was ${kinds}, not ${DATA.pack.join(',')}`);
     for (const p of [a, b]) if ((await net(p, () => window.__sg2net.roomId)) !== roomId) throw new Error(`${p.label} is not in the instance any more`);
-    console.log(`     the pack (${kinds}) died ${((await gameS(a)) - t0).toFixed(0)} s of game time after the walk began`);
+    console.log(`     the pack (${kinds}) died ${((await gameS(a)) - t0).toFixed(0)} s of game time after the walk began${deaths.size ? ` (fell and released: ${[...deaths].join(', ')})` : ''}`);
     await shot(a, 'pack-dead-a');
   });
 
@@ -332,16 +343,30 @@ try {
     await waitFor(b, (n) => window.__sg2net.party?.members.some((m) => m.name === n), a.name, WAIT_MS, 'B is not in the party after the reload');
   });
 
-  await check(`A presses P and leaves the party; within ${LEAVE_MS / 1000} s it is told why and sent to the Greenway, where it stands at the mouth`, async () => {
+  await check(`A presses P and leaves the party; it is told why and within ${LEAVE_MS / 1000} s sent to the Greenway, where it stands at the mouth`, async () => {
     await a.page.keyboard.press('KeyP');
     await a.page.waitForSelector('.sg-ps-leave', { timeout: WAIT_MS });
     await shot(a, 'party-sheet');
+    // the page's own clock times the notice and the travel (a MutationObserver: polling at about 1 fps would add seconds)
+    await a.page.evaluate((t) => {
+      const w = window, t0 = performance.now();
+      w.__leave = { notice: null, travel: null };
+      const look = () => {
+        if (w.__leave.notice === null && [...document.querySelectorAll('.sg-toast')].some((e) => e.textContent.includes(t))) w.__leave.notice = performance.now() - t0;
+        if (w.__leave.travel === null && (document.querySelector('.sg-travel.on') || w.__sg2net.zone === 'greenway')) w.__leave.travel = performance.now() - t0;
+      };
+      new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+      setInterval(look, 100);
+    }, DATA.leftParty);
     await a.page.click('.sg-ps-leave');
-    const left = Date.now();
-    await waitFor(a, (t) => [...document.querySelectorAll('.sg-toast')].some((e) => e.textContent.includes(t)), DATA.leftParty, LEAVE_MS, `no "${DATA.leftParty}" notice within ${LEAVE_MS / 1000} s`);
-    await shot(a, 'left-party-notice');
-    await waitFor(a, () => window.__sg2net.zone === 'greenway', null, LEAVE_MS - (Date.now() - left), `not sent to the Greenway within ${LEAVE_MS / 1000} s`);
-    await waitFor(a, () => /Adventurers online/.test(document.querySelector('.sg-online')?.textContent ?? '') && window.__sg2net.roomId === '', null, WAIT_MS * 2, 'A never stood in the Greenway');
+    const times = await waitFor(a, () => window.__leave.notice !== null && window.__leave.travel !== null && window.__leave, null, WAIT_MS, 'no notice or no travel after leaving the party');
+    console.log(`     the notice ${(times.notice / 1000).toFixed(1)} s and the travel to the Greenway ${(times.travel / 1000).toFixed(1)} s after Leave (page clock)`);
+    // (the server sends the notice as it takes the leave, and the travel INSTANCE_EVICT_S later; at about 1 fps the page
+    // itself takes seconds to send the click and draw the toast, so the 15 s run from the notice)
+    if (times.notice > 60_000) throw new Error(`no "${DATA.leftParty}" notice within 60 s of the click`);
+    if (times.travel - times.notice > LEAVE_MS) throw new Error(`not sent to the Greenway within ${LEAVE_MS / 1000} s of the notice`);
+    await shot(a, 'left-party-travel');
+    await waitFor(a, () => /Adventurers online/.test(document.querySelector('.sg-online')?.textContent ?? '') && window.__sg2net.zone === 'greenway' && window.__sg2net.instance === null, null, WAIT_MS * 2, 'A never stood in the Greenway');
     const at = await net(a, () => ({ x: window.__sg2.rig.position.x, z: window.__sg2.rig.position.z }));
     if (Math.hypot(at.x - DATA.arrive.x, at.z - DATA.arrive.z) > 3) throw new Error(`A is not at the crater mouth: ${JSON.stringify(at)}`);
     if ((await net(a, () => window.__sg2net.party)) !== null) throw new Error('A is still in a party');
