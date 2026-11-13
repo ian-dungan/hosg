@@ -208,9 +208,9 @@ const FIGHTERS_PER_ELITE_MIXED = 2;
  * The mixed run's pass marks, on top of the fight run's (measured, with headroom: see docs/load-test.md).
  * dodges replaces FIGHT_MIN.dodges (multi-fighter camps kill faster, so fewer telegraphs come out).
  * reactions: in all (scaled, see perRun); with --cycle, of at least reactionKinds kinds (ruling P3b-j: every kind is
- * shown by the party runs instead, PARTY_MIN); revives: completed Second Dawns.
+ * shown by the party runs instead, PARTY_MIN, with a revive).
  */
-const MIXED_MIN = { dodges: 20, casts: 50, reactions: 5, reactionKinds: 2, revives: 1 };
+const MIXED_MIN = { dodges: 20, casts: 50, reactions: 5, reactionKinds: 2 };
 /** --dungeon: the party bots' pass marks over the run (ruling P3b-j: every reaction kind shows up in parties). */
 const PARTY_MIN = { reactionKinds: 4, revives: 1 };
 /**
@@ -284,6 +284,8 @@ const { values } = parseArgs({
     assist: { type: 'string' },
     dungeon: { type: 'string' },
     warden: { type: 'string' },
+    join: { type: 'string' },
+    skill: { type: 'string' },
   },
 });
 if (values.jobs !== undefined && (values.jobs !== 'mixed' || !(values.fight || values.cycle))) {
@@ -303,7 +305,7 @@ if (assist !== null) { values.fight = true; values.jobs = 'mixed'; values.count 
 
 // ───────── parties (--dungeon, --warden) ─────────
 /** A party the bots form: its members (bot indices, the leader first), each member's job, how well they play. */
-interface PartyPlan { k: number; members: number[]; jobs: JobId[]; skill: Skill; careless: number[] }
+interface PartyPlan { k: number; members: number[]; jobs: JobId[]; skill: Skill; careless: number[]; leaderName?: string }
 const SKILLS: readonly Skill[] = ['careful', 'skilled', 'sloppy', 'careless'];
 /** --dungeon: party sizes cycle through these. */
 const DUNGEON_SIZES = [4, 3, 2];
@@ -341,6 +343,23 @@ if (wardenMode) {
     at += jobs.length;
   }
   values.fight = true; values.count = String(at); values.warmup = '0';
+}
+/**
+ * --join <name> (for the party smoke test, a server with SG2_START_AT=lampfall-mouth): --count bots (1–3: a White Mage
+ * with Second Dawn, a Black Mage, a Warrior) accept the invites of the adventurer called <name>, walk into the crater mouth
+ * once it is inside, take their jobs at the Crater Rim's (or the landing's) sanctuary and run the Lampfall with it at
+ * --skill (careful by default), as the party bots do. `hold` on stdin makes them stand (they still fight back and
+ * revive), `go` lets them carry on. They print `join: names <a>,<b>`, then `join: <event>` lines. No pass marks.
+ */
+const joinName = values.join ?? null;
+if (joinName !== null) {
+  if (wardenMode || values.dungeon !== undefined || assist !== null) { console.error('--join goes alone (not with --warden, --dungeon or --assist)'); process.exit(2); }
+  const n = Number(values.count === '100' ? '2' : values.count);
+  const skill = (values.skill ?? 'careful') as Skill;
+  if (!(n >= 1 && n <= PARTY_MAX - 1) || !SKILLS.includes(skill)) { console.error(`--join takes --count 1..${PARTY_MAX - 1} and --skill ${SKILLS.join('|')}`); process.exit(2); }
+  const jobs = (['white_mage', 'black_mage', 'warrior'] as JobId[]).slice(0, n);
+  partyPlans.push({ k: 0, members: jobs.map((_, j) => j), jobs, skill, careless: [], leaderName: joinName });
+  values.fight = true; values.count = String(n); values.warmup = '0';
 }
 /** Bots in parties (the first ones). */
 const PARTY_BOTS = partyPlans.reduce((n, p) => n + p.members.length, 0);
@@ -953,7 +972,9 @@ class Bot {
     });
     room.onMessage('partyInvite', (m: S2C['partyInvite']) => {
       // a member accepts its own leader's invite (and only that)
-      if (this.plan && this.plan.members[0] !== this.index && m.from === bots[this.plan.members[0]].name) {
+      const leader = this.plan?.leaderName ?? (this.plan && this.plan.members[0] !== this.index ? bots[this.plan.members[0]].name : null);
+      if (this.plan && leader !== null && m.from.toLowerCase() === leader.toLowerCase()) {
+        if (joinName !== null) console.log(`join: accepted ${m.from}'s invite`);
         this.room.send('party', { op: 'accept', partyId: m.partyId });
         partyStats.accepts++;
       }
@@ -1064,7 +1085,7 @@ class Bot {
         this.timers.push(setInterval(() => this.chat(), CHAT_EVERY_MS));
       }, Math.random() * CHAT_EVERY_MS),
     );
-    if (this.plan && this.plan.members[0] === this.index && this.plan.members.length > 1) {
+    if (this.plan && !this.plan.leaderName && this.plan.members[0] === this.index && this.plan.members.length > 1) {
       this.startInviting();
       this.timers.push(setInterval(() => this.partyChat(), PARTY_CHAT_EVERY_MS));
     }
@@ -1152,6 +1173,7 @@ class Bot {
       // the browser's rule: faster from Sprint's `use`, until a little before it ends
       if (e.t === 'use' && e.src === mine && e.ability === 'sprint') { this.sprintUntil = now + (SPRINT_S - SPRINT_EARLY_S) * 1000; this.sprints++; }
       if (assist !== null && this.index === 0 && (e.t === 'react' || e.t === 'revive')) console.log(`assist: ${JSON.stringify(e)}`);
+      if (joinName !== null && this.index === 0 && (e.t === 'react' || e.t === 'revive' || e.t === 'phase')) console.log(`join: ${JSON.stringify(e)}`);
       if (mixed && mine !== undefined && 'src' in e && e.src === mine) {
         if (e.t === 'cast') mixedStats.casts++;
         else if (e.t === 'castEnd') {
@@ -1443,7 +1465,7 @@ class Bot {
       this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
       return;
     }
-    if (!this.jobReady && this.diedAt === null && !(this.plan && wardenMode)) {
+    if (!this.jobReady && this.diedAt === null && !(this.plan && (wardenMode || joinName !== null))) {
       // (Warden runs take their jobs at the Keeper's Landing, a sanctuary.)
       // Its job can only be taken in a town: out through the west gate into the grove first.
       this.walkRoute(greenwayLayout().westGate, dt, now, 1, true);
@@ -1761,6 +1783,13 @@ class Bot {
   private toMouth(sv: SelfView, dt: number, now: number) {
     const plan = this.plan!;
     const spot = mouthGather();
+    if (plan.leaderName) {
+      // --join: in once the adventurer it joined is inside (the party's instance is open then)
+      const leader = this.partyView?.members.find((m) => m.name.toLowerCase() === plan.leaderName!.toLowerCase());
+      if (leader?.zone === 'lampfall' && !sv.inCombat && !assistHold) return this.walkRoute(LAMPFALL_MOUTH, dt, now, 1, true);
+      if (dist(spot, this.body) > 1) this.walkRoute(spot, dt, now, 1, false);
+      return;
+    }
     const formed = plan.members.length === 1 || (this.partyView?.members.length ?? 0) === plan.members.length;
     const mates = plan.members.map((i) => bots[i]).filter((b) => b !== this);
     const ready = formed && mates.every((b) => b.zone === 'lampfall' || b.switching || b.full || (b.zone === 'greenway' && dist(b.position, spot) < GATHER_R + 2));
@@ -1802,6 +1831,7 @@ class Bot {
 
   /** Each enemy's camp spot (its spawn in its room, matched when first seen): the brain's `home`. */
   private homes = new Map<number, { x: number; z: number; leash: number }>();
+  private jobReadyLogged = false;
 
   /**
    * One tick in the Lampfall: room by room in lampfallLayout() order, to each pack's (or boss's) room through its
@@ -1825,6 +1855,7 @@ class Bot {
       if (s) this.walkRoute(s, dt, now, 1, false);
       return;
     }
+    if (joinName !== null && !this.jobReadyLogged) { this.jobReadyLogged = true; console.log(`join: ${this.name} ready as ${this.jobNow.job} in ${this.roomId}`); }
     const mine = me.eid;
     const enemies: any[] = [];
     state.enemies?.forEach((e: any) => { if (e.mode !== 'dead') enemies.push(e); });
@@ -1842,7 +1873,7 @@ class Bot {
       const len = Math.hypot(corr.ax - corr.bx, corr.az - corr.bz);
       const back = Math.min(GATHER_BACK_M, len - 1);
       gather = { x: corr.bx + ((corr.ax - corr.bx) / len) * back, z: corr.bz + ((corr.az - corr.bz) / len) * back };
-      go = this.hasGo(goal, gather, now);
+      go = joinName !== null && assistHold ? false : this.hasGo(goal, gather, now);
       const pool = enemies.filter((e) => e.mode !== 'return' && dist(e, goal) <= goal.r + 2 && (go || e.mode !== 'idle'));
       target = pool.find((e) => ENEMY_KINDS[e.kind as EnemyKindId].boss) ?? null;
       if (!target) for (const e of pool) if (!target || e.hp < target.hp || (e.hp === target.hp && dist(e, this.body) < dist(target, this.body))) target = e;
@@ -1861,7 +1892,7 @@ class Bot {
     if (!thought) return; // it rolled
     const { act, scale } = thought;
     if (act.moveTo) return this.walkRoute(act.moveTo, dt, now, scale, false);
-    if (target || !goal || !gather) return;
+    if (target || !goal || !gather || (joinName !== null && assistHold)) return;
     // nothing to fight: into the room once the party has the go, else to the gather spot
     if (go) return this.walkRoute({ x: goal.x, z: goal.z }, dt, now, 1, false);
     if (dist(gather, this.body) > 1) this.walkRoute(gather, dt, now, 1, false);
@@ -1936,14 +1967,16 @@ try {
   process.exit(1);
 }
 bots.forEach((bot) => bot.start());
-if (assist !== null) {
+if (assist !== null || joinName !== null) {
   // the smoke test stops its helpers with SIGTERM: they leave their rooms first, so they are not left online
   process.on('SIGTERM', () => { void Promise.all(bots.map((bot) => bot.stop())).finally(() => process.exit(0)); });
+  const tag = assist !== null ? 'assist' : 'join';
   process.stdin.setEncoding('utf8').on('data', (d: string) => {
     for (const line of d.split('\n').map((l) => l.trim())) {
-      if (line === 'hold' || line === 'fight') { assistHold = line === 'hold'; console.log(`assist: ${line}`); }
+      if (line === 'hold' || line === 'fight' || line === 'go') { assistHold = line === 'hold'; console.log(`${tag}: ${line}`); }
     }
   });
+  if (joinName !== null) console.log(`join: names ${bots.map((b) => b.name).join(',')}`);
 }
 const zones = [...new Set(bots.map((bot) => bot.zone))].join(', ');
 console.log(`All ${count} joined (${zones}); ${fight ? 'fighting' : stand ? 'standing' : 'walking'} and chatting for ${seconds} s.`);
@@ -2098,9 +2131,10 @@ if (partyPlans.length) {
   }
 }
 
-if (assist !== null) {
+if (assist !== null || joinName !== null) {
   // the smoke test's helpers have no pass marks of their own
-  console.log(lost.length ? `assist: ${lost.length} bots disconnected` : 'assist: done');
+  const tag = assist !== null ? 'assist' : 'join';
+  console.log(lost.length ? `${tag}: ${lost.length} bots disconnected` : `${tag}: done`);
   process.exit(0);
 }
 const failures: string[] = [];
@@ -2126,10 +2160,9 @@ if (fight && !wardenMode) {
     const reactions = Object.values(m.reactions).reduce((a, b) => a + b, 0);
     if (reactions < perRun(MIXED_MIN.reactions)) failures.push(`${reactions} reactions, fewer than ${perRun(MIXED_MIN.reactions)}`);
     if (cycle) {
-      // (ruling P3b-j: every kind is shown by the party runs; the Greenway's cycle needs two kinds)
+      // (ruling P3b-j: every kind and a revive are shown by the party runs, PARTY_MIN; the Greenway's cycle needs two kinds)
       const kinds = Object.values(m.reactions).filter((v) => v > 0).length;
       if (kinds < MIXED_MIN.reactionKinds) failures.push(`reactions of ${kinds} kinds ${JSON.stringify(m.reactions)}, fewer than ${MIXED_MIN.reactionKinds}`);
-      if (m.revives < MIXED_MIN.revives) failures.push(`${m.revives} revives, fewer than ${MIXED_MIN.revives}`);
     }
   }
   if (knocks < FIGHT_MIN.knocks) failures.push(`${knocks} knockbacks, fewer than ${FIGHT_MIN.knocks}`);

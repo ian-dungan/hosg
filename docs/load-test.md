@@ -49,6 +49,9 @@ With `--fight` they fight in the Greenway with the shared brain (see "Fighting b
    | `--cycle` | off | implies `--fight`; also requires deaths and a bot back in the Greenway after one (the death → statue → east gate → Greenway cycle). For a run of 120 s or more |
    | `--jobs mixed` | off | only with `--fight`/`--cycle`: all seven jobs, in duos, chosen at the Guild Board (below); start the server with the default start zone (the grove) |
    | `--assist <name>` | off | the browser smoke test's two helpers (a Black Mage and a White Mage) for the adventurer called `<name>` (below); no pass marks |
+   | `--dungeon <n>` | off | with `--fight` (and usually `--jobs mixed`): the first bots form `n` parties and run the Lampfall (below, "Parties and the Lampfall") |
+   | `--warden <spec>` | off | scripted Warden runs, for a server with `SG2_START_AT=lampfall-mouth SG2_TEST_INSTANCE_START=landing` (below); sets `--count` itself |
+   | `--join <name>` `[--count 1-3] [--skill s]` | off | the party smoke test's helpers: bots that join `<name>`'s party and run the Lampfall with it (below); no pass marks |
 
 The bots stand still for a little over a second after joining (a new session starts with only 0.5 m
 of movement banked), then measure for `--seconds` after the warmup. It prints:
@@ -203,8 +206,9 @@ A mixed run passes only if the fight run's gates hold (with the dodge gate below
 - every job has at least one kill;
 - per 95 s of fighting (a 120 s run; the bots spend about 25 s on their jobs and the walk, and a 60 s run is
   scaled to its 35 s): dodges ≥ 30, casts ≥ 50, reactions ≥ 5;
-- `--cycle`: at least one of each reaction (Blast, Conduct, Steam, Bedrock) and at least one revive, besides
-  the deaths and the bot back in the Greenway;
+- `--cycle`: reactions of at least 2 kinds, besides the deaths and the bot back in the Greenway (ruling P3b-j:
+  until Plan 4 it needed one of each kind and a revive, which about half the runs missed; the party bots of
+  `--dungeon` now carry those gates);
 - every `self` carries `job`, `dodgeMax` and `cast`;
 - a predicted second roll that a knock replaced (the server sent the knock first) is counted apart, not as a
   roll that failed.
@@ -223,6 +227,94 @@ gate), fight its target (and whatever attacks them) and revive it when it falls.
 so it still falls. A line `hold` on their stdin stops them fighting (they only follow and revive), `fight` lets
 them fight again. They print `assist: ready`, and `assist: <fx>` for each reaction and revive they see. They leave
 their rooms on SIGTERM.
+
+## Parties and the Lampfall (`--dungeon`, `--warden`, `--join`, Plan 4)
+
+```sh
+# the dungeon load run: the default start zone (the grove)
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 npm start -w server
+npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 240 --fight --jobs mixed --dungeon 13
+# the scripted Warden runs (test switches: never on a real server)
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 SG2_START_AT=lampfall-mouth SG2_TEST_INSTANCE_START=landing npm start -w server
+npm run bots -w server -- --url http://localhost:2570 --seconds 420 --warden "paladin+black_mage:careful,warrior+ranger+white_mage:sloppy,paladin:careful"
+```
+
+**`--dungeon <n>`.** The first bots form `n` parties, of sizes 4, 3, 2, 4, 3, 2, ... (`--dungeon 13`: 40 bots,
+the first 12 parties 36 of them). Member i is a `JOB_IDS[i % 7]` with its duo picks, taken at the Guild Board as the
+mixed bots do. The leader invites each member by name (`party {op: 'invite', name}`) once everyone has joined, and
+again every 20 s for anyone not yet in (9 invites a minute at most, under the limit of 10); a member accepts only its
+own leader's invite. In a party with a White Mage one other member is careless (it never dodges), so the White Mage
+has someone to revive. The party walks to a gather spot on the road 10 m short of the crater mouth (`findPath`
+over the Greenway's ground), and once the party is whole, every member is there and none is in combat, they all walk
+into the mouth: the first opens the party's instance (`travel {zone: 'lampfall', instance}`), the others join it by
+id (`joinById`). On the way they only fight back. Inside, each member:
+- predicts the shut lamp-gates as walls (`gatedSurface` over the state's `gates`, for its body and its paths);
+- goes room by room in `lampfallLayout()` order to the first room whose encounter is not in the `instance` message's
+  `cleared`, first to a gather spot 8 m back along that room's entry corridor (outside any gate circle), and walks in
+  once every live member of its party in the instance is there (or after 30 s);
+- fights with the dungeon brain (`dungeonBrain`), with every required input filled from what it sees: `allies` its
+  party members (dead ones included), `arena` the room (a disc), `fields` the state's fields, `enemies` the live
+  enemies in its view, `home` the enemy's own spawn in its room (a Lens Shard: the Warden's) with its leash. Its
+  target is the boss while it lives, else the pack's live enemy with the least hp (the simulation's rule, so a
+  party focuses); the brain's own target intents (a warded boss's Lens Shard first) are sent as it says;
+- dead, it lies while a White Mage of its party with Second Dawn ready is within 30 m (up to 20 s); inside a sealed
+  fight it lies (a revive, the wipe or the 60 s auto release); otherwise it sends `release` once it may (10 s);
+- after a wipe everyone is up at the checkpoint and the party gathers and walks in again.
+Inside, the leader says a party chat line every 15 s (with markup), only while every member is in its instance;
+party bots say no zone chat there. Bots that are not in a party fight in the Greenway as before; their roles
+(duo partners, hunters, medics, sprinters, predictors) count from the first bot after the parties, so they are the
+same as in a plain mixed run of that many bots. A party told `REASON_INSTANCES_FULL` at the mouth (the `correct`
+and the notice the rule gives: not counted as a correction) stays in the Greenway and fights there.
+
+It prints, beside everything above: parties planned and formed, invites sent, accepted and refused (by reason),
+instances opened (and the most open at once), parties told the Lampfall is full, mouth refusals in combat, per
+instance its first pack's time after entry, packs, Wickhound and Warden kills and wipes; deaths inside, releases,
+revives inside; the party bots' reactions, revives, interrupts and Breaks; party chat lines sent, deliveries due
+(each line × the other members) and received; the instances' worst step p95 (`/healthz` `instances.tickMsP95Max`).
+
+A `--dungeon` run passes only if the fight run's and the mixed run's gates hold and:
+- parties formed = the parties planned; instances opened = min(n, 12); full notices = max(0, n − 12) parties;
+- every instance kills its first pack within 150 s of its first member's arrival;
+- party chat received = deliveries due (and at least one line sent);
+- the party bots show every reaction kind (Blast, Conduct, Steam, Bedrock) at least once and at least one revive
+  (ruling P3b-j moved these from the Greenway's `--cycle` gate here; `--cycle` now needs reactions ≥ 5 of at least
+  2 kinds);
+- every zone room's step p95 ≤ 15 ms, every instance's ≤ 3 ms, peak RSS ≤ 400 MB.
+
+**`--warden <spec>`.** `spec` is a comma list of parties, each `job+job…:skill` (skills as the simulation's:
+`careful`, `skilled` and `sloppy` miss 0%, 10% and 30% of the telegraphs they would answer, `careless` never
+dodges). The bots start at the mouth, form each party, walk in (the test start puts the instance at the Keeper's
+Landing with the packs and the Wickhound dead), take their jobs and picks at the landing's sanctuary (duo picks in
+a party, solo picks alone), gather before the Lens Pit and walk in together, and fight to a kill, a wipe or
+`--seconds` (the run ends early once every party is done). It prints per party: the outcome, seconds from the
+Warden's wake to the end, the phase reached, whether it enraged, deaths, revives, interrupts and Breaks. It never
+gates on the outcome (the simulation's bands do), only on: no correction, no disconnection, every party reached the
+Lens Pit, the bots' patch rate ≥ 14.5 Hz, every zone step p95 ≤ 15 ms and instance step p95 ≤ 3 ms, peak RSS ≤
+400 MB, and the event-loop delay p99 ≤ 50 ms (provisional: Plan 4 Task 7 measured 19.9 ms for 12 instances of
+walkers on a quiet machine).
+
+**`--join <name>`.** For the party smoke test (a server with `SG2_START_AT=lampfall-mouth`): `--count` 1–3 bots (a
+White Mage with Second Dawn, a Black Mage, a Warrior) accept the invites of the adventurer called `<name>` (it
+invites them by name: they print `join: names a,b`), walk into the mouth once it is inside, take their jobs at the
+rim's sanctuary and run the Lampfall as the party bots do (they do not wait for the adventurer). `hold` on stdin
+makes them stand (they still fight back and revive), `go` lets them carry on. No pass marks.
+
+### The party smoke test (`smoke-party.mjs`)
+
+```sh
+(cd client && npm run build:online)
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 SG2_START_AT=lampfall-mouth SG2_CLIENT_DIR=client/dist-online npm start -w server
+node server/scripts/smoke-party.mjs http://localhost:2570 --kill "kill <pid>" [--shots <dir>] [--helpers]
+```
+
+Page A (desktop) and page B (iPhone 13) play as guests, each through the character creator (its default look,
+Done: a guest is already named); A taps B and invites it from the focus frame, B accepts on its card, each shows
+the other in a party frame; A's party chat line with markup reaches B as plain text, tagged; both walk into the
+mouth and are in the same instance; both walk to the Root Cellar, target with Tab and fight; the first pack (two
+Thornlings and an Archer) is dead within 300 s of game time (the instance lists `root_cellar` as cleared and each of
+the three was seen dead), both still inside; B reloads and is back in the same instance and party; A presses P and
+leaves the party, is told why within 15 s and sent to the Greenway, where it stands at the mouth; killing the
+server shows "Connection lost". Any page error fails it. `--helpers` adds two `--join` bots to the party first.
 
 ## What a client receives (interest management)
 
