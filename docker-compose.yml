@@ -18,6 +18,8 @@ services:
       SG2_AUTH_RATE_PER_MIN: ${SG2_AUTH_RATE_PER_MIN:-10}
       # Joins (matchmake calls) per IP address a minute; empty: 600. Raise it only for a load test.
       SG2_JOIN_RATE_PER_MIN: ${SG2_JOIN_RATE_PER_MIN:-}
+      # /healthz shows only ok, players and tickHz except inside the container; all: everything to everyone (a load test).
+      SG2_HEALTHZ_DETAIL: ${SG2_HEALTHZ_DETAIL:-}
       # Set to 1 only behind Caddy, with SG2_PORT=127.0.0.1:2570 (deploy/README.md, "a web address").
       SG2_TRUST_PROXY: ${SG2_TRUST_PROXY:-}
     depends_on:

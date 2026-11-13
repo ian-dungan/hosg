@@ -23,9 +23,13 @@ With `--fight` they fight in the Greenway with the shared brain (see "Fighting b
    with the raised limit for the test, and restart it without afterwards:
 
    ```sh
-   SG2_AUTH_RATE_PER_MIN=1000 docker compose up -d   # for the bot run only
+   SG2_AUTH_RATE_PER_MIN=1000 SG2_HEALTHZ_DETAIL=all docker compose up -d   # for the bot run only
    docker compose up -d                              # afterwards: back to 10 a minute
    ```
+
+   (The image runs with `NODE_ENV=production`, where `/healthz` gives callers outside the container
+   only `ok`, `players` and `tickHz`; the bots read the rest, so `SG2_HEALTHZ_DETAIL=all` for the run.
+   A server started with `npm start` without `NODE_ENV=production` always gives everything.)
 
    Do not leave `SG2_AUTH_RATE_PER_MIN` raised on a public server: the limit is what slows down
    password guessing.

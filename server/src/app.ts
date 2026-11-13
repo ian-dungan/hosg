@@ -31,6 +31,11 @@ export interface AppOptions {
   authRatePerMinute?: number;
   /** Matchmake calls (joins, travels included) per address a minute (SG2_JOIN_RATE_PER_MIN; default JOIN_RATE_PER_MIN). */
   joinRatePerMinute?: number;
+  /**
+   * Who gets /healthz's full detail: 'all' (the default: development and tests), or 'loopback' (a public
+   * server, NODE_ENV=production unless SG2_HEALTHZ_DETAIL=all): everyone else gets only ok, players and tickHz.
+   */
+  healthDetail?: 'all' | 'loopback';
   /** Reverse proxies in front of the server whose X-Forwarded-For is believed (Express's `trust proxy` hop count); none when unset. */
   trustProxy?: number;
   /** Test-only: smaller zones (default MAX_PLAYERS in each zone's room). */
@@ -108,6 +113,15 @@ const INV_WINDOW_S = 6;
 
 /** Window of /healthz's eventLoopP99Ms (ms). */
 const EVENT_LOOP_WINDOW_MS = 5000;
+
+/**
+ * A request from this machine itself: a loopback socket that carries no X-Forwarded-For (a reverse proxy
+ * on the same machine, such as Caddy, connects over loopback too, but forwards the internet's requests).
+ */
+export function isLoopbackRequest(remoteAddress: string | undefined, forwardedFor: string | string[] | undefined): boolean {
+  if (forwardedFor !== undefined) return false;
+  return remoteAddress === '::1' || /^(::ffff:)?127\./.test(remoteAddress ?? '');
+}
 
 /** zoneDef(id) with `over` merged on top; its jobSwitch reads the merged town and sanctuaries (unless `over` gives one). */
 function mergedZone(id: ZoneId, over: Partial<ZoneDef> | undefined): ZoneDef {
@@ -238,7 +252,12 @@ export function createApp(opts: AppOptions): App {
         ratePerMinute: opts.authRatePerMinute, onLookChanged: (accountId) => { presence.get(accountId)?.room.refreshInventory(accountId); },
       }));
       app.use('/api', authRouter(opts.store, opts.jwtSecret, { ratePerMinute: opts.authRatePerMinute, instanceOf: (accountId) => instances.heldRoom(accountId) }));
-      app.get('/healthz', (_req, res) => {
+      app.get('/healthz', (req, res) => {
+        if (opts.healthDetail === 'loopback' && !isLoopbackRequest(req.socket.remoteAddress, req.headers['x-forwarded-for'])) {
+          const { players, tickHz } = stats();
+          res.json({ ok: true, players, tickHz });
+          return;
+        }
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
         const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
         const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);

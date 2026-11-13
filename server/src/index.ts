@@ -193,6 +193,13 @@ const dummyZones = testDummy();
 const trustProxy = trustProxyHops();
 const authRatePerMinute = positiveInt('SG2_AUTH_RATE_PER_MIN', 10);
 const joinRatePerMinute = positiveInt('SG2_JOIN_RATE_PER_MIN', JOIN_RATE_PER_MIN);
+/** SG2_HEALTHZ_DETAIL=all: /healthz's full detail for every caller even in production (a Docker load run from the host); else loopback only there. */
+const healthDetail = (() => {
+  const raw = process.env.SG2_HEALTHZ_DETAIL;
+  if (raw === undefined || raw === '') return process.env.NODE_ENV === 'production' ? 'loopback' as const : 'all' as const;
+  if (raw !== 'all') fail(`SG2_HEALTHZ_DETAIL must be all or empty (got "${raw}").`);
+  return 'all' as const;
+})();
 const jwtSecret = process.env.SG2_JWT_SECRET;
 if (!jwtSecret) fail('SG2_JWT_SECRET is not set. Set it to a random string of at least 32 characters.');
 if (jwtSecret.length < 32) fail(`SG2_JWT_SECRET is too short (${jwtSecret.length} characters); use at least 32.`);
@@ -214,7 +221,7 @@ if (process.env.SG2_STORE === 'memory') {
 }
 
 const app = createApp({
-  store, jwtSecret, clientDir, authRatePerMinute, joinRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones, lootAlways,
+  store, jwtSecret, clientDir, authRatePerMinute, joinRatePerMinute, healthDetail, trustProxy, openExits: exitsOpen, zones: dummyZones, lootAlways,
   ...(instanceStart ? { instances: { startAt: instanceStart } } : {}),
 });
 try {
