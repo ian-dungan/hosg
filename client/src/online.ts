@@ -29,7 +29,8 @@ import {
   type InventoryView,
   validateAdventurerName,
 } from '@sg2/shared';
-import { setCharacterDetail } from './player/character';
+import { setCharacterDetail, setGearBuilder } from './player/character';
+import { gearHooks } from './player/gearModels';
 import { setCreatorPreview } from './hud/creator';
 import { createCreatorPreview } from './player/creatorPreview';
 import { LookCache, barberHook, barberRefusal, creatorPlan } from './net/looks';
@@ -273,6 +274,8 @@ function boot(): void {
   let ownLookVer = 0;
   setCreatorPreview(createCreatorPreview);
   setCharacterDetail(game.quality);
+  // Plan 5 Task 9: worn gear and costumes on every adventurer (gear codes arrive with the looks)
+  setGearBuilder(gearHooks);
   /** This adventurer's own look onto its rig, when the room has sent a new one. */
   const applyOwnLook = () => {
     const me = room?.state.players?.get(room.sessionId);
