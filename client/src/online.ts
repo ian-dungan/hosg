@@ -331,7 +331,9 @@ function boot(): void {
   barberHook.open = openBarber;
   (window as unknown as Record<string, unknown>).__sg2barber = openBarber; // browser checks: the Barber without its stall
   // the emote button (the wheel: wave, bow, cheer, laugh, sit, point); played here at once, and sent for the others
-  const emoteBtn = h('button', 'sg-emote-btn', netUi, '☺');
+  // (inside a .sg-hud layer: its place uses the HUD's safe-area and gap variables, which netUi does not have; without
+  // them the button sat at the top-left corner over the player frame)
+  const emoteBtn = h('button', 'sg-emote-btn', h('div', 'sg-hud', netUi), '☺');
   emoteBtn.setAttribute('aria-label', 'Emotes');
   emoteBtn.addEventListener('click', () => {
     void hud.emoteWheel().then((e: EmoteId | null) => {

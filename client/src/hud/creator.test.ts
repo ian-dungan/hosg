@@ -128,6 +128,10 @@ describe('the creator overlay', () => {
     const { CREATOR_CSS } = await import('./creator');
     expect(CREATOR_CSS).toMatch(/\.sg-cr\{[^}]*pointer-events:auto/);
   });
+  it('the emote wheel takes pointer events too (live check: its buttons were under the canvas, no emote could be chosen)', async () => {
+    const { CREATOR_CSS } = await import('./creator');
+    expect(CREATOR_CSS).toMatch(/\.sg-ew\{[^}]*pointer-events:auto/);
+  });
 });
 
 describe('the creator opened again after a refused name (live check: "That name is taken" never showed)', () => {

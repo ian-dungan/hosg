@@ -85,7 +85,7 @@ export const CREATOR_CSS = /* css */ `
 .sg-cr-foot .done{flex:1.6;color:#3a2508;border-color:transparent;background:linear-gradient(180deg,#ffe49a,#F2B742 60%,#dc9a2c)}
 .sg-cr-foot button:disabled{opacity:.42;cursor:default}
 .sg-cr-hint{position:absolute;left:0;right:0;bottom:8px;margin:0;text-align:center;font-size:14px;color:rgba(255,246,230,.6);pointer-events:none}
-.sg-ew{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;background:rgba(10,10,26,.35)}
+.sg-ew{position:fixed;inset:0;z-index:70;pointer-events:auto;display:flex;align-items:center;justify-content:center;background:rgba(10,10,26,.35)}
 .sg-ew-ring{position:relative;width:260px;height:260px;border-radius:50%;background:rgba(16,18,42,.85);border:1px solid rgba(255,226,160,.3)}
 .sg-ew-ring button{position:absolute;width:76px;height:56px;margin:-28px 0 0 -38px;border-radius:28px;border:1px solid rgba(255,226,160,.35);background:rgba(255,246,230,.1);color:#fff6e6;font:600 15px var(--sans,sans-serif);cursor:pointer}
 `;
