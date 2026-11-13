@@ -387,10 +387,22 @@ state (a talk, use or hop only where they happen to stand): the walkers' bandwid
 
 It prints the bots by main-quest step at the end, how many are past `board` and `first_fight` and done, quests
 completed, steps done (`questDone`), scenes, what the bots still at a fighting step lack, acts sent, `questRefused`
-by reason, quest gold and items, nudges and pick swaps. **It passes** only if the gates above hold (the ledger
-includes quest gold and items) and: every `questRefused` is `'where'`, `'busy'` or `'bag-full'`; and in a run of at
-least 400 s started in the grove ≥ 95% of the bots are past `board`, ≥ 80% past `first_fight` and ≥ 50% have
-finished the main quest (a run started elsewhere: ≥ 80% past `first_fight` from 200 s).
+by reason, quest gold and items, nudges and pick swaps.
+
+**`first_fight` slots.** The step asks every bot for three Thornlings, and the Greenway has nine (a 25 s respawn; up
+to four adventurers are credited with each kill): with 100 bots on them at once, 65–76% got past the step in a run,
+every bot still there short of kills. That is the test's crowding, not the quest, so at most `QUEST_FIGHT_SLOTS` bots
+(four a Thornling: 36) fight at the step at once; the others wait where they stand (fighting back if attacked) and
+take a slot as one frees. The run prints the slots, how many bots waited, and of the bots that held a slot at least
+150 s before the end (`QUEST_SLOT_GATE_MS`; a slotted bot needs about 100 s for its three kills, its finisher, combo
+and dodge) how many are past the step. The whole zone's Thornling supply (about one credited kill a second) is a
+property of the Greenway, printed, not gated.
+
+**It passes** only if the gates above hold (the ledger includes quest gold and items) and: every `questRefused` is
+`'where'`, `'busy'` or `'bag-full'`; at least 36 bots (the slots) held a `first_fight` slot 150 s before the end and
+≥ 80% of them are past the step (a run of at least 400 s started in the grove, or of at least 200 s started
+elsewhere); and in a run of at least 400 s started in the grove ≥ 95% of the bots are past `board` and ≥ 50% have
+finished the main quest.
 
 **`--warden` kits.** A party may name its kit: `job+job:skill@kit` (`starter`, `t1`, `t2`, `t3`). The server gives
 every new adventurer one tier (`SG2_TEST_KIT`), so each kit is its own run; the tiers each party really wore (from
@@ -496,8 +508,9 @@ plain runs differ by 0.2 from run to run). The cheapest cut, if a later feature 
 34.6–35 a second (max 76.6–79.2). Run (a) failed only on one instance-step sample (3.08 ms; median 0.60, p90 1.14);
 (b) on an equip and an unequip refused 'dead' (sent in the moment of a death: the bots now swap at full health only);
 (c) on 29 corrections of 4 bots on their walk from the Smithy to the Tailor (the server held their last good pose at
-the Smithy for about 9 m of walking, then corrected; 3 `buyCostume` refused 'where' follow from that) — **not
-explained yet** (1 correction each in (a) and (b), none in the earlier trial runs). The 420 s quest runs: 100
+the Smithy for about 9 m of walking, then corrected; 3 `buyCostume` refused 'where' follow from that) — explained and
+fixed since (the bots' own process stalled about a second and each bot then sent the whole gap as one pose: see
+"2026-11-13 (the last fixes)" above). The 420 s quest runs: 100
 purchases, 548 swaps, 13 talents chosen (level 4 reached), ledgers all matched, inventory writes p95 33.6–38.4.
 
 **The opening quest** (`--quest --fight --looks --gear`, 420 s from the grove): 100 of 100 past `board` (the Beacon
