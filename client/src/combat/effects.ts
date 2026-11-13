@@ -290,6 +290,9 @@ export function createEffects(o: EffectsOpts): Effects {
             if (ev.src === me && ev.dst !== me) o.remotes.pulse(ev.dst);
             break;
           }
+          // Plan 5: a gear or talent shield (beside its `shield` number: says where it came from), and a last stand
+          case 'kitShield': if (ev.src === me || ev.dst === me) float(who(ev.dst), 'Gear shield', 'other', 1.45); break;
+          case 'lastStand': float(who(ev.src), 'Last stand!', 'combo', 1.3); break;
           case 'buff': if (ev.on && ev.src === me && ev.dst !== me) o.remotes.pulse(ev.dst); break;
           case 'gift': if (ev.dst === me || ev.src === me) float(who(ev.dst), `+${Math.round(ev.amount)} Momentum`, 'info', 1.25); break;
           case 'revive': float(who(ev.dst), 'Revived!', 'combo', 1.2); if (ev.src === me) o.remotes.pulse(ev.dst); break;

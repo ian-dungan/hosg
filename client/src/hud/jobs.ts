@@ -91,7 +91,7 @@ const countWord = (n: number) => WORDS[n] ?? String(n);
 export function openJobBoard(
   layer: HTMLElement, v: JobBoardView, push: (kind: string, keys: (e: KeyboardEvent) => boolean) => () => void,
   show: (el: HTMLElement) => void, close: (el: HTMLElement) => void, register?: (cancel: () => void) => void,
-): Promise<JobId | null> {
+): Promise<JobId | 'talents' | null> {
   return new Promise((resolve) => {
     const root = h('div', 'sg-jobs sg-ctl', layer);
     const panel = h('div', 'sg-jb-panel', root);
@@ -105,7 +105,7 @@ export function openJobBoard(
     const list = h('div', 'sg-jb-list', panel);
     let open: HTMLElement | null = null;
     let answered = false;
-    const done = (id: JobId | null) => { if (answered) return; answered = true; off(); close(root); resolve(id); };
+    const done = (id: JobId | 'talents' | null) => { if (answered) return; answered = true; off(); close(root); resolve(id); };
     register?.(() => done(null));
     for (const r of v.rows) {
       const row = h('div', 'sg-jb-row' + (r.id === v.current ? ' cur' : ''), list);
@@ -139,6 +139,11 @@ export function openJobBoard(
       }
       const act = h('div', 'sg-btn sg-btn-gold sg-jb-go', more, r.id === v.current ? 'Change picks' : `Become ${article(r.name)}`);
       act.addEventListener('click', (e) => { e.stopPropagation(); done(r.id); });
+      // Plan 5: the current job's talents (choose them here, in town; retrain at the board)
+      if (v.talents && r.id === v.current) {
+        const tb = h('div', 'sg-btn sg-jb-go', more, 'Talents and retraining');
+        tb.addEventListener('click', (e) => { e.stopPropagation(); done('talents'); });
+      }
       top.addEventListener('click', () => {
         if (open && open !== row) open.classList.remove('open');
         row.classList.toggle('open');

@@ -3,6 +3,7 @@
 // URL: ?cam=alpha,beta,radius,tx,ty,tz&q=low|med|high&beacon=1&phase=2&grid=1
 import { SceneInstrumentation, TransformNode, MeshBuilder, Engine, Scene, ArcRotateCamera, Vector3, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
 import { buildWorld } from './index';
+import { createStalls } from './stalls';
 import type { Quality } from '../core/contracts';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -31,6 +32,14 @@ world.attachCamera(cam);
   const bm = new StandardMaterial('devbm', scene); bm.diffuseColor = new Color3(0.9, 0.35, 0.25); body.material = bm;
   const t = cam.target; root.position.set(t.x, world.groundAt(t.x, t.z) ?? 0, t.z);
   world.addShadowCaster(root);
+}
+
+// Plan 5: the town stalls and their keepers (?stalls=1), with their triangle count in the console
+if (qs.get('stalls')) {
+  const st = createStalls(scene, world);
+  console.log(`stalls: ${st.tris} triangles`);
+  (window as unknown as { stalls: unknown }).stalls = st;
+  scene.onBeforeRenderObservable.add(() => st.update(Math.min(0.1, engine.getDeltaTime() / 1000)));
 }
 
 let overlay: Mesh | null = null;

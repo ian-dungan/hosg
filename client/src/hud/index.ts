@@ -14,6 +14,7 @@ import { Overlays } from './overlays';
 import { Settings } from './settings';
 import { createDoubleTap } from '../combat/doubleTap';
 import { openCreator, openEmoteWheel } from './creator';
+import { LevelBanner, LootToasts } from './loot';
 
 /** Movement keys as a screen-space direction (x right, y up), for a dodge. */
 const MOVE_KEYS: Record<string, [number, number]> = {
@@ -75,6 +76,14 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const partyBadge = partyBtn.querySelector('i') as HTMLElement;
   partyBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   partyBtn.addEventListener('click', () => emit({ type: 'openParty' }));
+  // Plan 5: the character menu (online only): one button for the bag, gear and stats, talents and wardrobe
+  const charBtn = h('button', 'sg-char-btn sg-ctl', combat);
+  charBtn.type = 'button';
+  charBtn.setAttribute('aria-label', 'Character: gear, bag, talents and wardrobe');
+  charBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7V5.5a4 4 0 0 1 8 0V7"/><path d="M5 9a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v9.5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 18.5z"/><path d="M9 13h6v3H9z"/></svg><i></i>';
+  const charBadge = charBtn.querySelector('i') as HTMLElement;
+  charBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  charBtn.addEventListener('click', () => emit({ type: 'openChar', tab: null }));
   const invites = new InviteCards(combat);
   const edges = createEdgeMarkers(fx);
   const quest = new QuestTracker(combat);
@@ -119,6 +128,8 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   h('i', '', bRule);
   let bannerAnim: Animation | null = null;
   const toasts = h('div', 'sg-toasts', fx);
+  const lootToasts = new LootToasts(fx);
+  const levelBanner = new LevelBanner(fx);
 
   // ── overlays ──
   const modalKinds = new Set<string>();
@@ -165,7 +176,8 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     else if (c === 'KeyL') { abar.flash('loadout'); emit({ type: 'openLoadout' }); }
     else if (c === 'KeyF') emit({ type: 'cycleAlly' });
     else if (c === 'KeyP') emit({ type: 'openParty' });
-    else if (c === 'KeyO') settings.toggle();
+    else if (c === 'KeyO') { if (cache.gear) emit({ type: 'openChar', tab: 'wardrobe' }); else settings.toggle(); }
+    else if (cache.gear && (c === 'KeyI' || c === 'KeyC' || c === 'KeyT')) emit({ type: 'openChar', tab: c === 'KeyI' ? 'bag' : c === 'KeyC' ? 'gear' : 'talents' });
     else if (c === 'Escape') emit({ type: 'clearTarget' });
     else return;
     e.preventDefault();
@@ -183,12 +195,12 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     heldDigits.clear();
   });
 
-  const cache = { boss: false, combat: false, hasParty: false, bossFrame: false, social: false, inParty: false, invites: -1 };
+  const cache = { boss: false, combat: false, hasParty: false, bossFrame: false, social: false, inParty: false, invites: -1, gear: false, gearBadge: -1 };
 
   // ── edge-marker exclusions: the joystick zone, the ability cluster and the frames (measured at most every 0.5 s) ──
   const exRects: { x0: number; y0: number; x1: number; y1: number }[] = [];
   let exAt = -Infinity;
-  const exEls = () => [root.querySelector('.sg-joyzone'), root.querySelector('.sg-abar'), tl, target.el, bossFrame.el, partyBtn, root.querySelector('.sg-gear'), root.querySelector('.sg-quest'), castSlot];
+  const exEls = () => [root.querySelector('.sg-joyzone'), root.querySelector('.sg-abar'), tl, target.el, bossFrame.el, partyBtn, charBtn, root.querySelector('.sg-gear'), root.querySelector('.sg-quest'), castSlot];
   const measure = () => {
     let n = 0;
     const add = (x0: number, y0: number, x1: number, y1: number) => { const r = (exRects[n] ??= { x0: 0, y0: 0, x1: 0, y1: 0 }); r.x0 = x0; r.y0 = y0; r.x1 = x1; r.y1 = y1; n++; };
@@ -231,6 +243,9 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
         if (s.social.inParty !== cache.inParty) { cache.inParty = s.social.inParty; toggle(partyBtn, 'inparty', s.social.inParty); }
         if (s.social.invites !== cache.invites) { cache.invites = s.social.invites; partyBadge.textContent = String(s.social.invites); toggle(partyBtn, 'invited', s.social.invites > 0); }
       }
+      const gearOn = !!s.gear;
+      if (gearOn !== cache.gear) { cache.gear = gearOn; toggle(root, 'sg-has-gear', gearOn); }
+      if (s.gear && s.gear.badge !== cache.gearBadge) { cache.gearBadge = s.gear.badge; charBadge.textContent = String(s.gear.badge); toggle(charBtn, 'badged', s.gear.badge > 0); }
       edges.update(s.edges ?? NO_EDGES);
       if ((s.hint ?? null) !== hintCache) { hintCache = s.hint ?? null; hintEl.textContent = hintCache ?? ''; toggle(hintEl, 'on', !!hintCache); host.style.setProperty('--hy', hintCache ? '124px' : '0px'); }
       ally.update(s.ally ?? null);
@@ -288,6 +303,10 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     exclusions() { const now = performance.now(); if (now - exAt > 500) { exAt = now; measure(); } return exRects; },
     dismissEndScreen: () => overlays.dismissEndScreen(),
     closeSheets: () => overlays.closeSheets(),
+    charSheet: (view, tab, onAct, onClosed) => overlays.charSheet(view, tab, onAct, onClosed),
+    vendor: (view, onAct, onClosed) => overlays.vendor(view, onAct, onClosed),
+    loot: (l) => lootToasts.show(l),
+    levelUp: (l, onTalent) => levelBanner.show(l, onTalent),
     danger(mode) {
       if (mode === 'flash') hurtFlash.animate([{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 0 }], { duration: 600, easing: 'ease-out' });
       else toggle(danger, 'on', mode === 'on');

@@ -328,6 +328,8 @@ export interface CombatOpts {
   zone: ZoneId;
   /** Plan 4 (online): the party and the instance. */
   social?: CombatSocial;
+  /** Plan 5 (online): opens the character sheet's Talents tab (the job board's Talents button). */
+  openTalents?: () => void;
 }
 
 const isKind = (k: string): k is EnemyKindId => Object.prototype.hasOwnProperty.call(ENEMY_KINDS, k);
@@ -605,10 +607,12 @@ export function createCombat(o: CombatOpts): CombatController {
     boardOpen = true;
     const r = rig().position;
     const view = jobBoardView(jobs, o.zone, { current: job(), pos: { x: r.x, z: r.z } });
+    if (o.openTalents) view.talents = true;
     if (!view.note && self?.inCombat) view.note = refusalText('in-combat', 'job');
     void hud.jobs(view).then((id) => {
       boardOpen = false;
       if (disposed || !id) return;
+      if (id === 'talents') { o.openTalents?.(); return; }
       if (id === job()) { openLoadout(); return; } // "Change picks" on the current job
       o.send('job', { job: id });
     });

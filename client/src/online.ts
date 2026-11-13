@@ -26,6 +26,7 @@ import {
   type VictoryView,
   type ZoneId,
   type EmoteId,
+  type InventoryView,
   validateAdventurerName,
 } from '@sg2/shared';
 import { setCharacterDetail } from './player/character';
@@ -33,7 +34,7 @@ import { setCreatorPreview } from './hud/creator';
 import { createCreatorPreview } from './player/creatorPreview';
 import { LookCache, barberHook, barberRefusal, creatorPlan } from './net/looks';
 import { fetchLookInfo, saveLook, startingLook } from './net/lookApi';
-import type { HudState } from './core/contracts';
+import type { HudState, TapInfo } from './core/contracts';
 import { bootGame, isZoneBuilt } from './boot';
 import { h } from './hud/dom';
 import { createChat, type ChatChannel } from './net/chatBox';
@@ -46,7 +47,12 @@ import { createRemotes, type Remotes } from './net/remotes';
 import { createEnemies, type Enemies } from './net/enemies';
 import { COMBAT_MESSAGES, createCombat, type CombatController, type CombatDebug } from './combat/controller';
 import { createGuildBoard } from './world/guildBoard';
-import { beaconRaisedFor, createStoryWorld, type StoryWorld } from './world/storyNpcs';
+import { beaconRaisedFor, createStoryWorld, storyIdOf, type StoryWorld } from './world/storyNpcs';
+import { stallOfEid } from './world/stallIds';
+import { createStalls, type Stalls } from './world/stalls';
+import { InvClient } from './net/inventory';
+import { createGearCtl, type GearCtl } from './net/gearCtl';
+import { routeTap } from './net/tapOrder';
 import {
   UNREACHABLE,
   connect,
@@ -82,19 +88,21 @@ const ENTER_TIMEOUT_MS = 15_000;
 const TRAVEL_LEAVE_MS = 5_000;
 
 const CSS = /* css */ `
-.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 114px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
+.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 226px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
   font-size:13px;font-weight:600;background:rgba(16,18,42,.45)}
 .sg-online.away{color:#ffd9a0}
-@media (max-width:700px) and (orientation:portrait){ .sg-online{right:auto;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--sb) + 4px);font-size:11px;padding:2px 8px;background:none} }
+@media (max-width:700px) and (orientation:portrait),(max-height:500px){ .sg-online{right:auto;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--sb) + 4px);font-size:11px;padding:2px 8px;background:none} }
 .sg-online:empty{display:none}
 .sg-modal-open ~ .sg-hud .sg-online,.sg-modal-open ~ div .sg-chat-btn{opacity:0;pointer-events:none}
 .sg-net-off{display:none}
-.sg-emote-btn{position:absolute;right:calc(var(--sr) + var(--g));top:calc(var(--st) + var(--g) + 116px);width:48px;height:48px;border-radius:24px;
+.sg-emote-btn{position:absolute;right:calc(var(--sr) + var(--g) + 168px);top:calc(var(--st) + var(--g));width:48px;height:48px;border-radius:24px;
   border:1px solid rgba(255,226,160,.35);background:rgba(16,18,42,.55);color:#fff6e6;font-size:22px;cursor:pointer;pointer-events:auto}
 .sg-travel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;pointer-events:none;
   font:600 18px/1.3 var(--sans,system-ui,sans-serif);color:#fff6e6;letter-spacing:.04em;text-shadow:0 1px 6px rgba(0,0,0,.6);
   opacity:0;transition:opacity .3s}
 .sg-travel.on{opacity:1}
+/* the top-right row (desktop, landscape): settings, party, the character menu (Plan 5), emotes; portrait phones: the right-hand column */
+@media (max-width:700px) and (orientation:portrait){ .sg-emote-btn{right:calc(var(--sr) + var(--g) + 2px);top:calc(var(--st) + var(--g) + 358px)} }
 `;
 
 interface NetDebug {
@@ -151,6 +159,13 @@ interface NetDebug {
   remoteLooks: Record<number, string>;
   /** Gold, as the last `inventory` said (the Barber's price check). */
   gold: number;
+  /** Plan 5 (Task 10): the last `inventory`, the last loot, the last 20 refusal lines, the kit's stats, level-ups, the open stall sheet. */
+  inventory: InventoryView | null;
+  lastLoot: { items: string[]; gold: number } | null;
+  invRefusals: string[];
+  stats: InventoryView['stats'] | null;
+  levelUps: { job: string; level: number }[];
+  stall: string | null;
 }
 /** What ended a connection: a reason for the login screen, or a travel to another zone (an instance by id). */
 type Ended = { reason: string } | { travel: ZonePlace };
@@ -160,15 +175,30 @@ function boot(): void {
   let remotes: Remotes | null = null;
   let enemies: Enemies | null = null;
   let combat: CombatController | null = null;
+  /** Plan 5: the gear screens of the room being played (null between rooms), and the inventory (it outlives rooms). */
+  let gearCtl: GearCtl | null = null;
+  const inv = new InvClient();
   /** The room being played (set on joining, before the adventurer is in it): the Lampfall's gates come from its state. */
   let joining: ZoneRoom | null = null;
 
   const game = bootGame({
-    busy: () => !room, onTap: (tap) => combat?.onTap(tap) ?? false,
+    busy: () => !room, onTap: (tap) => onTap(tap),
     // the Lampfall's shut lamp-gates are walls (as on the server) and its lamp-lift opens after the Warden
     lampfall: { gates: () => joining?.state.gates ?? 0, lift: () => !!joining?.state.lift },
   });
   const { hud, hudRoot } = game;
+  /**
+   * Who answers a tap (routeTap): an enemy (combat) > a story NPC or prop (story.handleTap) > a town booth (the gear
+   * screens) > the rest (an adventurer, the ground: the combat controller, then tap-to-walk).
+   */
+  const isEnemy = (eid: number) => { const r = room; if (!r) return false; let hit = false; r.state.enemies?.forEach((e) => { if (e.eid === eid && e.mode !== 'dead') hit = true; }); return hit; };
+  const tapIs = { enemy: isEnemy, story: (eid: number) => storyIdOf(eid) !== null, booth: (eid: number) => stallOfEid(eid) !== null };
+  function onTap(tap: TapInfo): boolean {
+    const route = routeTap(tap, tapIs);
+    if (route === 'story' && story?.handleTap(tap)) return true;
+    if (route === 'booth' && gearCtl?.onTap(tap)) return true;
+    return combat?.onTap(tap) ?? false;
+  }
   // the Guild Board stands in the grove's Plaza (online only: the offline demo has no jobs)
   // (its meshes go with the scene on a zone change)
   if (game.zone === 'grove') createGuildBoard(game.scene, game.world);
@@ -185,6 +215,9 @@ function boot(): void {
   };
   buildStory(game.zone);
   game.onZoneLoaded((z) => buildStory(z));
+  // the five town stalls and their keepers (online only; their meshes go with the scene on a zone change)
+  let stalls: Stalls | null = game.zone === 'grove' ? createStalls(game.scene, game.world) : null;
+  game.onZoneLoaded((z) => { stalls = z === 'grove' ? createStalls(game.scene, game.world) : null; });
   game.rig.setMoveScale(0);
   game.onZoneLoaded(() => game.rig.setMoveScale(0)); // a new zone's adventurer waits for its room
   hud.setVisible(false);
@@ -200,6 +233,7 @@ function boot(): void {
     jobs: null, refusals: [], allyFocus: null, guildBoard: { x: GUILD_BOARD.x, z: GUILD_BOARD.z },
     party: null, invites: [], partyRefusals: [], instance: null, roomId: '', boss: null, victory: null, chatLog: [], screen: '', corrections: 0, edges: 0,
     look: '', lookFree: false, creatorOpen: false, remoteLooks: {}, gold: 0,
+    inventory: null, lastLoot: null, invRefusals: inv.refusals, stats: null, levelUps: inv.levelUps, stall: null,
   };
   const logChat = (from: string, text: string, channel: string) => { net.chatLog.push({ from, text, channel }); if (net.chatLog.length > 50) net.chatLog.shift(); };
   // ── Plan 4: the party (it outlives each room), invites, party chat ──
@@ -233,7 +267,7 @@ function boot(): void {
       else sendParty({ op: a.kind, name: a.name });
     });
   };
-  hud.on((e) => { if (e.type === 'openParty') openPartySheet(); else combat?.onHud(e); });
+  hud.on((e) => { if (e.type === 'openParty') openPartySheet(); else if (!gearCtl?.onHud(e)) combat?.onHud(e); });
   // Plan 5: looks. The cache holds every adventurer's look by engine id for the room (cleared on leaving it).
   const lookCache = new LookCache();
   let ownLookVer = 0;
@@ -327,6 +361,9 @@ function boot(): void {
     remotes?.update(dt);
     enemies?.update(dt);
     combat?.update(dt);
+    gearCtl?.update(dt); // after the controller: a stall in reach takes the prompt when nothing else wants it
+    stalls?.update(dt);
+    net.stall = gearCtl?.stall ?? null;
     if (combat) {
       const d = combat.debug;
       net.self = d.self; net.fxSeen = d.fxSeen; net.jobs = d.jobs; net.refusals = d.refused; net.allyFocus = d.allyFocus;
@@ -462,8 +499,21 @@ function boot(): void {
         if (room === r) applyOwnLook();
       });
       r.onMessage('lookFree', (m: S2C['lookFree']) => { lookCache.handleFree(m); net.lookFree = lookCache.free === true; });
-      r.onMessage('invRefused', (m: S2C['invRefused']) => { const line = barberRefusal(m); if (line) hud.toast(line); });
-      r.onMessage('inventory', (m: S2C['inventory']) => { if (typeof m?.gold === 'number') net.gold = m.gold; });
+      r.onMessage('invRefused', (m: S2C['invRefused']) => {
+        const line = barberRefusal(m);
+        if (line) hud.toast(line);
+        else if (gearCtl) gearCtl.refused(m);
+        else { const l = inv.onRefused(m); if (l) hud.toast(l); }
+      });
+      // Plan 5: the inventory (the only source of what the adventurer owns), loot and level-ups
+      r.onMessage('inventory', (m: S2C['inventory']) => {
+        if (typeof m?.gold === 'number') net.gold = m.gold;
+        if (!inv.onInventory(m)) return;
+        net.inventory = inv.view; net.stats = inv.view?.stats ?? null;
+        gearCtl?.inventory();
+      });
+      r.onMessage('loot', (m: S2C['loot']) => { if (gearCtl) gearCtl.loot(m); else inv.onLoot(m); net.lastLoot = inv.lastLoot; });
+      r.onMessage('levelUp', (m: S2C['levelUp']) => { if (gearCtl) gearCtl.levelUp(m); else inv.onLevelUp(m); });
       // combat messages: forwarded to the controller once it exists (it is made on entering the room)
       const early: [typeof COMBAT_MESSAGES[number], unknown][] = [];
       for (const type of COMBAT_MESSAGES) r.onMessage(type, (m: unknown) => { if (combat) combat.message(type, m); else early.push([type, m]); });
@@ -525,7 +575,16 @@ function boot(): void {
         ownLookVer = 0;
         applyOwnLook();
         enemies = createEnemies(game.scene, game.world, r);
-        combat = createCombat({ game, hud, room: r, state, remotes, enemies, zone, social: socialView, send: (type, message) => send(r, type, message) });
+        combat = createCombat({
+          game, hud, room: r, state, remotes, enemies, zone, social: socialView, send: (type, message) => send(r, type, message),
+          openTalents: () => gearCtl?.openChar('talents'),
+        });
+        gearCtl = createGearCtl({
+          game, hud, room: r, zone, state, inv, combat, remotes, stalls: () => stalls,
+          sealed: () => !!instance?.view.sealed, send: (op) => send(r, 'inv', op),
+          labelLayer: (hudRoot.querySelector('.sg-hud') as HTMLElement | null) ?? hudRoot,
+        });
+        if (inv.view) gearCtl.inventory();
         net.combat = combat.debug;
         for (const [type, m] of early.splice(0)) combat.message(type, m);
         rig.setMoveScale(1);
@@ -564,6 +623,9 @@ function boot(): void {
         clearInterval(sendTimer);
         combat?.dispose();
         combat = null;
+        gearCtl?.dispose(); // its sheets belong to this room: their answers would go nowhere
+        gearCtl = null;
+        net.stall = null;
         net.combat = null;
         net.self = null;
         // engine ids are unique only within a room: no member keeps this room's eid; the next room's view sends its own
@@ -592,6 +654,7 @@ function boot(): void {
         if (kickedFor) { party.reset(); chat.setParty(false); hud.closeInvite(null); syncParty(); }
         endTravel(); // a kick during a travel (or a travel join that never entered) ends the travel here
         if (kickedFor) forgetToken(); // a reload must not sign in again and kick the other place
+        inv.reset(); net.inventory = null; net.stats = null; net.lastLoot = null; // signed out: the next account brings its own
         resolve({ reason: kickedFor || CONNECTION_LOST });
       });
     });

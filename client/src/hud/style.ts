@@ -3,6 +3,7 @@ import { JOBS_CSS } from './jobs';
 import { PARTY_CSS } from './party';
 import { BOSS_CSS } from './boss';
 import { EDGE_CSS } from '../combat/edgeMarkers';
+import { GEAR_CSS } from './gearStyle';
 
 const CSS = /* css */ `
 .sg-hud{
@@ -559,6 +560,6 @@ export function injectStyles(): void {
   injected = true;
   const s = document.createElement('style');
   s.id = 'sg-hud-css';
-  s.textContent = CSS + JOBS_CSS + PARTY_CSS + BOSS_CSS + EDGE_CSS + HINT_CSS;
+  s.textContent = CSS + JOBS_CSS + PARTY_CSS + BOSS_CSS + EDGE_CSS + HINT_CSS + GEAR_CSS;
   document.head.appendChild(s);
 }

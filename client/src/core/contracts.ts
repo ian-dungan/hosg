@@ -4,6 +4,7 @@
 // Units: metres, seconds, radians. Babylon left-handed, Y up. Ground plane is X/Z.
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
+import type { CharSheetHandle, CharSheetView, CharTab, LevelShow, LootShow, SheetAct, SheetHandle, VendorView } from './gearViews';
 import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, JobId, Look as AdventurerLook, WeaponId as SharedWeaponId } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
@@ -329,6 +330,8 @@ export interface HudState {
   /** Context action near the player, e.g. "Talk to Old Marrow". null hides the button. */
   prompt: string | null;
   inCombat: boolean;
+  /** Plan 5 (online): the character menu button shows, with a badge for open talent rows (the offline demo has none). */
+  gear?: { badge: number } | null;
 }
 export type HudEvent =
   | { type: 'ability'; slot: number }   // button tap or keys 1-5
@@ -347,7 +350,8 @@ export type HudEvent =
   | { type: 'invite'; eid: number }     // the focus frame's Invite
   | { type: 'focusMember'; eid: number } // a tap on a party frame
   | { type: 'release' }                 // dead in the Lampfall: get up at the checkpoint
-  | { type: 'leaveInstance' };          // the victory screen's "Leave the Lampfall"
+  | { type: 'leaveInstance' }           // the victory screen's "Leave the Lampfall"
+  | { type: 'openChar'; tab: CharTab | null }; // the menu button (null: the last tab), I (bag), C (gear and stats), O (wardrobe), T (talents)
 export interface HudApi {
   /** Live player settings (the Settings panel changes them; saved in this browser). */
   readonly settings: { readonly tapToWalk: boolean };
@@ -365,8 +369,8 @@ export interface HudApi {
   titleScreen(): Promise<void>;                                  // "Shady Grove 2" + Play
   /** Pick `count` abilities from the pool; resolves with the chosen ids. `title` names it (the job's name). */
   loadout(pool: AbilityDef[], current: string[], title: string, count?: number): Promise<string[]>;
-  /** The job board sheet: resolves with the job chosen ("Become a …"), or null when closed. */
-  jobs(view: JobBoardView): Promise<JobId | null>;
+  /** The job board sheet: resolves with the job chosen ("Become a …"), 'talents' (its Talents button), or null when closed. */
+  jobs(view: JobBoardView): Promise<JobId | 'talents' | null>;
   /**
    * opts.countdown: a line counting down `seconds` (its text has `{s}` for the seconds left);
    * opts.waitS: the buttons wake up after this long. Resolves with the button chosen, or -1 when dismissed.
@@ -401,6 +405,18 @@ export interface HudApi {
   creator(o: CreatorOpts): Promise<{ look: AdventurerLook; name?: string } | null>;
   /** The emote wheel: resolves with the emote chosen, or null when closed. */
   emoteWheel(): Promise<EmoteId | null>;
+  /**
+   * Plan 5: the character sheet (tabs Gear, Bag, Talents, Wardrobe, and Vault at the Vault). It stays open across
+   * inventory changes: update() redraws it in place. onAct gets each op the player asks for; onClosed runs once.
+   * closeSheets() closes it (the room's controller going away).
+   */
+  charSheet(view: CharSheetView, tab: CharTab, onAct: (a: SheetAct) => void, onClosed: () => void): CharSheetHandle;
+  /** A stall's sheet (the Smithy, the Lampwright, the Tailor); as charSheet. */
+  vendor(view: VendorView, onAct: (a: SheetAct) => void, onClosed: () => void): SheetHandle;
+  /** One kill's drops as a toast (stacked at the screen's edge, never over the fight). */
+  loot(l: LootShow): void;
+  /** The level-up moment; onTalent: its "New talent row" button. */
+  levelUp(l: LevelShow, onTalent: () => void): void;
 }
 export interface CreatorOpts {
   look: AdventurerLook;
@@ -471,6 +487,8 @@ export interface JobBoardView {
     /** The bar (quick, finisher, signature) and the four picks of its pool; `chosen`: the two it has picked. */
     bar: AbilityDef[]; picks: AbilityDef[]; chosen: string[];
   }[];
+  /** Plan 5: the current job's row offers "Talents" (it opens the character sheet's Talents tab). */
+  talents?: boolean;
   /** Jobs to unlock later (data hooks only): shown locked. */
   locked: { id: FutureJobId; name: string; glyph: string; role: string; weaponName: string; unique: string }[];
 }

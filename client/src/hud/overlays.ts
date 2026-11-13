@@ -5,6 +5,9 @@ import { openPartySheet } from './party';
 import { h } from './dom';
 import { abilityMeta, openJobBoard } from './jobs';
 import { Sheets } from './sheets';
+import type { CharSheetHandle, CharSheetView, CharTab, SheetAct, SheetHandle, VendorView } from '../core/gearViews';
+import { openCharSheet } from './bag';
+import { openVendor } from './vendor';
 
 type KeyHandler = (e: KeyboardEvent) => boolean;
 
@@ -219,7 +222,7 @@ export class Overlays {
   }
 
   // ───────────── job board ─────────────
-  jobs(view: JobBoardView): Promise<JobId | null> {
+  jobs(view: JobBoardView): Promise<JobId | 'talents' | null> {
     let closer: () => void = () => {};
     const p = openJobBoard(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el), (c) => { closer = c; this.sheets.add('jobs', c); });
     return p.finally(() => this.sheets.remove('jobs', closer));
@@ -230,6 +233,25 @@ export class Overlays {
     let closer: () => void = () => {};
     const p = openPartySheet(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el), (c) => { closer = c; this.sheets.add('party', c); });
     return p.finally(() => this.sheets.remove('party', closer));
+  }
+
+  // ───────────── Plan 5: the character sheet and the stall sheets (closeSheets closes them) ─────────────
+  charSheet(view: CharSheetView, tab: CharTab, onAct: (a: SheetAct) => void, onClosed: () => void): CharSheetHandle {
+    let handle: CharSheetHandle | null = null;
+    const closer = () => handle?.close();
+    handle = openCharSheet(this.layer, view, tab, onAct, () => { this.sheets.remove('charsheet', closer); onClosed(); }, this.sheetDeps());
+    this.sheets.add('charsheet', closer);
+    return handle;
+  }
+  vendor(view: VendorView, onAct: (a: SheetAct) => void, onClosed: () => void): SheetHandle {
+    let handle: SheetHandle | null = null;
+    const closer = () => handle?.close();
+    handle = openVendor(this.layer, view, onAct, () => { this.sheets.remove('vendor', closer); onClosed(); }, this.sheetDeps());
+    this.sheets.add('vendor', closer);
+    return handle;
+  }
+  private sheetDeps() {
+    return { push: (kind: string, keys: KeyHandler) => this.push(kind, keys), show: (el: HTMLElement) => this.show(el), close: (el: HTMLElement) => this.close(el) };
   }
 
   // ───────────── end screen ─────────────
