@@ -170,6 +170,8 @@ export const MOMENT_CSS = /* css */ `
 .sg-qc-x{position:absolute;right:4px;top:4px;width:48px;height:48px;padding:15px;border:0;border-radius:50%;color:var(--cream);background:none;cursor:pointer}
 .sg-modal-open .sg-qc,.sg-modal-open .sg-qh{visibility:hidden}
 .sg-desktop .sg-qh{bottom:calc(var(--sb) + 132px)}
+/* a context line under the prompt (the crater mouth's): the hint card stands above the prompt, not over it */
+.sg-desktop.sg-has-hint .sg-qh{bottom:calc(39% + 10px)}
 @media (max-width:700px) and (orientation:portrait){
   .sg-qm{top:calc(var(--st) + 33%);padding:10px 14px 12px}
   .sg-qm-title{font-size:20px}.sg-qm.big .sg-qm-title{font-size:24px}
@@ -182,6 +184,7 @@ export const MOMENT_CSS = /* css */ `
   .sg-qm-title{font-size:19px}.sg-qm.big .sg-qm-title{font-size:22px}
   /* landscape phones: between the joystick and the thumb cluster, under the adventurer */
   .sg-touch .sg-qh{bottom:calc(var(--sb) + 10px);max-width:min(400px,calc(100vw - 420px))}
+  .sg-touch.sg-has-hint .sg-qh{bottom:calc(var(--sb) + 150px)}
   .sg-qc{top:auto;bottom:calc(var(--sb) + 10px);width:min(380px,calc(100vw - 440px));padding:10px 12px}
   .sg-qc-title{font-size:19px}.sg-qc-text{font-size:14px}
 }

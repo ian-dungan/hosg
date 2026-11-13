@@ -259,7 +259,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
       if (gearOn !== cache.gear) { cache.gear = gearOn; toggle(root, 'sg-has-gear', gearOn); }
       if (s.gear && s.gear.badge !== cache.gearBadge) { cache.gearBadge = s.gear.badge; charBadge.textContent = String(s.gear.badge); toggle(charBtn, 'badged', s.gear.badge > 0); }
       edges.update(s.edges ?? NO_EDGES);
-      if ((s.hint ?? null) !== hintCache) { hintCache = s.hint ?? null; hintEl.textContent = hintCache ?? ''; toggle(hintEl, 'on', !!hintCache); host.style.setProperty('--hy', hintCache ? '124px' : '0px'); }
+      if ((s.hint ?? null) !== hintCache) { hintCache = s.hint ?? null; hintEl.textContent = hintCache ?? ''; toggle(hintEl, 'on', !!hintCache); toggle(root, 'sg-has-hint', !!hintCache); host.style.setProperty('--hy', hintCache ? '124px' : '0px'); }
       ally.update(s.ally ?? null);
       ally.prompt(s.ally ? s.prompt : null);
       toggle(root, 'sg-has-ally', !!s.ally);
