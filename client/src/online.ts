@@ -183,7 +183,7 @@ interface NetDebug {
   story: { id: string; eid: number; x: number; z: number }[];
 }
 /** What ended a connection: a reason for the login screen, or a travel to another zone (an instance by id). */
-type Ended = { reason: string } | { travel: ZonePlace };
+type Ended = { reason: string; notEntered?: true } | { travel: ZonePlace };
 
 function boot(): void {
   let room: ZoneRoom | null = null;
@@ -712,7 +712,8 @@ function boot(): void {
         endTravel(); // a kick during a travel (or a travel join that never entered) ends the travel here
         if (kickedFor) forgetToken(); // a reload must not sign in again and kick the other place
         inv.reset(); net.inventory = null; net.stats = null; net.lastLoot = null; // signed out: the next account brings its own
-        resolve({ reason: kickedFor || CONNECTION_LOST });
+        // (a join whose state never came within ENTER_TIMEOUT_MS: the loop below tries it once more by itself)
+        resolve(!entered && !kickedFor ? { reason: CONNECTION_LOST, notEntered: true } : { reason: kickedFor || CONNECTION_LOST });
       });
     });
   }
@@ -793,6 +794,8 @@ function boot(): void {
       }
     };
     let travelToken: string | null = null;
+    /** A join that never entered was tried again once already (reset by every join that enters). */
+    let enterRetried = false;
     for (;;) {
       let token: string | null = travelToken ?? resume;
       const arriving = travelling as { zone: ZoneId; instance?: string; fade: Promise<void>; since: number } | null;
@@ -830,7 +833,9 @@ function boot(): void {
         continue;
       }
       const ended = await play(joined.r, joined.zone);
-      if ('travel' in ended) { travelToken = token; continue; }
+      if ('travel' in ended) { travelToken = token; enterRetried = false; continue; }
+      if (ended.notEntered && !enterRetried) { enterRetried = true; resume = token; continue; } // a slow page: once more
+      enterRetried = false;
       notice = ended.reason;
     }
   })();

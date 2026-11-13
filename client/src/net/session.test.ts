@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TICK_HZ } from '@sg2/shared';
-import { SIGN_IN_AGAIN, UNREACHABLE, forgetToken, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, telegraphElapsedS, windupElapsedS, zoneFor } from './session';
+import { SIGN_IN_AGAIN, UNREACHABLE, forgetToken, retryJoin, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, telegraphElapsedS, windupElapsedS, zoneFor } from './session';
 
 const page = (search: string) => ({ origin: 'http://game.example:2570', search });
 
@@ -183,5 +183,17 @@ describe('wind-up progress from the room clock (an enemy first seen mid-wind-up)
     const telegraphs = map([{ owner: 7, at: 30, total: 2.2 }, { owner: 8, at: 40, total: 1 }]);
     expect(windupElapsedS({ telegraphs: telegraphs as never, clock: 45 }, 7)).toBeCloseTo(1);
     expect(windupElapsedS({ telegraphs: telegraphs as never, clock: 45 }, 9)).toBe(0);
+  });
+});
+
+describe('retryJoin (a slow page joins again by itself before it shows an error)', () => {
+  it('a timed-out join is tried once more; an expired seat twice more; anything else is shown at once', () => {
+    expect(retryJoin(UNREACHABLE, 1)).toBe(true);
+    expect(retryJoin(UNREACHABLE, 2)).toBe(false);
+    expect(retryJoin('seat reservation expired', 1)).toBe(true);
+    expect(retryJoin('seat reservation expired', 2)).toBe(true);
+    expect(retryJoin('seat reservation expired', 3)).toBe(false);
+    expect(retryJoin('The grove is full', 1)).toBe(false);
+    expect(retryJoin(SIGN_IN_AGAIN, 1)).toBe(false);
   });
 });

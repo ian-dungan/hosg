@@ -366,9 +366,18 @@ export async function connect(token: string, zone: ZoneId = 'grove', instance?: 
       joining.then((room) => room.leave(), () => {});
       if ((err as { code?: unknown } | null)?.code === ErrorCode.AUTH_FAILED) throw new Error(SIGN_IN_AGAIN);
       const message = err instanceof Error && err.message ? err.message : UNREACHABLE;
-      // A busy device can open the socket too late for its reserved seat; trying again usually fits.
-      if (attempt < 3 && /seat reservation expired/i.test(message)) continue;
+      if (retryJoin(message, attempt)) continue;
       throw new Error(/fetch|network|failed to|seat reservation/i.test(message) ? UNREACHABLE : message);
     }
   }
+}
+
+/**
+ * Whether a failed join is tried again before its error is shown: a join that timed out once (a slow or busy device
+ * can take longer than TIMEOUT_MS to open the room; the second try usually fits), and an expired seat reservation up
+ * to twice (the device opened the socket too late for its reserved seat).
+ */
+export function retryJoin(message: string, attempt: number): boolean {
+  if (message === UNREACHABLE) return attempt < 2;
+  return attempt < 3 && /seat reservation expired/i.test(message);
 }
