@@ -148,7 +148,7 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
   const done = h('button', 'done', foot, st.doneLabel);
   void goldEl;
 
-  let tab: CreatorTab = 'people';
+  let tab: CreatorTab = st.startTab(o.notice);
   let resolve!: (v: { look: Look; name?: string } | null) => void;
   const promise = new Promise<{ look: Look; name?: string } | null>((r) => { resolve = r; });
   let finished = false;
@@ -157,10 +157,8 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
   const refreshFoot = () => {
     undo.disabled = !st.canUndo;
     done.textContent = st.doneLabel;
-    const block = st.blocker;
-    done.disabled = !!block;
-    if (block && (tab !== 'name' || !o.needsName)) note.textContent = block;
-    else if (!block) note.textContent = o.notice && st.unchanged ? o.notice : '';
+    done.disabled = !!st.blocker;
+    note.textContent = st.noteLine(tab, o.notice);
   };
   const changed = () => { showLook(); refreshFoot(); };
 

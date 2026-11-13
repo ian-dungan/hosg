@@ -451,6 +451,8 @@ export interface CreatorOpts {
   validateName: (s: string) => string | null;
   /** A line shown over the buttons until the first change (why the creator opened again: a taken name, ...). */
   notice?: string;
+  /** The name to start with (the refused one, when the creator opened again over it). */
+  name?: string;
 }
 /** The dialogue's options (Plan 6): a close button, the page to start on, and each page as it shows. */
 export interface DialogueOpts { closable?: boolean; start?: number; onPage?: (page: number) => void }

@@ -129,3 +129,25 @@ describe('the creator overlay', () => {
     expect(CREATOR_CSS).toMatch(/\.sg-cr\{[^}]*pointer-events:auto/);
   });
 });
+
+describe('the creator opened again after a refused name (live check: "That name is taken" never showed)', () => {
+  const base = (o: Partial<CreatorStateOpts> = {}): CreatorStateOpts => ({ look: defaultLook('x'), mode: 'create', needsName: true, gold: 0, free: true, validateName: validateAdventurerName, ...o });
+  it('keeps the name it was given, starts on the Name tab and shows the notice until something changes', () => {
+    const s = new CreatorState(base({ name: 'Brambleton' }));
+    expect(s.name).toBe('Brambleton');
+    expect(s.startTab('That name is taken')).toBe('name');
+    expect(s.noteLine('name', 'That name is taken')).toBe('That name is taken');
+    expect(s.noteLine('people', 'That name is taken')).toBe('That name is taken');
+    s.name = 'Brambletown';
+    expect(s.noteLine('name', 'That name is taken')).toBe('');
+  });
+  it('without a notice: the blocker as before (and nothing on the Name tab, where the field says it)', () => {
+    const s = new CreatorState(base());
+    expect(s.startTab(undefined)).toBe('people');
+    expect(s.noteLine('people', undefined)).toBe('Choose a name for your adventurer');
+    expect(s.noteLine('name', undefined)).toBe('');
+    const g = new CreatorState(base({ needsName: false }));
+    expect(g.startTab('Something went wrong')).toBe('people');
+    expect(g.noteLine('people', 'Something went wrong')).toBe('Something went wrong');
+  });
+});

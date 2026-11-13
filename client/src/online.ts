@@ -755,13 +755,14 @@ function boot(): void {
       net.lookFree = got.info.free;
       const plan = creatorPlan(got.info);
       if (!plan.open) return { ok: true, name: got.info.name };
-      let look = startingLook(got.info, token), line: string | undefined;
+      let look = startingLook(got.info, token), line: string | undefined, name: string | undefined;
       for (;;) {
         net.creatorOpen = true;
-        const res = await hud.creator({ look, mode: 'create', needsName: plan.needsName, gold: 0, free: true, validateName: validateAdventurerName, notice: line });
+        const res = await hud.creator({ look, mode: 'create', needsName: plan.needsName, gold: 0, free: true, validateName: validateAdventurerName, notice: line, ...(name !== undefined ? { name } : {}) });
         net.creatorOpen = false;
         if (!res) return { ok: true, name: got.info.name };
         look = res.look;
+        name = res.name;
         const saved = await saveLook(token, res.look, plan.needsName ? res.name : undefined);
         if (saved.kind === 'saved') { net.lookFree = false; if (saved.info.name) rememberName(saved.info.name); return { ok: true, name: saved.info.name }; }
         if (saved.kind === 'notFree') return { ok: true, name: got.info.name };

@@ -115,6 +115,8 @@ const furFor = (p: PeopleId): Look['fur'] => (PEOPLES[p].furred ? { pattern: 1, 
 export interface CreatorStateOpts {
   look: Look; mode: 'create' | 'barber'; needsName: boolean; gold: number; free: boolean;
   validateName: (s: string) => string | null;
+  /** The name to start with (the one the server refused, so the player can change it rather than type it again). */
+  name?: string;
 }
 
 export class CreatorState {
@@ -122,9 +124,26 @@ export class CreatorState {
   readonly original: Look;
   name = '';
   private undoStack: Look[] = [];
+  private readonly originalName: string;
   constructor(readonly o: CreatorStateOpts) {
     this.look = parseLook(o.look) ?? o.look;
     this.original = this.look;
+    this.name = o.name ?? '';
+    this.originalName = this.name;
+  }
+  /** The tab to open on: the Name tab when the creator opened again over a name (a notice) and a name is asked for. */
+  startTab(notice: string | undefined): CreatorTab {
+    return notice && this.o.needsName ? 'name' : 'people';
+  }
+  /**
+   * The line over the buttons on `tab`: the notice (why the creator opened again: a taken name, ...) until the look or
+   * the name changes; else what stops Done (on the Name tab the field shows the name's own line); else nothing.
+   */
+  noteLine(tab: CreatorTab, notice: string | undefined): string {
+    if (notice && this.unchanged && this.name === this.originalName) return notice;
+    const block = this.blocker;
+    if (block && (tab !== 'name' || !this.o.needsName)) return block;
+    return '';
   }
   get tabs(): CreatorTab[] {
     const t: CreatorTab[] = ['people', 'body', 'face', 'hair', 'colours', 'style', 'outfit'];
