@@ -113,6 +113,28 @@ import {
   type JobId,
   type Loadout,
   type ZoneId,
+  AUTO_RELEASE_S,
+  REACTION_S,
+  SKILLED_MISS,
+  SLOPPY_MISS,
+  LAMPFALL_MOUTH,
+  MAX_INSTANCES,
+  PARTY_MAX,
+  REASON_IN_COMBAT,
+  REASON_INSTANCES_FULL,
+  RELEASE_MIN_S,
+  WIPE_DELAY_S,
+  dungeonBrain,
+  gatedSurface,
+  lampfallLayout,
+  type BrainAction,
+  type BrainInput,
+  type DungeonBrainInput,
+  type DungeonRoom,
+  type FieldView,
+  type InstanceView,
+  type PartyView,
+  type Skill,
 } from '@sg2/shared';
 
 const MIN_MEAN_HZ = 14;
@@ -185,9 +207,12 @@ const FIGHTERS_PER_ELITE_MIXED = 2;
 /**
  * The mixed run's pass marks, on top of the fight run's (measured, with headroom: see docs/load-test.md).
  * dodges replaces FIGHT_MIN.dodges (multi-fighter camps kill faster, so fewer telegraphs come out).
- * reactions: each of the four kinds at least this often; revives: completed Second Dawns.
+ * reactions: in all (scaled, see perRun); with --cycle, of at least reactionKinds kinds (ruling P3b-j: every kind is
+ * shown by the party runs instead, PARTY_MIN); revives: completed Second Dawns.
  */
-const MIXED_MIN = { dodges: 20, casts: 50, reactions: 5, eachReaction: 1, revives: 1 };
+const MIXED_MIN = { dodges: 20, casts: 50, reactions: 5, reactionKinds: 2, revives: 1 };
+/** --dungeon: the party bots' pass marks over the run (ruling P3b-j: every reaction kind shows up in parties). */
+const PARTY_MIN = { reactionKinds: 4, revives: 1 };
 /**
  * MIXED_MIN's dodges, casts and reactions are per 95 s of fighting, which a 120 s run gives: the bots first spend
  * about MIXED_WALK_S getting their jobs at the Guild Board and walking to the Greenway. Scaled to --seconds by that.
@@ -257,6 +282,8 @@ const { values } = parseArgs({
     cycle: { type: 'boolean', default: false },
     jobs: { type: 'string' },
     assist: { type: 'string' },
+    dungeon: { type: 'string' },
+    warden: { type: 'string' },
   },
 });
 if (values.jobs !== undefined && (values.jobs !== 'mixed' || !(values.fight || values.cycle))) {
@@ -273,6 +300,50 @@ const assist = values.assist ?? null;
 /** --assist: `hold` on stdin makes the helpers stop fighting (they only follow and revive), `fight` lets them fight again. */
 let assistHold = false;
 if (assist !== null) { values.fight = true; values.jobs = 'mixed'; values.count = '2'; values.warmup = '0'; }
+
+// ───────── parties (--dungeon, --warden) ─────────
+/** A party the bots form: its members (bot indices, the leader first), each member's job, how well they play. */
+interface PartyPlan { k: number; members: number[]; jobs: JobId[]; skill: Skill; careless: number[] }
+const SKILLS: readonly Skill[] = ['careful', 'skilled', 'sloppy', 'careless'];
+/** --dungeon: party sizes cycle through these. */
+const DUNGEON_SIZES = [4, 3, 2];
+const dungeonN = values.dungeon === undefined ? 0 : Number(values.dungeon);
+const wardenMode = values.warden !== undefined;
+const partyPlans: PartyPlan[] = [];
+if (values.dungeon !== undefined) {
+  if (!Number.isInteger(dungeonN) || dungeonN < 1 || !(values.fight || values.cycle) || wardenMode) {
+    console.error('--dungeon <n> takes a whole number of parties >= 1, and only with --fight (not with --warden)');
+    process.exit(2);
+  }
+  let at = 0;
+  for (let k = 0; k < dungeonN; k++) {
+    const size = DUNGEON_SIZES[k % DUNGEON_SIZES.length];
+    const members = Array.from({ length: size }, (_, j) => at + j);
+    const jobs = members.map((i) => JOB_IDS[i % JOB_IDS.length]);
+    // a party with a White Mage has one careless member (no dodges), so that the White Mage has someone to revive
+    const careless = jobs.includes('white_mage') ? [members[jobs.findIndex((j) => j !== 'white_mage')]] : [];
+    partyPlans.push({ k, members, jobs, skill: 'careful', careless });
+    at += size;
+  }
+}
+if (wardenMode) {
+  // `job+job…:skill`, comma separated: each a party that walks from the landing into the Lens Pit
+  let at = 0;
+  for (const [k, part] of values.warden!.split(',').entries()) {
+    const [jobsText, skillText = 'careful'] = part.trim().split(':');
+    const jobs = jobsText.split('+').map((j) => j.trim()) as JobId[];
+    const skill = skillText.trim() as Skill;
+    if (jobs.length < 1 || jobs.length > PARTY_MAX || !jobs.every((j) => JOB_IDS.includes(j)) || !SKILLS.includes(skill)) {
+      console.error(`--warden: "${part}" is not job+job…:skill (jobs ${JOB_IDS.join(', ')}; skills ${SKILLS.join(', ')}; at most ${PARTY_MAX} jobs)`);
+      process.exit(2);
+    }
+    partyPlans.push({ k, members: jobs.map((_, j) => at + j), jobs, skill, careless: [] });
+    at += jobs.length;
+  }
+  values.fight = true; values.count = String(at); values.warmup = '0';
+}
+/** Bots in parties (the first ones). */
+const PARTY_BOTS = partyPlans.reduce((n, p) => n + p.members.length, 0);
 const mixed = values.jobs === 'mixed';
 const FIGHTERS_PER_ENEMY = mixed ? FIGHTERS_PER_ENEMY_MIXED : FIGHTERS_PER_ENEMY_PLAN3;
 const FIGHTERS_PER_ELITE = mixed ? FIGHTERS_PER_ELITE_MIXED : FIGHTERS_PER_ELITE_PLAN3;
@@ -305,6 +376,8 @@ interface Health {
   /** The server process's event-loop delay p99 over its last 5 s window (ms). */
   eventLoopP99Ms?: number;
   zones?: Record<string, { players: number; tickHz: number; tickMs?: number; patchMs?: number }>;
+  /** Lampfall instances: open now, adventurers inside, the worst instance's step p95 (ms). */
+  instances?: { open: number; players: number; tickMsP95Max: number };
 }
 
 async function health(): Promise<Health> {
@@ -343,13 +416,15 @@ const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.
 
 
 /** Where an adventurer may walk in a zone, with the tap-to-walk clearance (built once per zone). */
-const walkable = new Map<ZoneId, (x: number, z: number) => boolean>();
-function passableIn(zone: ZoneId) {
-  let p = walkable.get(zone);
+const walkable = new Map<string, (x: number, z: number) => boolean>();
+/** In the Lampfall, by the shut lamp-gates (`gates`, the state's bits): a shut gate is a wall. */
+function passableIn(zone: ZoneId, gates = 0) {
+  const key = `${zone}:${gates}`;
+  let p = walkable.get(key);
   if (!p) {
-    const ground = zoneDef(zone).ground;
+    const ground = zone === 'lampfall' ? gatedSurface(zoneDef(zone).ground, () => gates) : zoneDef(zone).ground;
     p = withClearance((x, z) => ground(x, z) !== null, PATH_CLEARANCE);
-    walkable.set(zone, p);
+    walkable.set(key, p);
   }
   return p;
 }
@@ -370,6 +445,75 @@ const mixedStats = {
   killsByJob: {} as Record<string, number>, xpByJob: {} as Record<string, number>, abilityAlly: 0,
 };
 const bump = (r: Record<string, number>, k: string, n = 1) => { r[k] = (r[k] ?? 0) + n; };
+
+// --dungeon, --warden
+/** A leader re-invites members not yet in its party this often (3 members: 9 invites a minute, under PARTY_INVITES_PER_MIN). */
+const INVITE_RETRY_MS = 20_000;
+/** The leader's party chat line inside, this often (it starts with PARTY_CHAT_TAG, so receipts are told apart). */
+const PARTY_CHAT_EVERY_MS = 15_000;
+const PARTY_CHAT_TAG = 'pc ';
+/** The gather spot before a room: this far back along its entry corridor from the room's edge (outside its gate circle). */
+const GATHER_BACK_M = 8;
+/** At the gather spot: within this, in m; a party waits at most GATHER_WAIT_MS for a member that does not come. */
+const GATHER_R = 4;
+const GATHER_WAIT_MS = 30_000;
+/** Every instance kills its first pack within this of its first member's arrival (s). */
+const FIRST_PACK_S = 150;
+/** Each instance's step p95 (ms): the Global Constraints. */
+const MAX_INSTANCE_STEP_P95_MS = 3;
+/** --warden: the patch rate and the event-loop delay p99 the server must keep (twelve scripted Warden fights at once). */
+const WARDEN_MIN_HZ = 14.5;
+const WARDEN_MAX_LOOP_P99_MS = 50;
+const partyStats = {
+  formed: 0, invitesSent: 0, accepts: 0, refused: {} as Record<string, number>, notices: {} as Record<string, number>,
+  inCombatRefusals: 0, chatSent: 0, chatExpected: 0, chatGot: 0, releasesSent: 0, releases: 0, revivedMsgs: 0,
+  victories: {} as Record<string, number>, reactions: {} as Record<string, number>, revives: 0, interrupts: 0, breaks: 0,
+};
+/** Parties whose leader saw them whole, and parties told the Lampfall is full. */
+const formedPlans = new Set<number>();
+const fullPlans = new Set<number>();
+/** Each instance a party entered (by room id): when its first member arrived, what it cleared and when, its wipes. */
+interface InstanceRec { roomId: string; k: number; enteredAt: number; firstPackAt: number | null; cleared: Set<string>; wipes: number; lastWipeAt: number }
+const instanceRecs = new Map<string, InstanceRec>();
+function instanceRec(roomId: string, k: number): InstanceRec {
+  let rec = instanceRecs.get(roomId);
+  if (!rec) instanceRecs.set(roomId, (rec = { roomId, k, enteredAt: performance.now(), firstPackAt: null, cleared: new Set(), wipes: 0, lastWipeAt: -Infinity }));
+  return rec;
+}
+/** An `instance` message to a member: its cleared encounters and wipes (each counted once per instance). */
+function noteInstance(roomId: string, plan: PartyPlan, m: InstanceView) {
+  const rec = instanceRec(roomId, plan.k), now = performance.now();
+  for (const c of m.cleared) {
+    if (rec.cleared.has(c)) continue;
+    rec.cleared.add(c);
+    if (c === 'root_cellar') rec.firstPackAt ??= now;
+  }
+  if (m.wipeIn !== null && now - rec.lastWipeAt > (WIPE_DELAY_S + 5) * 1000) { rec.wipes++; rec.lastWipeAt = now; }
+}
+/** A scripted Warden run, per party. */
+interface WardenRec {
+  plan: PartyPlan; outcome: 'kill' | 'wipe' | 'time'; done: boolean; reachedPit: boolean;
+  wakeAt: number | null; endAt: number | null; phase: number; enraged: boolean; interrupts: number; breaks: number;
+}
+const wardenRecs = new Map<number, WardenRec>();
+const PACKS = ['root_cellar', 'brass_gallery', 'cog_hall'];
+/** Where a party gathers before the crater mouth (on the road, 10 m short of it). */
+let mouthSpot: Vec2 | null = null;
+function mouthGather(): Vec2 {
+  if (mouthSpot) return mouthSpot;
+  const pass = passableIn('greenway');
+  const back = { x: LAMPFALL_MOUTH.x - 10, z: LAMPFALL_MOUTH.z };
+  return (mouthSpot = pass(back.x, back.z) ? back : { x: LAMPFALL_MOUTH.arrive.x, z: LAMPFALL_MOUTH.arrive.z });
+}
+/** A Lampfall room's encounter (the recipe's), if it has one. */
+function encounterOf(room: DungeonRoom): string | undefined {
+  return lampfallLayout().recipe.rooms.find((r) => r.id === room.id)?.encounter;
+}
+function nearestOf<T extends { x: number; z: number }>(list: readonly T[], p: { x: number; z: number }): T | undefined {
+  let best: T | undefined, bestD = Infinity;
+  for (const q of list) { const d = dist(q, p); if (d < bestD) { best = q; bestD = d; } }
+  return best;
+}
 /** The most enemies one bot's state held at once. */
 let mostEnemiesInView = 0;
 /** `self` messages without the job fields the server always sends (job, dodgeMax, cast). */
@@ -382,7 +526,8 @@ function eliteCamps(): number[] {
 }
 
 /** The shared Shape of a telegraph in the state (as the browser builds it). */
-function telegraphShape(t: { shape: string; x: number; z: number; dir: number; r: number; width: number; angle: number }): Shape {
+function telegraphShape(t: { shape: string; x: number; z: number; dir: number; r: number; width: number; angle: number; inner?: number }): Shape {
+  if (t.shape === 'ring') return { kind: 'ring', x: t.x, z: t.z, dir: 0, inner: t.inner ?? 0, r: t.r };
   if (t.shape === 'cone') return { kind: 'cone', x: t.x, z: t.z, dir: t.dir, r: t.r, angle: t.angle };
   if (t.shape === 'line') return { kind: 'line', x: t.x, z: t.z, dir: t.dir, length: t.r, width: t.width };
   return { kind: 'circle', x: t.x, z: t.z, r: t.r };
@@ -518,7 +663,7 @@ class Bot {
   /** It runs the job and picks it fights with. */
   private get jobReady(): boolean {
     return this.jobNow.job === this.loadout.job && this.jobNow.picks[0] === this.loadout.picks[0] && this.jobNow.picks[1] === this.loadout.picks[1]
-      && (!mixed || this.switchCounted); // mixed: every bot asks for its job at the board, its own included
+      && (!(mixed || this.plan) || this.switchCounted); // mixed and party bots: every bot asks for its job, its own included
   }
   /** Sprinting (by the browser's rule: from Sprint's `use` fx) until then (performance.now ms). */
   private sprintUntil = -Infinity;
@@ -571,10 +716,43 @@ class Bot {
   private castSince: number | null = null;
   private castFor = 0;
 
+  // --dungeon, --warden
+  /** Its role index among the Greenway bots (index − PARTY_BOTS; negative for party bots). */
+  readonly ri: number;
+  /** The party it forms (null: a Greenway bot as in Plan 3b). */
+  readonly plan: PartyPlan | null;
+  /** Its party as the server last sent it, and the instance it is in (lampfall only). */
+  partyView: PartyView | null = null;
+  private instanceView: InstanceView | null = null;
+  /** The instance room it is in ('' outside), and the one a `travel` sent it to. */
+  roomId = '';
+  private switchingInstance: string | null = null;
+  /** Got REASON_INSTANCES_FULL at the mouth: it stays in the Greenway and fights there. */
+  full = false;
+  /** The last `correct` (performance.now ms): a mouth refusal's notice right after it means it was no correction. */
+  private lastCorrectAt = -Infinity;
+  /** The room (instance + room id) its party has the go for: it walks in from the gather spot. */
+  private goRoom: string | null = null;
+  private gatherSince: number | null = null;
+  private releasePending = false;
+  /** Deaths and revives inside the Lampfall (the Warden runs' table). */
+  deathsInside = 0;
+  revivedInside = 0;
+
   constructor(readonly index: number) {
-    this.careful = index % 4 !== 3;
-    this.hunter = fight && HUNTERS.includes(index);
-    this.predictor = fight && index % 5 === PREDICTOR;
+    // party bots come first (--dungeon, --warden); the Greenway bots' roles count from the first bot after them
+    this.ri = index - PARTY_BOTS;
+    this.plan = partyPlans.find((p) => p.members.includes(index)) ?? null;
+    this.careful = this.plan ? this.plan.skill !== 'careless' && !this.plan.careless.includes(index) : this.ri % 4 !== 3;
+    this.hunter = fight && !this.plan && HUNTERS.includes(this.ri);
+    this.predictor = fight && !this.plan && this.ri % 5 === PREDICTOR;
+    if (this.plan) {
+      const job = this.plan.jobs[this.plan.members.indexOf(index)];
+      const picks = this.plan.members.length > 1 ? JOBS[job].picks.duo : JOBS[job].picks.solo;
+      this.sprinter = false; this.partner = null; this.medicOf = null; this.toughFirst = false;
+      this.loadout = { job, picks: [picks[0], picks[1]] };
+      return;
+    }
     if (assist !== null) {
       const job: JobId = index === 0 ? 'black_mage' : 'white_mage';
       this.careful = true; this.hunter = false; this.predictor = false; this.sprinter = false;
@@ -582,25 +760,26 @@ class Bot {
       this.loadout = { job, picks: [JOBS[job].picks.duo[0], JOBS[job].picks.duo[1]] };
       return;
     }
+    const ri = this.ri;
     if (mixed) {
-      const job = JOB_IDS[index % JOB_IDS.length];
-      const hunted = MIXED_HUNTERS.find((h) => MIXED_MEDICS[h] === index && h < count);
-      this.medicOf = hunted ?? null;
+      const job = JOB_IDS[ri % JOB_IDS.length];
+      const hunted = MIXED_HUNTERS.find((h) => MIXED_MEDICS[h] === ri && h + PARTY_BOTS < count);
+      this.medicOf = hunted === undefined ? null : hunted + PARTY_BOTS;
       const special = (k: number) => MIXED_HUNTERS.includes(k) || Object.values(MIXED_MEDICS).includes(k);
-      this.partner = special(index) || special(index ^ 1) || (index ^ 1) >= count ? null : index ^ 1;
-      this.sprinter = job === 'ranger' && index % 5 === SPRINTER;
+      this.partner = special(ri) || special(ri ^ 1) || (ri ^ 1) + PARTY_BOTS >= count ? null : (ri ^ 1) + PARTY_BOTS;
+      this.sprinter = job === 'ranger' && ri % 5 === SPRINTER;
       const picks = this.sprinter ? SPRINTER_PICKS : this.hunter ? HUNTER_PICKS[job] ?? JOBS[job].picks.solo
         : this.partner !== null || this.medicOf !== null ? JOBS[job].picks.duo : JOBS[job].picks.solo;
       this.loadout = { job, picks: [picks[0], picks[1]] };
-      this.toughFirst = job === 'white_mage' && this.partner !== null && JOB_IDS[this.partner % JOB_IDS.length] === 'black_mage';
+      this.toughFirst = job === 'white_mage' && this.partner !== null && JOB_IDS[(this.partner - PARTY_BOTS) % JOB_IDS.length] === 'black_mage';
       return;
     }
     this.partner = null;
     this.medicOf = null;
     this.toughFirst = false;
-    this.sprinter = fight && index % 5 === SPRINTER;
+    this.sprinter = fight && ri % 5 === SPRINTER;
     this.loadout = this.sprinter ? { job: 'ranger', picks: SPRINTER_PICKS }
-      : fight && index % 4 === 1 ? { job: 'ranger', picks: [JOBS.ranger.picks.solo[0], JOBS.ranger.picks.solo[1]] } : NEW_LOADOUT;
+      : fight && ri % 4 === 1 ? { job: 'ranger', picks: [JOBS.ranger.picks.solo[0], JOBS.ranger.picks.solo[1]] } : NEW_LOADOUT;
   }
 
   /** The job it fights as (for kills and xp by job). */
@@ -629,7 +808,7 @@ class Bot {
   private askJob(now: number) {
     if (this.jobReady || now - this.jobAskedAt < JOB_RETRY_MS) return;
     this.jobAskedAt = now;
-    if (mixed ? !this.switchCounted : this.jobNow.job !== this.loadout.job) this.room.send('job', { job: this.loadout.job });
+    if (mixed || this.plan ? !this.switchCounted : this.jobNow.job !== this.loadout.job) this.room.send('job', { job: this.loadout.job });
     this.room.send('loadout', { picks: this.loadout.picks });
   }
 
@@ -642,12 +821,18 @@ class Bot {
   }
 
   /** Joins `zone`'s room and waits until this adventurer is in its state. */
-  private async connect(zone: ZoneId) {
+  private async connect(zone: ZoneId, instance: string | null = null) {
     this.zone = zone;
-    this.surface = zoneDef(this.zone).surface;
+    // inside the Lampfall a shut lamp-gate is a wall, as the server's own surface has it (gatedSurface over the state's gates)
+    this.surface = zone === 'lampfall' ? gatedSurface(zoneDef('lampfall').surface, () => (this.room?.state?.gates as number | undefined) ?? 0) : zoneDef(this.zone).surface;
     this.ack = 0; // each session numbers its displacements from 0
-    const room = await new Client(url).joinOrCreate(this.zone, { token: this.token });
+    const client = new Client(url);
+    // a Lampfall instance is joined by its room id (the `travel` names it); every other zone by name
+    const room = instance ? await client.joinById(instance, { token: this.token }) : await client.joinOrCreate(this.zone, { token: this.token });
     this.room = room;
+    this.roomId = zone === 'lampfall' ? room.roomId : '';
+    this.instanceView = null;
+    if (zone === 'lampfall' && this.plan) instanceRec(room.roomId, this.plan.k);
     room.reconnection.enabled = false; // a drop is a failure, not something to ride out
     const connection = room.connection as unknown as { events: { onmessage?: (ev: { data: ArrayBuffer | string }) => void } };
     const onmessage = connection.events.onmessage;
@@ -660,7 +845,7 @@ class Bot {
     room.onMessage('jobs', (m: S2C['jobs']) => {
       this.jobNow = { job: m.current, picks: [m.jobs[m.current].picks[0], m.jobs[m.current].picks[1]] };
       // a job change it asked for (at the Guild Board), confirmed: counted once per bot
-      if (mixed && !this.switchCounted && this.jobAskedAt > -Infinity && m.current === this.loadout.job) { this.switchCounted = true; mixedStats.switches++; }
+      if ((mixed || this.plan) && !this.switchCounted && this.jobAskedAt > -Infinity && m.current === this.loadout.job) { this.switchCounted = true; mixedStats.switches++; }
     });
     room.onMessage('fx', (m: S2C['fx']) => this.onFx(m));
     room.onMessage('credit', (m: S2C['credit']) => {
@@ -671,6 +856,7 @@ class Bot {
     room.onMessage('jobXp', (m: S2C['jobXp']) => bump(mixedStats.xpByJob, m.job, m.gained));
     room.onMessage('revived', () => {
       mixedStats.revivedMsgs++;
+      if (this.zone === 'lampfall') { this.revivedInside++; partyStats.revivedMsgs++; }
       this.deadSince = null;
       if (this.diedAt !== null) { this.revivedBack++; this.diedAt = null; } // up again where it fell: not on its way back
     });
@@ -715,10 +901,21 @@ class Bot {
         this.busyUntil = performance.now() + sim.seconds * 1000;
       }
     }));
-    room.onMessage('respawned', late((m: S2C['respawned']) => { this.dropPredictions('respawned', true); moved(m, m.seq); }));
+    room.onMessage('respawned', late((m: S2C['respawned']) => {
+      this.dropPredictions('respawned', true);
+      moved(m, m.seq);
+      if (this.zone === 'lampfall') {
+        // up at the checkpoint (a release, or everyone after a wipe): not on any way back; the party gathers again
+        if (this.releasePending) partyStats.releases++;
+        this.releasePending = false;
+        this.diedAt = null;
+        this.goRoom = null;
+      }
+    }));
     room.onMessage('travel', (m: S2C['travel']) => {
       if (!fight) { this.travelled = true; return; }
       this.switchingTo = m.zone;
+      this.switchingInstance = m.instance ?? null;
       // The server ends the session itself; if it has not after 5 s, leave.
       this.timers.push(setTimeout(() => { if (this.room === room && this.switchingTo) void room.leave().catch(() => {}); }, 5000));
     });
@@ -729,6 +926,7 @@ class Bot {
         this.rollbacksByReason[this.rollbackReason] = (this.rollbacksByReason[this.rollbackReason] ?? 0) + 1;
       } else {
         this.corrections++;
+        this.lastCorrectAt = performance.now();
         if (this.correctionLog.length < 5) this.correctionLog.push(`${this.name}: sent ${JSON.stringify(this.lastSent)}, corrected to ${JSON.stringify(m)}${fight ? ` (${this.lastScale})` : ''}`);
       }
       // go where the server says, standing, as the browser does
@@ -741,14 +939,51 @@ class Bot {
       this.hurts++;
       this.hurtHp += m.amount;
     });
-    room.onMessage('chat', () => this.chatsHeard++);
+    room.onMessage('chat', (m: S2C['chat']) => {
+      this.chatsHeard++;
+      if (m.channel === 'party' && m.from !== this.name && m.text.startsWith(PARTY_CHAT_TAG)) partyStats.chatGot++;
+    });
+    room.onMessage('party', (m: S2C['party']) => {
+      this.partyView = m.party;
+      const plan = this.plan;
+      if (plan && plan.members[0] === this.index && m.party && m.party.members.length === plan.members.length && !formedPlans.has(plan.k)) {
+        formedPlans.add(plan.k);
+        partyStats.formed++;
+      }
+    });
+    room.onMessage('partyInvite', (m: S2C['partyInvite']) => {
+      // a member accepts its own leader's invite (and only that)
+      if (this.plan && this.plan.members[0] !== this.index && m.from === bots[this.plan.members[0]].name) {
+        this.room.send('party', { op: 'accept', partyId: m.partyId });
+        partyStats.accepts++;
+      }
+    });
+    room.onMessage('partyRefused', (m: S2C['partyRefused']) => bump(partyStats.refused, m.reason));
+    room.onMessage('instance', (m: S2C['instance']) => {
+      this.instanceView = m;
+      if (this.plan && this.zone === 'lampfall') noteInstance(this.roomId, this.plan, m);
+    });
+    room.onMessage('victory', (m: S2C['victory']) => { if (this.plan) bump(partyStats.victories, m.boss); });
+    room.onMessage('notice', (m: S2C['notice']) => {
+      bump(partyStats.notices, m.text);
+      // the mouth's refusals come as a `correct` and then this notice: the rule says so (no false correction)
+      if ((m.text === REASON_INSTANCES_FULL || m.text === REASON_IN_COMBAT) && performance.now() - this.lastCorrectAt < 1000 && this.corrections > 0) {
+        this.corrections--;
+        this.correctionLog.pop();
+        this.lastCorrectAt = -Infinity;
+        if (m.text === REASON_INSTANCES_FULL && this.plan) {
+          this.full = true;
+          fullPlans.add(this.plan.k);
+        } else partyStats.inCombatRefusals++;
+      }
+    });
     room.onMessage('kicked', (m: { reason: string }) => (this.disconnected ??= `kicked: ${m.reason}`));
     room.onDrop((code) => (this.disconnected ??= `dropped (code ${code})`));
     room.onLeave((code) => {
       if (this.room !== room) return;
       const next = this.switchingTo;
       if (next) {
-        this.connect(next).then(
+        this.connect(next, this.switchingInstance).then(
           () => { this.switchingTo = null; this.travels++; },
           (err) => { this.disconnected ??= `could not join ${next}: ${err instanceof Error ? err.message : err}`; },
         );
@@ -763,6 +998,7 @@ class Bot {
       const dead = me?.dead === true;
       if (dead && !wasDead) {
         this.deaths++;
+        if (this.zone === 'lampfall') this.deathsInside++;
         this.diedAt = performance.now();
         this.bestProgress = Infinity;
         this.progressAt = this.diedAt;
@@ -794,7 +1030,9 @@ class Bot {
     this.deadSince = null;
     this.telegraphSeen.clear();
     this.windupSeen.clear();
-    this.memory = newBrainMemory();
+    // a party bot plays at its party's skill (the simulation's: skilled and sloppy miss a seeded share of telegraphs)
+    const slip = this.plan?.skill === 'sloppy' ? SLOPPY_MISS : this.plan?.skill === 'skilled' ? SKILLED_MISS : 0;
+    this.memory = slip > 0 ? newBrainMemory(REACTION_S + Math.random() * 0.2, { rate: slip, seed: this.index * 104729 + 1 }) : newBrainMemory();
     this.castSince = null;
     this.settleUntil = performance.now() + SETTLE_MS;
     this.lastStepAt = 0;
@@ -826,6 +1064,10 @@ class Bot {
         this.timers.push(setInterval(() => this.chat(), CHAT_EVERY_MS));
       }, Math.random() * CHAT_EVERY_MS),
     );
+    if (this.plan && this.plan.members[0] === this.index && this.plan.members.length > 1) {
+      this.startInviting();
+      this.timers.push(setInterval(() => this.partyChat(), PARTY_CHAT_EVERY_MS));
+    }
   }
 
   /**
@@ -891,6 +1133,11 @@ class Bot {
     }
   }
 
+  /** How far p is from the nearest exit circle's edge. */
+  private exitGap(p: { x: number; z: number }): number {
+    return Math.min(Infinity, ...zoneDef(this.zone).exits.map((e) => Math.hypot(p.x - e.x, p.z - e.z) - e.r));
+  }
+
   private nearExit(p: { x: number; z: number }): boolean {
     return zoneDef(this.zone).exits.some((e) => Math.hypot(p.x - e.x, p.z - e.z) < e.r + 1.5);
   }
@@ -918,7 +1165,17 @@ class Bot {
         } else if (e.t === 'shield' && e.dst !== mine) mixedStats.allyShields++;
         else if (e.t === 'gift' && e.dst !== mine) mixedStats.gifts++;
       }
-      if (e.t !== 'death' || !enemyKinds.has(e.dst)) continue;
+      if (this.plan && mine !== undefined && 'src' in e && e.src === mine) {
+        if (e.t === 'react') bump(partyStats.reactions, e.reaction);
+        else if (e.t === 'revive') partyStats.revives++;
+      }
+      // interrupts and Breaks inside, counted once a party (by its leader, which sees everything in its instance)
+      if (this.plan && this.zone === 'lampfall' && this.plan.members[0] === this.index && (e.t === 'interrupt' || e.t === 'break')) {
+        if (e.t === 'interrupt') partyStats.interrupts++; else partyStats.breaks++;
+        const rec = wardenRecs.get(this.plan.k);
+        if (rec && !rec.done) { if (e.t === 'interrupt') rec.interrupts++; else rec.breaks++; }
+      }
+      if (e.t !== 'death' || this.zone !== 'greenway' || !enemyKinds.has(e.dst)) continue;
       // every bot that sees it gets the event: count it once (an enemy waits at least 5 s to respawn)
       const last = enemyDeathAt.get(e.dst);
       if (last !== undefined && now - last < 5000) continue;
@@ -995,12 +1252,18 @@ class Bot {
       }
       const attack = e.windup as EnemyAttackId;
       windup = { attack, total: e.windupTotal, left: Math.max(0, e.windupTotal - (now - at) / 1000), interruptible: ENEMY_ATTACKS[attack]?.interruptible ?? false };
+      if (ENEMY_ATTACKS[attack]?.unavoidable) windup.unavoidable = true;
     } else this.windupSeen.delete(e.eid);
+    const clock = typeof this.room.state.clock === 'number' ? this.room.state.clock : 0;
+    const enrageAt = typeof e.enrageAt === 'number' ? e.enrageAt : 0;
     return {
       id: e.eid, team: 'enemy', kind: e.kind as EnemyKindId, x: e.x, z: e.z, y: e.y, facing: e.facing, hp: e.hp, maxHp: e.maxHp,
       alive: e.mode !== 'dead', shield: 0, marks: e.marks, stagger: e.stagger, maxStagger: e.maxStagger,
       targetId: e.target < 0 ? null : e.target, act: (e.mode === 'stunned' ? 'stun' : e.mode === 'return' ? 'return' : '') as Act,
-      windup, surging: e.surging, staggerImmune: e.staggerImmune,
+      windup, surging: e.surging, staggerImmune: e.staggerImmune, debuffs: e.debuffs ?? 0,
+      // Plan 4: the boss fields the dungeon brain reads (the state's are unset for ordinary enemies)
+      tier: ENEMY_KINDS[e.kind as EnemyKindId]?.tier ?? 'ordinary', phase: e.phase ?? 0, warded: e.warded === true,
+      enrageIn: enrageAt > 0 ? Math.max(0, (enrageAt - clock) / TICK_HZ) : null,
     };
   }
 
@@ -1020,7 +1283,9 @@ class Bot {
       let at = this.telegraphSeen.get(t.id);
       // its start by the server's clock (TelegraphState.at), so one first seen late is as far along as it really is
       if (at === undefined) this.telegraphSeen.set(t.id, (at = now - this.elapsedOf(t) * 1000));
-      out.push({ id: t.id, owner: t.owner, attack: t.attack as EnemyAttackId, shape: telegraphShape(t), total: t.total, left: Math.max(0, t.total - (now - at) / 1000) });
+      const view: TelegraphView = { id: t.id, owner: t.owner, attack: t.attack as EnemyAttackId, shape: telegraphShape(t), total: t.total, left: Math.max(0, t.total - (now - at) / 1000) };
+      if (ENEMY_ATTACKS[t.attack as EnemyAttackId]?.unavoidable) view.unavoidable = true;
+      out.push(view);
     });
     for (const id of this.telegraphSeen.keys()) if (!live.has(id)) this.telegraphSeen.delete(id);
     return out;
@@ -1053,7 +1318,7 @@ class Bot {
       // an elite a hunter is on is left to it: not kept, not fought back, not picked (it stays solo)
       if (!this.hunter && elite && hunted.has(e.eid)) return;
       // with --jobs mixed a hunter with no medic also leaves an elite another hunter is on (unless it is attacking this one), so its fight stays solo
-      if (mixed && this.hunter && MIXED_MEDICS[this.index] === undefined && elite && hunted.has(e.eid) && e.eid !== this.sentTarget && e.target !== mine) return;
+      if (mixed && this.hunter && MIXED_MEDICS[this.ri] === undefined && elite && hunted.has(e.eid) && e.eid !== this.sentTarget && e.target !== mine) return;
       const d = dist(e, this.body);
       if (e.eid === this.sentTarget && d <= TARGET_RANGE + 5) current = e;
       if (e.target === mine && d <= TARGET_RANGE) attacker = e;
@@ -1065,6 +1330,8 @@ class Bot {
       if (this.toughFirst ? !best || e.hp > best.hp || (e.hp === best.hp && d < bestD) : d <= bestD) { best = e; bestD = d; }
     });
     mostEnemiesInView = Math.max(mostEnemiesInView, n);
+    // a party bot on its way to the crater mouth only fights back
+    if (this.plan && !this.full) return attacker ?? current;
     if (assist !== null) {
       if (assistHold) return null;
       // the adventurer it assists: its target while that lives near, else whatever attacks the bot
@@ -1079,7 +1346,7 @@ class Bot {
       return e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5 ? e : attacker;
     }
     // the odd bot of a duo takes its leader's target (the leader never follows, so they never chase each other's)
-    const leader = this.partner !== null && (this.index & 1) === 1 ? bots[this.partner] : null;
+    const leader = this.partner !== null && (this.ri & 1) === 1 ? bots[this.partner] : null;
     if (leader && leader.zone === this.zone && !leader.switching && leader.target !== null) {
       const e = findEnemy(this.room, leader.target);
       if (e && e.mode !== 'dead' && e.mode !== 'return' && dist(e, this.body) <= TARGET_RANGE + 5) return e;
@@ -1098,8 +1365,11 @@ class Bot {
   /** The other adventurers its state holds within ALLY_VIEW_R (dead ones included), as the brain wants them. */
   private alliesInView(mine: number): CombatantView[] {
     const out: CombatantView[] = [];
+    // a party bot's allies are its party members (the engine's ally rule), wherever it is
+    const members = this.plan ? new Set((this.partyView?.members ?? []).map((m) => m.eid).filter((e) => e >= 0)) : null;
     this.room.state.players?.forEach((p: any) => {
       if (p.eid === mine || dist(p, this.body) > ALLY_VIEW_R) return;
+      if (members && !members.has(p.eid)) return;
       if (assist !== null && !p.dead) return; // --assist: it revives, but never heals or shields (the smoke test's adventurer must fall)
       out.push({
         id: p.eid, team: 'adventurer', kind: 'adventurer', x: p.x, z: p.z, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp,
@@ -1133,6 +1403,7 @@ class Bot {
     if (!me || now < this.settleUntil) return;
     if (me.dead) {
       this.deadSince ??= now;
+      if (this.zone === 'lampfall') return this.deadInside(now);
       // with a White Mage near whose Second Dawn is ready (as far as it can tell), it lies a while for a revive
       const waitMs = mixed && now - this.deadSince < REVIVE_WAIT_MS && this.mageNear() ? REVIVE_WAIT_MS : DEATH_MIN_S * 1000 + 300;
       if (now - this.deadSince >= waitMs && now - this.respawnAskedAt >= 1000) {
@@ -1158,6 +1429,7 @@ class Bot {
     if (now < this.busyUntil) return;
     if (this.diedAt !== null) this.noteProgress(now);
 
+    if (this.zone === 'lampfall') return this.dungeonStep(me, now, dt);
     if (this.zone !== 'greenway') {
       // In the grove (a town) it takes its job first, standing; then (back from a death, or started in
       // the grove, or come for its job) to the east gate, and through it.
@@ -1171,7 +1443,8 @@ class Bot {
       this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
       return;
     }
-    if (!this.jobReady && this.diedAt === null) {
+    if (!this.jobReady && this.diedAt === null && !(this.plan && wardenMode)) {
+      // (Warden runs take their jobs at the Keeper's Landing, a sanctuary.)
       // Its job can only be taken in a town: out through the west gate into the grove first.
       this.walkRoute(greenwayLayout().westGate, dt, now, 1, true);
       return;
@@ -1192,6 +1465,79 @@ class Bot {
       this.sentTarget = targetId;
       this.room.send('target', { id: targetId });
     }
+    const thought = this.think(me, now, target, null);
+    if (!thought) return; // it rolled
+    const { act, sv, scale } = thought;
+    if (target) {
+      this.route = null;
+      this.campGoal = null;
+      if (act.moveTo) {
+        if (act.intents.length === 0) this.maybeSprint(dist(act.moveTo, this.body), sv, now);
+        this.walkRoute(act.moveTo, dt, now, scale, false);
+      }
+      return;
+    }
+    // A party bot walks to the crater mouth with its party and in (until the Lampfall is full).
+    if (this.plan && !this.full) return this.toMouth(sv, dt, now);
+    // A medic stays near its hunter; the odd bot of a duo goes where its leader is.
+    const leadBot = this.medicOf !== null ? bots[this.medicOf] : this.partner !== null && (this.ri & 1) === 1 ? bots[this.partner] : null;
+    const assisted = this.assisted();
+    const leadAt = assisted ? { x: assisted.x, z: assisted.z }
+      : leadBot && leadBot.zone === this.zone && !leadBot.switching && !leadBot.disconnected ? leadBot.position : null;
+    if (assist !== null && !leadAt) return; // not in view: it waits where it is
+    if (leadAt) {
+      const keep = this.medicOf !== null || (assist !== null && this.index === 1) ? MEDIC_FOLLOW_M : DUO_FOLLOW_M;
+      const d = dist(leadAt, this.body);
+      this.campGoal = null;
+      if (d > keep) {
+        const p = leadAt, k = (keep - 2) / d;
+        let spot = { x: p.x + (this.body.x - p.x) * k, z: p.z + (this.body.z - p.z) * k };
+        if (!passableIn(this.zone)(spot.x, spot.z)) spot = { x: p.x, z: p.z };
+        this.maybeSprint(d, sv, now);
+        this.walkRoute(spot, dt, now, scale, false);
+      } else if (act.moveTo) this.walkRoute(act.moveTo, dt, now, scale, false);
+      return;
+    }
+    // Nothing to fight in range: to the nearest camp not visited lately, where it waits a while at a
+    // spot just outside it (clear of every spawn point, so it never holds a respawn up).
+    const camps = greenwayLayout().camps;
+    if (this.campGoal === null) {
+      let best = -1, bestD = Infinity;
+      camps.forEach((c, k) => {
+        const visited = this.campVisited.get(k);
+        if (visited !== undefined && now - visited < CAMP_REVISIT_MS) return;
+        // the first walk spreads the bots over the camps; after that, the nearest
+        // (a hunter: the Mossback camps only, the nearest first)
+        const mine = mixed ? HUNTER_CAMP[this.ri] : undefined;
+        const first = this.hunter ? (mine !== undefined ? (k === mine ? 0 : Infinity) : eliteCamps().includes(k) ? dist(c, this.body) : Infinity)
+          : k === ((((mixed ? this.ri >> 1 : this.ri) % camps.length) + camps.length) % camps.length) ? 0 : Infinity;
+        const d = this.campVisited.size === 0 || this.hunter ? first : dist(c, this.body);
+        if (d < bestD) { best = k; bestD = d; }
+      });
+      if (best < 0) { this.campVisited.clear(); return; }
+      this.campGoal = best;
+      this.campSpot = this.standOff(camps[best]);
+      this.campWaitFrom = null;
+    }
+    const spot = this.campSpot!;
+    if (dist(spot, this.body) < 1) {
+      this.campWaitFrom ??= now;
+      if (now - this.campWaitFrom >= CAMP_WAIT_MS) {
+        this.campVisited.set(this.campGoal, now);
+        this.campGoal = null;
+        this.route = null;
+      }
+      return;
+    }
+    this.maybeSprint(dist(spot, this.body), sv, now);
+    this.walkRoute(spot, dt, now, 1, false);
+  }
+
+  /**
+   * The brain's tick: its own view (the last `self`, aged), the telegraphs, its allies; the brain's intents
+   * sent (abilities, a dodge, and in the Lampfall its target). Null when it rolled (nothing more this tick).
+   */
+  private think(me: any, now: number, target: any, dungeon: Pick<DungeonBrainInput, 'fields' | 'arena' | 'enemies' | 'home'> | null): { act: BrainAction; sv: SelfView; scale: number } | null {
     // A `self` sent while the room was being joined can arrive before its handler is set (and the next
     // comes only when something changes): until one arrives it is a fresh adventurer.
     const sv = this.agedSelf(now) ?? this.freshSelf();
@@ -1200,7 +1546,7 @@ class Bot {
       id: me.eid, team: 'adventurer', kind: 'adventurer', x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading,
       hp: me.hp, maxHp: me.maxHp, alive: !me.dead, shield: me.shield, marks: 0, stagger: 0, maxStagger: 0,
       targetId: me.target < 0 ? null : me.target, act: (me.act || '') as Act, windup: null, ...sv,
-      job, dodgeMax: sv.dodgeMax ?? JOBS[job].dodgeCharges, cast: sv.cast ?? null,
+      job, dodgeMax: sv.dodgeMax ?? JOBS[job].dodgeCharges, cast: sv.cast ?? null, searing: me.searing ?? 0,
     };
     // the server's `self` always carries job, dodgeMax and cast (Plan 3b Task 6): one without them is a protocol fault
     if (this.selfView && (this.selfView.dodgeMax === undefined || this.selfView.job === undefined || this.selfView.cast === undefined)) selfFieldsMissing++;
@@ -1209,10 +1555,12 @@ class Bot {
     // Allies: the other adventurers in its view within ALLY_VIEW_R, dead ones included (Plan 3 bots fight
     // alone: none). Heals, shields and revives on them carry their id: the engine's automatic pick reaches
     // party members only (Plan 4), and these bots are in no party, so only an explicit ally id helps them.
-    const allies = mixed ? this.alliesInView(me.eid) : [];
-    const act = adventurerBrain({ nowS: now / 1000, careful: this.careful, self, allies, target: target ? this.enemyView(target, now) : null, telegraphs }, this.memory);
+    const allies = mixed || this.plan ? this.alliesInView(me.eid) : [];
+    const input: BrainInput = { nowS: now / 1000, careful: this.careful, self, allies, target: target ? this.enemyView(target, now) : null, telegraphs };
+    // in the Lampfall: the dungeon brain, with the room's fields, arena, enemies and the target's camp (its home)
+    const act = dungeon ? dungeonBrain({ ...input, ...dungeon }, this.memory) : adventurerBrain(input, this.memory);
     // an auto-only hunter presses nothing and never dodges: it walks where the brain goes and lets its autos run
-    if (mixed && assist === null && AUTO_ONLY_HUNTERS.includes(this.index)) act.intents = act.intents.filter((i) => i.t === 'target');
+    if (mixed && assist === null && AUTO_ONLY_HUNTERS.includes(this.ri)) act.intents = act.intents.filter((i) => i.t === 'target');
     if (assistHold) act.intents = act.intents.filter((i) => i.t !== 'ability' || ABILITIES[sv.slots[i.slot]]?.ai === 'revive');
     // a medic presses only its quick skill (Tidelash: Soaked on the hunter's target) and its revive: no heals or
     // shields for the hunter, which is there to fall
@@ -1242,77 +1590,21 @@ class Bot {
           // rolls at once (predicted), and again from its end after the gap when both charges are there
           this.rollPredicted(i.dx, i.dz, now, false);
           if (sv.dodgeCharges >= 2) this.secondDodge = { at: now + (DODGE_MIN_GAP_S + 0.03) * 1000, dx: i.dx, dz: i.dz };
-          return;
+          return null;
         }
         // from where the body is (its last sent pose), with the latest ack; nothing more until it is answered
         this.dodgesSent++;
         this.dodgeSentAt = now;
         this.room.send('dodge', { x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading, moving: false, ack: this.ack, dx: i.dx, dz: i.dz });
-        return;
+        return null;
+      } else if (dungeon && i.t === 'target' && i.id !== this.sentTarget) {
+        // the dungeon brain picks its own target (a warded boss's add first): sent as it says
+        this.sentTarget = i.id;
+        this.room.send('target', { id: i.id });
       }
-      // 'target' intents: it sends its own choice above
+      // 'target' intents on open ground: it sends its own choice before thinking
     }
-    if (target) {
-      this.route = null;
-      this.campGoal = null;
-      if (act.moveTo) {
-        if (act.intents.length === 0) this.maybeSprint(dist(act.moveTo, this.body), sv, now);
-        this.walkRoute(act.moveTo, dt, now, scale, false);
-      }
-      return;
-    }
-    // A medic stays near its hunter; the odd bot of a duo goes where its leader is.
-    const leadBot = this.medicOf !== null ? bots[this.medicOf] : this.partner !== null && (this.index & 1) === 1 ? bots[this.partner] : null;
-    const assisted = this.assisted();
-    const leadAt = assisted ? { x: assisted.x, z: assisted.z }
-      : leadBot && leadBot.zone === this.zone && !leadBot.switching && !leadBot.disconnected ? leadBot.position : null;
-    if (assist !== null && !leadAt) return; // not in view: it waits where it is
-    if (leadAt) {
-      const keep = this.medicOf !== null || (assist !== null && this.index === 1) ? MEDIC_FOLLOW_M : DUO_FOLLOW_M;
-      const d = dist(leadAt, this.body);
-      this.campGoal = null;
-      if (d > keep) {
-        const p = leadAt, k = (keep - 2) / d;
-        let spot = { x: p.x + (this.body.x - p.x) * k, z: p.z + (this.body.z - p.z) * k };
-        if (!passableIn(this.zone)(spot.x, spot.z)) spot = { x: p.x, z: p.z };
-        this.maybeSprint(d, sv, now);
-        this.walkRoute(spot, dt, now, scale, false);
-      } else if (act.moveTo) this.walkRoute(act.moveTo, dt, now, scale, false);
-      return;
-    }
-    // Nothing to fight in range: to the nearest camp not visited lately, where it waits a while at a
-    // spot just outside it (clear of every spawn point, so it never holds a respawn up).
-    const camps = greenwayLayout().camps;
-    if (this.campGoal === null) {
-      let best = -1, bestD = Infinity;
-      camps.forEach((c, k) => {
-        const visited = this.campVisited.get(k);
-        if (visited !== undefined && now - visited < CAMP_REVISIT_MS) return;
-        // the first walk spreads the bots over the camps; after that, the nearest
-        // (a hunter: the Mossback camps only, the nearest first)
-        const mine = mixed ? HUNTER_CAMP[this.index] : undefined;
-        const first = this.hunter ? (mine !== undefined ? (k === mine ? 0 : Infinity) : eliteCamps().includes(k) ? dist(c, this.body) : Infinity)
-          : k === (mixed ? this.index >> 1 : this.index) % camps.length ? 0 : Infinity;
-        const d = this.campVisited.size === 0 || this.hunter ? first : dist(c, this.body);
-        if (d < bestD) { best = k; bestD = d; }
-      });
-      if (best < 0) { this.campVisited.clear(); return; }
-      this.campGoal = best;
-      this.campSpot = this.standOff(camps[best]);
-      this.campWaitFrom = null;
-    }
-    const spot = this.campSpot!;
-    if (dist(spot, this.body) < 1) {
-      this.campWaitFrom ??= now;
-      if (now - this.campWaitFrom >= CAMP_WAIT_MS) {
-        this.campVisited.set(this.campGoal, now);
-        this.campGoal = null;
-        this.route = null;
-      }
-      return;
-    }
-    this.maybeSprint(dist(spot, this.body), sv, now);
-    this.walkRoute(spot, dt, now, 1, false);
+    return { act, sv, scale };
   }
 
   /** A sprinter presses Sprint for a walk longer than SPRINT_FROM_M, when it is ready (and not already on). */
@@ -1364,7 +1656,7 @@ class Bot {
   private walkRoute(goal: Vec2, dt: number, now: number, scale: number, intoExit: boolean) {
     if (this.route && dist(this.route.goal, goal) > 2) this.route = null;
     if (!this.route && (this.stuckTicks >= STUCK_TICKS || dist(goal, this.body) > 15)) {
-      const points = findPath({ x: this.body.x, z: this.body.z }, goal, passableIn(this.zone), PATH_OPTS);
+      const points = findPath({ x: this.body.x, z: this.body.z }, goal, passableIn(this.zone, this.zone === 'lampfall' ? this.room.state.gates ?? 0 : 0), PATH_OPTS);
       this.route = { goal: { ...goal }, points: points ?? [] };
       this.stuckTicks = 0;
     }
@@ -1388,7 +1680,8 @@ class Bot {
       const h = ahead + turn;
       const b = { ...this.body };
       stepFor(b, { vx: Math.sin(h) * speed, vz: Math.cos(h) * speed, jump: false }, dt, this.surface);
-      if (dist(b, this.body) < speed * Math.min(dt, BODY_STEP_MAX_S) * 0.3 || (!intoExit && this.nearExit(b))) continue;
+      // (near an exit it may only step away from it: a party told the Lampfall is full stands right by the mouth)
+      if (dist(b, this.body) < speed * Math.min(dt, BODY_STEP_MAX_S) * 0.3 || (!intoExit && this.nearExit(b) && this.exitGap(b) <= this.exitGap(this.body))) continue;
       body = b;
       facing = h;
       break;
@@ -1423,12 +1716,194 @@ class Bot {
   /** Died and is neither back in the Greenway nor getting nearer it (nor still lying dead, nor travelling). */
   stuckAfterDeath(now: number): boolean {
     if (this.diedAt === null || this.switching) return false;
-    if (this.dead) return now - this.diedAt > 40_000; // it asks to respawn from 3 s on (the server wakes it at 30 s anyway)
+    // it asks to respawn from 3 s on (the server wakes it at 30 s anyway); inside, it may lie until the auto release
+    if (this.dead) return now - this.diedAt > (this.zone === 'lampfall' ? (AUTO_RELEASE_S + 15) * 1000 : 40_000);
     return now - this.progressAt > PROGRESS_MS;
+  }
+
+  // ───────── --dungeon, --warden ─────────
+
+  /** The other members of its party in its instance, alive and not travelling. */
+  private matesHere(): Bot[] {
+    if (!this.plan) return [];
+    return this.plan.members.map((i) => bots[i]).filter((b) => b !== this && b.zone === 'lampfall' && b.roomId === this.roomId && !b.switching && !b.disconnected && !b.isDead);
+  }
+
+  /** A White Mage of its party in its instance with Second Dawn ready, within ALLY_VIEW_R. */
+  private partyMageNear(): boolean {
+    return this.matesHere().some((b) => b.reviveReady && dist(b.position, this.body) <= ALLY_VIEW_R);
+  }
+
+  /** The leader invites its members by name, again every INVITE_RETRY_MS until the party is whole. */
+  startInviting() {
+    const plan = this.plan!;
+    const invite = () => {
+      if (formedPlans.has(plan.k) || this.disconnected) return;
+      const inParty = new Set((this.partyView?.members ?? []).map((m) => m.name));
+      plan.members.slice(1).forEach((i, j) => {
+        const name = bots[i].name;
+        if (inParty.has(name)) return;
+        this.timers.push(setTimeout(() => {
+          if (this.switching || this.disconnected || formedPlans.has(plan.k)) return;
+          this.room.send('party', { op: 'invite', name });
+          partyStats.invitesSent++;
+        }, j * 300));
+      });
+    };
+    this.timers.push(setTimeout(invite, SETTLE_MS + 500));
+    this.timers.push(setInterval(invite, INVITE_RETRY_MS));
+  }
+
+  /**
+   * In the Greenway on its way in: to the gather spot before the crater mouth, and once its party is whole and
+   * every member there (or already in), out of combat, into the mouth.
+   */
+  private toMouth(sv: SelfView, dt: number, now: number) {
+    const plan = this.plan!;
+    const spot = mouthGather();
+    const formed = plan.members.length === 1 || (this.partyView?.members.length ?? 0) === plan.members.length;
+    const mates = plan.members.map((i) => bots[i]).filter((b) => b !== this);
+    const ready = formed && mates.every((b) => b.zone === 'lampfall' || b.switching || b.full || (b.zone === 'greenway' && dist(b.position, spot) < GATHER_R + 2));
+    if (!ready || sv.inCombat) {
+      if (dist(spot, this.body) > 1) this.walkRoute(spot, dt, now, 1, false);
+      return;
+    }
+    this.walkRoute(LAMPFALL_MOUTH, dt, now, 1, true);
+  }
+
+  /** Dead inside: it lies for a revive (a party White Mage near with Second Dawn ready), else releases when it may. */
+  private deadInside(now: number) {
+    const inst = this.instanceView;
+    if (inst && inst.wipeIn !== null) return; // a wipe: everyone gets up at the checkpoint
+    if (this.partyMageNear() && now - this.deadSince! < REVIVE_WAIT_MS) return;
+    // in a sealed fight a released adventurer could not come back in: it lies (a revive, a wipe or the auto release)
+    if (this.room.state.sealed) return;
+    if (now - this.deadSince! < RELEASE_MIN_S * 1000 + 500 || now - this.respawnAskedAt < 1000) return;
+    this.respawnAskedAt = now;
+    this.room.send('release', {});
+    if (!this.releasePending) partyStats.releasesSent++;
+    this.releasePending = true;
+  }
+
+  /**
+   * Has its party the go for room `goal`? Each member gathers at `gather` (on the entry corridor, outside any gate);
+   * once all the live members in the instance are there (or GATHER_WAIT_MS has passed), they walk in together.
+   * Outside a room whose gate is shut there is no go (it waits at the gather spot until the fight ends).
+   */
+  private hasGo(goal: DungeonRoom, gather: Vec2, now: number): boolean {
+    const key = `${this.roomId}:${goal.id}`;
+    if (encounterOf(goal) && this.room.state.sealed === encounterOf(goal) && dist(this.body, goal) > goal.r - 0.5) { this.goRoom = null; return false; }
+    if (this.goRoom === key) return true;
+    const here = dist(this.body, gather) < GATHER_R;
+    this.gatherSince = here ? this.gatherSince ?? now : null;
+    if (here && (this.matesHere().every((b) => b.goRoom === key || dist(b.position, gather) < GATHER_R) || now - this.gatherSince! > GATHER_WAIT_MS)) this.goRoom = key;
+    return this.goRoom === key;
+  }
+
+  /** Each enemy's camp spot (its spawn in its room, matched when first seen): the brain's `home`. */
+  private homes = new Map<number, { x: number; z: number; leash: number }>();
+
+  /**
+   * One tick in the Lampfall: room by room in lampfallLayout() order, to each pack's (or boss's) room through its
+   * gather spot, fighting with the dungeon brain: target the boss while it lives, else the pack's live enemy with
+   * the least hp (the simulation's rule, so the party focuses); allies its party; the room as its arena; the fields
+   * and enemies it sees. Warden runs end at a kill or a wipe (then it stands).
+   */
+  private dungeonStep(me: any, now: number, dt: number) {
+    const L = lampfallLayout();
+    const state = this.room.state;
+    const cleared = new Set<string>(this.instanceView?.cleared ?? []);
+    const goal = L.rooms.find((r) => encounterOf(r) !== undefined && !cleared.has(encounterOf(r)!)) ?? null;
+    const rec = this.plan ? wardenRecs.get(this.plan.k) : undefined;
+    if (rec) this.noteWarden(rec, cleared, now);
+    const clearTarget = () => { if (this.sentTarget !== null) { this.sentTarget = null; this.room.send('target', { id: null }); } };
+    if (rec?.done) return clearTarget(); // its run is over: it stands
+    if (!this.jobReady) {
+      // a Warden run takes its job at a sanctuary (the landing it starts at)
+      if (zoneDef('lampfall').jobSwitch(this.body.x, this.body.z)) return this.askJob(now);
+      const s = nearestOf(zoneDef('lampfall').sanctuaries ?? [], this.body);
+      if (s) this.walkRoute(s, dt, now, 1, false);
+      return;
+    }
+    const mine = me.eid;
+    const enemies: any[] = [];
+    state.enemies?.forEach((e: any) => { if (e.mode !== 'dead') enemies.push(e); });
+    for (const e of enemies) {
+      if (this.homes.has(e.eid)) continue;
+      const room = L.rooms.find((r) => dist(e, r) <= r.r + 2);
+      const spawns = room?.spawns ?? [];
+      const own = ENEMY_KINDS[e.kind as EnemyKindId].speed > 0 ? nearestOf(spawns.filter((sp) => sp.kind === e.kind), e) : spawns.find((sp) => ENEMY_KINDS[sp.kind].boss);
+      if (own) this.homes.set(e.eid, { x: own.x, z: own.z, leash: ENEMY_KINDS[own.kind].leash });
+    }
+    const attacker = enemies.find((e) => e.target === mine && e.mode !== 'return') ?? null;
+    let target: any = null, go = false, gather: Vec2 | null = null;
+    if (goal) {
+      const corr = L.corridors.find((c) => c.to === goal.id)!;
+      const len = Math.hypot(corr.ax - corr.bx, corr.az - corr.bz);
+      const back = Math.min(GATHER_BACK_M, len - 1);
+      gather = { x: corr.bx + ((corr.ax - corr.bx) / len) * back, z: corr.bz + ((corr.az - corr.bz) / len) * back };
+      go = this.hasGo(goal, gather, now);
+      const pool = enemies.filter((e) => e.mode !== 'return' && dist(e, goal) <= goal.r + 2 && (go || e.mode !== 'idle'));
+      target = pool.find((e) => ENEMY_KINDS[e.kind as EnemyKindId].boss) ?? null;
+      if (!target) for (const e of pool) if (!target || e.hp < target.hp || (e.hp === target.hp && dist(e, this.body) < dist(target, this.body))) target = e;
+    }
+    target ??= attacker;
+    if (!target) clearTarget();
+    const fields: FieldView[] = [];
+    state.fields?.forEach((f: any) => {
+      const shape: Shape = f.shape === 'ring' ? { kind: 'ring', x: f.x, z: f.z, dir: 0, inner: f.inner, r: f.r } : { kind: 'circle', x: f.x, z: f.z, r: f.r };
+      fields.push({ id: f.id, owner: f.owner, field: f.field, shape, raw: f.raw, startedAt: f.at / TICK_HZ });
+    });
+    const home = target ? this.homes.get(target.eid) : undefined;
+    const thought = this.think(me, now, target, {
+      fields, arena: goal ? { x: goal.x, z: goal.z, r: goal.r } : null, enemies: enemies.map((e) => this.enemyView(e, now)), ...(home ? { home } : {}),
+    });
+    if (!thought) return; // it rolled
+    const { act, scale } = thought;
+    if (act.moveTo) return this.walkRoute(act.moveTo, dt, now, scale, false);
+    if (target || !goal || !gather) return;
+    // nothing to fight: into the room once the party has the go, else to the gather spot
+    if (go) return this.walkRoute({ x: goal.x, z: goal.z }, dt, now, 1, false);
+    if (dist(gather, this.body) > 1) this.walkRoute(gather, dt, now, 1, false);
+  }
+
+  /** A Warden run's record, from what this member sees: the Lens Pit reached, the wake, phases, enrage, the end. */
+  private noteWarden(rec: WardenRec, cleared: Set<string>, now: number) {
+    if (rec.done) return;
+    const pit = lampfallLayout().rooms.find((r) => r.id === 'lens_pit')!;
+    if (dist(this.body, pit) <= pit.r) rec.reachedPit = true;
+    const state = this.room.state;
+    const clock = typeof state.clock === 'number' ? state.clock : 0;
+    state.enemies?.forEach((e: any) => {
+      if (e.kind !== 'fallen_warden') return;
+      if (e.mode !== 'idle' && e.mode !== 'dead') rec.wakeAt ??= now;
+      rec.phase = Math.max(rec.phase, e.phase ?? 0);
+      if (e.enrageAt > 0 && clock >= e.enrageAt) rec.enraged = true;
+    });
+    if (cleared.has('warden')) { rec.outcome = 'kill'; rec.endAt = now; rec.done = true; }
+    else if (rec.wakeAt !== null && this.instanceView && this.instanceView.wipeIn !== null) { rec.outcome = 'wipe'; rec.endAt = now; rec.done = true; }
+  }
+
+  private partyLines = 0;
+  private lastChatAt = -Infinity;
+  /** The leader's party chat inside (with markup, shown as plain text by clients): only while every member is in its instance. */
+  partyChat() {
+    const plan = this.plan;
+    if (!plan || plan.members[0] !== this.index || plan.members.length < 2 || this.zone !== 'lampfall' || this.switching || this.disconnected) return;
+    const mates = plan.members.slice(1).map((i) => bots[i]);
+    if (!mates.every((b) => b.zone === 'lampfall' && b.roomId === this.roomId && !b.switching && !b.disconnected)) return;
+    const now = performance.now();
+    if (now - this.lastChatAt < 1500) return; // the chat interval is shared by both channels
+    this.lastChatAt = now;
+    this.room.send('chat', { text: `${PARTY_CHAT_TAG}${plan.k}:${++this.partyLines} <b>pull</b> & "go"`, channel: 'party' });
+    partyStats.chatSent++;
+    partyStats.chatExpected += mates.length;
   }
 
   private chat() {
     if (this.travelled || this.switching) return;
+    if (this.zone === 'lampfall') return; // inside, party bots talk on the party channel only (partyChat)
+    this.lastChatAt = performance.now();
     this.room.send('chat', { text: `${this.name} says hello at ${new Date().toISOString().slice(11, 19)}` });
   }
 
@@ -1441,7 +1916,16 @@ class Bot {
   }
 }
 
+if (PARTY_BOTS > count) {
+  console.error(`--dungeon ${dungeonN} needs ${PARTY_BOTS} bots in parties, more than --count ${count}`);
+  process.exit(2);
+}
 const bots = Array.from({ length: count }, (_, i) => new Bot(i));
+if (wardenMode) {
+  for (const plan of partyPlans) {
+    wardenRecs.set(plan.k, { plan, outcome: 'time', done: false, reachedPit: false, wakeAt: null, endAt: null, phase: 0, enraged: false, interrupts: 0, breaks: 0 });
+  }
+}
 console.log(`Joining ${count} bots to ${url} ...`);
 try {
   for (let i = 0; i < count; i += JOINS_AT_ONCE) {
@@ -1486,7 +1970,11 @@ const sampler = setInterval(() => {
 }, 1000);
 for (const bot of bots) bot.patches = 0;
 const measureStart = performance.now();
-await sleep(seconds * 1000);
+// (a Warden run ends early once every party's fight is over: a kill or a wipe)
+for (let left = seconds * 1000; left > 0; left -= 1000) {
+  await sleep(Math.min(1000, left));
+  if (wardenMode && [...wardenRecs.values()].every((r) => r.done)) { await sleep(3000); break; }
+}
 const measured = (performance.now() - measureStart) / 1000;
 const rates = bots.map((bot) => (bot.patches ?? 0) / measured);
 clearInterval(sampler);
@@ -1579,6 +2067,37 @@ if (fight) {
   console.log(`  fx events per bot a second: ${(sum((bot) => bot.fxEvents) / count / Math.max(1, measured + warmupMs / 1000)).toFixed(2)}; lowest hp a bot was seen alive at: ${Math.min(...bots.map((bot) => bot.hpSeenMin))}`);
 }
 
+const instSamples = healthSamples.map((h) => h.instances?.tickMsP95Max ?? 0);
+const maxInstanceP95 = Math.max(0, ...instSamples, final.instances?.tickMsP95Max ?? 0);
+const maxLoopP99 = Math.max(0, ...loopSamples);
+const recs = [...instanceRecs.values()];
+const firstPackLate = recs.filter((r) => r.firstPackAt === null || r.firstPackAt - r.enteredAt > FIRST_PACK_S * 1000);
+if (partyPlans.length) {
+  const show = (r: Record<string, number>) => JSON.stringify(Object.fromEntries(Object.entries(r).sort()));
+  const sizes = partyPlans.map((p) => p.members.length).join(',');
+  console.log(`parties (${wardenMode ? '--warden' : `--dungeon ${dungeonN}`}): planned ${partyPlans.length} (sizes ${sizes}; ${PARTY_BOTS} bots), formed ${partyStats.formed}; invites sent ${partyStats.invitesSent}, accepted ${partyStats.accepts}, refused ${show(partyStats.refused)}`);
+  console.log(`  instances opened ${recs.length} (most open at once, /healthz: ${Math.max(0, ...healthSamples.map((h) => h.instances?.open ?? 0))}); full notices: ${fullPlans.size} parties; mouth refusals in combat ${partyStats.inCombatRefusals}; instances open at the end ${final.instances?.open ?? '?'} with ${final.instances?.players ?? '?'} inside`);
+  console.log(`  where the party bots are at the end: ${JSON.stringify(bots.filter((b) => b.plan).reduce<Record<string, number>>((n, b) => (bump(n, b.switching ? 'travelling' : b.zone), n), {}))}; instance step p95 max ${maxInstanceP95} ms; zone step p95 max ${maxStepP95} ms; event-loop p99 max ${maxLoopP99} ms`);
+  for (const r of recs) {
+    const packs = PACKS.filter((c) => r.cleared.has(c)).length;
+    const first = r.firstPackAt === null ? 'never' : `${((r.firstPackAt - r.enteredAt) / 1000).toFixed(0)} s`;
+    console.log(`  instance ${r.roomId} (party ${r.k}, ${partyPlans[r.k].members.length} bots: ${partyPlans[r.k].jobs.join('+')}): first pack ${first} after entry; packs ${packs}; Wickhound ${r.cleared.has('wickhound') ? 'killed' : '-'}; Warden ${r.cleared.has('warden') ? 'killed' : '-'}; wipes ${r.wipes}`);
+  }
+  const wick = recs.filter((r) => r.cleared.has('wickhound')).length;
+  const partyDeaths = bots.reduce((n, b) => n + b.deathsInside, 0);
+  console.log(`  packs killed ${recs.reduce((n, r) => n + PACKS.filter((c) => r.cleared.has(c)).length, 0)}; Wickhound kills ${wardenMode ? '- (the test start clears it)' : wick}; Warden kills ${recs.filter((r) => r.cleared.has('warden')).length}; wipes ${recs.reduce((n, r) => n + r.wipes, 0)}; deaths inside ${partyDeaths}; releases ${partyStats.releases} (sent ${partyStats.releasesSent}); revived inside ${partyStats.revivedMsgs}`);
+  console.log(`  party bots: reactions ${show(partyStats.reactions)}; revives ${partyStats.revives}; interrupts ${partyStats.interrupts}; Breaks ${partyStats.breaks}; victories ${show(partyStats.victories)}`);
+  console.log(`  party chat: lines sent ${partyStats.chatSent}, deliveries due ${partyStats.chatExpected}, received ${partyStats.chatGot}; notices ${show(partyStats.notices)}`);
+  if (wardenMode) {
+    console.log('  Warden runs (per party): outcome, seconds from the wake, phase reached (1-based), enrage, deaths, revives, interrupts, Breaks');
+    for (const w of wardenRecs.values()) {
+      const secs = w.wakeAt === null ? '-' : (((w.endAt ?? endedAt) - w.wakeAt) / 1000).toFixed(0);
+      const members = w.plan.members.map((i) => bots[i]);
+      console.log(`    ${w.plan.jobs.join('+')}:${w.plan.skill}: ${w.outcome}, ${secs} s, phase ${w.phase + 1}, enrage ${w.enraged ? 'yes' : 'no'}, deaths ${members.reduce((n, b) => n + b.deathsInside, 0)}, revives ${members.reduce((n, b) => n + b.revivedInside, 0)}, interrupts ${w.interrupts}, Breaks ${w.breaks}${w.reachedPit ? '' : ' (never reached the Lens Pit)'}`);
+    }
+  }
+}
+
 if (assist !== null) {
   // the smoke test's helpers have no pass marks of their own
   console.log(lost.length ? `assist: ${lost.length} bots disconnected` : 'assist: done');
@@ -1587,11 +2106,12 @@ if (assist !== null) {
 const failures: string[] = [];
 if (lost.length) failures.push(`${lost.length} bots disconnected (first: ${lost[0].name}, ${lost[0].disconnected})`);
 // (Standing bots too: the state's `clock` changes every step, so a patch goes out every step.)
-if (!(mean >= MIN_MEAN_HZ)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${MIN_MEAN_HZ} Hz`);
+const minHz = wardenMode ? WARDEN_MIN_HZ : MIN_MEAN_HZ;
+if (!(mean >= minHz)) failures.push(`mean patch rate ${mean.toFixed(2)} Hz is below ${minHz} Hz`);
 if (corrections) failures.push(`${corrections} legal steps were corrected`);
 if (airStalls) failures.push(`${airStalls} ticks in the air had no pose the server would accept`);
 if (longestStall >= TICK_HZ) failures.push(`a bot was stuck for ${longestStall} ticks in a row`);
-if (fight) {
+if (fight && !wardenMode) {
   if (kills < FIGHT_MIN.kills) failures.push(`${kills} kills credited, fewer than ${FIGHT_MIN.kills}`);
   const minDodges = mixed ? perRun(MIXED_MIN.dodges) : FIGHT_MIN.dodges;
   if (dodges < minDodges) failures.push(`${dodges} dodges rolled, fewer than ${minDodges}`);
@@ -1606,8 +2126,9 @@ if (fight) {
     const reactions = Object.values(m.reactions).reduce((a, b) => a + b, 0);
     if (reactions < perRun(MIXED_MIN.reactions)) failures.push(`${reactions} reactions, fewer than ${perRun(MIXED_MIN.reactions)}`);
     if (cycle) {
-      const missing = (['blast', 'conduct', 'steam', 'bedrock'] as const).filter((r) => !((m.reactions[r] ?? 0) >= MIXED_MIN.eachReaction));
-      if (missing.length) failures.push(`no ${missing.join(', ')} reaction`);
+      // (ruling P3b-j: every kind is shown by the party runs; the Greenway's cycle needs two kinds)
+      const kinds = Object.values(m.reactions).filter((v) => v > 0).length;
+      if (kinds < MIXED_MIN.reactionKinds) failures.push(`reactions of ${kinds} kinds ${JSON.stringify(m.reactions)}, fewer than ${MIXED_MIN.reactionKinds}`);
       if (m.revives < MIXED_MIN.revives) failures.push(`${m.revives} revives, fewer than ${MIXED_MIN.revives}`);
     }
   }
@@ -1624,6 +2145,26 @@ if (fight) {
   if (!(maxStepP95 <= MAX_STEP_P95_MS)) failures.push(`zone step p95 reached ${maxStepP95} ms (over ${MAX_STEP_P95_MS})`);
   if (!(peakRss <= MAX_PEAK_RSS_MB)) failures.push(`peak RSS ${peakRss} MB (over ${MAX_PEAK_RSS_MB})`);
   if (mostEnemiesInView > MAX_ENEMIES_PER_ZONE || enemyKinds.size > MAX_ENEMIES_PER_ZONE) failures.push(`more than ${MAX_ENEMIES_PER_ZONE} enemies (${Math.max(mostEnemiesInView, enemyKinds.size)})`);
+}
+if (partyPlans.length && !wardenMode) {
+  const formedDue = partyPlans.filter((p) => p.members.length > 1).length;
+  if (partyStats.formed !== formedDue) failures.push(`${partyStats.formed} of ${formedDue} parties formed`);
+  if (recs.length !== Math.min(dungeonN, MAX_INSTANCES)) failures.push(`${recs.length} instances opened, not ${Math.min(dungeonN, MAX_INSTANCES)}`);
+  if (fullPlans.size !== Math.max(0, dungeonN - MAX_INSTANCES)) failures.push(`${fullPlans.size} parties told the Lampfall is full, not ${Math.max(0, dungeonN - MAX_INSTANCES)}`);
+  if (firstPackLate.length) failures.push(`${firstPackLate.length} instances did not kill their first pack within ${FIRST_PACK_S} s of entry`);
+  if (partyStats.chatSent < 1 || partyStats.chatGot !== partyStats.chatExpected) failures.push(`party chat: ${partyStats.chatGot} received of ${partyStats.chatExpected} due (${partyStats.chatSent} lines sent)`);
+  if (!(maxInstanceP95 <= MAX_INSTANCE_STEP_P95_MS)) failures.push(`instance step p95 reached ${maxInstanceP95} ms (over ${MAX_INSTANCE_STEP_P95_MS})`);
+  const kinds = Object.values(partyStats.reactions).filter((v) => v > 0).length;
+  if (kinds < PARTY_MIN.reactionKinds) failures.push(`party bots' reactions of ${kinds} kinds ${JSON.stringify(partyStats.reactions)}, fewer than ${PARTY_MIN.reactionKinds}`);
+  if (partyStats.revives < PARTY_MIN.revives) failures.push(`party bots' revives ${partyStats.revives}, fewer than ${PARTY_MIN.revives}`);
+}
+if (wardenMode) {
+  const away = [...wardenRecs.values()].filter((w) => !w.reachedPit);
+  if (away.length) failures.push(`${away.length} parties never reached the Lens Pit (first: ${away[0].plan.jobs.join('+')})`);
+  if (!(maxStepP95 <= MAX_STEP_P95_MS)) failures.push(`zone step p95 reached ${maxStepP95} ms (over ${MAX_STEP_P95_MS})`);
+  if (!(maxInstanceP95 <= MAX_INSTANCE_STEP_P95_MS)) failures.push(`instance step p95 reached ${maxInstanceP95} ms (over ${MAX_INSTANCE_STEP_P95_MS})`);
+  if (!(peakRss <= MAX_PEAK_RSS_MB)) failures.push(`peak RSS ${peakRss} MB (over ${MAX_PEAK_RSS_MB})`);
+  if (!(maxLoopP99 <= WARDEN_MAX_LOOP_P99_MS)) failures.push(`event-loop p99 reached ${maxLoopP99} ms (over ${WARDEN_MAX_LOOP_P99_MS})`);
 }
 console.log(failures.length ? `FAIL: ${failures.join('; ')}` : 'PASS');
 process.exit(failures.length ? 1 : 0);
