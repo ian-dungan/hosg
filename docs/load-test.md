@@ -297,7 +297,7 @@ walkers on a quiet machine).
 White Mage with Second Dawn, a Black Mage, a Warrior) accept the invites of the adventurer called `<name>` (it
 invites them by name: they print `join: names a,b`), walk into the mouth once it is inside, take their jobs at the
 rim's sanctuary and run the Lampfall as the party bots do (they do not wait for the adventurer). `hold` on stdin
-makes them stand (they still fight back and revive), `go` lets them carry on. No pass marks.
+makes them stand once inside (they still fight back and revive), `go` lets them carry on. No pass marks.
 
 ### The party smoke test (`smoke-party.mjs`)
 
