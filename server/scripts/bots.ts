@@ -177,6 +177,8 @@ const CYCLE_MIN = { deaths: 1, returned: 1 };
 const ELITE_HUNTERS = [3, 7, 11];
 const MAX_STEP_P95_MS = 15;
 const MAX_PEAK_RSS_MB = 400;
+/** The longest frame a walk simulates (s): the browser's clamp (client/src/boot.ts), so one pose never covers a stall. */
+const MAX_FRAME_S = 0.1;
 /** Walking speed as a share of what the server allows (RUN_SPEED × its speed scale); sprinters walk at 1. */
 const WALK_SHARE = 0.95;
 /** Bots (by index mod 5) that walk at the browser's full speed and take Sprint (Rangers with Sprint and Field Dressing). */
@@ -1928,7 +1930,12 @@ class Bot {
    * ground once it is stuck (or for a walk longer than a few metres). Sends the pose only if the
    * server's own check would take it (else it stays put). `intoExit`: it may walk into exit circles.
    */
-  private walkRoute(goal: Vec2, dt: number, now: number, scale: number, intoExit: boolean) {
+  private walkRoute(goal: Vec2, rawDt: number, now: number, scale: number, intoExit: boolean) {
+    // A frame's walk is at most MAX_FRAME_S, as the browser's (client/src/boot.ts: "game time follows real time
+    // down to 10 fps"): after a stall of this process every bot's next tick would otherwise step the whole gap
+    // in one pose (seen: 1 s, 4–9 m), past the server's allowance or, sliding along a stall, through it on the
+    // server's straight-line check: an honest pose no browser sends, corrected.
+    const dt = Math.min(rawDt, MAX_FRAME_S);
     if (this.route && dist(this.route.goal, goal) > 2) this.route = null;
     if (!this.route && (this.stuckTicks >= STUCK_TICKS || dist(goal, this.body) > 15)) {
       const points = findPath({ x: this.body.x, z: this.body.z }, goal, passableIn(this.zone, this.zone === 'lampfall' ? this.room.state.gates ?? 0 : 0), PATH_OPTS);
