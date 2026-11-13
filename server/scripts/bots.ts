@@ -311,6 +311,7 @@ const { values } = parseArgs({
     looks: { type: 'boolean', default: false },
     gear: { type: 'boolean', default: false },
     quest: { type: 'boolean', default: false },
+    parties: { type: 'boolean', default: false },
   },
 });
 // --quest with --fight: quest followers (they walk, talk, jump and fight in the Greenway as their steps need); --quest alone:
@@ -604,6 +605,8 @@ function findEnemy(room: Room<any, any>, eid: number): any {
 const looksMode = values.looks;
 const gearMode = values.gear;
 const questMode = values.quest;
+/** --parties (walkers): bots in parties of four (bot 4k invites the next three; they accept), for the party status lines' bandwidth. */
+const walkParties = values.parties;
 /** A random client operation id (OP_ID: 12–40 of A–Z a–z 0–9 _ -), new for every operation. */
 const newOpId = () => randomBytes(15).toString('base64url');
 /** --gear: every this long, a fighting bot (out of combat) takes a worn piece off and puts it on again. */
@@ -1142,6 +1145,10 @@ class Bot {
     room.onMessage('partyInvite', (m: S2C['partyInvite']) => {
       // a member accepts its own leader's invite (and only that)
       const leader = this.plan?.leaderName ?? (this.plan && this.plan.members[0] !== this.index ? bots[this.plan.members[0]].name : null);
+      if (walkParties && !this.plan && this.index % 4 !== 0 && m.from.toLowerCase() === bots[this.index - (this.index % 4)]?.name.toLowerCase()) {
+        this.room.send('party', { op: 'accept', partyId: m.partyId });
+        return;
+      }
       if (this.questFollow && !this.plan && m.from.toLowerCase() === bots[this.index - 1]?.name.toLowerCase()) {
         this.room.send('party', { op: 'accept', partyId: m.partyId });
         return;
@@ -1263,6 +1270,18 @@ class Bot {
         this.timers.push(setInterval(() => this.chat(), CHAT_EVERY_MS));
       }, Math.random() * CHAT_EVERY_MS),
     );
+    if (walkParties && !this.plan && this.index % 4 === 0) {
+      // --parties: invite the next three (again every 20 s for anyone not in yet)
+      const invite = () => {
+        const inParty = new Set((this.partyView?.members ?? []).map((m) => m.name));
+        for (let j = 1; j < 4; j++) {
+          const mate = bots[this.index + j];
+          if (mate?.name && !inParty.has(mate.name) && !this.disconnected) this.room.send('party', { op: 'invite', name: mate.name });
+        }
+      };
+      this.timers.push(setTimeout(invite, SETTLE_MS + 500 + Math.random() * 2000));
+      this.timers.push(setInterval(invite, INVITE_RETRY_MS));
+    }
     if (this.plan && !this.plan.leaderName && this.plan.members[0] === this.index && this.plan.members.length > 1) {
       this.startInviting();
       this.timers.push(setInterval(() => this.partyChat(), PARTY_CHAT_EVERY_MS));
@@ -2619,6 +2638,7 @@ if (looksMode) {
   looksDistinct = new Set(codes).size;
   console.log(`looks (--looks): bot 0 sees ${looksInView} adventurers, ${codes.length} with a look code, ${looksDistinct} distinct; gear code changes seen ${gearStats.gearCodeChanges}`);
 }
+if (walkParties) console.log(`parties (--parties): bots in a party of 2 or more at the end ${bots.filter((b) => b.inParty).length} of ${count} (in a full party of 4: ${bots.filter((b) => (b.partyView?.members.length ?? 0) === 4).length})`);
 const ledgerBad = bots.flatMap((b) => b.ledgerBad);
 const uidRepeats = sum((b) => b.uidRepeats);
 const invRefusalsBad = Object.entries(gearStats.refused).filter(([k]) => !GEAR_OK_REFUSALS.includes(k.split(' ')[1]));
