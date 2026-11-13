@@ -336,7 +336,10 @@ if (assist !== null) { values.fight = true; values.jobs = 'mixed'; values.count 
 
 // ───────── parties (--dungeon, --warden) ─────────
 /** A party the bots form: its members (bot indices, the leader first), each member's job, how well they play. */
-interface PartyPlan { k: number; members: number[]; jobs: JobId[]; skill: Skill; careless: number[]; leaderName?: string }
+interface PartyPlan { k: number; members: number[]; jobs: JobId[]; skill: Skill; careless: number[]; leaderName?: string; kit?: WardenKit }
+/** --warden: the kit a party fights in (the server's SG2_TEST_KIT gives every new adventurer one tier: one tier a server). */
+type WardenKit = 'starter' | 't1' | 't2' | 't3';
+const WARDEN_KITS: readonly WardenKit[] = ['starter', 't1', 't2', 't3'];
 const SKILLS: readonly Skill[] = ['careful', 'skilled', 'sloppy', 'careless'];
 /** --dungeon: party sizes cycle through these. */
 const DUNGEON_SIZES = [4, 3, 2];
@@ -362,7 +365,10 @@ if (values.dungeon !== undefined) {
 if (wardenMode) {
   // `job+job…:skill`, comma separated: each a party that walks from the landing into the Lens Pit
   let at = 0;
-  for (const [k, part] of values.warden!.split(',').entries()) {
+  for (const [k, part0] of values.warden!.split(',').entries()) {
+    const [part, kitText = 'starter'] = part0.trim().split('@');
+    const kit = kitText.trim() as WardenKit;
+    if (!WARDEN_KITS.includes(kit)) { console.error(`--warden: "${part0}" has kit "${kitText}" (kits ${WARDEN_KITS.join(', ')})`); process.exit(2); }
     const [jobsText, skillText = 'careful'] = part.trim().split(':');
     const jobs = jobsText.split('+').map((j) => j.trim()) as JobId[];
     const skill = skillText.trim() as Skill;
@@ -370,10 +376,11 @@ if (wardenMode) {
       console.error(`--warden: "${part}" is not job+job…:skill (jobs ${JOB_IDS.join(', ')}; skills ${SKILLS.join(', ')}; at most ${PARTY_MAX} jobs)`);
       process.exit(2);
     }
-    partyPlans.push({ k, members: jobs.map((_, j) => at + j), jobs, skill, careless: [] });
+    partyPlans.push({ k, members: jobs.map((_, j) => at + j), jobs, skill, careless: [], kit });
     at += jobs.length;
   }
   values.fight = true; values.count = String(at); values.warmup = '0';
+  if (new Set(partyPlans.map((p) => p.kit)).size > 1) console.log('--warden: the parties name different kits; the server gives one (SG2_TEST_KIT): each party\'s worn tier is printed beside its outcome');
 }
 /**
  * --join <name> (for the party smoke test, a server with SG2_START_AT=lampfall-mouth): --count bots (1–3: a White Mage
@@ -831,6 +838,8 @@ class Bot {
 
   // --looks, --gear, --quest
   /** The look code and gear code the room sent for each engine id (its `looks` messages), this room only. */
+  /** Its current job's level (from `jobs`). */
+  level = 1;
   /** The zone it first joined. */
   startZone: ZoneId | null = null;
   seenLooks = new Map<number, string>();
@@ -987,6 +996,7 @@ class Bot {
     room.onMessage('self', (m: S2C['self']) => { this.selfView = m; this.selfAt = performance.now(); });
     room.onMessage('jobs', (m: S2C['jobs']) => {
       this.jobNow = { job: m.current, picks: [m.jobs[m.current].picks[0], m.jobs[m.current].picks[1]] };
+      this.level = m.jobs[m.current].level ?? this.level;
       // a job change it asked for (at the Guild Board), confirmed: counted once per bot
       if ((mixed || this.plan) && !this.switchCounted && this.jobAskedAt > -Infinity && m.current === this.loadout.job) { this.switchCounted = true; mixedStats.switches++; }
     });
@@ -2673,6 +2683,16 @@ if (partyPlans.length) {
     for (const w of wardenRecs.values()) {
       const secs = w.wakeAt === null ? '-' : (((w.endAt ?? endedAt) - w.wakeAt) / 1000).toFixed(0);
       const members = w.plan.members.map((i) => bots[i]);
+      // the kit it asked for and the tiers it wore (from its last inventory: its current job's worn pieces), beside its band
+      const worn = [...new Set(members.map((b) => {
+        const g = b.inv?.gear[b.job] ?? {};
+        const tiers = Object.values(g).map((uid) => ITEMS[b.inv!.bag.find((i) => i.uid === uid)?.item ?? '']?.tier ?? 0);
+        return tiers.length ? `t${Math.min(...tiers)}-t${Math.max(...tiers)}` : '?';
+      }))].join('/');
+      const band = w.plan.members.length >= 2 && w.plan.skill === 'sloppy' ? (w.plan.kit === 't2' ? 'G2: T2 sloppy duos win >= 60% (about 75%)' : w.plan.kit === 'starter' ? 'G2: starter sloppy duos win <= 50% (about 25%)' : w.plan.kit === 't1' ? 'G3: T1 between starter and T2' : '-')
+        : w.plan.members.length === 1 && w.plan.kit === 't3' ? (w.plan.skill === 'careful' ? 'G5: T3 careful solo wins >= 20% (about 35%)' : w.plan.skill === 'sloppy' ? 'G5: T3 sloppy solo wins <= 20% (about 8%)' : '-')
+        : w.plan.members.length === 1 && w.plan.kit === 't2' ? 'G4: T2 careful solo wins <= 10% (about 3%)' : '-';
+      console.log(`    ${w.plan.jobs.join('+')}:${w.plan.skill}@${w.plan.kit ?? 'starter'} (worn ${worn}, level ${members.map((b) => b.level).join('/')}): band ${band}`);
       console.log(`    ${w.plan.jobs.join('+')}:${w.plan.skill}: ${w.outcome}, ${secs} s, phase ${w.phase + 1}, enrage ${w.enraged ? 'yes' : 'no'}, deaths ${members.reduce((n, b) => n + b.deathsInside, 0)}, revives ${members.reduce((n, b) => n + b.revivedInside, 0)}, interrupts ${w.interrupts}, Breaks ${w.breaks}${w.reachedPit ? '' : ' (never reached the Lens Pit)'}`);
     }
   }
