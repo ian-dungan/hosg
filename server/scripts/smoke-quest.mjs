@@ -209,7 +209,7 @@ try {
   console.log('PASS');
 } catch (err) {
   console.log(`FAIL at "${step}": ${err instanceof Error ? err.message.split('\n').slice(0, 8).join('\n') : err}`);
-  if (shots) for (const p of pages) if (!p.page.isClosed()) await p.page.screenshot({ path: `${shots}/quest-fail-${p.label.split(' ')[0]}.png` }).catch(() => {});
+  if (shots) for (const p of pages) if (!p.page.isClosed()) await p.page.screenshot({ path: `${shots}/quest-fail-${p.label.split(' ')[0]}.png`, timeout: 30_000 }).catch(() => {});
   if (pageErrors.length && step !== 'page errors') console.log(`page errors so far:\n  ${pageErrors.join('\n  ')}`);
   process.exitCode = 1;
 } finally {
