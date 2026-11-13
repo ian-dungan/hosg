@@ -122,3 +122,10 @@ describe('creatorLayout', () => {
     });
   }
 });
+
+describe('the creator overlay', () => {
+  it('takes pointer events itself: the HUD root it sits in has none, so Done was unclickable (Plan 4 Task 10 live check)', async () => {
+    const { CREATOR_CSS } = await import('./creator');
+    expect(CREATOR_CSS).toMatch(/\.sg-cr\{[^}]*pointer-events:auto/);
+  });
+});

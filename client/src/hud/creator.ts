@@ -27,8 +27,9 @@ let previewFactory: (() => CreatorPreview) | null = null;
 /** Installs the preview the creator draws (the online client does; tests and the offline demo need none). */
 export function setCreatorPreview(f: (() => CreatorPreview) | null): void { previewFactory = f; }
 
-const CSS = /* css */ `
-.sg-cr{position:fixed;inset:0;z-index:80;font:15px/1.35 var(--sans,system-ui,sans-serif);color:var(--cream,#fff6e6);
+/** The creator's own style (exported for its test). It takes pointer events itself: the HUD root it is put in has none. */
+export const CREATOR_CSS = /* css */ `
+.sg-cr{position:fixed;inset:0;z-index:80;pointer-events:auto;font:15px/1.35 var(--sans,system-ui,sans-serif);color:var(--cream,#fff6e6);
   background:radial-gradient(ellipse at 30% 30%,#3b3a6e 0%,#1e1b3a 70%);touch-action:none;-webkit-user-select:none;user-select:none}
 .sg-cr *{box-sizing:border-box}
 .sg-cr-pv{position:absolute;overflow:hidden;touch-action:none;cursor:grab}
@@ -92,7 +93,7 @@ function injectCss() {
   if (document.getElementById('sg-creator-css')) return;
   const s = document.createElement('style');
   s.id = 'sg-creator-css';
-  s.textContent = CSS;
+  s.textContent = CREATOR_CSS;
   document.head.appendChild(s);
 }
 
