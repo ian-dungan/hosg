@@ -232,7 +232,9 @@ try {
     await shot(a, 'a-bag-item');
     const equipBtn = a.page.locator('.sg-gs-btn', { hasText: /^Equip/ }).first();
     await equipBtn.waitFor({ state: 'visible', timeout: WAIT_MS });
-    if (await equipBtn.evaluate((el) => el.classList.contains('off'))) throw new Error(`${DATA.names[it.item]} cannot be equipped by a ${before.job}`);
+    // (the button is off while A is still in its fight: it is waited for, and its line read if it never turns on)
+    const on = await a.page.waitForFunction(() => { const b = [...document.querySelectorAll('.sg-gs-btn')].find((e) => /^Equip/.test(e.textContent ?? '')); return b && !b.classList.contains('off'); }, null, { timeout: 120_000, polling: 500 }).then(() => true, () => false);
+    if (!on) throw new Error(`${DATA.names[it.item]}: Equip stays off for a ${before.job} (${await ev(a, () => [...document.querySelectorAll('.sg-gs-why')].map((e) => e.textContent).join(' | '))})`);
     // (a fight can start meanwhile: "Not while fighting" is refused, and it is asked again once the fight is over)
     for (let tries = 0; tries < 8; tries++) {
       await equipBtn.click();
