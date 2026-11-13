@@ -89,6 +89,8 @@ import {
   BOSSES,
   INSTANCE_EVICT_S,
   INSTANCE_RECONNECT_S,
+  INSTANCE_IDLE_S,
+  REASON_INSTANCE_IDLE,
   MAX_INSTANCES,
   LAMPFALL_MOUTH,
   PARTY_MAX,
@@ -245,9 +247,10 @@ const JUMP_EVERY_MS = 1000;
 interface QuestOut { pay: QuestPay; changed: boolean }
 
 /** An instance's timings (s): the Numbers by default, shorter in tests. */
-export interface InstanceTimings { reconnectS: number; evictS: number; wipeS: number; releaseMinS: number; autoReleaseS: number; sealS: number }
+export interface InstanceTimings { reconnectS: number; evictS: number; wipeS: number; releaseMinS: number; autoReleaseS: number; sealS: number; idleS: number }
 const INSTANCE_TIMINGS: InstanceTimings = {
   reconnectS: INSTANCE_RECONNECT_S, evictS: INSTANCE_EVICT_S, wipeS: WIPE_DELAY_S, releaseMinS: RELEASE_MIN_S, autoReleaseS: AUTO_RELEASE_S, sealS: SEAL_DELAY_S,
+  idleS: INSTANCE_IDLE_S,
 };
 
 /** A GM's kick closes the connection with this code (the client shows the sign-in screen with the reason). */
@@ -467,6 +470,8 @@ interface Session {
    */
   dead: boolean;
   deadAt: number;
+  /** Its last pose change or intent (combat s): an instance sends it out after INSTANCE_IDLE_S without one. */
+  activeAt: number;
   /** The death's save as respawned (at the statue in RESPAWN_ZONE): every later save waits for it. */
   deathSave?: Promise<'saved' | 'refused' | 'failed'>;
   /**
@@ -874,6 +879,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       awaitingDisplace: false,
       dead: false,
       deadAt: -Infinity,
+      activeAt: now,
       respawnSaved: false,
       lastSelf: '',
       lastDisplaceKind: null,
@@ -1128,6 +1134,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       return false;
     }
     const before = session.lastGood;
+    if (pose.x !== before.x || pose.z !== before.z || pose.y !== before.y || pose.facing !== session.facing) session.activeAt = this.nowS();
     movement.metres -= Math.hypot(pose.x - session.lastGood.x, pose.z - session.lastGood.z);
     session.lastGood = { x: pose.x, z: pose.z, y: pose.y };
     session.facing = pose.facing;
@@ -1246,6 +1253,15 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (session.reconnection) return;
     const text = reason === 'save' ? INV_SAVE_TEXT : INV_TEXT[reason];
     this.sendTo(session.client, 'invRefused', { op, reason, text });
+  }
+
+  /** Engaged in a boss fight: inside the arena of a boss that is awake (the wipe and release rules handle the rest). */
+  private inBossFight(session: Session): boolean {
+    const inst = this.inst;
+    if (!inst) return false;
+    const { x, z } = session.lastGood;
+    for (const boss of inst.bosses.values()) if (boss.wokeAt !== null && inst.arenas[boss.encounter](x, z)) return true;
+    return false;
   }
 
   /** Inside an instance's sealed boss arena now (ruling P5-h: no gear, talent or pick changes there). */
@@ -1799,6 +1815,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /** Passes an intent to the engine; a refusal goes back to the client. True if accepted. */
   private intent(session: Session, action: IntentAction, intent: Intent): boolean {
+    session.activeAt = this.nowS();
     const refusal = this.combat.intent(session.eid, intent, this.nowS());
     if (refusal) this.refuse(session, action, refusal);
     return refusal === null;
@@ -3180,6 +3197,13 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       inst.evictAt.delete(accountId);
       const session = this.sessionOf(accountId);
       if (session) this.travelOut(session);
+    }
+    // idle for idleS (no pose change, no intent; dead counts): out to the mouth, unless in an awake boss's arena
+    for (const session of this.sessions.values()) {
+      if (session.travelling || session.reconnection || now - session.activeAt < inst.t.idleS) continue;
+      if (this.inBossFight(session)) continue;
+      this.notice(session, REASON_INSTANCE_IDLE, this.wallMs());
+      this.travelOut(session);
     }
     // a fight is on while any enemy targets someone
     for (const e of this.state.enemies.values()) {

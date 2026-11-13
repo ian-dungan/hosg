@@ -162,6 +162,7 @@ New combat constants live in `shared/src/combat/constants.ts` in a section heade
 | `INSTANCE_MAX_S` | 5400 | hard lifetime (90 min); then everyone inside is sent to the mouth with a notice |
 | `INSTANCE_RECONNECT_S` | 120 | a dropped adventurer's seat inside is held this long (spec: 2 minutes) |
 | `INSTANCE_EVICT_S` | 10 | after leaving or being kicked from the party, an adventurer inside is sent to the mouth after this |
+| `INSTANCE_IDLE_S` | 300 | (final review I2) an adventurer inside with no pose change and no intent for this long is sent to the mouth with `REASON_INSTANCE_IDLE`; dead and idle counts as idle; never while engaged in a boss fight (inside an awake boss's arena) |
 | `WIPE_DELAY_S` | 5 | after a wipe, everyone gets up at the checkpoint after this |
 | `RELEASE_MIN_S` | 10 | a dead adventurer in an instance may release (get up at the checkpoint) after this |
 | `AUTO_RELEASE_S` | 60 | ...and releases by itself after this |

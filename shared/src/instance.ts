@@ -12,6 +12,12 @@ export const INSTANCE_MAX_S = 5400;
 export const INSTANCE_RECONNECT_S = 120;
 /** After leaving or being kicked from the party, an adventurer inside is sent to the mouth after this (s). */
 export const INSTANCE_EVICT_S = 10;
+/**
+ * An adventurer inside with no pose change and no intent for this long (s) is sent to the crater mouth
+ * with REASON_INSTANCE_IDLE (dead and idle counts as idle), never while engaged in a boss fight (inside an
+ * awake boss's arena: the wipe and release rules handle that). Instances are few (MAX_INSTANCES).
+ */
+export const INSTANCE_IDLE_S = 300;
 /** After a wipe, everyone gets up at the checkpoint after this (s). */
 export const WIPE_DELAY_S = 5;
 /** A dead adventurer in an instance may release (get up at the checkpoint) after this (s)… */
@@ -29,6 +35,8 @@ export const REASON_INSTANCES_FULL = 'The Lampfall is crowded right now, try aga
 export const REASON_ARENA_SEALED = 'The lamp-gate is shut until the fight ends';
 /** The instance closed (its hard lifetime) with this adventurer inside: sent to the mouth. */
 export const REASON_INSTANCE_CLOSED = 'The Lampfall has gone quiet; you climb back out';
+/** Idle inside for INSTANCE_IDLE_S: sent to the mouth. */
+export const REASON_INSTANCE_IDLE = 'You rested too long in the Lampfall, so you climb back out';
 /** Left or kicked from the party while inside: sent to the mouth after INSTANCE_EVICT_S. */
 export const REASON_LEFT_PARTY = 'You left the party, so you climb back out of the Lampfall';
 
