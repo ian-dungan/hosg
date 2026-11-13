@@ -52,6 +52,10 @@ With `--fight` they fight in the Greenway with the shared brain (see "Fighting b
    | `--dungeon <n>` | off | with `--fight` (and usually `--jobs mixed`): the first bots form `n` parties and run the Lampfall (below, "Parties and the Lampfall") |
    | `--warden <spec>` | off | scripted Warden runs, for a server with `SG2_START_AT=lampfall-mouth SG2_TEST_INSTANCE_START=landing` (below); sets `--count` itself |
    | `--join <name>` `[--count 1-3] [--skill s]` | off | the party smoke test's helpers: bots that join `<name>`'s party and run the Lampfall with it (below); no pass marks |
+   | `--looks` | off | each bot spends its free creator visit on a random look (`randomLook(prng(index + 1))`, `POST /api/look`) before joining; prints how many distinct looks bot 0 sees (below, "Looks, gear and the opening quest") |
+   | `--gear` | off | with `--fight`: the Smithy, the Tailor, a worn piece taken off and put on every 60 s, drops sold, talents, and a gold and item ledger per bot (below); start the server with `SG2_TEST_START_GOLD` ≥ 200 |
+   | `--parties` | off | walkers in parties of four (bot 4k invites the next three): the party status lines in the walkers' bandwidth |
+   | `--quest` | off | with `--fight`: bots follow the opening quest (`questGoal`, below); without `--fight`: walkers that carry quest state |
 
 The bots stand still for a little over a second after joining (a new session starts with only 0.5 m
 of movement banked), then measure for `--seconds` after the warmup. It prints:
@@ -318,6 +322,94 @@ Thornlings and an Archer) is dead within 300 s of game time (the instance lists 
 the three was seen dead), both still inside; B reloads and is back in the same instance and party; A presses P and
 leaves the party, is told why within 15 s and sent to the Greenway, where it stands at the mouth; killing the
 server shows "Connection lost". Any page error fails it. `--helpers` adds two `--join` bots to the party first.
+
+## Looks, gear and the opening quest (`--looks`, `--gear`, `--quest`, Plans 5 and 6)
+
+```sh
+# gear and quests in one run (test switch: never on a real server)
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 SG2_TEST_START_GOLD=200 npm start -w server
+npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 420 --quest --fight --looks --gear
+# the quest from its first fight, in the Greenway
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 SG2_START_ZONE=greenway SG2_TEST_QUEST=solstice_crossing:first_fight npm start -w server
+npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 240 --quest --fight
+# the Warden in gear: one tier a server (SG2_TEST_KIT); the kit named in the spec is printed beside the band
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_AUTH_RATE_PER_MIN=1000 SG2_START_AT=lampfall-mouth SG2_TEST_INSTANCE_START=landing SG2_TEST_KIT=t2 npm start -w server
+npm run bots -w server -- --url http://localhost:2570 --seconds 420 --warden "paladin+black_mage:sloppy@t2"
+```
+
+**`--looks`.** Before joining, each bot `POST`s `/api/look` with `randomLook(prng(index + 1))` (its one free creator
+visit; a guest has no name to give). At the end it prints how many adventurers bot 0's view holds, how many have a
+look code from its `looks` messages, and how many of those codes differ; the run fails unless the distinct codes are
+at least 90% of the adventurers in its view.
+
+**`--gear`** (with `--fight`; the server needs `SG2_TEST_START_GOLD` ≥ 200).
+- In the grove, once it has its job, a bot walks to the Smithy, buys its job's T1 chest (`buy` with a random op id,
+  the same id if it has to ask again, so a resend is a dup and never a second purchase) and equips it; with 150 gold
+  left it buys the Straw Sunhat at the Tailor and wears it; then it goes on as before.
+- In the Greenway, every 60 s, out of combat, it takes the chest off and puts it on again (`unequip`, `equip`).
+- Back in the grove after a death it sells one unworn drop at the Smithy on its way to the gate.
+- A `levelUp` with a talent row queues a `talent` pick (choice index % 3), sent the next time it is in a town.
+- **The ledger.** Every `inventory` is checked against the one before: gold moves by exactly the `loot` gold (with
+  drops a full bag sold) and the `questDone` gold since then, plus sales (each sold uid's sell price) minus
+  purchases (each new uid that was no drop and no quest item: its Smithy price) minus new costumes; every new uid is
+  a drop, a quest item, a purchase or a starter piece minted by an unequip; every uid that went was sold; and no uid
+  ever comes back. The first view after joining a room after a travel may carry loot written while the bot was
+  between rooms (no `loot` message reaches it): that view resyncs the ledger and is counted apart.
+- It prints purchases, costumes, sales, equips, swaps, talents, drops, loot gold, refusals by reason, the server's
+  inventory writes a second (`/healthz` `invWritesPerS`, p95 and max) and the ledger.
+- **It passes** only if the fight run's gates (and Plan 4's with `--dungeon`) hold and: every inventory refusal is
+  `'combat'` or `'busy'` (none `'rate'`); every ledger matches; no uid repeats; at least one purchase;
+  `invWritesPerS` p95 ≤ 40; every zone step p95 ≤ 15 ms.
+
+**`--quest`** (with `--fight`). Each bot follows `questGoal(view, here)` (`shared/src/story/questBot.ts`) on its own
+`quests` view: the main quest first; it walks (`findPath`, through the grove's east gate or the Greenway's west gate)
+to talk (`quest {act: 'talk'}`, a reward choice index % 3), use, accept and skip; hops in place for `pim_hop` (a real
+rise of about 1.45 m, at most one every 1.2 s); sends `job` with its job at the Guild Board; fights with the shared
+brain for kills and acts (kinds filter its targets and camps); equips the chest piece for `equip`. When a combo is
+still missing and its kit has no mark to set off (a new Warrior), it takes the marking pick of its pool
+(Skullringer), as the step's hint says; a pick, finisher or dodge still missing after 30 s of fighting gets a nudge.
+The optional `duo` step: every eighth bot (role index 1 mod 8) invites the next to a party there and they fight
+together (the partner takes the leader's target); bots with index % 4 = 0 hunt a Mossback; the rest skip; any of
+them skips after 60 s at the step. After the main quest every third bot takes Bristle Bounty and every fifth Gran's
+Waymarks; every tenth takes the epilogue and abandons it. Without `--fight` the bots are walkers that carry quest
+state (a talk, use or hop only where they happen to stand): the walkers' bandwidth with quests on.
+
+It prints the bots by main-quest step at the end, how many are past `board` and `first_fight` and done, quests
+completed, steps done (`questDone`), scenes, what the bots still at a fighting step lack, acts sent, `questRefused`
+by reason, quest gold and items, nudges and pick swaps. **It passes** only if the gates above hold (the ledger
+includes quest gold and items) and: every `questRefused` is `'where'`, `'busy'` or `'bag-full'`; and in a run of at
+least 400 s started in the grove ≥ 95% of the bots are past `board`, ≥ 80% past `first_fight` and ≥ 50% have
+finished the main quest (a run started elsewhere: ≥ 80% past `first_fight` from 200 s).
+
+**`--warden` kits.** A party may name its kit: `job+job:skill@kit` (`starter`, `t1`, `t2`, `t3`). The server gives
+every new adventurer one tier (`SG2_TEST_KIT`), so each kit is its own run; the tiers each party really wore (from
+its last `inventory`) and its level are printed beside the outcome and its band (G2–G5). It never gates on the outcome.
+
+### The gear and quest smoke tests (`smoke-gear.mjs`, `smoke-quest.mjs`)
+
+```sh
+(cd client && npm run build:online)
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_TEST_START_GOLD=1000 SG2_TEST_LOOT=always SG2_CLIENT_DIR=client/dist-online npm start -w server
+node server/scripts/smoke-gear.mjs http://localhost:2570 --kill "kill <pid>" [--shots <dir>]
+SG2_STORE=memory SG2_JWT_SECRET=$(openssl rand -hex 32) SG2_CLIENT_DIR=client/dist-online npm start -w server
+node server/scripts/smoke-quest.mjs http://localhost:2570 --kill "kill <pid>" [--shots <dir>]
+```
+
+`smoke-gear.mjs`: page A (iPhone 13) registers; the creator opens and A picks Brindlekin, moves three body sliders,
+hair style 12, a free fur colour (the hue strip) and a name, Done; A's look code says so (people, sliders, hair) and
+A has that name; page B (desktop, a guest through the creator) holds A's look code among those its room sent; A buys
+the Straw Sunhat at the Tailor and wears it, and A's gear code on B changes; A walks out to the Greenway and fights
+Thornlings until a `loot` holds an item; A opens the bag and equips it, and `__sg2net.stats` before and after are
+what the shared kit rules (`kitFor`) give for the gear worn; A (no game master) sends `/gm announce hi` and no
+announcement reaches A or a fresh B; killing the server shows "Connection lost". Any page error fails it.
+
+`smoke-quest.mjs`: page A (iPhone 13) and page B (desktop), guests; A takes "Surprise me" in the creator; the
+tracker reads "Speak with Old Marrow"; A taps Old Marrow where `__sg2.screenOf` puts him, walks over and pages
+through: step `pim_find`; A taps the pointer chip, is walked to the tavern, Pim's call shows (a dialogue by Pim),
+A taps Jump: step `pim`; A taps Pim and pages through: step `plaque`; A reloads: still `plaque`; A reads the plaque:
+a `questDone` with scene `beacon` and `beaconRaised`; B's quest state never moved (no `questDone`, still at
+Marrow) and its websocket bytes in the 20 s before and after A's plaque differ by under 5%; killing the server
+shows "Connection lost". Any page error fails it.
 
 ## What a client receives (interest management)
 
