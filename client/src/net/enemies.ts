@@ -27,7 +27,14 @@ interface Drawn {
   moving: boolean;
   /** The latest position pushed (for the snap check). */
   lx: number; lz: number;
+  /** Bosses: the phase last seen (−1 before the first state), and until when (performance.now ms) its transition plays. */
+  phase: number; holdUntil: number;
 }
+
+/** A boss's extra state (EnemyState.phase, warded, enrageAt; unset on older servers and on ordinary kinds). */
+type BossStateView = EnemyStateView & { phase?: number; warded?: boolean; enrageAt?: number };
+/** The Lens Shard's ward beam meets the Warden this high over its feet, in m. */
+const WARD_BEAM_Y = 2.6;
 
 export interface Enemies {
   /** Call every frame: moves and animates every enemy. */
@@ -98,6 +105,8 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
   const apply = (d: Drawn, e: EnemyStateView) => {
     const changed = e.mode !== d.mode || e.windup !== d.windup;
     if (!changed) return;
+    // a boss's phase transition holds its 'phase' pose (it stands invulnerable) unless it dies
+    if (now < d.holdUntil && e.mode !== 'dead') { d.mode = e.mode; d.windup = e.windup; return; }
     if (d.mode === 'windup' && e.mode !== 'windup' && windupReleased(e.mode)) d.view.strike();
     const firstSight = d.mode === '';
     d.mode = e.mode; d.windup = e.windup;
@@ -113,7 +122,7 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
     if (!isKind(e.kind)) return null;
     const view = pool.take(e.kind);
     view.setEntityId(eid);
-    const d: Drawn = { view, buf: new PoseBuffer(), kind: e.kind, mode: '', windup: '', x: e.x, z: e.z, y: e.y, placed: false, moving: false, lx: e.x, lz: e.z };
+    const d: Drawn = { view, buf: new PoseBuffer(), kind: e.kind, mode: '', windup: '', x: e.x, z: e.z, y: e.y, placed: false, moving: false, lx: e.x, lz: e.z, phase: -1, holdUntil: 0 };
     drawn.set(eid, d);
     return d;
   };
@@ -132,6 +141,15 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
     d.lx = e.x; d.lz = e.z;
     d.buf.push(now, e.x, e.z, e.facing, e.y);
     d.view.setSurging(!!e.surging);
+    const boss = ENEMY_KINDS[d.kind].boss;
+    if (boss) {
+      const b = e as BossStateView, ph = b.phase ?? 0;
+      // a phase seen to rise (not on first sight) plays the transition for the boss's transitionS
+      if (d.phase >= 0 && ph > d.phase && e.mode !== 'dead') { d.holdUntil = now + boss.transitionS * 1000; d.view.setMode('phase'); }
+      d.phase = ph;
+      const enraged = (b.enrageAt ?? 0) > 0 && (room.state.clock ?? 0) >= (b.enrageAt ?? 0);
+      d.view.setBoss(ph, !!b.warded, enraged);
+    }
     apply(d, e);
   };
   const onState = () => {
@@ -144,10 +162,20 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
   onState();
 
   const s: DrawnPose = { x: 0, z: 0, y: 0, facing: 0 };
+  const wardAt = { x: 0, y: 0, z: 0 };
   return {
     update(dt) {
       const t = performance.now();
+      let warden: Drawn | null = null;
+      for (const d of drawn.values()) if (d.kind === 'fallen_warden' && d.mode !== 'dead') warden = d;
+      if (warden) { wardAt.x = warden.x; wardAt.y = warden.y + WARD_BEAM_Y; wardAt.z = warden.z; }
       for (const d of drawn.values()) {
+        if (d.holdUntil > 0 && t >= d.holdUntil) {
+          d.holdUntil = 0;
+          if (d.mode === 'windup' && isAttack(d.windup)) d.view.setMode('windup', d.windup);
+          else d.view.setMode(viewMode(d.mode, d.moving));
+        }
+        if (d.kind === 'lens_shard') d.view.setTether(warden && d.mode !== 'dead' ? wardAt : null);
         if (!d.buf.sampleInto(t, s)) continue;
         const root = d.view.root;
         const speed = d.placed && dt > 0 ? Math.hypot(s.x - d.x, s.z - d.z) / dt : 0;
@@ -157,7 +185,7 @@ export function createEnemies(scene: Scene, world: WorldApi, room: ZoneRoom): En
         const moving = speed > RUN_ABOVE;
         if (moving !== d.moving) {
           d.moving = moving;
-          if (d.mode !== 'windup') d.view.setMode(viewMode(d.mode, moving));
+          if (d.mode !== 'windup' && d.holdUntil === 0) d.view.setMode(viewMode(d.mode, moving));
         }
         d.view.update(dt);
       }

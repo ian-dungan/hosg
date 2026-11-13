@@ -14,8 +14,10 @@ import { ENEMY_ATTACKS, ENEMY_KINDS, type EnemyAttackId, type EnemyKindId } from
 import { Builder, hex, mix, tint, type RGB, type V3 } from '../world/mesh';
 import { PAL } from '../world/parts';
 import { PALETTE } from '../core/contracts';
+import { WICKHOUND, FALLEN_WARDEN, LENS_SHARD, BOSS_DRAW, BOSS_CADENCE } from './bossModels';
 
-export type EnemyMode = 'idle' | 'run' | 'windup' | 'stunned' | 'dead' | 'return';
+/** 'phase': a boss's transition between phases (invulnerable, still; net/enemies.ts holds it for the boss's transitionS). */
+export type EnemyMode = 'idle' | 'run' | 'windup' | 'stunned' | 'dead' | 'return' | 'phase';
 export interface EnemyView {
   readonly root: TransformNode; readonly height: number; readonly radius: number;
   /** metadata { entityId } on every pickable mesh. */
@@ -31,6 +33,10 @@ export interface EnemyView {
   /** A flinch. */ hit(): void;
   /** A white flash (on damage). */ flash(): void;
   setTargeted(on: boolean): void;
+  /** Bosses (Plan 4): the 0-based phase (its look changes with it), warded (a Lens Shard lives) and enraged. */
+  setBoss(phase: number, warded: boolean, enraged: boolean): void;
+  /** A beam from this enemy to a world point (the Lens Shard's ward on the Warden), or null for none. */
+  setTether(p: { x: number; y: number; z: number } | null): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -49,9 +55,9 @@ const P = {
 };
 
 // ───────────────────────── model building: parts on rigid bones ─────────────────────────
-interface JointDef { name: string; parent: number; pivot: V3 }
+export interface JointDef { name: string; parent: number; pivot: V3 }
 
-class Model {
+export class Model {
   readonly b: Builder; readonly g: Builder;
   readonly joints: JointDef[] = [];
   readonly bIdx: number[] = []; readonly gIdx: number[] = [];
@@ -70,23 +76,29 @@ class Model {
 }
 
 /** Per-joint pose values, written every frame: rotation, offset from rest, scale. */
-type PoseVals = Float32Array; // [rx, ry, rz, px, py, pz, sx, sy, sz] × joints
+export type PoseVals = Float32Array; // [rx, ry, rz, px, py, pz, sx, sy, sz] × joints
 const NV = 9;
 
-interface Anim {
+export interface Anim {
   T: number; mode: EnemyMode; attack: EnemyAttackId | null;
+  /** Bosses: the phase (0-based), time since the 'phase' mode began (−1 none), warded, enraged. */
+  bossPhase: number; phaseT: number; warded: boolean; enraged: boolean;
+  /** setTether's point in model space (tOn false: none). */
+  tOn: boolean; tx: number; ty: number; tz: number;
   /** Time since the wind-up started, and its length. */ wT: number; wDur: number;
   /** Time since the strike started (−1 = none) and what it released (null = an auto). */ sT: number; sAttack: EnemyAttackId | null;
   hT: number; deadT: number; stunT: number; speed: number; phase: number;
 }
-interface KindDef {
+export interface KindDef {
   height: number;
   build(m: Model): void;
   pose(o: Poser, a: Anim): void;
+  /** The glow parts' brightness now (default: the shared pulse, brighter in wind-ups, flickering when stunned). */
+  glow?(a: Anim, base: number): number;
 }
 
 /** Writes pose values by joint name (indices looked up once). */
-class Poser {
+export class Poser {
   v: PoseVals;
   private ix = new Map<string, number>();
   constructor(m: Model) { this.v = new Float32Array(m.joints.length * NV); m.joints.forEach((j, i) => this.ix.set(j.name, i)); }
@@ -495,8 +507,8 @@ const DUMMY: KindDef = {
 
 const KINDS: Record<EnemyKindId, KindDef> = {
   thornling: THORNLING, boar: BOAR, archer: ARCHER, mossback: MOSSBACK, dummy: DUMMY,
-  // placeholders until Plan 4 Task 9 builds their models
-  wickhound: MOSSBACK, fallen_warden: MOSSBACK, lens_shard: MOSSBACK,
+  // Plan 4's bosses and the Warden's add (combat/bossModels.ts)
+  wickhound: WICKHOUND, fallen_warden: FALLEN_WARDEN, lens_shard: LENS_SHARD,
 };
 
 // ───────────────────────── shared per scene ─────────────────────────
@@ -533,7 +545,7 @@ const RIM: Partial<Record<EnemyKindId, Color3>> = { thornling: new Color3(0.62, 
 const WINDUP_TINT = Color3.FromHexString(PALETTE.roof);
 const BLEND_S = 0.1;
 /** Drawn size per kind (the Thornling is drawn 1.3× so it fills its 0.5 m hit circle and reads at a distance). */
-const DRAW_SCALE: Partial<Record<EnemyKindId, number>> = { thornling: 1.3 };
+const DRAW_SCALE: Partial<Record<EnemyKindId, number>> = { thornling: 1.3, ...BOSS_DRAW };
 const STRIKE_LINGER_S = 0.4;
 /** A second strike() within this of the last one is the same swing (the hit fx and the wind-up end both report it), in s. */
 const STRIKE_DEDUPE_S = 0.3;
@@ -576,7 +588,7 @@ function templateOf(scene: Scene, kind: EnemyKindId): { body: Mesh; glow: Mesh |
  * seconds in (an enemy first seen part way through one) and lasts `seconds` (default: the attack's wind-up).
  * Returns false when nothing changed (the same mode, or the same wind-up, again).
  */
-export function applyMode(a: Pick<Anim, 'mode' | 'attack' | 'wT' | 'wDur'>, mode: EnemyMode, attack?: EnemyAttackId, seconds?: number, elapsed = 0): boolean {
+export function applyMode(a: Pick<Anim, 'mode' | 'attack' | 'wT' | 'wDur'> & Partial<Pick<Anim, 'phaseT'>>, mode: EnemyMode, attack?: EnemyAttackId, seconds?: number, elapsed = 0): boolean {
   if (mode === 'windup') {
     const atk = attack ?? a.attack ?? null;
     if (a.mode === 'windup' && atk === a.attack) return false;
@@ -586,6 +598,7 @@ export function applyMode(a: Pick<Anim, 'mode' | 'attack' | 'wT' | 'wDur'>, mode
   } else {
     if (mode === a.mode) return false;
     a.attack = null;
+    if (mode === 'phase') (a as Partial<Anim>).phaseT = 0;
   }
   a.mode = mode;
   return true;
@@ -652,7 +665,12 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
   const poser = new Poser(m), from = new Float32Array(poser.v.length), out = new Float32Array(poser.v.length);
   poser.reset(); out.set(poser.v); from.set(out);
   let blend = 1;
-  const a: Anim = { T: Math.random() * 10, mode: 'idle', attack: null, wT: 0, wDur: 1, sT: -1, sAttack: null, hT: -1, deadT: 0, stunT: 0, speed: 0, phase: Math.random() };
+  const a: Anim = {
+    T: Math.random() * 10, mode: 'idle', attack: null, wT: 0, wDur: 1, sT: -1, sAttack: null, hT: -1, deadT: 0, stunT: 0, speed: 0, phase: Math.random(),
+    bossPhase: 0, phaseT: -1, warded: false, enraged: false, tOn: false, tx: 0, ty: 0, tz: 0,
+  };
+  const tetherAt = { x: 0, y: 0, z: 0 };
+  let tether: { x: number; y: number; z: number } | null = null;
   let surging = false;
   let flashT = -1, lastWindup: { attack: EnemyAttackId; endedAt: number } | null = null, spawnT = 1;
   const prev = new Vector3(NaN, 0, 0);
@@ -684,8 +702,13 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       startBlend();
     },
     setSurging(on) { surging = on; },
+    setBoss(phase, warded, enraged) { a.bossPhase = phase; a.warded = warded; a.enraged = enraged; },
+    setTether(p) {
+      if (p) { tetherAt.x = p.x; tetherAt.y = p.y; tetherAt.z = p.z; tether = tetherAt; } else { tether = null; a.tOn = false; }
+    },
     reset() {
       surging = false;
+      a.bossPhase = 0; a.phaseT = -1; a.warded = false; a.enraged = false; a.tOn = false; tether = null;
       a.mode = 'idle'; a.attack = null; a.wT = 0; a.sT = -1; a.sAttack = null; a.hT = -1; a.deadT = 0; a.stunT = 0; a.speed = 0;
       flashT = -1; lastWindup = null; spawnT = 1; blend = 1;
       poser.reset(); out.set(poser.v); from.set(out);
@@ -712,6 +735,7 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       if (a.sT >= 0) { a.sT += dt; if (a.sT > 0.9) a.sT = -1; }
       if (a.hT >= 0) { a.hT += dt; if (a.hT > 0.8) a.hT = -1; }
       if (a.mode === 'dead') a.deadT += dt;
+      if (a.phaseT >= 0) a.phaseT += dt;
       // root motion → speed and gait phase
       root.computeWorldMatrix(true);
       const wp = root.getAbsolutePosition();
@@ -722,7 +746,12 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
         a.speed += (sp - a.speed) * Math.min(1, dt * 8);
         prev.copyFrom(wp);
       }
-      const cadence = kind === 'mossback' ? 0.32 : kind === 'boar' ? 0.42 : kind === 'archer' ? 0.48 : 0.6;
+      const cadence = BOSS_CADENCE[kind] ?? (kind === 'mossback' ? 0.32 : kind === 'boar' ? 0.42 : kind === 'archer' ? 0.48 : 0.6);
+      // the tether point in model space (the root turns with facing; the rig is scaled by DS)
+      if (tether) {
+        const dx = tether.x - wp.x, dy = tether.y - wp.y, dz = tether.z - wp.z, ry = root.rotation.y, c = Math.cos(ry), sn = Math.sin(ry);
+        a.tOn = true; a.tx = (dx * c - dz * sn) / DS; a.ty = dy / DS; a.tz = (dx * sn + dz * c) / DS;
+      }
       a.phase += dt * (a.mode === 'run' || a.mode === 'return' ? Math.max(1.2, a.speed * cadence + 0.6) : 0);
       // pose
       poser.reset();
@@ -753,6 +782,7 @@ export function makeEnemy(scene: Scene, kind: EnemyKindId): EnemyView {
       if (a.mode === 'stunned') glowK = 0.5 + 0.3 * Math.abs(Math.sin(a.T * 9));
       if (surging && a.mode !== 'dead') { const p = 0.5 + 0.5 * Math.sin(a.T * 16); e.r += 0.04 * p; e.g += 0.22 * p; e.b += 0.3 * p; }
       if (a.mode === 'dead') glowK = 0.2;
+      if (def.glow) glowK = def.glow(a, glowK);
       if (flashT >= 0) {
         flashT += dt;
         const f = Math.max(0, 1 - flashT / 0.16) * 0.85;

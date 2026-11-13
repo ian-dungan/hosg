@@ -22,6 +22,7 @@ import { WorldFxPlugin, WFX, type WfxOpts } from './shading';
 import { buildGrass } from './grass';
 import { createLife } from './life';
 import { createLook } from './look';
+import { buildMouth, MOUTH_CRATER_R } from './mouth';
 
 /**
  * A hash of (x, y) in [0, 1) from integer arithmetic only (x and y are taken to 1/1024): the same in every
@@ -988,6 +989,7 @@ export function buildGreenway(scene: Scene): WorldApi {
   const gOk = (x: number, z: number) => {
     if (walk.groundAt(x, z) === null) return false;
     if (Math.abs(z - layout.roadZ(x)) < 3.2) return false;
+    if (Math.hypot(x - layout.mouth.x, z - layout.mouth.z) < MOUTH_CRATER_R + 0.5) return false; // the crater mouth's scorched earth
     return !plan.camps.some(c => Math.hypot(c.x - x, c.z - z) < c.r * 0.7);
   };
   const bnd = walk.bounds;
@@ -1031,7 +1033,9 @@ export function buildGreenway(scene: Scene): WorldApi {
   // "Shady Grove" on the face toward the zone (read walking back west), "The Greenway" on the face toward the grove
   const sign = signPlane(scene, gateOut.sign, plan.gate.yaw - Math.PI, 'Shady Grove');
   const signBack = signPlane(scene, gateOut.signBack, plan.gate.yaw, 'The Greenway');
-  const statics: Mesh[] = [mRoad, mFixed, mGlowM, mBelt, mFar, mMount, sign, signBack, ...tiles.flatMap(tileMeshes)];
+  // the crater mouth (world/mouth.ts): its opening is cut out of the drawn terrain and road
+  const mouth = buildMouth(scene, layout, { cut: [mTerrainMat, mRoadMat], lit: mLit, glow: mGlow });
+  const statics: Mesh[] = [...mouth.meshes, mRoad, mFixed, mGlowM, mBelt, mFar, mMount, sign, signBack, ...tiles.flatMap(tileMeshes)];
   for (const m of statics) { m.freezeWorldMatrix(); m.doNotSyncBoundingInfo = true; m.isPickable = false; }
   // the ground is pickable (tap-to-walk); the scenery is not
   for (const t of tiles) for (const m of [t.fine, t.coarse]) if (m) m.isPickable = true;

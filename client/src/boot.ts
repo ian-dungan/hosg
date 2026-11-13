@@ -6,12 +6,13 @@ import { Color3, Engine, MeshBuilder, Scene, StandardMaterial, Vector3, type Mes
 import type { HudApi, PlayerRig, Quality, TapInfo, WorldApi, ZoneId } from './core/contracts';
 import { buildWorld } from './world/index';
 import { buildGreenway } from './world/greenway';
-import { buildLampfallPlain, type LampfallLive } from './world/lampfallPlain';
+import { buildLampfall } from './world/lampfall';
+import type { LampfallLive } from './world/lampfallPlain';
 import { createPlayerRig } from './player/rig';
 import { createHud } from './hud/index';
 import { SAFE_FALL, findPath, withClearance, type Vec2 } from '@sg2/shared';
 
-/** The zones this client can build ('lampfall': a plain placeholder from its layout until Plan 4 Task 9's look). */
+/** The zones this client can build. */
 const BUILT_ZONES: ReadonlySet<ZoneId> = new Set<ZoneId>(['grove', 'beacon', 'arena', 'greenway', 'lampfall']);
 /** True when this client can build zone `z` (a newer server may send the adventurer somewhere this one cannot draw). */
 export const isZoneBuilt = (z: ZoneId): boolean => BUILT_ZONES.has(z);
@@ -94,7 +95,7 @@ export function bootGame(opts: GameOpts = {}): Game {
   let scene = new Scene(engine);
   let zone: ZoneId = opts.zone ?? 'grove';
   const lampfallLive: LampfallLive = opts.lampfall ?? { gates: () => 0, lift: () => false };
-  const build = (z: ZoneId) => (z === 'lampfall' ? buildLampfallPlain(scene, lampfallLive) : (z === 'greenway' ? buildGreenway : buildWorld)(scene));
+  const build = (z: ZoneId) => (z === 'lampfall' ? buildLampfall(scene, lampfallLive) : (z === 'greenway' ? buildGreenway : buildWorld)(scene));
   let world = build(zone);
   // Every device starts on full settings; a device that cannot keep up steps down by itself (see the render loop).
   // `?q=low|med|high` starts on (and holds) a tier: playtests and budget checks
