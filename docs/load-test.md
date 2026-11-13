@@ -263,7 +263,8 @@ id (`joinById`). On the way they only fight back. Inside, each member:
 Inside, the leader says a party chat line every 15 s (with markup), only while every member is in its instance;
 party bots say no zone chat there. Bots that are not in a party fight in the Greenway as before; their roles
 (duo partners, hunters, medics, sprinters, predictors) count from the first bot after the parties, so they are the
-same as in a plain mixed run of that many bots. A party told `REASON_INSTANCES_FULL` at the mouth (the `correct`
+same as in a plain mixed run of that many bots. The party that reaches the mouth 13th (not always party 12: the duos
+walk slower to the gather spot) is told `REASON_INSTANCES_FULL` (the `correct`
 and the notice the rule gives: not counted as a correction) stays in the Greenway and fights there.
 
 It prints, beside everything above: parties planned and formed, invites sent, accepted and refused (by reason),
@@ -273,12 +274,14 @@ revives inside; the party bots' reactions, revives, interrupts and Breaks; party
 (each line × the other members) and received; the instances' worst step p95 (`/healthz` `instances.tickMsP95Max`).
 
 A `--dungeon` run passes only if the fight run's and the mixed run's gates hold and:
-- parties formed = the parties planned; instances opened = min(n, 12); full notices = max(0, n − 12) parties;
+- parties formed = the parties planned; instances opened = min(n, 12); full notices = max(0, n − 12) parties; at the
+  end every party is whole in one instance, or wholly in the Greenway after the full notice;
 - every instance kills its first pack within 150 s of its first member's arrival;
 - party chat received = deliveries due (and at least one line sent);
-- the party bots show every reaction kind (Blast, Conduct, Steam, Bedrock) at least once and at least one revive
-  (ruling P3b-j moved these from the Greenway's `--cycle` gate here; `--cycle` now needs reactions ≥ 5 of at least
-  2 kinds);
+- the party bots show every reaction kind (Blast, Conduct, Steam, Bedrock) at least once (ruling P3b-j moved this
+  from the Greenway's `--cycle` gate here; `--cycle` now needs reactions ≥ 5 of at least 2 kinds). Revives are
+  printed, not gated: careful parties at the packs lose 0–4 members a 240 s run and a White Mage is near for only
+  some of those (measured 0–1 revives a run); the Warden runs and the live checks show them (below);
 - every zone room's step p95 ≤ 15 ms, every instance's ≤ 3 ms, peak RSS ≤ 400 MB.
 
 **`--warden <spec>`.** `spec` is a comma list of parties, each `job+job…:skill` (skills as the simulation's:
@@ -338,6 +341,62 @@ must fit within ±500 m and heights −52..180 m (`shared/src/world/limits.ts`; 
 the generator throw otherwise).
 
 ## Results
+
+### 2026-11-13: parties and the Lampfall (Plan 4 Task 10) — PROVISIONAL
+
+Development sandbox (4 CPU cores, Node 22), server and bots on the same machine, ports 2574–2575, `SG2_STORE=memory`,
+`SG2_AUTH_RATE_PER_MIN=1000`, server `node --import tsx server/src/index.ts` from the main checkout at this task's
+commits, a fresh server per run, stopped by PID. Other workers' headless browsers and test suites ran on the machine
+for most of the day; the load average (`uptime`, 1 min) is given per run. **The timing numbers (Hz, step p95,
+event-loop p99) are provisional: to be re-measured on a quiet machine.** The runs marked "quiet" ran with nothing else
+on the machine (load 0.0–0.8). Greenway: 21 enemies; the Lampfall per instance: 3 packs (10 enemies), the Wickhound,
+the Warden (2 Lens Shards in its phase 2). Every run: 0 corrections, 0 disconnections, 0 dodge rollbacks.
+
+| run | load | result | bot Hz | zone step p95 max | instance step p95 max (median / p90 of 1 s samples) | event-loop p99 max | peak RSS | KiB/s per bot (mean / p95) |
+|---|---|---|---|---|---|---|---|---|
+| `--dungeon 13`, 100 bots, 240 s (a) | 2.8 → 12 | FAIL (timing; a stuck bot by the mouth, fixed) | 14.65 | 16.3 ms | 22.5 ms | 61.6 ms | 196 MB | 3.8 / 4.8 |
+| `--dungeon 13`, 100 bots, 240 s (b) | ~1 | FAIL (instance p95; revives 0, no longer gated) | 15.1 | 9.19 ms | 4.45 ms | 17.4 ms | — | 4.0 / 4.7 |
+| `--dungeon 13`, 100 bots, 240 s (c), quiet | 0.2 | PASS | 15.13 | 9.09 ms | 2.27 ms (0.49 / 0.98) | 19.9 ms | 167 MB | 4.0 / 5.1 |
+| `--dungeon 13`, 100 bots, 240 s (d), quiet | 0.3 | PASS | 15.15 | 9.73 ms | 2.07 ms (0.48 / 0.96) | 18.4 ms | 169 MB | 4.0 / 5.1 |
+| `--warden` (3 parties), 420 s | ~8 | FAIL (instance p95 only) | — | 2.1 ms | 5.94 ms | 43.4 ms | — | — |
+| `--warden` (3 parties), 420 s, quiet | 0.2 | PASS | 15.07 | 1.86 ms | 2.34 ms (0.42 / 0.59) | 12.2 ms | 143 MB | — |
+| `--warden` (12 parties, 24 bots), 420 s, CPU profile on | 11.5 | FAIL (instance p95, loop p99) | 14.84 | 10.6 ms | 4.04 ms | 113.9 ms | 164 MB | 1.2 / 1.6 |
+| `--warden` (12 parties, 24 bots), 420 s, quiet | 0.0 | PASS | 15.06 | 3.2 ms | 2.01 ms (0.35 / 0.45) | 13.3 ms | 152 MB | — |
+| grove, 100 walkers, 30 s, quiet | 0.3 | PASS | 15.13 | 7.97 ms | — | 18.1 ms | 165 MB | 8.9 / 10.4 |
+| grove, `--cluster 15`, 30 s, quiet | 0.2 | PASS | 15.12 | 6.42 ms | — | 17.9 ms | 165 MB | **10.8** / 10.9 |
+| `--cycle --jobs mixed`, 120 s, quiet | 0.8 | PASS | 15.25 | 7.71 ms | — | 15.8 ms | 176 MB | 5.7 / 6.4 |
+
+The dungeon runs (c, d): 13 parties formed (27 invites, 27 accepted, none refused); 12 instances; one party told
+the Lampfall is full (its 2–4 members stayed in the Greenway); first packs 16–34 s after entry; 33–35 of 36 packs
+killed in 240 s (no party reaches the Wickhound in a 240 s run: the walk from the grove takes about 70 s); party chat
+144 lines, every delivery received (300–312); party bots' reactions Blast 62–75, Conduct 19–20, Steam 11–23, Bedrock
+10–21; deaths inside 2–4, releases 1–2, revives 0–1, one wipe in (d); interrupts 55–68, Breaks 55–60. The Greenway
+bots: 962–1037 kills, 434–484 dodges, 41–90 knockbacks, every job with kills. A 240 s CPU profile of the 12 Warden
+fights (busy machine) showed the server 96% idle and every room's step together at 1.3% of one core (about 0.07 ms
+a step on average): the instance p95 spikes over 3 ms on the busy machine are scheduling (the process waiting for a
+core), not work, and the quiet runs stay at 2.0–2.3 ms.
+
+The scripted Warden runs (`paladin+black_mage:careful, warrior+ranger+white_mage:sloppy, paladin:careful`; the same
+outcomes over 10 runs of each: two 3-party runs and the four copies in each of two 12-party runs), next to the
+simulation's bands:
+
+| party | outcome | seconds from the wake | phase | enrage | deaths | revives | interrupts | Breaks | band (Task 5) |
+|---|---|---|---|---|---|---|---|---|---|
+| paladin + black_mage, careful | 8 wipes, 1 kill, 1 out of time (420 s) | 347–412 | 3 | yes | 2 | 0 | 4–14 | 11–15 | W1 careful duos ≥ 95% win: **disagrees** |
+| warrior + ranger + white_mage, sloppy | 10 kills | 206–213 | 3 | no | 0–1 | 0–1 | 2–8 | 9–10 | W2 sloppy trios ≥ 70% win: agrees |
+| paladin, careful | 10 wipes | 343–349 | 2 | yes | 1 | 0 | 2–9 | 11–14 | W4 solo 0 wins: agrees |
+
+The careful Paladin + Black Mage duo runs out of time (it reaches phase 3 and the enrage, then falls to Last Light).
+The live server gives level-1 adventurers their kits (82 hp, Plan 5), which the simulation's bands were not tuned
+against; this is reported, not tuned here.
+
+Live checks (`smoke-party.mjs` and scratch scripts, `?lockq`, headless): the party smoke test PASSES (with
+`--helpers`: the two pages alone, auto-attacking at about 1 fps, fell to the first pack in two runs); a Second Dawn
+revive in an instance (a `--join` White Mage revived page A where it fell); the wipe screen ("The light goes out…",
+up at the Keeper's Landing at full health 5 s later); walking and then rolling twice into the shut Lens Pit gate (B
+stopped at its edge, 0 corrections, 0 refusals); a Bedrock drawn over the Warden's telegraph (no hole in the decal);
+the Wickhound waking (boss frame); and a page following two `--join` bots from the crater mouth through every room
+to the Lens Pit (18 min of wall time, 0 corrections, no page errors).
 
 ### 2026-11-12: mixed jobs, the job smoke steps (Plan 3b Task 9)
 
