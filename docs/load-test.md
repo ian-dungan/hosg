@@ -449,7 +449,82 @@ the generator throw otherwise).
 
 ## Results
 
-### 2026-11-13: parties and the Lampfall (Plan 4 Task 10) — PROVISIONAL
+### 2026-11-13: looks, gear, the opening quest; every run again on a quiet machine (Plan 5 Task 11, Plan 6 Task 7)
+
+Development sandbox (4 CPU cores, Node 22), server and bots on the same machine, port 2574, `SG2_STORE=memory`,
+`SG2_AUTH_RATE_PER_MIN=100000 SG2_JOIN_RATE_PER_MIN=100000`, server `node --import tsx server/src/index.ts` from the
+branch at the final-review server fixes (71e3275) plus the seat-hold fix (44fe36c), a fresh server per run, stopped by
+PID. Nothing else ran on the machine (1-minute load average per run in the table). **These numbers replace the
+provisional ones below.** Gates are each run's own (above); a FAIL names what failed.
+
+| run | load | result | bot Hz | zone step p95 max | instance step p95 max | event-loop p99 max | peak RSS | KiB/s per bot (mean / p95) | corrections |
+|---|---|---|---|---|---|---|---|---|---|
+| grove, 100 walkers, 30 s | 1.99 | PASS | 15.12 | 9.14 ms | - | 19.12 ms | 161 MB | 8.8 / 10.3 | 0 |
+| grove, 100 walkers, 30 s (again) | 0.89 | PASS | 15.10 | 8.92 ms | - | 22.23 ms | 162 MB | 9.0 / 10.5 | 0 |
+| grove `--cluster 15` | 1.55 | PASS | 15.12 | 9.1 ms | - | 22.77 ms | 164 MB | 10.7 / 11.0 | 0 |
+| grove `--looks` | 1.13 | PASS | 15.09 | 8.18 ms | - | 24.99 ms | 166 MB | 9.0 / 10.7 | 0 |
+| grove `--cluster 15 --looks` | 0.86 | PASS | 15.09 | 11.54 ms | - | 26.59 ms | 163 MB | 10.8 / 10.9 | 0 |
+| grove `--cluster 15 --looks --parties` | 0.90 | PASS | 15.12 | 8.24 ms | - | 22.09 ms | 158 MB | 11.0 / 11.1 | 0 |
+| grove `--cluster 15 --looks`, `SG2_TEST_KIT=t3` | 0.77 | PASS | 15.09 | 7.89 ms | - | 25.67 ms | 163 MB | 11.0 / 11.2 | 0 |
+| grove `--quest` (walkers) | 0.97 | PASS | 15.12 | 10.44 ms | - | 23.27 ms | 161 MB | 9.1 / 10.5 | 0 |
+| grove `--quest` (walkers, again) | 0.68 | PASS | 15.11 | 10.13 ms | - | 20.46 ms | 165 MB | 9.0 / 10.6 | 0 |
+| grove `--cluster 15 --quest` | 0.72 | PASS | 15.09 | 9.36 ms | - | 18.4 ms | 166 MB | 10.8 / 11.0 | 0 |
+| Greenway `--fight`, 60 s | 1.08 | PASS | 15.04 | 11.24 ms | - | 23.15 ms | 166 MB | 5.9 / 6.9 | 0 |
+| `--cycle --jobs mixed`, 120 s | 0.88 | PASS | 15.13 | 10.41 ms | - | 20.61 ms | 169 MB | 5.4 / 6.5 | 0 |
+| `--fight --jobs mixed --dungeon 13`, 240 s | 0.61 | PASS | 15.21 | 9.08 ms | 2.05 ms | 21.69 ms | 170 MB | 4.0 / 5.0 | 0 |
+| `--fight --jobs mixed --looks --gear --dungeon 13`, 240 s, gold 500 (a) | 0.56 | FAIL: instance step p95 reached 3.08 ms (over 3) | 15.09 | 10.67 ms | 3.08 ms | 23.35 ms | 173 MB | 4.2 / 5.3 | 0 |
+| the same (b) | 0.48 | FAIL: inventory refusals other than combat, busy: unequip dead 1, equip dead 1 | 15.10 | 13.24 ms | 2.28 ms | 21.41 ms | 175 MB | 4.2 / 5.2 | 0 |
+| the same (c, bots swap only at full health) | 0.41 | FAIL: 29 legal steps were corrected; inventory refusals other than combat, busy: buyCostume where 3 | 15.11 | 11.22 ms | 2.13 ms | 24.95 ms | 178 MB | 4.2 / 5.1 | 29 |
+| `--quest --fight --looks --gear`, 420 s, gold 200 (a) | 1.05 | FAIL: 65 of 100 past first_fight (under 80%) | 15.12 | 11.74 ms | - | 24.64 ms | 189 MB | 4.2 / 5.1 | 0 |
+| the same (b, up to 4 bots on a quest kind) | 0.68 | FAIL: 72 of 100 past first_fight (under 80%) | 15.11 | 10.49 ms | - | 22.02 ms | 174 MB | 4.2 / 5.0 | 0 |
+| Greenway from `first_fight`, `--quest --fight`, 240 s (a) | 0.66 | FAIL: 52 of 100 past first_fight (under 80%) | 15.10 | 14.74 ms | - | 22.09 ms | 171 MB | 3.5 / 4.7 | 0 |
+| the same (b, up to 4 bots on a quest kind) | 0.00 | FAIL: 1 legal steps were corrected; questRefused other than where, busy, bag-full: skip dead 1; 76 of 100 past first_fight (under 80%) | 15.11 | 11.02 ms | - | 21.17 ms | 177 MB | 4.8 / 5.7 | 1 |
+| `--warden` 12 parties (4 × the Plan 4 spec), 420 s | 0.67 | PASS | 15.06 | 11.1 ms | 2.69 ms | 18.97 ms | 152 MB | 1.4 / 1.8 | 0 |
+| `--warden` 4 × `paladin+black_mage:sloppy@t2`, `SG2_TEST_KIT=t2` | 0.26 | FAIL: instance step p95 reached 3.01 ms (over 3) | 15.07 | 9.81 ms | 3.01 ms | 14.7 ms | 144 MB | 1.5 / 1.9 | 0 |
+| `--warden` 4 × `paladin+black_mage:sloppy@starter` | 0.02 | FAIL: instance step p95 reached 3.13 ms (over 3) | 15.05 | 8.38 ms | 3.13 ms | 14.4 ms | 143 MB | 1.0 / 1.8 | 0 |
+| `--warden` 3 × `dark_knight:careful@t3` + 3 × `:sloppy@t3`, `SG2_TEST_KIT=t3` | 0.09 | FAIL: instance step p95 reached 4.01 ms (over 3) | 15.04 | 9.41 ms | 4.01 ms | 17.02 ms | 145 MB | 1.3 / 1.6 | 0 |
+
+**Bandwidth.** Clustered walkers: 10.7 KiB/s plain, 10.8 with random looks, 11.0 with looks and parties of four (the
+party status lines), 11.0 with looks and every adventurer in T3 gear; 10.8 with `--quest` (walkers carrying quest
+state: one `quests` view per join). All at or under the 11.0 limit; the looks cost +0.1 and the party status lines
+or T3 gear codes about +0.2 each. Spread-out walkers: 8.8–9.0 plain, 9.0 with looks, 9.0–9.1 with `--quest` (the two
+plain runs differ by 0.2 from run to run). The cheapest cut, if a later feature needs room: the party status lines
+(+0.2) can go out at half the rate for members off screen.
+
+**Gear** (`--gear`, with `--dungeon 13`): 100 purchases, 100 costumes bought and worn, 253–254 swaps, 72 drops,
+3710–3807 loot gold; every ledger matched (0 mismatches, 0 uids seen again, 0 resyncs); inventory writes p95
+34.6–35 a second (max 76.6–79.2). Run (a) failed only on one instance-step sample (3.08 ms; median 0.60, p90 1.14);
+(b) on an equip and an unequip refused 'dead' (sent in the moment of a death: the bots now swap at full health only);
+(c) on 29 corrections of 4 bots on their walk from the Smithy to the Tailor (the server held their last good pose at
+the Smithy for about 9 m of walking, then corrected; 3 `buyCostume` refused 'where' follow from that) — **not
+explained yet** (1 correction each in (a) and (b), none in the earlier trial runs). The 420 s quest runs: 100
+purchases, 548 swaps, 13 talents chosen (level 4 reached), ledgers all matched, inventory writes p95 33.6–38.4.
+
+**The opening quest** (`--quest --fight --looks --gear`, 420 s from the grove): 100 of 100 past `board` (the Beacon
+scene for all 100), 65 then 72 past `first_fight` (gate 80%), 56 finished the main quest both times (gate 50%), 0
+`questRefused`; side quests 7–9 Gran's Waymarks, 1 Bristle Bounty. From `first_fight` in the Greenway (240 s): 52, then
+76 past it (gate 80%). The bots still at `first_fight` lack (run b) kills 28, finisher 27, combo 27, dodge 26 of 28:
+100 bots crowd 21 enemies, and the Thornlings they need respawn every 25 s. Raising how many bots may fight one
+Thornling (1 → 4: everyone with a tenth of the damage is credited) took the Greenway run from 52 to 76. A new
+Warrior's kit has no mark of its own, so it cannot combo alone; the step's hint now names Skullringer, and the bots
+take it (80 swaps a run).
+
+**The Warden in gear.** The test kit is a tier's full set at level 1 (no level switch): the bands assume level 10.
+
+| party | kit (worn) | outcomes | band |
+|---|---|---|---|
+| paladin + black_mage, sloppy | T2 (t2) | 3 kills, 1 wipe | G2 T2 sloppy duos ≈ 75%: agrees |
+| paladin + black_mage, sloppy | starter | 4 wipes (phase 2–3) | G2 starter ≈ 25%: agrees |
+| dark_knight, careful | T3 (t3) | 3 kills of 3 | G5 careful T3 solo ≈ 35%: more (level 1, 3 runs) |
+| dark_knight, sloppy | T3 (t3) | 3 wipes | G5 sloppy T3 solo ≈ 8%: agrees |
+| paladin + black_mage, careful | starter | 4 wipes (enrage) | W1 (≥ 95%): disagrees, as in Plan 4 |
+| warrior + ranger + white_mage, sloppy | starter | 4 kills | W2: agrees |
+| paladin, careful | starter | 4 wipes | W4: agrees |
+
+The instance step p95 gate (3 ms) failed in three of the four Warden runs on single samples (3.01–4.01 ms) while the
+median (0.37–0.53 ms) and p90 (0.5–0.67 ms) match Plan 4's quiet runs; the 12-party run passed (2.69 ms).
+
+### 2026-11-13: parties and the Lampfall (Plan 4 Task 10) — PROVISIONAL (superseded by the quiet-machine runs above)
 
 Development sandbox (4 CPU cores, Node 22), server and bots on the same machine, ports 2574–2575, `SG2_STORE=memory`,
 `SG2_AUTH_RATE_PER_MIN=1000`, server `node --import tsx server/src/index.ts` from the main checkout at this task's
