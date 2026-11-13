@@ -1936,6 +1936,9 @@ class Bot {
     // in one pose (seen: 1 s, 4–9 m), past the server's allowance or, sliding along a stall, through it on the
     // server's straight-line check: an honest pose no browser sends, corrected.
     const dt = Math.min(rawDt, MAX_FRAME_S);
+    // and never faster than its own charge or cast lets it (as the browser's rig): a walk to a camp, a quest spot or a
+    // stall with a charge still held went at full speed while the server slowed it (the charging Rangers' corrections)
+    scale = Math.min(scale, this.moveSlow());
     if (this.route && dist(this.route.goal, goal) > 2) this.route = null;
     if (!this.route && (this.stuckTicks >= STUCK_TICKS || dist(goal, this.body) > 15)) {
       const points = findPath({ x: this.body.x, z: this.body.z }, goal, passableIn(this.zone, this.zone === 'lampfall' ? this.room.state.gates ?? 0 : 0), PATH_OPTS);
@@ -1987,6 +1990,15 @@ class Bot {
     if (sprinting > 1) this.sprintMoves++;
     this.room.send('move', next);
     this.lastSent = next;
+  }
+
+  /** Its own charge or cast slow as it knows it (think's rule): CHARGE_WALK_SCALE, CAST_MOVE_SCALE, or 1. */
+  private moveSlow(): number {
+    if (!fight || !this.room) return 1;
+    const sv = this.selfView, me = this.room.state.players?.get(this.room.sessionId), now = performance.now();
+    if ((this.chargeSince !== null && now - this.chargeSince <= 1000) || (sv?.charge ?? null) !== null || me?.act === 'charge') return CHARGE_WALK_SCALE;
+    if ((this.castSince !== null && now - this.castSince <= (this.castFor + 1.5) * 1000) || (sv?.cast ?? null) !== null || (me?.cast ?? '') !== '') return CAST_MOVE_SCALE;
+    return 1;
   }
 
   /** For a bot on its way back after a death: how near the Greenway it is (grove: the gate; travelling counts as progress). */
