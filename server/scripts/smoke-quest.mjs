@@ -171,6 +171,11 @@ try {
 
   let plaqueAt = 0;
   await check('A reads the plaque: questDone with scene beacon, and the Beacon is raised', async () => {
+    // to the plaque first: the pointer chip walks there (tap-to-walk)
+    await settle(a);
+    await waitFor(a, () => !!window.__sg2net.pointer || null, null, WAIT_MS, 'no pointer to the plaque');
+    await ev(a, () => document.querySelector('.sg-qp')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    await waitFor(a, () => { const s = window.__sg2net.story.find((v) => v.id === 'plaque'), r = window.__sg2.rig.position; return (s && Math.hypot(s.x - r.x, s.z - r.z) < 3.5 && !window.__sg2.game.walking) || null; }, null, WAIT_MS, 'never walked to the plaque');
     await tapSpot(a, 'plaque', 0.8);
     await readDialogue(a, 'the plaque');
     await waitFor(a, () => window.__sg2net.questDone.some((g) => g.scene === 'beacon') || null, null, WAIT_MS, 'no questDone with scene beacon');
