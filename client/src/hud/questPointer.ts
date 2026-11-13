@@ -46,6 +46,15 @@ export function pointerLayout(px: number, py: number, front: boolean, w: number,
   return out;
 }
 
+/**
+ * Which way the chip's label runs from a chip at (x, y) on a w × h screen, so the whole line stays on screen: to the
+ * left of a chip in the right third, to the right of one in the left third, else centred under it; above it in the
+ * bottom third.
+ */
+export function pointerLabelSide(x: number, y: number, w: number, hgt: number): { left: boolean; right: boolean; up: boolean } {
+  return { left: x > w * 0.66, right: x < w * 0.34, up: y > hgt * 0.66 };
+}
+
 export class QuestPointer {
   readonly el: HTMLElement;
   private label: HTMLElement;
@@ -75,8 +84,10 @@ export class QuestPointer {
     }
     if (Math.abs(p.angle - this.la) > 0.01) { this.la = p.angle; this.el.style.setProperty('--a', `${p.angle.toFixed(3)}rad`); }
     // the label sits on the side away from the edge
-    toggle(this.el, 'lab-left', p.x > window.innerWidth * 0.66);
-    toggle(this.el, 'lab-up', p.y > window.innerHeight * 0.66);
+    const side = pointerLabelSide(p.x, p.y, window.innerWidth, window.innerHeight);
+    toggle(this.el, 'lab-left', side.left);
+    toggle(this.el, 'lab-right', side.right);
+    toggle(this.el, 'lab-up', side.up);
   }
 }
 
@@ -92,7 +103,9 @@ export const POINTER_CSS = /* css */ `
   font:600 14px/1.25 var(--sans);color:var(--cream);background:rgba(16,18,42,.62);pointer-events:none}
 .sg-qp.lab-up .sg-qp-label{top:auto;bottom:100%;margin:0 0 -2px}
 .sg-qp.lab-left .sg-qp-label{left:auto;right:50%;transform:none}
-.sg-qp:not(.lab-left) .sg-qp-label{transform:translateX(-50%)}
+.sg-qp.lab-right .sg-qp-label{left:8px;transform:none}
+.sg-qp:not(.lab-left):not(.lab-right) .sg-qp-label{transform:translateX(-50%)}
+.sg-qp-label{max-width:calc(100vw - 40px);overflow:hidden;text-overflow:ellipsis}
 .sg-qp.over{pointer-events:none}
 .sg-qp.over .sg-qp-arrow,.sg-qp.over .sg-qp-label{display:none}
 .sg-qp.over .sg-qp-gem{font-size:24px;color:var(--gold2);text-shadow:0 0 10px rgba(242,183,66,.9),0 2px 3px rgba(40,20,0,.6);animation:sg-qp-bob 1.6s ease-in-out infinite}

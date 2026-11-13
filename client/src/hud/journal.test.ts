@@ -41,3 +41,12 @@ describe('completion moment', () => {
     expect(rewardChips({ xp: 0, gold: 0, item: null })).toEqual([]);
   });
 });
+
+describe('the pointer chip\'s label stays on screen (live check: "d Marrow" cut off at a phone\'s left edge)', () => {
+  it('a chip in the left third puts its label to the right, in the right third to the left, else centred', async () => {
+    const { pointerLabelSide } = await import('./questPointer');
+    expect(pointerLabelSide(32, 400, 390, 844)).toMatchObject({ left: false, right: true });
+    expect(pointerLabelSide(358, 400, 390, 844)).toMatchObject({ left: true, right: false });
+    expect(pointerLabelSide(195, 812, 390, 844)).toMatchObject({ left: false, right: false, up: true });
+  });
+});
