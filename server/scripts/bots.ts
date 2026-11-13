@@ -606,9 +606,9 @@ const QUEST_RETRY_MS = 3000;
 /** The cheapest Tailor costume a --gear bot buys when it can (and wears). */
 const BOT_COSTUME: CostumeId = 'straw_sunhat';
 /** --quest: a duo leader gives up on its party kill (and skips the optional step) after this long at the step. */
-const DUO_WAIT_MS = 90_000;
+const DUO_WAIT_MS = 60_000;
 /** --quest: a fighting step whose acts are still missing after this long gets a nudge (a dodge in a fight, a finisher). */
-const NUDGE_AFTER_MS = 60_000;
+const NUDGE_AFTER_MS = 30_000;
 /** Refusals that are no failure: 'combat' and 'busy' (the bots try out of combat; a fight can start meanwhile). */
 const GEAR_OK_REFUSALS = ['combat', 'busy'];
 /** questRefused reasons that are no failure: a bot that raced its own walk, a busy moment, a full bag. */
@@ -618,7 +618,7 @@ const gearStats = {
   purchases: 0, costumes: 0, wears: 0, sales: 0, equips: 0, unequips: 0, swaps: 0, talents: 0, drops: 0, lootGold: 0, saleGold: 0,
   refused: {} as Record<string, number>, gearCodeChanges: 0,
 };
-const questStats = { acts: 0, done: 0, scenes: {} as Record<string, number>, refused: {} as Record<string, number>, completed: {} as Record<string, number>, gold: 0, items: 0, nudges: 0, invites: 0 };
+const questStats = { acts: 0, done: 0, scenes: {} as Record<string, number>, refused: {} as Record<string, number>, completed: {} as Record<string, number>, gold: 0, items: 0, nudges: 0, invites: 0, pickSwaps: 0 };
 /** Where a bot stands to use a stall (in front of its booth, on walkable ground). */
 function stallSpot(id: StallId): Vec2 {
   const s = TOWN_STALLS[id];
@@ -746,7 +746,7 @@ class Bot {
   /** Predicts its rolls, sees its displacements late and rolls twice (PREDICTOR). */
   readonly predictor: boolean;
   /** The job and picks it fights with (changed in the grove: see the file comment). */
-  private readonly loadout: Loadout;
+  private loadout: Loadout;
   /** The job and picks the server last said it has (its `jobs`), and when it last asked for its own. */
   private jobNow: Loadout = NEW_LOADOUT;
   private jobAskedAt = -Infinity;
@@ -1677,7 +1677,14 @@ class Bot {
         this.room.send('dodge', { x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading, moving: false, ack: this.ack, dx: Math.sin(a), dz: Math.cos(a) });
         return;
       }
-      if (this.questNudge.includes('finisher') && sv.gcd <= 0 && (sv.cd[1] ?? 1) <= 0) {
+      // a pick (twice, at the picks step), or the primer that leaves the mark a combo sets off
+      const pickSlot = [3, 4].find((k) => (sv.cd[k] ?? 1) <= 0 && (this.questNudge!.includes('pick') || (this.questNudge!.includes('combo') && ABILITIES[sv.slots[k]]?.primer)));
+      if (pickSlot !== undefined && sv.gcd <= 0) {
+        this.nudgeAt = now;
+        questStats.nudges++;
+        this.pressedAt = now;
+        this.room.send('ability', { slot: pickSlot, phase: 'press' });
+      } else if (this.questNudge.includes('finisher') && sv.gcd <= 0 && (sv.cd[1] ?? 1) <= 0) {
         this.nudgeAt = now;
         questStats.nudges++;
         this.pressedAt = now;
@@ -2108,6 +2115,8 @@ class Bot {
   private sendQuest(act: Record<string, unknown>, now: number) {
     const key = JSON.stringify(act);
     if (this.questAct && this.questAct.key === key && now - this.questAct.at < QUEST_RETRY_MS) return;
+    const me = this.room.state.players?.get(this.room.sessionId);
+    if (!me || me.dead || me.hp <= 0) return; // (a dead adventurer's act is refused 'dead')
     this.questAct = { key, at: now };
     this.room.send('quest', act);
     questStats.acts++;
@@ -2150,6 +2159,19 @@ class Bot {
       if (now - this.duoSince! > DUO_WAIT_MS) g = { g: 'skip', quest: 'solstice_crossing' }; // (no party kill, no Mossback: skipped)
     }
     if (g.g === 'fight') {
+      // a combo needs a mark to set off: a kit with none (a new Warrior) takes a pick that leaves one, as the hint says
+      // (picks change anywhere out of a fight)
+      if (g.acts.includes('combo') && !sv.inCombat && now - this.jobAskedAt > JOB_RETRY_MS) {
+        const kit = [...JOBS[this.jobNow.job].bar, ...this.jobNow.picks];
+        const primer = JOBS[this.jobNow.job].pool.find((a) => ABILITIES[a]?.primer && ABILITIES[a]?.mark);
+        if (primer && !kit.some((a) => ABILITIES[a]?.primer && ABILITIES[a]?.mark)) {
+          this.loadout = { job: this.jobNow.job, picks: [primer, this.jobNow.picks[0] === primer ? this.jobNow.picks[1] : this.jobNow.picks[0]] };
+          this.jobAskedAt = now;
+          this.room.send('loadout', { picks: this.loadout.picks });
+          questStats.pickSwaps++;
+          return true;
+        }
+      }
       const key = `${main?.step ?? 'x'}:${JSON.stringify(g)}`;
       if (key !== this.questFightKey) { this.questFightKey = key; this.questFightSince = now; }
       this.questKinds = g.kinds;
@@ -2603,7 +2625,15 @@ if (questMode) {
   const show = (r: Record<string, number>) => JSON.stringify(Object.fromEntries([...mainIds, 'done', '?'].filter((k) => r[k]).map((k) => [k, r[k]])));
   console.log(`quests (--quest): bots by main-quest step at the end ${show(hist)}`);
   console.log(`  past board ${pastStep('board')}, past first_fight ${pastStep('first_fight')}, main quest done ${hist.done ?? 0} of ${questBots.length}; quests completed ${JSON.stringify(questStats.completed)}; steps done (questDone) ${questStats.done}; scenes ${JSON.stringify(questStats.scenes)}`);
-  console.log(`  acts sent ${questStats.acts}; questRefused ${JSON.stringify(questStats.refused)}; quest gold ${questStats.gold}, items ${questStats.items}; nudges ${questStats.nudges}; duo invites ${questStats.invites}`);
+  // what the bots still at a fighting step lack (objective by objective, summed)
+  for (const id of ['first_fight', 'picks']) {
+    const k = mainIds.indexOf(id), objs = QUESTS.solstice_crossing.steps[k]!.objectives;
+    const at = questBots.filter((b) => stepOf(b) === id);
+    if (!at.length) continue;
+    const lacking = objs.map((o, i) => `${o.k === 'act' ? o.what : o.k} ${at.filter((b) => (b.quests!.active.find((q) => q.id === 'solstice_crossing')!.counts[i] ?? 0) < (o.k === 'kill' || o.k === 'act' ? o.n : 1)).length}`);
+    console.log(`  at ${id} (${at.length} bots), still lacking: ${lacking.join(', ')}`);
+  }
+  console.log(`  acts sent ${questStats.acts}; questRefused ${JSON.stringify(questStats.refused)}; quest gold ${questStats.gold}, items ${questStats.items}; nudges ${questStats.nudges}; pick swaps for a combo ${questStats.pickSwaps}; duo invites ${questStats.invites}`);
 }
 
 const instSamples = healthSamples.map((h) => h.instances?.tickMsP95Max ?? 0);
