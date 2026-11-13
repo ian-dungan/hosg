@@ -461,6 +461,40 @@ the generator throw otherwise).
 
 ## Results
 
+### 2026-11-13 (the last fixes): the gear run's corrections, the charge slow, `first_fight` slots
+
+Development sandbox (4 CPU cores, Node 22), server and bots on the same machine, port 2574, `SG2_STORE=memory`,
+`SG2_AUTH_RATE_PER_MIN=100000 SG2_JOIN_RATE_PER_MIN=100000`, `node --import tsx server/src/index.ts`, a fresh server
+per run stopped by PID.
+
+**The gear run's corrections, explained.** In run (c) below (and again here: 25 in one of six tries) a whole group of
+bots was corrected on its walk from the Smithy to the Tailor. The server was right: the bots' own process stalled for
+about a second (every bot's tick late at once, 0.5–1.24 s), and each bot's next walk sent the whole gap as one pose,
+4–9 m from the last, past the allowance (8.3 m) or through a stall on the server's straight-line check. A browser
+never does that (`client/src/boot.ts` simulates at most 0.1 s a frame), and now no bot does either (`walkRoute`
+clamps its step to `MAX_FRAME_S`); with a 1.5 s stall injected three times: 716 corrections before, 0 after. A second
+bot fault of the same kind: a walk to the next camp, a quest spot or a stall went at full speed with a charge still
+held (the server slows the adventurer), the "charging Ranger" correction; every walk now keeps to the bot's own
+charge or cast slow, as the browser's rig does.
+
+| run | load | result | bot Hz | zone step p95 max | instance step p95 max | event-loop p99 max | peak RSS | KiB/s per bot (mean / p95) | corrections |
+|---|---|---|---|---|---|---|---|---|---|
+| `--fight --jobs mixed --looks --gear --dungeon 13`, 240 s, gold 500 (1) | 0.56 | PASS | 15.11 | 7.68 ms | 2.27 ms | 22.87 ms | 197 MB | 4.4 / 5.5 | 0 |
+| the same (2) | 0.82 | PASS | 15.11 | 7.14 ms | 2.02 ms | 20.64 ms | 174 MB | 4.4 / 5.3 | 0 |
+| the same (3) | 0.51 | PASS | 15.12 | 9.15 ms | 2.05 ms | 21.02 ms | 174 MB | 4.3 / 5.3 | 0 |
+| Greenway from `first_fight`, `--quest --fight`, 240 s (1) | 1.77 | PASS: 48 of 53 slotted past (91%) | 15.10 | 10.92 ms | - | 19.69 ms | 170 MB | 3.1 / 4.7 | 0 |
+| the same (2) | 0.39 | PASS: 51 of 56 (91%) | 15.10 | 9.98 ms | - | 21.35 ms | 167 MB | 3.4 / 5.0 | 0 |
+| the same (3) | 0.64 | PASS: 50 of 57 (88%) | 15.11 | 8.66 ms | - | 17.87 ms | 169 MB | 3.2 / 4.5 | 0 |
+| `--quest --fight --looks --gear`, 420 s, gold 200 (1) | 0.49 | PASS: 79 of 91 (87%), done 57 | 15.13 | 8.85 ms | - | 20.32 ms | 167 MB | 4.2 / 5.1 | 0 |
+| the same (2) | 0.66 | PASS: 92 of 97 (95%), done 59 | 15.13 | 9.41 ms | - | 19.5 ms | 176 MB | 4.2 / 5.1 | 0 |
+| the same (3, started a minute after a container restart) | 6.73 | FAIL: done 46 (slots 69 of 83, 83%) | 15.13 | 11.02 ms | - | 21.99 ms | 212 MB | 3.9 / 4.9 | 0 |
+| the same (4, quiet) | 0.54 | FAIL: slots 59 of 81 (73%), done 43 | - | 8.87 ms | - | - | 171 MB | 3.4 / 4.6 | 0 |
+
+Gear runs: 100 worn T1 chests, ledgers 0 mismatches, inventory refusals only 'combat' (0–4), inventory writes p95
+35.4–35.8. With the slots, Greenway runs pass the step's gate with room (88–91%); the grove runs vary a lot: in run (4)
+35 of the 37 bots still at `first_fight` had too few kills after holding a slot for minutes, which is **not explained**
+(the step's other runs: 5–26 bots left there). The gates were not lowered.
+
 ### 2026-11-13: looks, gear, the opening quest; every run again on a quiet machine (Plan 5 Task 11, Plan 6 Task 7)
 
 Development sandbox (4 CPU cores, Node 22), server and bots on the same machine, port 2574, `SG2_STORE=memory`,
