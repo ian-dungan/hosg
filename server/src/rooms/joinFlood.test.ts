@@ -33,8 +33,8 @@ describe('matchmaking floods (final review C1)', () => {
     }
   }, 20_000);
 
-  it('a zone room holds a reserved seat for SEAT_RESERVATION_S (5 s), and the account may try again after it', async () => {
-    expect(SEAT_RESERVATION_S).toBe(5);
+  it('a zone room holds a reserved seat for SEAT_RESERVATION_S (15 s: the client join timeout; 5 s expired the seats of slow pages in the live smoke tests), and the account may try again after it', async () => {
+    expect(SEAT_RESERVATION_S).toBe(15);
     const { url, store, app } = await startServer();
     try {
       const a = await accountFor(store, 'Slowpoke');

@@ -11,9 +11,11 @@ export const RECONNECT_SECONDS = 30;
 /**
  * How long a zone room keeps a seat reserved by matchmaking for the socket that should take it (s). A
  * client opens its socket right after the matchmake answer; an account has at most one such seat
- * pending at a time (a flood of matchmake calls cannot hold a zone's seats).
+ * pending at a time (a flood of matchmake calls cannot hold a zone's seats). 15 s, the client's own join
+ * timeout: with 5 s a busy page (a slow phone building its zone) missed its seat three times in a row
+ * ("seat reservation expired", then "Cannot reach the server") in the live smoke tests.
  */
-export const SEAT_RESERVATION_S = 5;
+export const SEAT_RESERVATION_S = 15;
 /** Matchmake calls (joins, including travels) per address a minute by default (SG2_JOIN_RATE_PER_MIN). */
 export const JOIN_RATE_PER_MIN = 600;
 /**
