@@ -46,7 +46,7 @@ setTimeout(() => { console.log('alive ' + processFaults.unhandledRejections); },
   it('/healthz shows the counts', async () => {
     const { url, app } = await startServer();
     try {
-      const health = await (await fetch(`${url}/healthz`)).json();
+      const health = await (await fetch(`${url}/healthz`)).json() as any;
       expect(health.unhandledRejections).toBe(processFaults.unhandledRejections);
       expect(health.uncaughtExceptions).toBe(processFaults.uncaughtExceptions);
     } finally {

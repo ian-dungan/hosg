@@ -18,10 +18,10 @@ describe('/healthz detail (final review M2)', () => {
   it("with healthDetail 'loopback' (production), a forwarded caller sees only ok, players and tickHz; a loopback one everything", async () => {
     const { url, app } = await startServer({ healthDetail: 'loopback' });
     try {
-      const outside = await (await fetch(`${url}/healthz`, { headers: { 'x-forwarded-for': '203.0.113.7' } })).json();
+      const outside = await (await fetch(`${url}/healthz`, { headers: { 'x-forwarded-for': '203.0.113.7' } })).json() as any;
       expect(Object.keys(outside).sort()).toEqual(['ok', 'players', 'tickHz']);
       expect(outside.ok).toBe(true);
-      const local = await (await fetch(`${url}/healthz`)).json();
+      const local = await (await fetch(`${url}/healthz`)).json() as any;
       expect(local).toHaveProperty('zones');
       expect(local).toHaveProperty('peakRssMb');
     } finally {
@@ -32,7 +32,7 @@ describe('/healthz detail (final review M2)', () => {
   it('by default (development, tests, SG2_HEALTHZ_DETAIL=all) everyone gets the full detail', async () => {
     const { url, app } = await startServer();
     try {
-      const outside = await (await fetch(`${url}/healthz`, { headers: { 'x-forwarded-for': '203.0.113.7' } })).json();
+      const outside = await (await fetch(`${url}/healthz`, { headers: { 'x-forwarded-for': '203.0.113.7' } })).json() as any;
       expect(outside).toHaveProperty('zones');
     } finally {
       await app.close();
