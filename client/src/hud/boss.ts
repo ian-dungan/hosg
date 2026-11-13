@@ -117,6 +117,12 @@ export class BossFrame {
     this.castName = h('div', 'sg-bf-castname', this.castEl);
     this.castBar = new Bar(this.castEl, 'sg-bf-castbar', false);
     this.warn = h('div', 'sg-bf-warn', this.castEl, UNAVOIDABLE_TEXT);
+    // portrait phones: one line (name and health) until tapped; a tap shows the whole frame, another folds it again
+    this.el.addEventListener('pointerdown', (e) => {
+      if (this.close.contains(e.target as Node)) return;
+      e.preventDefault(); e.stopPropagation();
+      toggle(this.el, 'expanded', !this.el.classList.contains('expanded'));
+    });
   }
   update(b: BossBar | null | undefined): boolean {
     const c = this.c, on = !!b;
@@ -215,14 +221,26 @@ export const BOSS_CSS = /* css */ `
 .sg-bf-cast.unav .sg-bf-warn{display:block;animation:sg-pulse .45s ease-in-out infinite alternate}
 .sg-has-bossframe .sg-banner{top:calc(var(--st) + 22vh)}
 @media (max-width:700px) and (orientation:portrait){
-  .sg-bf{position:relative;left:auto;top:auto;transform:none;width:auto;padding:5px 8px 6px}
+  .sg-bf{position:relative;left:auto;top:auto;transform:none;width:auto;padding:5px 8px 6px;pointer-events:auto}
   .sg-bf-name{font-size:15px}
+  /* folded (until tapped): one line, the name and the health bar; an unavoidable cast's warning still shows */
+  .sg-bf:not(.expanded){flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:4px 8px}
+  .sg-bf:not(.expanded) .sg-bf-head{flex:1 1 auto;min-width:0}
+  .sg-bf:not(.expanded) .sg-bf-name{text-align:left;font-size:14px}
+  .sg-bf:not(.expanded) .sg-bf-hpwrap{flex:0 0 36%;min-width:0}
+  .sg-bf:not(.expanded) .sg-bf-hp{height:11px}
+  .sg-bf:not(.expanded) .sg-bf-hp .sg-bar-text{display:none}
+  .sg-bf:not(.expanded) .sg-bf-sub,.sg-bf:not(.expanded) .sg-bf-stagwrap,.sg-bf:not(.expanded) .sg-bf-cast:not(.unav){display:none}
+  .sg-bf:not(.expanded) .sg-bf-cast.unav{flex-basis:100%}
+  .sg-bf:not(.expanded) .sg-bf-cast.unav .sg-bf-castname,.sg-bf:not(.expanded) .sg-bf-cast.unav .sg-bf-castbar{display:none}
+
   .sg-bf-hp{height:13px}
   .sg-bf-sub{font-size:10.5px}
   .sg-bf-warn{font-size:11px}
 }
 @media (max-height:500px){
   .sg-bf{left:auto;right:calc(var(--sr) + var(--g) + 112px);transform:none;width:min(44vw,400px);padding:4px 10px 5px;gap:3px}
+
   .sg-has-bossframe .sg-tf{top:calc(var(--st) + var(--g) + 124px)}
   .sg-bf-name{font-size:15px}
   .sg-bf-hp{height:12px}

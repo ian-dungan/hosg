@@ -113,6 +113,10 @@ export const TRACKER_CSS = /* css */ `
   .sg-hud.sg-touch.sg-has-quest:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + var(--tlh,62px) + var(--qh,0px) + 14px)}
   .sg-hud.sg-touch.sg-has-quest.sg-has-boss:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + var(--tlh,62px) + var(--bsh,96px) + var(--qh,0px) + 20px)}
 }
+/* portrait phones: in a boss fight the tracker steps aside (the boss, focus and party frames need the column) */
+@media (max-width:700px) and (orientation:portrait){
+  .sg-hud.sg-has-bossframe .sg-quest.on{display:none}
+}
 /* the smallest phones in a fight: the title alone (the tracker stays above 45% of the screen) */
 @media (max-width:700px) and (orientation:portrait) and (max-height:640px){
   .sg-hud.sg-in-combat .sg-quest:not(.expanded) .sg-quest-steps{display:none}
@@ -127,7 +131,7 @@ export const TRACKER_CSS = /* css */ `
   .sg-hud.sg-touch:not(.sg-no-abilities) .sg-quest.on,.sg-hud .sg-quest.on{display:block}
   .sg-hud .sg-quest{top:calc(var(--st) + var(--g) + 54px);right:calc(var(--sr) + var(--g));width:auto;max-width:min(250px,30vw);border-radius:12px;
     background:linear-gradient(90deg,rgba(18,22,48,.5),rgba(18,22,48,.3));-webkit-mask-image:none;mask-image:none}
-  .sg-hud.sg-touch.sg-has-boss .sg-quest.on,.sg-hud.sg-touch.sg-has-bossframe .sg-quest.on{display:none}
+  .sg-hud.sg-touch.sg-has-boss .sg-quest.on,.sg-hud.sg-has-bossframe .sg-quest.on{display:none}
   .sg-hud .sg-quest.expanded .sg-quest-steps li:not(.cur){display:none}
 }
 `;
