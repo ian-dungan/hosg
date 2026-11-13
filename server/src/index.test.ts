@@ -302,3 +302,34 @@ describe('SG2_TEST_QUEST (test servers only)', () => {
     expect(pg.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_QUEST works only with SG2_STORE=memory.');
   }, 90_000);
 });
+
+describe('test switches in production (final review I4)', () => {
+  const switches: Record<string, string> = {
+    SG2_TEST_KIT: 't2', SG2_TEST_START_GOLD: '1000', SG2_TEST_LOOT: 'always', SG2_TEST_DUMMY: '1', SG2_TEST_INSTANCE_START: 'landing',
+    SG2_START_AT: 'lampfall-mouth', SG2_START_ZONE: 'greenway', SG2_OPEN_EXITS: 'grove:greenway',
+  };
+  it('each is refused with one line when NODE_ENV=production', async () => {
+    for (const [name, value] of Object.entries(switches)) {
+      const { code, stderr } = await runServer({ SG2_STORE: 'memory', NODE_ENV: 'production', [name]: value });
+      expect(code, name).toBe(1);
+      expect(stderr.trim(), name).toBe(`Shady Grove 2 server: ${name} is refused when NODE_ENV=production.`);
+    }
+  }, 120_000);
+
+  it('empty switches are fine in production (docker compose passes unset ones through as empty)', async () => {
+    const { port, release } = await heldPort();
+    await release();
+    const child = spawn(process.execPath, ['--import', 'tsx', entry], {
+      env: { PATH: process.env.PATH ?? '', SG2_JWT_SECRET: SECRET, SG2_STORE: 'memory', SG2_PORT: String(port), NODE_ENV: 'production', ...Object.fromEntries(Object.keys(switches).map((k) => [k, ''])) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      let out = '';
+      child.stdout.on('data', (chunk) => (out += chunk));
+      child.stderr.on('data', () => {});
+      await waitFor(() => out.includes('listening'), 15_000);
+    } finally {
+      child.kill('SIGTERM');
+    }
+  }, 30_000);
+});

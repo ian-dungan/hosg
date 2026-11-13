@@ -22,6 +22,17 @@ function reason(err: unknown): string {
   return err.message || inner?.message || (err as NodeJS.ErrnoException).code || err.name;
 }
 
+/**
+ * A test switch's raw value: unset or empty is off; set, it is refused when NODE_ENV=production (the
+ * Docker image sets it), so a public server can never run with one (final review I4).
+ */
+function testSwitch(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return undefined;
+  if (process.env.NODE_ENV === 'production') fail(`${name} is refused when NODE_ENV=production.`);
+  return raw;
+}
+
 function positiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -46,8 +57,8 @@ function trustProxyHops(): number | undefined {
 
 /** SG2_START_ZONE (for local test servers): the zone new adventurers start in, at its spawn; grove by default. */
 function startZone(): ZoneId {
-  const raw = process.env.SG2_START_ZONE;
-  if (raw === undefined || raw === '') return 'grove';
+  const raw = testSwitch('SG2_START_ZONE');
+  if (raw === undefined) return 'grove';
   if (!isSaveZoneId(raw)) fail(`SG2_START_ZONE must be ${SAVE_ZONE_IDS.join(' or ')} (got "${raw}").`);
   return raw;
 }
@@ -57,8 +68,8 @@ function startZone(): ZoneId {
  * comma-separated from:to zone pairs, for example grove:greenway; unset or empty opens none.
  */
 function openExits(): Partial<Record<ZoneId, ZoneId[]>> | undefined {
-  const raw = process.env.SG2_OPEN_EXITS;
-  if (raw === undefined || raw === '') return undefined;
+  const raw = testSwitch('SG2_OPEN_EXITS');
+  if (raw === undefined) return undefined;
   const open: Partial<Record<ZoneId, ZoneId[]>> = {};
   for (const pair of raw.split(',')) {
     const [from, to, extra] = pair.trim().split(':');
@@ -75,8 +86,9 @@ function openExits(): Partial<Record<ZoneId, ZoneId[]>> | undefined {
  * for job and ability checks against a server; unset, empty or 0 adds none.
  */
 function testDummy(): Partial<Record<ZoneId, { camps: CampSpawn[] }>> | undefined {
-  const raw = process.env.SG2_TEST_DUMMY;
-  if (raw === undefined || raw === '' || raw === '0') return undefined;
+  if (process.env.SG2_TEST_DUMMY === '0') return undefined;
+  const raw = testSwitch('SG2_TEST_DUMMY');
+  if (raw === undefined) return undefined;
   if (raw !== '1') fail(`SG2_TEST_DUMMY must be 1 or empty (got "${raw}").`);
   return { grove: { camps: [...zoneDef('grove').camps, { kind: 'dummy', x: 3, z: -11, facing: 0 }] } };
 }
@@ -87,8 +99,8 @@ function testDummy(): Partial<Record<ZoneId, { camps: CampSpawn[] }>> | undefine
  * start zone's spawn.
  */
 function startAt(): 'lampfall-mouth' | undefined {
-  const raw = process.env.SG2_START_AT;
-  if (raw === undefined || raw === '') return undefined;
+  const raw = testSwitch('SG2_START_AT');
+  if (raw === undefined) return undefined;
   if (raw !== 'lampfall-mouth') fail(`SG2_START_AT must be lampfall-mouth or empty (got "${raw}").`);
   const zone = process.env.SG2_START_ZONE;
   if (zone !== undefined && zone !== '' && zone !== 'greenway') fail(`SG2_START_AT=lampfall-mouth starts in the Greenway; SG2_START_ZONE must be greenway or empty (got "${zone}").`);
@@ -100,16 +112,16 @@ function startAt(): 'lampfall-mouth' | undefined {
  * the packs and the Wickhound already dead and the checkpoint at the Keeper's Landing (scripted Warden runs).
  */
 function testInstanceStart(): CheckpointId | undefined {
-  const raw = process.env.SG2_TEST_INSTANCE_START;
-  if (raw === undefined || raw === '') return undefined;
+  const raw = testSwitch('SG2_TEST_INSTANCE_START');
+  if (raw === undefined) return undefined;
   if (raw !== 'landing') fail(`SG2_TEST_INSTANCE_START must be landing or empty (got "${raw}").`);
   return raw;
 }
 
 /** SG2_TEST_START_GOLD=<n> (test servers only, never in Docker): new adventurers start with n gold. */
 function testStartGold(): number | undefined {
-  const raw = process.env.SG2_TEST_START_GOLD;
-  if (raw === undefined || raw === '') return undefined;
+  const raw = testSwitch('SG2_TEST_START_GOLD');
+  if (raw === undefined) return undefined;
   const n = Number(raw);
   if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n > GOLD_MAX) fail(`SG2_TEST_START_GOLD must be a whole number of gold from 0 to ${GOLD_MAX}, or empty (got "${raw}").`);
   return n;
@@ -117,16 +129,16 @@ function testStartGold(): number | undefined {
 
 /** SG2_TEST_LOOT=always (test servers only, never in Docker): every credited kill on a row with items drops one (the roll still picks which). */
 function testLoot(): boolean {
-  const raw = process.env.SG2_TEST_LOOT;
-  if (raw === undefined || raw === '') return false;
+  const raw = testSwitch('SG2_TEST_LOOT');
+  if (raw === undefined) return false;
   if (raw !== 'always') fail(`SG2_TEST_LOOT must be always or empty (got "${raw}").`);
   return true;
 }
 
 /** SG2_TEST_KIT=t1|t2|t3 (test servers only, never in Docker): new adventurers get that tier's full kit for every job, worn. */
 function testKit(): 1 | 2 | 3 | undefined {
-  const raw = process.env.SG2_TEST_KIT;
-  if (raw === undefined || raw === '') return undefined;
+  const raw = testSwitch('SG2_TEST_KIT');
+  if (raw === undefined) return undefined;
   if (raw !== 't1' && raw !== 't2' && raw !== 't3') fail(`SG2_TEST_KIT must be t1, t2, t3 or empty (got "${raw}").`);
   return Number(raw.slice(1)) as 1 | 2 | 3;
 }
