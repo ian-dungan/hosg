@@ -13,11 +13,12 @@ import {
   Scene, MeshBuilder, DynamicTexture, Mesh, VertexData, type AbstractMesh,
   type ArcRotateCamera, type TransformNode,
 } from '@babylonjs/core';
-import { ENEMY_KINDS, greenwayLayout, prng, type ZoneLayout } from '@sg2/shared';
+import { ENEMY_KINDS, LAMPFALL_MOUTH, greenwayLayout, prng, type ZoneLayout } from '@sg2/shared';
 import type { WorldApi, AnchorName, Anchor, Quality } from '../core/contracts';
 import { Builder, hex, mix, tint, vnoise, type RGB, type V3 } from './mesh';
 import { Kit, PAL, tree, lantern } from './parts';
 import { createShaderSky, SUN_DIR, HAZE } from './sky';
+import { GREENWAY_BEACON_DIR, createFallingStar, createFarBeacon, greenwayStarPath } from './storySky';
 import { WorldFxPlugin, WFX, type WfxOpts } from './shading';
 import { buildGrass } from './grass';
 import { createLife } from './life';
@@ -1043,6 +1044,10 @@ export function buildGreenway(scene: Scene): WorldApi {
 
   const sky = createShaderSky(scene, new Vector3(-0.4, 0.5, 0.75)); // the cloud bank stays where the Beacon would be: off to the north-west
   const life = createLife(scene, []);
+  // the Beacon far off in the cloud bank's direction, once it has risen (an adventurer past the plaque), and the falling star
+  const farAt = new Vector3(GREENWAY_BEACON_DIR.x * 1500, GREENWAY_BEACON_DIR.y * 1500, GREENWAY_BEACON_DIR.z * 1500);
+  const farBeacon = createFarBeacon(scene, 'gw', farAt, 1.1);
+  const star = createFallingStar(scene, 'gw');
 
   // ───── anchors and spawns ─────
   const entry = layout.entry;
@@ -1111,8 +1116,10 @@ export function buildGreenway(scene: Scene): WorldApi {
     // grove-only anchors (the statue, the docks, the arena) have no place here: they all answer the entry
     anchor: (_name: AnchorName) => ({ pos: entryAnchor.pos.clone(), facing: entryAnchor.facing }),
     enemySpawns: () => spawns.map(p => p.clone()),
-    raiseBeacon: () => Promise.resolve(),
-    get beaconRaised() { return false; },
+    raiseBeacon: () => { farBeacon.setShown(true); sky.setReveal(1); return Promise.resolve(); },
+    get beaconRaised() { return farBeacon.shown; },
+    setBeaconRaised: (on) => { farBeacon.setShown(on); sky.setReveal(on ? 1 : 0); },
+    fallingStar: () => star.play(greenwayStarPath(farAt, H(LAMPFALL_MOUTH.x, LAMPFALL_MOUTH.z))),
     setArenaPhase: () => {},
     statueLens: lens,
     setQuality,
@@ -1126,6 +1133,7 @@ export function buildGreenway(scene: Scene): WorldApi {
       // tiles re-pick their detail once the adventurer has moved a few metres (or the tier changed)
       if (tileQ !== quality || Math.hypot(tmpTarget.x - tileX, tmpTarget.z - tileZ) > 4) applyTiles(tmpTarget.x, tmpTarget.z);
       sky.update(time);
+      star.update(dt, scene.activeCamera?.globalPosition ?? tmpTarget);
       life.update(dt, time, WFX.target);
       for (let i = blobs.length - 1; i >= 0; i--) {
         const b = blobs[i];

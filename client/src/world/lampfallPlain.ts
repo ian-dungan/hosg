@@ -176,6 +176,8 @@ export function buildLampfallPlain(scene: Scene, live: LampfallLive): WorldApi {
     enemySpawns: () => [],
     raiseBeacon: () => Promise.resolve(),
     get beaconRaised() { return false; },
+    setBeaconRaised: () => {},
+    fallingStar: () => Promise.resolve(),
     setArenaPhase: () => {},
     statueLens: new Vector3(rim.x, rim.floorY + 2, rim.z),
     setQuality: () => {},

@@ -18,6 +18,7 @@ import { createRiver } from './water';
 import { buildGrass } from './grass';
 import { createLife, createCloudBank, dotTex } from './life';
 import { createReveal } from './reveal';
+import { createFallingStar, groveStarPath } from './storySky';
 import { createLook } from './look';
 import {
   createGroveWalk, groundHeight, BEACON_DIR, BEACON_C, BEACON_U, BEACON_PERP, ARENA_C, ARENA_Y, BEACON_TOP, B_DOCK_U, B_DOCK_Y, SKY_ISLAND,
@@ -152,6 +153,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
   const bank = createCloudBank(scene, islandPos, bankSide, SKY_ISLAND.r);
   const dot = dotTex(scene);
   const reveal = createReveal(scene, statueLens, islandPos, new Vector3(SUN_DIR[0], SUN_DIR[1], SUN_DIR[2]), dot);
+  const star = createFallingStar(scene, 'world');
 
   // animated bits
   const sails = mk(sail, 'world_windmill_sails', mLit);
@@ -244,6 +246,16 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
       return new Promise<void>(resolve => { rise = { t: 0, resolve }; });
     },
     get beaconRaised() { return raised; },
+    setBeaconRaised: (on) => {
+      if (rise) { const r = rise; rise = null; r.resolve(); }
+      beaconRoot.setEnabled(on);
+      beaconRoot.position.y = islandPos.y + (on ? 0 : HIDDEN_Y);
+      beaconRoot.visibility = beaconGlow.visibility = beaconFall.visibility = on ? 1 : 0;
+      sky.setReveal(on ? 1 : 0);
+      raised = on;
+      afterRaise = on ? 60 : -1;   // risen long ago: only the faint lingering shaft
+    },
+    fallingStar: () => star.play(groveStarPath(islandPos)),
     setArenaPhase: (p) => {
       phase = p;
       walk.arenaRadius = ARENA_RADIUS[p];
@@ -262,6 +274,7 @@ export const buildWorld: BuildWorld = (scene: Scene): WorldApi => {
       if (ac && (ac as ArcRotateCamera).target) { tmpTarget.copyFrom((ac as ArcRotateCamera).target); WFX.target.copyFrom(tmpTarget); WFX.fadeRadius = 3.2; }
       const camPos = scene.activeCamera?.globalPosition ?? Vector3.Zero();
       sky.update(time);
+      star.update(dt, camPos);
       river.update(time, camPos, phase === 3 ? 1 : 0);
       life.update(dt, time, WFX.target);
       sails.rotation.z = time * 0.6;

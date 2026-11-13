@@ -21,6 +21,7 @@ import {
   type JobsView,
   type PartyOp,
   type PartyView,
+  type QuestsView,
   type S2C,
   type VictoryView,
   type ZoneId,
@@ -45,6 +46,7 @@ import { createRemotes, type Remotes } from './net/remotes';
 import { createEnemies, type Enemies } from './net/enemies';
 import { COMBAT_MESSAGES, createCombat, type CombatController, type CombatDebug } from './combat/controller';
 import { createGuildBoard } from './world/guildBoard';
+import { beaconRaisedFor, createStoryWorld, type StoryWorld } from './world/storyNpcs';
 import {
   UNREACHABLE,
   connect,
@@ -171,6 +173,18 @@ function boot(): void {
   // (its meshes go with the scene on a zone change)
   if (game.zone === 'grove') createGuildBoard(game.scene, game.world);
   game.onZoneLoaded((z) => { if (z === 'grove') createGuildBoard(game.scene, game.world); });
+  // the people and places of the opening quest (grove and Greenway), their markers from the last `quests` view
+  // (Plan 6 Task 6 wires taps on them: story.handleTap, and the talk flow)
+  let story: StoryWorld | null = null;
+  let questView: QuestsView | null = null;
+  const buildStory = (z: typeof game.zone) => {
+    try { story?.dispose(); } catch { /* its scene is gone already */ }
+    story = z === 'grove' || z === 'greenway' ? createStoryWorld(game.scene, game.world, z, { quality: game.quality }) : null;
+    story?.setView(questView);
+    game.world.setBeaconRaised(beaconRaisedFor(questView));
+  };
+  buildStory(game.zone);
+  game.onZoneLoaded((z) => buildStory(z));
   game.rig.setMoveScale(0);
   game.onZoneLoaded(() => game.rig.setMoveScale(0)); // a new zone's adventurer waits for its room
   hud.setVisible(false);
@@ -308,6 +322,8 @@ function boot(): void {
   let connecting = false;
   let statusText = '';
   game.start((dt) => {
+    story?.setInCombat(state.inCombat);
+    story?.update(dt);
     remotes?.update(dt);
     enemies?.update(dt);
     combat?.update(dt);
@@ -459,6 +475,14 @@ function boot(): void {
         Object.assign(sent, { x: m.x, z: m.z, y: m.y });
       });
       r.onMessage('hurt', (m: S2C['hurt']) => { if (m.amount > 0) showHurt(m.amount); });
+      // quest views (to this adventurer only): markers follow every one; the Beacon's state is set from the first in
+      // each room (a returning adventurer past the plaque sees it risen; the rise itself is the Beacon scene's)
+      let beaconSet = false;
+      r.onMessage('quests', (m: S2C['quests']) => {
+        questView = m;
+        story?.setView(m);
+        if (!beaconSet) { beaconSet = true; game.world.setBeaconRaised(beaconRaisedFor(m)); }
+      });
       r.onMessage('notice', (m: S2C['notice']) => hud.toast(m.text));
       r.onMessage('travel', (m: S2C['travel']) => {
         // The server has moved the adventurer to `m.zone` and ends this session: fade out meanwhile.

@@ -64,6 +64,8 @@ function fakeWorld(): WorldApi {
     enemySpawns() { return []; },
     raiseBeacon() { return Promise.resolve(); },
     beaconRaised: false,
+    setBeaconRaised() {},
+    fallingStar() { return Promise.resolve(); },
     setArenaPhase() {},
     statueLens: new Vector3(0, 5, 0),
     setQuality() {},

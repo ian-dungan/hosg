@@ -881,6 +881,9 @@ export function buildLampfall(scene: Scene, live?: LampfallLive): LampfallWorld 
     enemySpawns: () => spawns.map(p => p.clone()),
     raiseBeacon: () => Promise.resolve(),
     get beaconRaised() { return false; },
+    // underground: no sky for the Beacon or the falling star (WorldApi: zones without a sky do nothing)
+    setBeaconRaised: () => {},
+    fallingStar: () => Promise.resolve(),
     setArenaPhase: () => {},
     statueLens: lens,
     setQuality,

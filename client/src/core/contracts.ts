@@ -56,6 +56,12 @@ export interface WorldApi {
    *  statue's spyglass + the island rising (about 8 s) and resolves when finished. */
   raiseBeacon(): Promise<void>;
   readonly beaconRaised: boolean;
+  /** Shows or hides the Beacon at once (no rise): a returning adventurer past the plaque (online). The Greenway's sky
+   *  shows it far off; zones without a sky for it do nothing. */
+  setBeaconRaised(on: boolean): void;
+  /** A 3 s streak from the Beacon down past the grove's east edge toward the Greenway, with a soft flash on the
+   *  horizon; resolves when it lands. (The Greenway: from its far Beacon into the crater; elsewhere it resolves at once.) */
+  fallingStar(): Promise<void>;
   /** Arena visuals for the boss phase (2 = outer ring crumbles to ARENA_RADIUS[2], 3 = storm light). */
   setArenaPhase(phase: 1 | 2 | 3): void;
   /** World position of the statue's spyglass lens (for the beam / camera work). */

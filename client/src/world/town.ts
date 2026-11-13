@@ -6,6 +6,7 @@ import {
   BEACON_DIR, DOCK_ANGLE, DOCK_START, DOCK_LEN, DOCK_HW, DOCK_Y, GROVE_CENTER, type Obstacle,
 } from './layout';
 import { buildLookout } from './lookout';
+import { pimGround as sharedPimGround } from '@sg2/shared';
 
 const PERP = { x: -BEACON_DIR.z, z: BEACON_DIR.x };
 const H = groundHeight;
@@ -151,7 +152,9 @@ export function buildTown(k: Kit, props: Kit): TownOut {
     const px = tv.x + Math.cos(TAVERN_YAW) * sx + fwd.x * (tv.d / 2 + 2.0), pz = tv.z - Math.sin(TAVERN_YAW) * sx + fwd.z * (tv.d / 2 + 2.0);
     obs.push(circ(px, pz, 0.3));
   }
-  const pimGround: V3 = [doorX + fwd.x * 2.6, 0, doorZ + fwd.z * 2.6]; pimGround[1] = H(pimGround[0], pimGround[2]);
+  // Pim's talk spot: the shared story spot (STORY_NPCS.pim, the same TAVERN + fwd × (d / 2 + 2.6) the server checks)
+  const pg = sharedPimGround();
+  const pimGround: V3 = [pg.x, H(pg.x, pg.z), pg.z];
   const pimFacing = TAVERN_YAW + Math.PI;
 
   // ───── market stalls ─────

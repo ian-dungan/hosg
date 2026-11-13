@@ -485,8 +485,8 @@ export type ShapeKit = Kit;
 
 // ───────────────────────── humanoid design spec ─────────────────────────
 type HairStyle = 'hero' | 'braid' | 'bun' | 'pony' | 'short' | 'bald' | 'bob' | 'none';
-type Hat = 'none' | 'cap' | 'straw' | 'kerchief' | 'witch';
-type IdleStyle = 'hero' | 'cane' | 'hips' | 'wipe' | 'relaxed' | 'behind' | 'basket';
+type Hat = 'none' | 'cap' | 'straw' | 'kerchief' | 'witch' | 'hood';
+type IdleStyle = 'hero' | 'cane' | 'hips' | 'wipe' | 'relaxed' | 'behind' | 'basket' | 'pole';
 interface HumanSpec {
   skin: Color3; hair: Color3; hairStyle: HairStyle; brows?: Color3;
   eyes?: 'open' | 'kind';
@@ -510,6 +510,8 @@ interface HumanSpec {
   handPaint?: (side: number) => Paint | undefined;
   /** The look: builds the head, face, ears, hair and facial hair in place of the fixed ones. */
   customHead?: (k: Kit) => void;
+  /** A story NPC under a hood (hat 'hood'): tufted ears through it in this colour. */
+  hoodEars?: Color3;
 }
 
 function headPaint(skin: Color3, blush: number): Paint {
@@ -719,9 +721,33 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
   }
   } // (the fixed head)
 
+  // spectacles over a look-built face (a story NPC: Old Marrow)
+  if (sp.customHead && sp.glasses) {
+    for (const sx of [-1, 1]) {
+      const ring: V3[] = [];
+      for (let i = 0; i <= 10; i++) { const a = (i / 10) * Math.PI * 2; ring.push([sx * 0.07 + Math.cos(a) * 0.04, HY + Math.sin(a) * 0.038, 0.2]); }
+      k.tube('head', ring, 0.0055, P.gold, { seg: 4, noOcc: true, caps: false });
+    }
+    k.tube('head', [[-0.03, HY + 0.005, 0.202], [0, HY + 0.012, 0.212], [0.03, HY + 0.005, 0.202]], 0.005, P.gold, { seg: 4, noOcc: true });
+  }
+
   // ── hats ──
   const hcol = sp.hatColor ?? C.leather;
-  if (sp.hat === 'cap') {
+  if (sp.hat === 'hood') {
+    // a deep travelling hood with the face open, its point falling at the back, the rim in hatBand
+    const rim = sp.hatBand ?? shade(hcol, 0.8);
+    k.ellip('head', [0, HY + 0.05, -0.035], [0.27, 0.29, 0.275], hcol, { seg: 16, lat: 10, noOcc: true,
+      deform: (l) => { if ((l.z > 0.34 && l.y < 0.55 && l.y > -0.72) || l.y < -0.8) { l.x *= 0.8; l.y *= 0.8; l.z *= 0.8; } },
+      paint: (_w, _uv, l) => (l.z > 0.2 && l.y < 0.62 && l.y > -0.7 && Math.abs(l.x) > 0.6 ? rim : undefined) });
+    k.tube('head', [[0, HY + 0.1, -0.22], [0, HY - 0.04, -0.31], [0, HY - 0.22, -0.32], [0, HY - 0.4, -0.27]], [0.13, 0.1, 0.06, 0.01], hcol, { seg: 8, noOcc: true });
+    if (sp.hoodEars) {
+      // tufted ears through slits in the hood
+      for (const sx of [-1, 1]) {
+        k.tube('head', [[sx * 0.13, HY + 0.2, -0.04], [sx * 0.2, HY + 0.32, -0.06], [sx * 0.24, HY + 0.43, -0.08]], [0.065, 0.04, 0.005], sp.hoodEars, { seg: 6, flatten: 0.45, noOcc: true });
+        k.tube('head', [[sx * 0.135, HY + 0.22, -0.02], [sx * 0.195, HY + 0.32, -0.035], [sx * 0.225, HY + 0.4, -0.05]], [0.035, 0.022, 0.004], mix(sp.hoodEars, P.cloud, 0.55), { seg: 5, flatten: 0.4, noOcc: true });
+      }
+    }
+  } else if (sp.hat === 'cap') {
     k.ellip('head', [0, HY + 0.13, -0.01], [0.225, 0.13, 0.222], hcol, { seg: 14, lat: 8, deform: (l) => { if (l.y < 0) { l.y = 0; } } });
     k.lathe('head', [0, HY + 0.12, 0.17], [[-0.008, 0.11], [0.008, 0.1]], shade(hcol, 0.85), { seg: 12, sz: 0.75, rot: [0.25, 0, 0] });
     k.ellip('head', [0, HY + 0.26, -0.01], [0.025, 0.018, 0.025], sp.hatBand ?? P.gold, { seg: 6, lat: 4, noOcc: true });
@@ -1107,7 +1133,7 @@ function buildWarden(k: Kit) {
 }
 
 // ───────────────────────── character designs ─────────────────────────
-interface Design { spec: HumanSpec | null; idle: IdleStyle; hunch: number; scale: number; shoulder: number; prop: 'cane' | 'rag' | 'basket' | null; stride: number }
+interface Design { spec: HumanSpec | null; idle: IdleStyle; hunch: number; scale: number; shoulder: number; prop: 'cane' | 'rag' | 'basket' | 'pole' | null; stride: number }
 
 function strHash(s: string): number {
   let h = 2166136261;
@@ -1159,6 +1185,7 @@ function design(kind: EntityKind | 'npc', color: string | undefined, look: Adven
     } };
   }
   if (kind !== 'npc') return { ...base, spec: null, idle: 'relaxed' };
+  if (look) return npcLookDesign(look, color, detail);
   if (!color) {
     // Old Marrow: kindly elder with a white beard, spectacles and a cane.
     return { ...base, idle: 'cane', hunch: 0.3, scale: 0.94, prop: 'cane', stride: 0.55, spec: {
@@ -1206,11 +1233,52 @@ function design(kind: EntityKind | 'npc', color: string | undefined, look: Adven
   } };
 }
 
+/**
+ * A story NPC built from an authored Look (online, world/storyNpcs.ts STORY_LOOKS): the look gives the people, body,
+ * face, hair and fur; the costume, idle and prop are the character's own. Old Marrow (no colour): a long grey coat,
+ * a shawl, spectacles and a cane. Nell Thistlewood ('#6E8B3D'): a long moss-green hooded cloak edged in thistle
+ * purple, a leather vest and a walking pole with a road lantern. Any other colour: a plain tunic in it.
+ */
+function npcLookDesign(look: AdventurerLook, color: string | undefined, detail: number): Design {
+  const base = { hunch: 0, scale: 1, shoulder: 0.235, prop: null, stride: 1 } as const;
+  const sp = adventurerSpec(look, detail);
+  const noKit = { cape: undefined, scarf: undefined, pouch: false } as const;
+  if (!color) {
+    return { ...base, idle: 'cane', hunch: 0.3, prop: 'cane', stride: 0.55, spec: { ...sp, ...noKit,
+      top: shade(mix(P.stone, P.rock, 0.3), 0.74), topTrim: P.gold, hem: 0.1, flare: 0.13, girth: 1.02,
+      sleeves: 'long', sleeveColor: shade(mix(P.stone, P.rock, 0.34), 0.68), legs: null, boots: C.leather,
+      belt: P.gold, buckle: undefined, shawl: mix(P.stone, P.cloud, 0.35), glasses: true, hat: 'none' } };
+  }
+  const c = hex(color);
+  if (color.toUpperCase() === '#6E8B3D') {
+    const thistle = shade(mix(P.rock, P.roof, 0.3), 1.05);
+    return { ...base, idle: 'pole', prop: 'pole', stride: 0.9, spec: { ...sp,
+      top: C.cream, topTrim: undefined, hem: 0.62, flare: 0.04, girth: 0.95, vest: shade(C.leather, 1.25), sleeves: 'long', sleeveColor: shade(c, 0.8),
+      legs: C.khaki, boots: C.leather, bootTop: 0.46, belt: C.leather, buckle: P.gold, pouch: true, scarf: undefined,
+      cape: { color: c, trim: thistle, len: 0.95 }, hat: 'hood', hatColor: shade(c, 0.95), hatBand: thistle,
+      hoodEars: look.fur ? hex('#' + look.colours.skin.toString(16).padStart(6, '0')) : undefined } };
+  }
+  return { ...base, idle: 'relaxed', spec: { ...sp, ...noKit, top: c, topTrim: shade(c, 0.8), vneck: C.cream } };
+}
+
 function buildProps(k: Kit, prop: Design['prop']) {
   if (prop === 'cane') {
     // gnarled walking stick, held in the right hand, tip on the ground in front
     k.tube('prop', [[0.27, 0.78, 0.03], [0.275, 0.73, 0.04], [0.29, 0.4, 0.07], [0.3, 0.0, 0.09]], [0.024, 0.022, 0.02, 0.017], C.leather, { seg: 6 });
     k.tube('prop', [[0.22, 0.79, 0.03], [0.27, 0.8, 0.03], [0.31, 0.77, 0.03]], 0.026, C.leatherLight, { seg: 6 });
+  } else if (prop === 'pole') {
+    // a staff-length walking pole through the right hand (kept upright by the idle pose), a crook above the hood and a
+    // small road lantern hanging from it (its flame in the glow pass)
+    const wd = shade(C.leather, 1.15), Y = 0.24;
+    k.tube('prop', [[0.27, -0.42, 0.05], [0.27, 0.6, 0.05], [0.272, 1.5, 0.05], [0.27, 1.72 + Y, 0.05]], [0.026, 0.024, 0.022, 0.021], wd, { seg: 6 });
+    k.tube('prop', [[0.27, 1.72 + Y, 0.05], [0.27, 1.82 + Y, 0.08], [0.27, 1.84 + Y, 0.17], [0.27, 1.78 + Y, 0.22]], [0.021, 0.019, 0.017, 0.015], wd, { seg: 6 });
+    k.box('prop', [0.07, 0.016, 0.07], [0.27, 1.69 + Y, 0.22], C.ink);
+    k.box('prop', [0.085, 0.02, 0.085], [0.27, 1.55 + Y, 0.22], C.ink);
+    for (const [dx, dz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) k.box('prop', [0.012, 0.13, 0.012], [0.27 + dx * 0.036, 1.62 + Y, 0.22 + dz * 0.036], C.ink);
+    k.ellip('prop', [0.27, 1.62 + Y, 0.22], [0.03, 0.05, 0.03], mix(P.gold, P.cloud, 0.35), { seg: 6, lat: 4, glow: true });
+    k.lathe('prop', [0.27, 1.7 + Y, 0.22], [[0, 0.04], [0.03, 0.025], [0.05, 0]], C.ink, { seg: 6 });
+    k.tube('prop', [[0.27, 1.75 + Y, 0.22], [0.27, 1.79 + Y, 0.22]], 0.006, C.ink, { seg: 4, noOcc: true });
+    k.lathe('prop', [0.27, 0.62, 0.05], [[-0.02, 0.032], [0.02, 0.032]], shade(mix(P.rock, P.roof, 0.3), 1.05), { seg: 8 });
   } else if (prop === 'rag') {
     k.ellip('propL', [-0.24, 0.69, 0.06], [0.06, 0.08, 0.04], P.cloud, { seg: 8, lat: 5, deform: (l) => { l.x += Math.sin(l.y * 6) * 0.15; } });
   } else if (prop === 'basket') {
@@ -1313,6 +1381,12 @@ function idleArms(o: PoseVals, c: AnimCtx, br: number) {
     o['uArmL.rx'] = 0.25; o['uArmL.rz'] = -0.05; o['fArmL.rz'] = 0.7; o['fArmL.rx'] = -0.2; // left hand at the small of the back
   } else if (s === 'relaxed') {
     o['fArmL.rx'] = -0.3; o['fArmR.rx'] = -0.3;
+  } else if (s === 'pole') {
+    // the walking pole held upright at the side; every few seconds she lifts it and plants it again
+    const cyc = c.T % 6.5, tap = cyc > 5.7 ? Math.sin(((cyc - 5.7) / 0.8) * Math.PI) : 0;
+    o['uArmR.rx'] = -0.18 - tap * 0.1; o['uArmR.rz'] = 0.12; o['fArmR.rx'] = -0.62 - tap * 0.12;
+    o['prop.rx'] = 0.8 + tap * 0.22;
+    o['uArmL.rx'] = 0.05; o['uArmL.rz'] = -0.16; o['fArmL.rx'] = -0.5; o['fArmL.ry'] = 0.35; // a thumb in the belt
   }
 }
 
@@ -1371,6 +1445,7 @@ function computePose(o: PoseVals, pose: Pose, c: AnimCtx) {
       o['fArmL.rx'] = -1.25 - 0.3 * Math.max(0, sn); o['fArmR.rx'] = -1.25 - 0.3 * Math.max(0, -sn);
       if (d.idle === 'cane') { o['uArmR.rx'] = -0.35 - sn * 0.2; o['fArmR.rx'] = -0.45; o['prop.rx'] = 0.6 + sn * 0.2; }
       if (d.idle === 'basket') { o['uArmR.rx'] = -0.1; o['fArmR.rx'] = -1.3; }
+      if (d.idle === 'pole') { o['uArmR.rx'] = -0.2 - sn * 0.15; o['fArmR.rx'] = -0.6; o['prop.rx'] = 0.8 + sn * 0.15; }
       if (tr.heavy) o['base.rz'] = sn * 0.05;
       if (c.drawn && c.humanoid) {
         if (c.weapon === 'blade' || c.weapon === 'sword') { o['uArmR.rx'] = -0.4 - sn * 0.3; o['fArmR.rx'] = -0.6; }
@@ -1593,7 +1668,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const tr = TRAITS[kind];
   const id = ++charCounter;
   const mats = shared(scene);
-  let look: AdventurerLook | null = kind === 'player' ? opts.look ?? null : null;
+  // (story NPCs take an authored look too: world/storyNpcs.ts)
+  let look: AdventurerLook | null = kind === 'player' || kind === 'npc' ? opts.look ?? null : null;
   let gear: GearLook | null = kind === 'player' ? opts.gear ?? null : null;
   const detailOf = () => DETAIL[opts.detail ?? detailNow];
   let des = design(kind, opts.color, look, detailOf());
