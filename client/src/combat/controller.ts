@@ -16,21 +16,27 @@
 // not with `refused`. Ally-aimed abilities carry the focused adventurer (a tap on them, F) as `ally`; without
 // one the server picks (the lowest health in range). A spell's cast slows the adventurer from the press (never
 // faster than the server allows) and fills the cast bar from the server's cast.
-import { Color3, MeshBuilder, StandardMaterial, Vector3 } from '@babylonjs/core';
+import { Color3, Matrix, MeshBuilder, StandardMaterial, Vector3, type Viewport } from '@babylonjs/core';
 import {
   ABILITIES, BUFF_BITS, CAST_MOVE_SCALE, CHARGE_FULL_S, CHARGE_INTERRUPT_FRAC, CHARGE_MOVE_SCALE, DEATH_MIN_S, AUTO_RESPAWN_S, DEBUFF_BITS, DODGE_CHARGES,
   DODGE_MIN_GAP_S, DODGE_REFILL_S, ENEMY_ATTACKS, ENEMY_KINDS, GUILD_BOARD, JOBS, MARK_BITS, RANGE_FUZZ, REASON_JOB_NOT_HERE, SPRINT_S, SPRINT_SCALE, TARGET_RANGE,
   TELEGRAPH_LEAD_S, TICK_HZ, WEAPONS, dodgeDisplacement, isJobId, simulateDisplacement,
+  BOSSES, LAMPFALL_MOUTH, RELEASE_MIN_S, REASON_IN_COMBAT, lampfallLayout, type InstanceView, type CheckpointId,
   type AbilityId, type BuffId, type C2S, type CastView, type DebuffId, type EnemyAttackId, type EnemyKindId, type FxEvent, type JobId, type JobsView,
   type MarkId, type S2C, type SelfView, type ZoneId,
 } from '@sg2/shared';
-import type { HudApi, HudEvent, HudState, StatusId, TapInfo } from '../core/contracts';
+import type { BossBar, HudApi, HudEvent, HudState, PartyBar, StatusId, TapInfo } from '../core/contracts';
+import type { PartyState } from '../net/party';
+import { bossBar, bossTitle } from '../hud/boss';
+import { partyBars } from '../hud/party';
+import { edgeMarkerLayout, type EdgeCam, type EdgeMarker, type EdgeMember } from './edgeMarkers';
+import { lampfallRoomAt } from '../world/lampfallPlain';
 import type { Game } from '../boot';
 import type { Enemies } from '../net/enemies';
 import type { Remotes } from '../net/remotes';
 import { windupElapsedS, type EnemyStateView, type PlayerView, type ZoneRoom } from '../net/session';
 import { ABILITY_DEFS } from './abilityDefs';
-import { FOCUS_RANGE, aimHint, createAllyFocus, createFocusRing, type AllyPos } from './allyFocus';
+import { FOCUS_RANGE, aimHint, createAllyFocus, createFocusRing, createPartyRings, type AllyPos } from './allyFocus';
 import { article, jobBoardView, roleLabel } from '../hud/jobs';
 import { GUILD_BOARD_EID, GUILD_BOARD_REACH } from '../world/guildBoard';
 import { createTelegraphs, type Telegraphs } from './telegraphs';
@@ -261,6 +267,28 @@ export interface CombatDebug {
   chasing: number | null;
   /** The spell pool: visuals live and instances drawn last frame (set once the effects exist). */
   spells?: { readonly live: number; readonly drawn: number };
+  /** Plan 4: the boss frame's boss (null: none shown). */
+  boss: { kind: string; phase: number; warded: boolean; enrageIn: number | null } | null;
+  /** Which end screen is up: 'fallen' (dead in an instance), 'wipe', 'defeat' (the statue), or ''. */
+  screen: string;
+}
+
+/** Where the Lampfall's checkpoints are, by name (the wipe and release lines). */
+export function checkpointName(cp: CheckpointId | undefined): string {
+  const room = lampfallLayout().rooms.find((r) => r.checkpoint === (cp ?? 'rim'));
+  return room?.name ?? 'Crater Rim';
+}
+
+/** Seconds left of an instance countdown sent as `s` (wipeIn, releaseIn) `sinceMs` ago; null when there is none. */
+export function countdownLeft(s: number | null | undefined, sinceMs: number): number | null {
+  return typeof s === 'number' ? Math.max(0, s - sinceMs / 1000) : null;
+}
+
+/** Plan 4: the party and the instance (online.ts keeps them; the controller reads them). */
+export interface CombatSocial {
+  readonly party: PartyState;
+  /** The last `instance` message in this room and when it arrived (performance.now ms), or null. */
+  instance(): { view: InstanceView; at: number } | null;
 }
 
 /** The room messages the controller handles. */
@@ -298,6 +326,8 @@ export interface CombatOpts {
   send: <K extends keyof C2S>(type: K, message: C2S[K]) => void;
   /** The zone this room is (the job board's note; the Guild Board stands in the grove). */
   zone: ZoneId;
+  /** Plan 4 (online): the party and the instance. */
+  social?: CombatSocial;
 }
 
 const isKind = (k: string): k is EnemyKindId => Object.prototype.hasOwnProperty.call(ENEMY_KINDS, k);
@@ -309,6 +339,7 @@ export function createCombat(o: CombatOpts): CombatController {
   const meState = (): PlayerView | undefined => room.state.players?.get(room.sessionId);
   const debug: CombatDebug = {
     self: null, jobs: null, refused: [], allyFocus: null, fxSeen: 0, ack: 0, dodges: 0, refusals: [], corrections: 0, displaced: 0, telegraphs: 0, inDanger: false, log: [], chasing: null,
+    boss: null, screen: '',
   };
   const note = (e: unknown) => { debug.log.push({ t: performance.now(), e }); if (debug.log.length > 200) debug.log.splice(0, 50); };
 
@@ -365,7 +396,40 @@ export function createCombat(o: CombatOpts): CombatController {
   const allyCast = { name: '', frac: 0 };
   const selfStatuses: StatusId[] = [];
   /** What the context prompt does now (E or its button). */
-  let promptAction: { kind: 'revive'; eid: number; slot: number } | { kind: 'board' } | null = null;
+  let promptAction: { kind: 'revive'; eid: number; slot: number } | { kind: 'board' } | { kind: 'mouth' } | { kind: 'release' } | { kind: 'releaseWait' } | null = null;
+
+  // ── Plan 4: parties, the boss frame, the Lampfall ──
+  const social = o.social ?? null;
+  const party = social?.party ?? null;
+  const instanced = o.zone === 'lampfall';
+  /** Dead in an instance and the Fallen screen put away ("Watch"): the prompt offers Release instead. */
+  let watching = false;
+  /** Bumped whenever an end screen opens, so a stale screen's answer is ignored. */
+  let screenSeq = 0;
+  /** A `phase` fx per boss: when its transition began (the banner and the frame's transition flag). */
+  const phaseFx = new Map<number, number>();
+  const bossOut = { phaseMarks: [] as number[] } as unknown as BossBar;
+  const bossOpts = { windupFrac: 0, transitionLeftS: 0, targeted: false };
+  const bossDebug = { kind: '', phase: 0, warded: false, enrageIn: null as number | null };
+  const partyOut: PartyBar[] = [];
+  const rings = createPartyRings(game.scene);
+  const edgePool: EdgeMember[] = [], edgeList: EdgeMember[] = [], edgeOut: EdgeMarker[] = [];
+  const projIn = new Vector3(), projOut = new Vector3();
+  let viewport: Viewport | null = null, vpW = 0, vpH = 0;
+  const vpSize = { w: 0, h: 0 };
+  const edgeCam: EdgeCam & { x: number; z: number } = {
+    x: 0, z: 0,
+    project(x, y, z, out) {
+      projIn.set(x, y, z);
+      Vector3.ProjectToRef(projIn, Matrix.IdentityReadOnly, game.scene.getTransformMatrix(), viewport!, projOut);
+      out.x = projOut.x; out.y = projOut.y; out.front = projOut.z > 0 && projOut.z < 1;
+    },
+  };
+  /** The room the adventurer stands in (the Lampfall: a banner on walking into the next one), checked a few times a second. */
+  let roomId: string | null = null, roomCheckAt = 0;
+  /** The crater mouth's note, recomputed a few times a second (not every frame). */
+  let mouthHint: string | null = null, mouthNear = false, mouthCheckAt = 0;
+  let releaseText = '', releaseN = -1;
 
   const telegraphs: Telegraphs = createTelegraphs(game.scene, game.world, room);
   const overheads: Overheads = createOverheads(game.scene, room, o.enemies);
@@ -420,11 +484,35 @@ export function createCombat(o: CombatOpts): CombatController {
     return found.p ? (found as { sid: string; p: PlayerView }) : null;
   };
   const isPlayerEid = (eid: number) => playerByEid(eid) !== null;
+  /** A party member standing in this room, from its PlayerState (partyBars reads it at once). */
+  const memberHere = (eid: number) => playerByEid(eid)?.p;
+  const isBossKind = (k: string) => Object.prototype.hasOwnProperty.call(BOSSES, k);
+  /** The first engaged boss in view (forEach callback, made once: nothing allocated per frame). */
+  let bossPick: EnemyStateView | undefined;
+  const pickBoss = (e: EnemyStateView) => { if (!bossPick && isBossKind(e.kind) && (e.mode === 'fight' || e.mode === 'windup' || e.mode === 'stunned')) bossPick = e; };
   const isReviveId = (id: AbilityId) => ABILITIES[id].aim === 'dead-ally';
   const setFocus = (id: number | null) => { o.remotes.setFocus(id); debug.allyFocus = id; };
   const isDead = () => !!meState()?.dead;
   const enemyView = (eid: number) => room.state.enemies?.get(String(eid));
   const toast = (t: string | null) => { if (t) hud.toast(t); };
+  /** A party member here (by engine id): the server's automatic picks choose only these (the ally rule). */
+  const isMemberEid = (id: number) => !!party?.memberByEid(id);
+  const myName = () => meState()?.name ?? '';
+  const inst = () => social?.instance() ?? null;
+  /** Seconds until this adventurer may release (dead in an instance), counted from the last `instance`. */
+  const releaseLeft = (now: number) => {
+    const i = inst();
+    const left = i ? countdownLeft(i.view.releaseIn, now - i.at) : null;
+    return left ?? Math.max(0, RELEASE_MIN_S - (deadSince !== null ? (now - deadSince) / 1000 : 0));
+  };
+  const wipeLeft = (now: number) => { const i = inst(); return i ? countdownLeft(i.view.wipeIn, now - i.at) : null; };
+  const checkpoint = () => checkpointName(inst()?.view.checkpoint);
+  const sendRelease = () => {
+    const left = releaseLeft(performance.now());
+    if (left > 0.05) { toast(`You can release in ${Math.ceil(left)} s`); return false; }
+    o.send('release', {} as Record<string, never>);
+    return true;
+  };
 
   let lastTargetSent = -Infinity;
   const setTarget = (id: number | null, tell = true) => {
@@ -558,10 +646,30 @@ export function createCombat(o: CombatOpts): CombatController {
         break;
       }
       case 'clearAlly': focus.clear(); setFocus(null); break;
+      case 'focusMember': {
+        if (playerByEid(e.eid)) setFocus(focus.set(e.eid, performance.now()));
+        else toast('Not close enough to see them');
+        break;
+      }
+      case 'invite': {
+        const who = playerByEid(e.eid);
+        if (!who) { toast('They are not here any more'); break; }
+        o.send('party', { op: 'invite', eid: e.eid });
+        // the server sends no answer when it works (only a refusal): say so here
+        toast(`Invite sent to ${who.p.name}`);
+        break;
+      }
+      case 'release': if (isDead() && instanced) sendRelease(); break;
+      case 'leaveInstance': if (instanced && !isDead()) o.send('leaveInstance', {} as Record<string, never>); break;
       case 'interact': {
         const a = promptAction;
         if (a?.kind === 'revive') press(a.slot, a.eid);
         else if (a?.kind === 'board') openJobs();
+        else if (a?.kind === 'release' || a?.kind === 'releaseWait') sendRelease();
+        else if (a?.kind === 'mouth') {
+          const y = game.world.groundAt(LAMPFALL_MOUTH.x, LAMPFALL_MOUTH.z) ?? rig().position.y;
+          if (!game.walkTo(new Vector3(LAMPFALL_MOUTH.x, y, LAMPFALL_MOUTH.z))) toast('Walk into the crater to climb down');
+        }
         break;
       }
       default: break;
@@ -599,7 +707,8 @@ export function createCombat(o: CombatOpts): CombatController {
     note({ t: 'revived', ...m });
     revivedAt = performance.now();
     deadSince = null;
-    if (deathScreen) { hud.dismissEndScreen(); deathScreen = false; }
+    watching = false;
+    if (deathScreen) { screenSeq++; hud.dismissEndScreen(); deathScreen = false; debug.screen = ''; }
     hud.toast('Back on your feet');
   };
   const onDisplaced = (m: S2C['displaced']) => {
@@ -628,8 +737,9 @@ export function createCombat(o: CombatOpts): CombatController {
     followEid = null;
     rig().place(new Vector3(m.x, m.y, m.z));
     ack = m.seq;
+    screenSeq++;
     hud.dismissEndScreen();
-    deathScreen = false;
+    deathScreen = false; watching = false; debug.screen = '';
   };
   const onRefused = (m: S2C['refused']) => {
     debug.refusals.push(`${m.action}:${m.reason}`);
@@ -659,6 +769,15 @@ export function createCombat(o: CombatOpts): CombatController {
       if (ev.t === 'use' && ev.src === me && ev.ability === 'sprint') sprintUntil = performance.now() + (SPRINT_S - SPRINT_EARLY_S) * 1000;
       if (ev.t === 'hit' && room.state.enemies?.get(String(ev.dst))) hurtAt.set(ev.dst, performance.now());
       if (ev.t === 'cast' && ev.src === me) castFx = { ability: ev.ability, total: ev.total, at: performance.now() };
+      if (ev.t === 'phase') {
+        // a boss between phases: its banner (lore.phases is 0-based: ev.phase is already the next one)
+        phaseFx.set(ev.src, performance.now());
+        const k = enemyView(ev.src)?.kind;
+        if (k && Object.prototype.hasOwnProperty.call(BOSSES, k)) {
+          const data = BOSSES[k as keyof typeof BOSSES];
+          hud.banner(data.lore.phases[ev.phase] ?? data.phases[ev.phase]?.name ?? '', bossTitle(ENEMY_KINDS[k as EnemyKindId].name));
+        }
+      }
       if (ev.t === 'castEnd' && ev.src === me) {
         castFx = null; castPress = null;
         if (!ev.ok && ev.reason === 'interrupt') toast(`${ABILITIES[ev.ability].name} interrupted`);
@@ -712,9 +831,29 @@ export function createCombat(o: CombatOpts): CombatController {
       game.walkTo(null); followEid = null;
       charge.cancel();
     }
-    if (!dead && deadSince !== null) { deadSince = null; if (deathScreen) { hud.dismissEndScreen(); deathScreen = false; } }
-    if (dead && !deathScreen && deadSince !== null && now - revivedAt > 2000) {
-      deathScreen = true;
+    if (!dead && deadSince !== null) { deadSince = null; watching = false; if (deathScreen && debug.screen !== 'wipe') { screenSeq++; hud.dismissEndScreen(); deathScreen = false; debug.screen = ''; } }
+    // the Lampfall: a wipe's screen (over any other), else the Fallen screen (wait for a revive, or release)
+    const wipe = instanced ? wipeLeft(now) : null;
+    if (wipe !== null && wipe > 0 && debug.screen !== 'wipe') {
+      const seq = ++screenSeq;
+      deathScreen = true; debug.screen = 'wipe';
+      void hud.endScreen('defeat', ['Everyone in the party has fallen.', 'The foes still standing go back to their places.'], ['OK'], {
+        title: 'The light goes out…', countdown: { seconds: wipe, text: `Back to the ${checkpoint()} in {s} s` },
+      }).then(() => { if (seq === screenSeq) { deathScreen = false; watching = true; debug.screen = ''; } });
+    } else if (instanced && dead && !deathScreen && !watching && deadSince !== null && now - revivedAt > 2000) {
+      const seq = ++screenSeq;
+      deathScreen = true; debug.screen = 'fallen';
+      void hud.endScreen('defeat', ['You have fallen.', `A party member can bring you back, or release to get up at the ${checkpoint()}.`], ['Release', 'Watch'], {
+        title: 'Fallen', countdown: { seconds: releaseLeft(now), text: 'Release in {s} s', doneText: 'You can release now' },
+      }).then((i) => {
+        if (seq !== screenSeq || disposed) return;
+        debug.screen = '';
+        if (i === 0) { if (sendRelease()) debug.screen = 'released'; else deathScreen = false; } // too early: it comes back
+        else { deathScreen = false; watching = i === 1; }
+      });
+    }
+    if (!instanced && dead && !deathScreen && deadSince !== null && now - revivedAt > 2000) {
+      deathScreen = true; debug.screen = 'defeat';
       const since = (now - deadSince) / 1000;
       void hud.endScreen('defeat', ['You were defeated.', 'You will wake by the statue in Shady Grove.'], ['Return to the statue'], {
         countdown: { seconds: Math.max(1, AUTO_RESPAWN_S - since), text: 'Waking there by yourself in {s} s' },
@@ -823,6 +962,8 @@ export function createCombat(o: CombatOpts): CombatController {
       a.name = pv.name; a.hp = pv.hp; a.maxHp = pv.maxHp; a.dead = !!pv.dead;
       a.glyph = isJobId(pv.job) ? JOBS[pv.job].glyph : '';
       a.inRange = Math.hypot(pv.x - r.position.x, pv.z - r.position.z) <= FOCUS_RANGE + RANGE_FUZZ;
+      a.eid = focus.id!;
+      a.canInvite = !!party && !party.memberByEid(focus.id!) && party.canInvite(myName());
       a.statuses.length = 0;
       if ((pv.shield ?? 0) > 0) a.statuses.push('guard');
       buffStatuses(pv.buffs ?? 0, 'adventurer', a.statuses);
@@ -844,14 +985,86 @@ export function createCombat(o: CombatOpts): CombatController {
     const reviveReady = reviveSlot >= 0 && !!self && (self.cd[reviveSlot] ?? 0) - (now - self.at) / 1000 <= 0 && !self.cast && !castFx;
     if (!dead && reviveReady && self) {
       const ab = ABILITIES[self.slots[reviveSlot]];
-      const want = aimHint(ab, focus.id, meAlly(), others());
+      // the server's own pick reaches party members only (the ally rule): the hint guesses the same
+      const want = aimHint(ab, focus.id, meAlly(), others(), isMemberEid);
       const who = want !== null ? playerByEid(want) : null;
       if (who && want !== null) { promptAction = { kind: 'revive', eid: want, slot: reviveSlot }; promptText = `${ab.name} · Revive ${who.p.name}`; }
     }
     if (!promptAction && o.zone === 'grove' && Math.hypot(GUILD_BOARD.x - r.position.x, GUILD_BOARD.z - r.position.z) <= GUILD_BOARD_REACH) {
       promptAction = { kind: 'board' }; promptText = 'Guild Board · Jobs';
     }
+    // dead in the Lampfall with the Fallen screen put away: Release (once allowed)
+    if (!promptAction && dead && instanced && !deathScreen) {
+      const n = Math.ceil(releaseLeft(now));
+      if (n !== releaseN) { releaseN = n; releaseText = n > 0 ? `Release in ${n} s` : `Release · get up at the ${checkpoint()}`; }
+      promptAction = n > 0 ? { kind: 'releaseWait' } : { kind: 'release' }; promptText = releaseText;
+    }
+    // the crater mouth (the Greenway): what the Lampfall is, who comes along, and why not now
+    if (o.zone === 'greenway' && now >= mouthCheckAt) {
+      mouthCheckAt = now + 400;
+      const d = Math.hypot(LAMPFALL_MOUTH.x - r.position.x, LAMPFALL_MOUTH.z - r.position.z);
+      mouthNear = d <= 14 && !dead;
+      if (!mouthNear) mouthHint = null;
+      else if (self?.inCombat) mouthHint = REASON_IN_COMBAT;
+      else {
+        const v = party?.view;
+        const mates = v ? v.members.filter((m) => m.name !== myName()).map((m) => m.name) : [];
+        mouthHint = mates.length
+          ? `The Lampfall: a private dungeon for your party (you, ${mates.join(', ')}). Party members who walk in join you.`
+          : 'The Lampfall: a private dungeon. Alone unless you form a party first (tap an adventurer, then Invite).';
+      }
+    }
+    if (!promptAction && mouthNear && o.zone === 'greenway' && !self?.inCombat && !dead) { promptAction = { kind: 'mouth' }; promptText = 'Enter the Lampfall'; }
     state.prompt = promptText;
+    state.hint = o.zone === 'greenway' ? mouthHint : null;
+
+    // the Lampfall: a banner with each room's name on walking into it
+    if (instanced && now >= roomCheckAt) {
+      roomCheckAt = now + 250;
+      const rm = lampfallRoomAt(r.position.x, r.position.z);
+      if (rm && rm.id !== roomId) { if (roomId !== null) hud.banner(rm.name, 'The Lampfall'); roomId = rm.id; }
+    }
+
+    // the party frames (members here read their PlayerState), their rings, and the edge markers toward those off screen
+    if (party) {
+      const pos = r.position;
+      state.party = partyBars(party.view, myName(), memberHere, pos, partyOut);
+      let ring = 0, en = 0;
+      for (const b of state.party) {
+        if (b.eid < 0) continue;
+        const pv = playerByEid(b.eid)?.p;
+        if (!pv) continue;
+        rings.set(ring++, o.remotes.viewOfEid(b.eid)?.root ?? null);
+        const m = (edgePool[en] ??= { id: 0, x: 0, y: 0, z: 0, initial: '' });
+        m.id = b.eid; m.x = pv.x; m.y = pv.y + 1; m.z = pv.z; m.initial = b.name.charAt(0).toUpperCase();
+        en++;
+      }
+      rings.clearFrom(ring);
+      edgeList.length = 0;
+      for (let i = 0; i < en; i++) edgeList.push(edgePool[i]);
+      const cv = game.scene.getEngine().getRenderingCanvas(), cam = game.scene.activeCamera;
+      if (cv && cam && en > 0) {
+        const w = cv.clientWidth, hh = cv.clientHeight;
+        if (!viewport || w !== vpW || hh !== vpH) { vpW = w; vpH = hh; viewport = cam.viewport.toGlobal(w, hh); }
+        vpSize.w = w; vpSize.h = hh; edgeCam.x = pos.x; edgeCam.z = pos.z;
+        state.edges = edgeMarkerLayout(edgeCam, vpSize, edgeList, hud.exclusions(), edgeOut);
+      } else { edgeOut.length = 0; state.edges = edgeOut; }
+    }
+
+    // the boss frame: the targeted boss, else an engaged one in view
+    let boss: EnemyStateView | undefined = target !== null ? enemyView(target) : undefined;
+    if (boss && !isBossKind(boss.kind)) boss = undefined;
+    if (!boss) { bossPick = undefined; room.state.enemies?.forEach(pickBoss); boss = bossPick; }
+    if (boss) {
+      const w = windupSince.get(boss.eid), data = BOSSES[boss.kind as keyof typeof BOSSES];
+      bossOpts.windupFrac = w && boss.windup ? (now - w.at) / 1000 / Math.max(0.1, boss.windupTotal || 1) : 0;
+      const ph = phaseFx.get(boss.eid);
+      bossOpts.transitionLeftS = ph !== undefined ? data.transitionS - (now - ph) / 1000 : 0;
+      bossOpts.targeted = boss.eid === target;
+      state.boss = bossBar(boss, room.state.clock, bossOpts, bossOut);
+      bossDebug.kind = boss.kind; bossDebug.phase = bossOut.phase; bossDebug.warded = bossOut.warded; bossDebug.enrageIn = bossOut.enrageIn;
+      debug.boss = bossDebug;
+    } else { state.boss = null; debug.boss = null; }
 
     overheads.update({ target, hurtAt, now, me: myEid() });
     effects.update(dt);
@@ -927,7 +1140,10 @@ export function createCombat(o: CombatOpts): CombatController {
       overheads.dispose();
       selfRing.dispose(); ringMat.dispose();
       focusRing.dispose(); o.remotes.setFocus(null);
-      state.prompt = null; state.ally = null;
+      rings.dispose();
+      state.prompt = null; state.ally = null; state.boss = null; state.hint = null; state.edges = undefined;
+      partyOut.length = 0; state.party = partyOut; phaseFx.clear();
+      screenSeq++;
       effects.dispose();
       if (deathScreen) hud.dismissEndScreen();
       hud.closeSheets(); // the board and the picks belong to this room: their answers would go nowhere

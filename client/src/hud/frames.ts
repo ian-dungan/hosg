@@ -1,6 +1,6 @@
 // Unit frames: player, target (+ boss bar), party. Every update() diffs against a cache.
 import type { JobId } from '@sg2/shared';
-import type { HudBar, HudState, StatusId, WeaponId } from '../core/contracts';
+import type { HudState, StatusId, WeaponId } from '../core/contracts';
 import { h, toggle, ICONS } from './dom';
 import { JOB_COLOR } from './jobs';
 
@@ -271,32 +271,6 @@ export class TargetFrame {
   }
 }
 
-export class PartyFrames {
-  readonly el: HTMLElement;
-  private rows: { el: HTMLElement; name: HTMLElement; bar: Bar; chips: Chips; n: string; hp: number; max: number }[] = [];
-  private count = -1;
-  constructor(parent: HTMLElement) { this.el = h('div', 'sg-party', parent); }
-  update(list: HudBar[]): void {
-    if (list.length !== this.count) {
-      this.count = list.length;
-      while (this.rows.length < list.length) {
-        const el = h('div', 'sg-party-row', this.el);
-        const name = h('div', 'sg-party-name', el);
-        const bar = new Bar(el, 'sg-hp-party', false);
-        const chips = new Chips(el, false);
-        this.rows.push({ el, name, bar, chips, n: '', hp: -1, max: -1 });
-      }
-      this.rows.forEach((r, i) => toggle(r.el, 'off', i >= list.length));
-    }
-    list.forEach((m, i) => {
-      const r = this.rows[i];
-      if (r.n !== m.name) { r.n = m.name; r.name.textContent = m.name; }
-      if (r.hp !== m.hp || r.max !== m.maxHp) { r.hp = m.hp; r.max = m.maxHp; r.bar.set(m.maxHp > 0 ? m.hp / m.maxHp : 0); }
-      r.chips.set(m.statuses);
-    });
-  }
-}
-
 /**
  * The focused ally (a tap on another adventurer): job glyph, name, health, buffs, their cast, and a close
  * button. Greyed while out of reach of ally abilities; "Down" while dead (a revive prompt shows near them).
@@ -311,8 +285,10 @@ export class FocusFrame {
   private cast: CastBar;
   private act: HTMLElement;
   private actText = '';
-  private c = { on: false, name: '', glyph: '', hp: -1, max: -1, dead: false, far: false };
-  constructor(parent: HTMLElement, onClose: () => void, onAct: () => void) {
+  private inviteBtn: HTMLElement;
+  private eid = -1;
+  private c = { on: false, name: '', glyph: '', hp: -1, max: -1, dead: false, far: false, invite: false };
+  constructor(parent: HTMLElement, onClose: () => void, onAct: () => void, onInvite: (eid: number) => void = () => {}) {
     this.el = h('div', 'sg-af', parent);
     const head = h('div', 'sg-af-head', this.el);
     this.glyph = h('b', 'sg-af-glyph', head);
@@ -327,6 +303,14 @@ export class FocusFrame {
     // on portrait phones the context prompt (a revive) shows here instead of under the frames
     this.act = h('div', 'sg-af-act sg-ctl', this.el);
     this.act.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); onAct(); });
+    // Plan 4: a stranger can be invited from here (two taps: the adventurer, then Invite)
+    this.inviteBtn = h('div', 'sg-af-invite sg-ctl', this.el, 'Invite to party');
+    this.inviteBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (this.eid < 0) return;
+      this.inviteBtn.animate([{ transform: 'scale(.94)' }, { transform: 'none' }], { duration: 160 });
+      onInvite(this.eid);
+    });
   }
   /** The context prompt's text, shown as this frame's button on portrait phones (null hides it). */
   prompt(text: string | null): void {
@@ -350,5 +334,8 @@ export class FocusFrame {
     }
     this.chips.set(a.statuses);
     this.cast.set(a.cast);
+    this.eid = a.eid ?? -1;
+    const inv = !!a.canInvite && this.eid >= 0;
+    if (inv !== c.invite) { c.invite = inv; toggle(this.inviteBtn, 'on', inv); }
   }
 }

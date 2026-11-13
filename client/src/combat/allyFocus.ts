@@ -23,6 +23,8 @@ export function createAllyFocus() {
       id = id === eid ? null : eid; usedAt = nowMs;
       return id;
     },
+    /** A tap on a party frame: focuses that member (a second tap keeps it: a healer taps again and again). */
+    set(eid: number, nowMs: number): number { id = eid; usedAt = nowMs; return id; },
     /** F: the next adventurer outward from the focus (nearest first, wrapping) within FOCUS_RANGE; none clears it. */
     cycle(me: { x: number; z: number }, others: readonly AllyPos[], nowMs: number): number | null {
       const near = others.map((o) => ({ id: o.id, d: Math.hypot(o.x - me.x, o.z - me.z) }))
@@ -113,5 +115,28 @@ export function createFocusRing(scene: Scene) {
       ring.scaling.x = ring.scaling.z = s;
     },
     dispose() { ring.dispose(); mat.dispose(); },
+  };
+}
+
+/** Teal rings under the party members on screen (distinct from the green focus ring): at most three, reused. */
+export function createPartyRings(scene: Scene, max = 3) {
+  const mat = new StandardMaterial('partyRingMat', scene);
+  mat.disableLighting = true; mat.emissiveColor = Color3.FromHexString('#3FB0A6'); mat.alpha = 0.8; mat.zOffset = -2;
+  const rings: { mesh: Mesh; on: TransformNode | null }[] = [];
+  for (let i = 0; i < max; i++) {
+    const mesh = MeshBuilder.CreateTorus('partyRing' + i, { diameter: 1.15, thickness: 0.07, tessellation: 36 }, scene);
+    mesh.scaling.y = 0.2; mesh.position.y = 0.045; mesh.isPickable = false; mesh.material = mat; mesh.setEnabled(false);
+    rings.push({ mesh, on: null });
+  }
+  return {
+    /** Ring i under `root` (a member's character), or hidden (null). */
+    set(i: number, root: TransformNode | null) {
+      const r = rings[i];
+      if (!r || r.on === root) return;
+      r.on = root; r.mesh.parent = root; r.mesh.setEnabled(!!root);
+    },
+    /** Hides rings from i on. */
+    clearFrom(i: number) { for (let k = i; k < rings.length; k++) this.set(k, null); },
+    dispose() { for (const r of rings) r.mesh.dispose(); mat.dispose(); },
   };
 }

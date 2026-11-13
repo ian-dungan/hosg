@@ -2,7 +2,10 @@
 import type { CreateHud, HudApi, HudEvent, HudState } from '../core/contracts';
 import { injectStyles } from './style';
 import { h, toggle, ICONS } from './dom';
-import { PlayerFrame, TargetFrame, PartyFrames, FocusFrame } from './frames';
+import { PlayerFrame, TargetFrame, FocusFrame } from './frames';
+import { PartyFrames, InviteCards } from './party';
+import { BossFrame } from './boss';
+import { createEdgeMarkers } from '../combat/edgeMarkers';
 import { AbilityBar } from './abilities';
 import { Joystick } from './joystick';
 import { QuestTracker } from './quest';
@@ -15,6 +18,8 @@ import { createDoubleTap } from '../combat/doubleTap';
 const MOVE_KEYS: Record<string, [number, number]> = {
   KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0],
 };
+
+const NO_EDGES: readonly never[] = [];
 
 export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   injectStyles();
@@ -47,10 +52,30 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const tl = h('div', 'sg-tl', combat);
   const castSlot = h('div', 'sg-castslot', combat);
   const player = new PlayerFrame(tl, castSlot);
-  const party = new PartyFrames(tl);
-  const ally = new FocusFrame(tl, () => emit({ type: 'clearAlly' }), () => emit({ type: 'interact' }));
+  // a tap on a member here focuses them (a healer's main way to aim); one elsewhere says where they are
+  const party = new PartyFrames(tl, (b) => {
+    if (b.eid >= 0 && b.zoneLabel === null) emit({ type: 'focusMember', eid: b.eid });
+    else api.toast(b.online ? `${b.name} is in ${b.zoneLabel ?? 'another place'}` : `${b.name} is offline`);
+  });
+  const ally = new FocusFrame(tl, () => emit({ type: 'clearAlly' }), () => emit({ type: 'interact' }), (eid) => emit({ type: 'invite', eid }));
   const bossSlot = h('div', 'sg-bossslot', combat);
-  const target = new TargetFrame(combat, bossSlot, () => emit({ type: 'clearTarget' }));
+  const target = new TargetFrame(tl, bossSlot, () => emit({ type: 'clearTarget' }));
+  const bossFrame = new BossFrame(tl, () => emit({ type: 'clearTarget' }));
+  // the top-left column's height: what sits under it on phones (the prompt, the chat log, the joystick zone) follows it
+  if (typeof ResizeObserver !== 'undefined') {
+    let lastH = -1;
+    new ResizeObserver(() => { const hh = Math.round(tl.getBoundingClientRect().height); if (hh !== lastH) { lastH = hh; host.style.setProperty('--tlh', `${hh}px`); } }).observe(tl);
+  }
+  // the party button (online only), the invite cards, the edge markers
+  const partyBtn = h('button', 'sg-party-btn sg-ctl', combat);
+  partyBtn.type = 'button';
+  partyBtn.setAttribute('aria-label', 'Party');
+  partyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 13.7c3 .2 5.5 2.1 5.5 5.3"/></svg><i></i>';
+  const partyBadge = partyBtn.querySelector('i') as HTMLElement;
+  partyBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  partyBtn.addEventListener('click', () => emit({ type: 'openParty' }));
+  const invites = new InviteCards(combat);
+  const edges = createEdgeMarkers(fx);
   const quest = new QuestTracker(combat);
   // the movement keys held now (a Shift dodge goes that way) and double taps of one of them
   const held = new Set<string>();
@@ -69,7 +94,9 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const pKey = h('span', 'sg-prompt-key', prompt);
   pKey.innerHTML = '<b>E</b>' + ICONS.talk;
   const pText = h('span', 'sg-prompt-text', prompt);
+  const hintEl = h('div', 'sg-hint', promptRow);
   let promptCache: string | null = null;
+  let hintCache: string | null = null;
   prompt.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     prompt.animate([{ transform: 'scale(.93)' }, { transform: 'scale(1)' }], { duration: 180 });
@@ -136,6 +163,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     else if (c === 'KeyJ') { abar.flash('jobs'); emit({ type: 'openJobs' }); }
     else if (c === 'KeyL') { abar.flash('loadout'); emit({ type: 'openLoadout' }); }
     else if (c === 'KeyF') emit({ type: 'cycleAlly' });
+    else if (c === 'KeyP') emit({ type: 'openParty' });
     else if (c === 'KeyO') settings.toggle();
     else if (c === 'Escape') emit({ type: 'clearTarget' });
     else return;
@@ -154,18 +182,56 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     heldDigits.clear();
   });
 
-  const cache = { boss: false, combat: false, hasParty: false };
+  const cache = { boss: false, combat: false, hasParty: false, bossFrame: false, social: false, inParty: false, invites: -1 };
+
+  // ── edge-marker exclusions: the joystick zone, the ability cluster and the frames (measured at most every 0.5 s) ──
+  const exRects: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  let exAt = -Infinity;
+  const exEls = () => [root.querySelector('.sg-joyzone'), root.querySelector('.sg-abar'), tl, target.el, bossFrame.el, partyBtn, root.querySelector('.sg-gear'), root.querySelector('.sg-quest'), castSlot];
+  const measure = () => {
+    let n = 0;
+    const add = (x0: number, y0: number, x1: number, y1: number) => { const r = (exRects[n] ??= { x0: 0, y0: 0, x1: 0, y1: 0 }); r.x0 = x0; r.y0 = y0; r.x1 = x1; r.y1 = y1; n++; };
+    for (const el of exEls()) {
+      if (!(el instanceof HTMLElement)) continue;
+      const b = el.getBoundingClientRect();
+      if (b.width > 0 && b.height > 0) add(b.left, b.top, b.right, b.bottom);
+    }
+    // the touch cluster has no box of its own (its buttons sit round a point): their union
+    if (touch) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      root.querySelectorAll('.sg-abar > .sg-ab').forEach((b) => {
+        const r = b.getBoundingClientRect();
+        if (r.width === 0) return;
+        x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top); x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+      });
+      if (x1 > x0) add(x0, y0, x1, y1);
+    }
+    exRects.length = n;
+  };
 
   const api: HudApi = {
     settings: settings.values,
     render(s: HudState) {
       player.update(s.player);
-      const mode = target.update(s.target);
+      // the boss frame: when the target is the boss, the target frame stays away (no duplicate bars)
+      const bossOn = bossFrame.update(s.boss ?? null);
+      if (bossOn !== cache.bossFrame) { cache.bossFrame = bossOn; toggle(root, 'sg-has-bossframe', bossOn); }
+      const mode = target.update(s.boss?.targeted ? null : s.target);
       const boss = mode === 2;
       if (boss !== cache.boss) { cache.boss = boss; toggle(root, 'sg-has-boss', boss); }
       const hasT = mode === 1;
       toggle(root, 'sg-has-target', hasT);
       party.update(s.party);
+      const hasParty = s.party.length > 0;
+      if (hasParty !== cache.hasParty) { cache.hasParty = hasParty; toggle(root, 'sg-has-party', hasParty); }
+      const social = !!s.social;
+      if (social !== cache.social) { cache.social = social; toggle(root, 'sg-social', social); }
+      if (s.social) {
+        if (s.social.inParty !== cache.inParty) { cache.inParty = s.social.inParty; toggle(partyBtn, 'inparty', s.social.inParty); }
+        if (s.social.invites !== cache.invites) { cache.invites = s.social.invites; partyBadge.textContent = String(s.social.invites); toggle(partyBtn, 'invited', s.social.invites > 0); }
+      }
+      edges.update(s.edges ?? NO_EDGES);
+      if ((s.hint ?? null) !== hintCache) { hintCache = s.hint ?? null; hintEl.textContent = hintCache ?? ''; toggle(hintEl, 'on', !!hintCache); host.style.setProperty('--hy', hintCache ? '124px' : '0px'); }
       ally.update(s.ally ?? null);
       ally.prompt(s.ally ? s.prompt : null);
       toggle(root, 'sg-has-ally', !!s.ally);
@@ -213,6 +279,10 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     loadout: (pool, current, title, count) => overlays.loadout(pool, current, title, count),
     jobs: (view) => overlays.jobs(view),
     endScreen: (kind, lines, buttons, opts) => overlays.endScreen(kind, lines, buttons, opts),
+    partyInvite: (from, size, seconds = 60) => invites.open(from, size, seconds),
+    closeInvite: (from) => invites.close(from),
+    partySheet: (view) => overlays.partySheet(view),
+    exclusions() { const now = performance.now(); if (now - exAt > 500) { exAt = now; measure(); } return exRects; },
     dismissEndScreen: () => overlays.dismissEndScreen(),
     closeSheets: () => overlays.closeSheets(),
     danger(mode) {

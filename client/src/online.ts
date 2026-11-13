@@ -13,17 +13,25 @@ import {
   TICK_HZ,
   zoneDef,
   zoneFullReason,
+  PARTY_TEXT,
   type C2S,
   type CastView,
+  type InstanceView,
   type JobId,
   type JobsView,
+  type PartyOp,
+  type PartyView,
   type S2C,
+  type VictoryView,
   type ZoneId,
 } from '@sg2/shared';
 import type { HudState } from './core/contracts';
 import { bootGame, isZoneBuilt } from './boot';
 import { h } from './hud/dom';
-import { createChat } from './net/chatBox';
+import { createChat, type ChatChannel } from './net/chatBox';
+import { createPartyState } from './net/party';
+import { partySheetView } from './hud/party';
+import { victoryLines } from './hud/boss';
 import { showLogin } from './net/loginScreen';
 import { LeaveNameScreen, showNameScreen } from './net/nameScreen';
 import { createRemotes, type Remotes } from './net/remotes';
@@ -41,6 +49,7 @@ import {
   savedToken,
   zoneFor,
   type PlayerView,
+  type ZonePlace,
   type SentPose,
   type ZoneRoom,
 } from './net/session';
@@ -55,7 +64,7 @@ const LOAD_FAILED = "Couldn't load that area, try again";
 /** A zone this client cannot build: the sign-in is kept (the adventurer is fine; this version of the game is old). */
 class ZoneClosedError extends Error {}
 const zoneClosedNotice = (zone: ZoneId) => `Your adventurer is in ${zoneDef(zone).name}, which this version of the game can't show yet. Reload to update the game, or try again later.`;
-const KEEP_TOKEN_ON = new Set([LOAD_FAILED, UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway')]);
+const KEEP_TOKEN_ON = new Set([LOAD_FAILED, UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway'), zoneFullReason('lampfall')]);
 /** How long the screen takes to fade out and back in around a zone change, in s. */
 const TRAVEL_FADE_S = 0.6;
 /** Longest wait after joining for the room to show this adventurer. */
@@ -64,7 +73,7 @@ const ENTER_TIMEOUT_MS = 15_000;
 const TRAVEL_LEAVE_MS = 5_000;
 
 const CSS = /* css */ `
-.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 58px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
+.sg-online{position:absolute;right:calc(var(--sr) + var(--g) + 114px);top:calc(var(--st) + var(--g));padding:4px 12px;border-radius:12px;
   font-size:13px;font-weight:600;background:rgba(16,18,42,.45)}
 .sg-online.away{color:#ffd9a0}
 @media (max-width:700px) and (orientation:portrait){ .sg-online{right:auto;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--sb) + 4px);font-size:11px;padding:2px 8px;background:none} }
@@ -104,17 +113,42 @@ interface NetDebug {
   combat: CombatDebug | null;
   /** Moves sent (and with which ack, the last). */
   moves: number;
+  /** Plan 4: the party (null: none), pending invites, the last party refusals (PARTY_TEXT lines). */
+  party: PartyView | null;
+  invites: { partyId: string; from: string }[];
+  partyRefusals: string[];
+  /** The Lampfall instance as last heard (null outside one), and the room's id (an instance's id inside one). */
+  instance: InstanceView | null;
+  roomId: string;
+  /** The boss the boss frame shows (null: none). */
+  boss: { kind: string; phase: number; warded: boolean; enrageIn: number | null } | null;
+  /** The last boss kill this adventurer was credited with (null: none in this room). */
+  victory: VictoryView | null;
+  /** The last 50 chat lines. */
+  chatLog: { from: string; text: string; channel: string }[];
+  /** Which end screen is up ('fallen', 'wipe', 'defeat', 'victory', or ''). */
+  screen: string;
+  /** `correct` messages received so far (an honest client at a shut lamp-gate gets none). */
+  corrections: number;
+  /** Edge markers shown now (party members off screen). */
+  edges: number;
 }
-/** What ended a connection: a reason for the login screen, or a travel to another zone. */
-type Ended = { reason: string } | { travel: ZoneId };
+/** What ended a connection: a reason for the login screen, or a travel to another zone (an instance by id). */
+type Ended = { reason: string } | { travel: ZonePlace };
 
 function boot(): void {
   let room: ZoneRoom | null = null;
   let remotes: Remotes | null = null;
   let enemies: Enemies | null = null;
   let combat: CombatController | null = null;
+  /** The room being played (set on joining, before the adventurer is in it): the Lampfall's gates come from its state. */
+  let joining: ZoneRoom | null = null;
 
-  const game = bootGame({ busy: () => !room, onTap: (tap) => combat?.onTap(tap) ?? false });
+  const game = bootGame({
+    busy: () => !room, onTap: (tap) => combat?.onTap(tap) ?? false,
+    // the Lampfall's shut lamp-gates are walls (as on the server) and its lamp-lift opens after the Warden
+    lampfall: { gates: () => joining?.state.gates ?? 0, lift: () => !!joining?.state.lift },
+  });
   const { hud, hudRoot } = game;
   // the Guild Board stands in the grove's Plaza (online only: the offline demo has no jobs)
   // (its meshes go with the scene on a zone change)
@@ -130,14 +164,44 @@ function boot(): void {
   const netUi = h('div', 'sg-net-off', hudRoot);
   // Outside netUi, so "Connecting…" shows before the room does.
   const status = h('div', 'sg-online', h('div', 'sg-hud', hudRoot));
-  const chat = createChat(netUi, (text) => room && send(room, 'chat', { text }));
-  const travelLabel = h('div', 'sg-travel', document.body);
-
   const net: NetDebug = {
     remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0,
     jobs: null, refusals: [], allyFocus: null, guildBoard: { x: GUILD_BOARD.x, z: GUILD_BOARD.z },
+    party: null, invites: [], partyRefusals: [], instance: null, roomId: '', boss: null, victory: null, chatLog: [], screen: '', corrections: 0, edges: 0,
   };
-  hud.on((e) => combat?.onHud(e));
+  const logChat = (from: string, text: string, channel: string) => { net.chatLog.push({ from, text, channel }); if (net.chatLog.length > 50) net.chatLog.shift(); };
+  // ── Plan 4: the party (it outlives each room), invites, party chat ──
+  const party = createPartyState();
+  const sendParty = (op: PartyOp) => { if (room) send(room, 'party', op); else hud.toast('Not connected right now'); };
+  const chat = createChat(netUi, {
+    send: (text, channel: ChatChannel) => { if (room) send(room, 'chat', channel === 'party' ? { text, channel } : { text }); },
+    invite: (name) => { sendParty({ op: 'invite', name }); if (room) hud.toast(`Invite sent to ${name}`); },
+  });
+  const travelLabel = h('div', 'sg-travel', document.body);
+  /** The instance message of this room and when it came (the controller counts its timers down from then). */
+  let instance: { view: InstanceView; at: number } | null = null;
+  const socialView = { party, instance: () => instance };
+  const syncParty = () => {
+    net.party = party.view;
+    net.invites = party.invites.map((i) => ({ partyId: i.partyId, from: i.from }));
+    net.partyRefusals = party.refusals.slice();
+    social.inParty = party.view !== null; social.invites = party.invites.length;
+  };
+  const social = { inParty: false, invites: 0 };
+  let sheetOpen = false;
+  const openPartySheet = () => {
+    if (sheetOpen || !room) return;
+    sheetOpen = true;
+    const me = state.player.name;
+    void hud.partySheet(partySheetView(party.view, me, party.canInvite(me))).then((a) => {
+      sheetOpen = false;
+      if (!a) return;
+      if (a.kind === 'invite') { sendParty({ op: 'invite', name: a.name }); hud.toast(`Invite sent to ${a.name}`); }
+      else if (a.kind === 'leave') sendParty({ op: 'leave' });
+      else sendParty({ op: a.kind, name: a.name });
+    });
+  };
+  hud.on((e) => { if (e.type === 'openParty') openPartySheet(); else combat?.onHud(e); });
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
   // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
   // Getters: a zone change replaces the scene, world and rig.
@@ -181,6 +245,7 @@ function boot(): void {
     quest: null,
     prompt: null,
     inCombat: false,
+    social,
   };
 
   /** From asking to join until this adventurer is in the room (or the attempt ends). */
@@ -193,7 +258,12 @@ function boot(): void {
     if (combat) {
       const d = combat.debug;
       net.self = d.self; net.fxSeen = d.fxSeen; net.jobs = d.jobs; net.refusals = d.refused; net.allyFocus = d.allyFocus;
+      net.boss = d.boss;
+      net.edges = state.edges?.length ?? 0;
+      if (net.screen !== 'victory') net.screen = d.screen;
     }
+    // invites that ran out: their cards go
+    if (party.invites.length) for (const gone of party.expire(performance.now())) { hud.closeInvite(gone.from); syncParty(); }
     let text = connecting ? CONNECTING : '';
     if (room) text = room.reconnection.isReconnecting ? RECONNECTING : `Adventurers online: ${room.state.online ?? room.state.players?.size ?? 0}`;
     if (text !== statusText) {
@@ -221,8 +291,8 @@ function boot(): void {
     hud.danger('flash');
   };
 
-  /** Set from a `travel` message until the next room is entered: the zone, the fade and when it began. */
-  let travelling: { zone: ZoneId; fade: Promise<void>; since: number } | null = null;
+  /** Set from a `travel` message until the next room is entered: where to (an instance by id), the fade and when it began. */
+  let travelling: { zone: ZoneId; instance?: string; fade: Promise<void>; since: number } | null = null;
   /** Ends a travel that will not reach its room (a kick, a timeout, a failed join): the label goes and the screen fades back in. */
   const endTravel = () => {
     if (!travelling) return;
@@ -236,7 +306,10 @@ function boot(): void {
     const rig = game.rig;
     return new Promise((resolve) => {
       let kickedFor = '';
-      let travelTo: ZoneId | null = null;
+      let travelTo: ZonePlace | null = null;
+      joining = r;
+      net.roomId = r.roomId;
+      instance = null; net.instance = null; net.victory = null;
       let lostTimer = 0;
       let sendTimer = 0;
       let travelTimer = 0;
@@ -258,11 +331,63 @@ function boot(): void {
         sent.x = NaN; // the server may have missed the last pose: send it again
       });
       r.onMessage('kicked', (m: S2C['kicked']) => { kickedFor = m.reason; });
-      r.onMessage('chat', (m: S2C['chat']) => chat.add(m.from, m.text));
+      r.onMessage('chat', (m: S2C['chat']) => {
+        const channel = m.channel === 'party' ? 'party' : 'zone';
+        chat.add(m.from, m.text, channel, m.gm === true);
+        logChat(m.from, m.text, channel);
+      });
+      // a game master's announcement: a banner (as text, never HTML) and a chat line
+      r.onMessage('announce', (m: S2C['announce']) => {
+        if (typeof m?.text !== 'string') return;
+        hud.banner(m.text, typeof m.event === 'string' && m.event ? m.event : 'Announcement');
+        chat.announce(m.text);
+        logChat('Announcement', m.text, 'announce');
+      });
+      // ── parties ──
+      r.onMessage('party', (m: S2C['party']) => {
+        const was = party.view?.members.find((x) => x.leader)?.name;
+        const { joined, left } = party.onParty(m);
+        if (joined) { hud.closeInvite(null); const lead = party.view?.members.find((x) => x.leader)?.name; hud.toast(lead && lead !== state.player.name ? `You joined ${lead}'s party` : 'Your party is formed'); }
+        if (left) hud.toast('You are no longer in a party');
+        const now = party.view?.members.find((x) => x.leader)?.name;
+        if (!joined && !left && was && now && was !== now) hud.toast(now === state.player.name ? 'You lead the party now' : `${now} leads the party now`);
+        chat.setParty(party.view !== null);
+        syncParty();
+      });
+      r.onMessage('partyStatus', (m: S2C['partyStatus']) => { party.onStatus(m); net.party = party.view; });
+      r.onMessage('partyInvite', (m: S2C['partyInvite']) => {
+        const { invite, fresh } = party.onInvite(m, performance.now());
+        syncParty();
+        if (!fresh) return; // a refreshed invite: its card is already up (or queued)
+        void hud.partyInvite(invite.from, invite.size, Math.max(1, (invite.expiresAt - performance.now()) / 1000)).then((ok) => {
+          if (!party.invites.some((i) => i.partyId === invite.partyId)) return; // expired, or joined another party meanwhile
+          party.answered(invite.partyId);
+          syncParty();
+          // decline has no answer from the server; accept answers with `party` (or a refusal)
+          if (room) send(room, 'party', { op: ok ? 'accept' : 'decline', partyId: invite.partyId });
+        });
+      });
+      r.onMessage('partyRefused', (m: S2C['partyRefused']) => {
+        party.onRefused({ reason: m.reason, text: typeof m.text === 'string' ? m.text : PARTY_TEXT[m.reason] ?? 'Refused' });
+        hud.toast(PARTY_TEXT[m.reason] ?? m.text);
+        syncParty();
+      });
+      // ── the Lampfall ──
+      r.onMessage('instance', (m: S2C['instance']) => { instance = { view: m, at: performance.now() }; net.instance = m; });
+      r.onMessage('victory', (m: S2C['victory']) => {
+        net.victory = m;
+        net.screen = 'victory';
+        hud.dismissEndScreen();
+        void hud.endScreen('victory', victoryLines(m), ['Leave the Lampfall', 'Stay'], { title: 'Victory' }).then((i) => {
+          if (net.screen === 'victory') net.screen = '';
+          if (i === 0 && room === r) send(r, 'leaveInstance', {} as Record<string, never>);
+        });
+      });
       // combat messages: forwarded to the controller once it exists (it is made on entering the room)
       const early: [typeof COMBAT_MESSAGES[number], unknown][] = [];
       for (const type of COMBAT_MESSAGES) r.onMessage(type, (m: unknown) => { if (combat) combat.message(type, m); else early.push([type, m]); });
       r.onMessage('correct', (m: S2C['correct']) => {
+        net.corrections++;
         combat?.onCorrect();
         game.walkTo(null);
         rig.place(new Vector3(m.x, m.y, m.z)); // keeps the facing and the camera angle
@@ -273,15 +398,15 @@ function boot(): void {
       r.onMessage('travel', (m: S2C['travel']) => {
         // The server has moved the adventurer to `m.zone` and ends this session: fade out meanwhile.
         if (travelTo) return;
-        travelTo = m.zone;
+        travelTo = { zone: m.zone, ...(typeof m.instance === 'string' && m.instance ? { instance: m.instance } : {}) };
         hud.dismissEndScreen();
         combat?.onTravel(); // or its per-frame speed would let the adventurer walk during the fade
         rig.setMoveScale(0);
         game.walkTo(null);
         clearInterval(sendTimer);
-        travelLabel.textContent = `${zoneDef(m.zone).name}…`;
+        travelLabel.textContent = m.zone === 'lampfall' ? 'Entering the Lampfall…' : `${zoneDef(m.zone).name}…`;
         travelLabel.classList.add('on');
-        travelling = { zone: m.zone, fade: hud.fade(true, '#16122a', TRAVEL_FADE_S), since: performance.now() };
+        travelling = { ...travelTo, fade: hud.fade(true, '#16122a', TRAVEL_FADE_S), since: performance.now() };
         // the server ends the session right after `travel`; if it never does, leave it ourselves
         travelTimer = window.setTimeout(() => void r.leave(), TRAVEL_LEAVE_MS);
       });
@@ -308,7 +433,7 @@ function boot(): void {
         room = r;
         remotes = createRemotes(game.scene, game.world, r, r.sessionId);
         enemies = createEnemies(game.scene, game.world, r);
-        combat = createCombat({ game, hud, room: r, state, remotes, enemies, zone, send: (type, message) => send(r, type, message) });
+        combat = createCombat({ game, hud, room: r, state, remotes, enemies, zone, social: socialView, send: (type, message) => send(r, type, message) });
         net.combat = combat.debug;
         for (const [type, m] of early.splice(0)) combat.message(type, m);
         rig.setMoveScale(1);
@@ -349,6 +474,12 @@ function boot(): void {
         combat = null;
         net.combat = null;
         net.self = null;
+        // engine ids are unique only within a room: no member keeps this room's eid; the next room's view sends its own
+        party.clearEids();
+        if (joining === r) joining = null;
+        instance = null; net.instance = null; net.boss = null; net.roomId = '';
+        if (net.screen === 'victory') { hud.dismissEndScreen(); net.screen = ''; }
+        state.party = []; state.boss = null;
         remotes?.dispose();
         remotes = null;
         enemies?.dispose();
@@ -362,6 +493,7 @@ function boot(): void {
         netUi.className = 'sg-net-off';
         (document.activeElement as HTMLElement | null)?.blur?.();
         if (travelTo && !kickedFor) { resolve({ travel: travelTo }); return; }
+        if (kickedFor) { party.reset(); chat.setParty(false); hud.closeInvite(null); syncParty(); }
         endTravel(); // a kick during a travel (or a travel join that never entered) ends the travel here
         if (kickedFor) forgetToken(); // a reload must not sign in again and kick the other place
         resolve({ reason: kickedFor || CONNECTION_LOST });
@@ -391,7 +523,8 @@ function boot(): void {
       }
     };
     /** Builds `zone` if it is not the one loaded. */
-    const ensureZone = (zone: ZoneId) => {
+    const ensureZone = (place: ZonePlace | ZoneId) => {
+      const zone = typeof place === 'string' ? place : place.zone;
       net.zone = zone;
       if (game.zone === zone) return;
       const t0 = performance.now();
@@ -405,22 +538,22 @@ function boot(): void {
      * Joins the adventurer's zone: `zone` when known (a travel), else whatever /api/zone says. A join refused
      * because the adventurer is somewhere else asks /api/zone again and tries once more.
      */
-    const join = async (token: string, zone: ZoneId | null): Promise<{ r: ZoneRoom; zone: ZoneId }> => {
-      let z = zone ?? await zoneFor(token);
+    const join = async (token: string, place: ZonePlace | null): Promise<{ r: ZoneRoom; zone: ZoneId }> => {
+      let z = place ?? await zoneFor(token);
       ensureZone(z);
       try {
-        return { r: await connect(token, z), zone: z };
+        return { r: await connect(token, z.zone, z.instance), zone: z.zone };
       } catch (err) {
         if (!(err instanceof Error) || err.message !== REASON_ELSEWHERE) throw err;
         z = await zoneFor(token);
         ensureZone(z);
-        return { r: await connect(token, z), zone: z };
+        return { r: await connect(token, z.zone, z.instance), zone: z.zone };
       }
     };
     let travelToken: string | null = null;
     for (;;) {
       let token: string | null = travelToken ?? resume;
-      const arriving = travelling as { zone: ZoneId; fade: Promise<void>; since: number } | null;
+      const arriving = travelling as { zone: ZoneId; instance?: string; fade: Promise<void>; since: number } | null;
       travelToken = null;
       resume = null;
       if (!token) {
@@ -432,7 +565,7 @@ function boot(): void {
       connecting = true;
       try {
         if (arriving) await arriving.fade; // build the next zone behind the faded screen
-        joined = await join(token, arriving?.zone ?? null);
+        joined = await join(token, arriving ? { zone: arriving.zone, ...(arriving.instance ? { instance: arriving.instance } : {}) } : null);
       } catch (err) {
         connecting = false;
         endTravel();

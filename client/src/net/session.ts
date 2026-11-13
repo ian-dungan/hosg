@@ -37,6 +37,9 @@ export interface PlayerView {
   readonly castTotal?: number;
   readonly castAt?: number;
   readonly buffs?: number;
+  /** Plan 4: Searing stacks (0–5), unset until the first. Plan 5: the current job's level. */
+  readonly searing?: number;
+  readonly level?: number;
 }
 
 /** One enemy as the room state shows it (the server's EnemyState, from Task 6). */
@@ -66,6 +69,11 @@ export interface EnemyStateView {
   readonly staggerImmune?: number;
   /** Live debuffs as bits (DEBUFF_BITS); unset until its first debuff (read as 0). */
   readonly debuffs?: number;
+  /** Plan 4: 'elite' | 'boss' | 'mega' (unset: ordinary); a boss's 0-based phase; warded; when it enrages on `clock` (0: no clock running). */
+  readonly tier?: string;
+  readonly phase?: number;
+  readonly warded?: boolean;
+  readonly enrageAt?: number;
 }
 
 /** A telegraph on the ground (the server's TelegraphState): immutable, deleted when it resolves or is cancelled. */
@@ -74,7 +82,7 @@ export interface TelegraphStateView {
   /** The enemy's engine id. */
   readonly owner: number;
   readonly attack: string;
-  /** 'circle' | 'cone' | 'line'. */
+  /** 'circle' | 'cone' | 'line' | 'ring'. */
   readonly shape: string;
   readonly x: number;
   readonly z: number;
@@ -83,6 +91,8 @@ export interface TelegraphStateView {
   /** Radius (circle, cone) or length (line). */
   readonly r: number;
   readonly width: number;
+  /** A ring's inner radius (the safe middle); unset (0) for other shapes. */
+  readonly inner?: number;
   /** Cone full width (rad). */
   readonly angle: number;
   /** Wind-up length in s. */
@@ -110,6 +120,26 @@ export interface ZoneState {
   readonly online?: number;
   /** The combat clock in steps of 1/TICK_HZ s (telegraphs' `at` is on it). */
   readonly clock?: number;
+  /** Plan 4: standing hazards (every client gets every one). */
+  readonly fields?: StateMap<FieldStateView>;
+  /** A Lampfall instance's room id ('' in a shared zone room). */
+  readonly instance?: string;
+  /** The boss room whose gate is sealed ('wickhound' | 'warden' | ''). */
+  readonly sealed?: string;
+  /** Shut lamp-gates as bits (GATE_WICK, GATE_WICK_EXIT, GATE_PIT): each a wall, as on the server. */
+  readonly gates?: number;
+  /** During a wipe: the clock step when everyone gets up; 0 none. */
+  readonly wipeAt?: number;
+  /** The lamp-lift is open (the Warden has fallen here). */
+  readonly lift?: boolean;
+}
+
+/** A standing hazard (the server's FieldState). */
+export interface FieldStateView {
+  readonly id: number; readonly owner: number; readonly field: string;
+  /** 'ring' | 'circle'. */
+  readonly shape: string;
+  readonly x: number; readonly z: number; readonly r: number; readonly inner: number; readonly raw: number; readonly at: number;
 }
 
 /**
@@ -287,11 +317,18 @@ export async function nameAdventurer(token: string, name: string): Promise<NameR
   }
 }
 
+/** Where an adventurer is: a zone, and inside the Lampfall the id of its instance's room. */
+export interface ZonePlace { zone: ZoneId; instance?: string }
+
+/** Longest instance room id accepted from the server. */
+const INSTANCE_ID_MAX = 64;
+
 /**
- * Which zone the token's adventurer is in (GET /api/zone): the room to join. Throws Error(SIGN_IN_AGAIN) when
- * the token is no good, else Error(UNREACHABLE) when the server cannot answer.
+ * Which zone the token's adventurer is in (GET /api/zone): the room to join, with the instance's room id inside
+ * the Lampfall (a seat held there: a reload, a new tab). Throws Error(SIGN_IN_AGAIN) when the token is no good,
+ * else Error(UNREACHABLE) when the server cannot answer.
  */
-export async function zoneFor(token: string): Promise<ZoneId> {
+export async function zoneFor(token: string): Promise<ZonePlace> {
   const controller = new AbortController();
   let res: Response, body: unknown;
   try {
@@ -303,15 +340,22 @@ export async function zoneFor(token: string): Promise<ZoneId> {
   }
   if (res.status === 401) throw new Error(SIGN_IN_AGAIN);
   const zone = (body as { zone?: unknown } | null)?.zone;
+  const instance = (body as { instance?: unknown } | null)?.instance;
   if (!res.ok || !isZoneId(zone)) throw new Error(UNREACHABLE);
-  return zone;
+  if (typeof instance === 'string' && instance.length > 0 && instance.length <= INSTANCE_ID_MAX) return { zone, instance };
+  // the Lampfall is only ever joined by its instance's id
+  if (zone === 'lampfall') throw new Error(UNREACHABLE);
+  return { zone };
 }
 
-/** Joins zone `zone`'s room with a token. Throws an Error with the server's reason if the join is refused. */
-export async function connect(token: string, zone: ZoneId = 'grove'): Promise<ZoneRoom> {
+/**
+ * Joins zone `zone`'s room with a token, or with `instance` the room with that id (a Lampfall instance). Throws an
+ * Error with the server's reason if the join is refused.
+ */
+export async function connect(token: string, zone: ZoneId = 'grove', instance?: string): Promise<ZoneRoom> {
   const client = new Client(serverUrl());
   for (let attempt = 1; ; attempt++) {
-    const joining = client.joinOrCreate<ZoneState>(zone, { token });
+    const joining = instance ? client.joinById<ZoneState>(instance, { token }) : client.joinOrCreate<ZoneState>(zone, { token });
     try {
       return await withTimeout(joining, UNREACHABLE);
     } catch (err) {

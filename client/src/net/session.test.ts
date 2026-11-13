@@ -142,10 +142,21 @@ describe('zoneFor', () => {
   it('asks GET /api/zone with the token and answers the zone', async () => {
     const seen: { url?: string; auth?: string | null } = {};
     answer(200, { zone: 'greenway' }, seen);
-    await expect(zoneFor('tok')).resolves.toBe('greenway');
+    await expect(zoneFor('tok')).resolves.toEqual({ zone: 'greenway' });
     expect(seen).toEqual({ url: '/api/zone', auth: 'Bearer tok' });
     answer(200, { zone: 'grove' });
-    await expect(zoneFor('tok')).resolves.toBe('grove');
+    await expect(zoneFor('tok')).resolves.toEqual({ zone: 'grove' });
+  });
+
+  it('inside the Lampfall it answers the instance room id to join by; the Lampfall without one is no answer', async () => {
+    answer(200, { zone: 'lampfall', instance: 'aB3_xY' });
+    await expect(zoneFor('tok')).resolves.toEqual({ zone: 'lampfall', instance: 'aB3_xY' });
+    answer(200, { zone: 'lampfall' });
+    await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
+    answer(200, { zone: 'lampfall', instance: 'x'.repeat(65) });
+    await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
+    answer(200, { zone: 'greenway', instance: 7 });
+    await expect(zoneFor('tok')).resolves.toEqual({ zone: 'greenway' });
   });
 
   it('a refused token means signing in again; anything else is an unreachable server', async () => {

@@ -1,7 +1,9 @@
 // Dev harness for the HUD (dev/hud.html). Not part of the game build.
-import type { AbilityDef, HudEvent, HudState, StatusId, WeaponId } from '../core/contracts';
+import type { AbilityDef, BossBar, HudEvent, HudState, PartyBar, StatusId, WeaponId } from '../core/contracts';
+import { TICK_HZ } from '@sg2/shared';
 import { createHud } from './index';
 import { jobBoardView } from './jobs';
+import { bossBar, victoryLines } from './boss';
 
 const ABILITIES: AbilityDef[] = [
   { id: 'cleave', name: 'Tide Cleave', glyph: '⟋', desc: 'A wide slash that Soaks foes; Soaked foes take bonus lightning.', cooldown: 6, range: 3, castTime: 0, job: 'warrior', support: false, kind: 'damage' },
@@ -65,7 +67,32 @@ const weapon: WeaponId = 'blade';
 const cds = [0, 0, 0, 0, 0];
 let quest: HudState['quest'] = { title: 'The Solstice Crossing', steps: [{ text: 'Speak with Old Marrow', done: false }, { text: 'Find where the Two are pointing', done: false }] };
 let prompt: string | null = params.has('noprompt') ? null : 'Talk · Old Marrow';
-let party = false;
+let party = params.has('party');
+
+/** Plan 4: three party members (one here, one far off in this room, one in the grove), with Searing on the tank. */
+function devParty(t: number): PartyBar[] {
+  const row = (o: Partial<PartyBar>): PartyBar => ({ name: '', hp: 100, maxHp: 100, statuses: [], eid: 1, dead: false, leader: false, online: true, zoneLabel: null, inRange: true, glyph: '⚔', job: 'warrior', level: 3, searing: 0, ...o });
+  return [
+    row({ name: 'Ellie_01', eid: 4, leader: true, job: 'paladin', glyph: '⛨', hp: 420 + 200 * Math.sin(t), maxHp: 700, searing: Math.floor(t / 2) % 6, level: 7 }),
+    row({ name: 'Felix_Lamp', eid: 5, job: 'white_mage', glyph: '✚', hp: 0, maxHp: 520, dead: true, level: 6 }),
+    row({ name: 'Pim', eid: -1, job: 'ninja', glyph: '✴', hp: 300, maxHp: 480, zoneLabel: 'Shady Grove', inRange: false, level: 2 }),
+  ];
+}
+/** A boss for the frame: the Wickhound mid-fight, or the Warden warded and enraging. */
+const bossBuf = { phaseMarks: [] as number[] } as unknown as BossBar;
+function devBoss(t: number): BossBar | null {
+  if (scene === 'wickhound') {
+    const ph = t % 9;
+    return bossBar({ kind: 'wickhound', hp: 1500 - (t * 12) % 600, maxHp: 3380, mode: ph > 7 ? 'stunned' : 'fight', windup: ph < 1.8 ? 'ember_breath' : '', stagger: (ph / 7) * 220, maxStagger: 220, phase: 1 },
+      1000, { windupFrac: ph / 1.8, transitionLeftS: 0, targeted: true }, bossBuf);
+  }
+  if (scene === 'warden') {
+    const ph = t % 8;
+    return bossBar({ kind: 'fallen_warden', hp: 3300 - (t * 8) % 900, maxHp: 6500, mode: 'windup', windup: ph < 4 ? 'keepers_toll' : 'beacon_lance', stagger: 120, maxStagger: 300, phase: 1, warded: true, enrageAt: 1000 + (42 - t % 42) * TICK_HZ },
+      1000, { windupFrac: (ph % 4) / 4, transitionLeftS: 0, targeted: false }, bossBuf);
+  }
+  return null;
+}
 let castT = -1;
 
 hud.on((e) => {
@@ -99,6 +126,7 @@ function frame(now: number): void {
   for (let i = 0; i < 5; i++) cds[i] = Math.max(0, cds[i] - dt);
   if (castT >= 0) { castT += dt; if (castT > 1.2) castT = -1; }
   const combat = scene !== 'town';
+  const boss = devBoss(t);
   const st: StatusId[] = combat ? ['regen', ...(Math.sin(t * 0.5) > 0 ? ['guard' as StatusId] : [])] : [];
   let target: HudState['target'] = null;
   if (scene === 'combat') {
@@ -122,7 +150,7 @@ function frame(now: number): void {
       cast: castT >= 0 ? { name: 'Casting…', frac: castT / 1.2 } : scene === 'elite' ? { name: 'Charged Shot', frac: Math.min(1, (t % 3) / 1.5), mark: 0.8 } : null,
       ...(scene === 'elite' ? { momentum: (t * 12) % 110 > 100 ? 100 : (t * 12) % 110, dodge: { charges: Math.floor(t / 3) % 3, max: 2, refill: (t % 5) / 5 } } : {}) },
     target,
-    party: party ? [{ name: 'Pim', hp: 700 + 200 * Math.sin(t), maxHp: 900, statuses: ['regen'] }, { name: 'Ash', hp: 300, maxHp: 800, statuses: [] }] : [],
+    party: party ? devParty(t) : [],
     slots: combat || params.has('slots') ? loadout.map((id, i) => {
       const a = ABILITIES.find((x) => x.id === id)!;
       return { ability: a, cdRemaining: cds[i], usable: true };
@@ -130,6 +158,10 @@ function frame(now: number): void {
     quest,
     prompt: combat ? null : prompt,
     inCombat: combat,
+    boss,
+    social: params.has('social') || party ? { inParty: party, invites: 0 } : null,
+    hint: params.has('mouth') ? 'The Lampfall: a private dungeon for your party (you, Ellie_01). Party members who walk in join you.' : null,
+    ally: params.has('ally') ? { name: 'Brightwen', hp: 260, maxHp: 400, statuses: [], dead: false, inRange: true, glyph: '✚', cast: null, eid: 9, canInvite: true } : null,
   };
   hud.render(state);
   requestAnimationFrame(frame);
@@ -160,6 +192,18 @@ const dev = {
   title: () => hud.titleScreen(),
   loadout: () => hud.loadout(ABILITIES, loadout, 'Wren', 5).then((ids) => { loadout = ids; return ids; }),
   jobs: () => hud.jobs(jobBoardView(null, params.has('greenway') ? 'greenway' : 'grove')),
+  invite: () => hud.partyInvite('Ellie_01', 2, 60),
+  partySheet: (leader = true) => hud.partySheet({ amLeader: leader, canInvite: leader, members: [
+    { name: 'Wren', leader, online: true, zone: 'The Lampfall', job: 'Warrior', level: 4, glyph: '⚔', me: true },
+    { name: 'Ellie_01', leader: !leader, online: true, zone: 'The Lampfall', job: 'Paladin', level: 7, glyph: '⛨', me: false },
+    { name: 'Pim', leader: false, online: false, zone: 'Offline', job: 'Ninja', level: 2, glyph: '✴', me: false },
+  ] }),
+  fallen: () => hud.endScreen('defeat', ['You have fallen.', 'A party member can bring you back, or release to get up at the Crater Rim.'], ['Release', 'Watch'],
+    { title: 'Fallen', countdown: { seconds: 10, text: 'Release in {s} s', doneText: 'You can release now' } }),
+  wipe: () => hud.endScreen('defeat', ['Everyone in the party has fallen.', 'The foes still standing go back to their places.'], ['OK'],
+    { title: 'The light goes out…', countdown: { seconds: 5, text: "Back to the Keeper's Landing in {s} s" } }),
+  lampVictory: (seal = true) => hud.endScreen('victory', victoryLines({ boss: 'fallen_warden', seconds: 277, partySize: 2, xp: 300, seal, seals: seal ? 1 : 2, title: null, rank: 3,
+    lore: "The Warden's lamp steadies, and for a moment its beam points the same way as Ellie's arm." }), ['Leave the Lampfall', 'Stay'], { title: 'Victory' }),
   victory: () => hud.endScreen('victory', ['The Warden falls silent. The lamp burns clear.', 'Solo · 6:42'], ['Return to Shady Grove', 'Fight again']),
   defeat: () => hud.endScreen('defeat', ['The tide took you this time.'], ['Retry', 'Return to the statue']),
   banner: () => hud.banner('The Plaza of the Two', 'Shady Grove'),
@@ -178,6 +222,8 @@ const btns: [string, () => unknown][] = [
   ['Hide/show HUD', () => dev.toggleHud()], ['Town', () => dev.setScene('town')], ['Combat', () => dev.setScene('combat')], ['Boss', () => dev.setScene('boss')], ['Elite', () => dev.setScene('elite')],
   ['Party', () => { party = !party; }], ['Prompt', () => { prompt = prompt ? null : 'Talk · Old Marrow'; }], ['Step done', () => dev.completeStep(1)],
   ['Floats', burst], ['Loadout', dev.loadout], ['Jobs', dev.jobs], ['Victory', dev.victory], ['Defeat', dev.defeat],
+  ['Wickhound', () => dev.setScene('wickhound')], ['Warden', () => dev.setScene('warden')], ['Invite', dev.invite], ['Party sheet', () => dev.partySheet()],
+  ['Fallen', dev.fallen], ['Wipe', dev.wipe], ['Lampfall victory', () => dev.lampVictory()],
 ];
 for (const [label, fn] of btns) {
   const b = document.createElement('button'); b.textContent = label;

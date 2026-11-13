@@ -57,6 +57,8 @@ void main() {
 export function telegraphShape(t: TelegraphStateView): Shape {
   if (t.shape === 'cone') return { kind: 'cone', x: t.x, z: t.z, dir: t.dir, r: t.r, angle: t.angle };
   if (t.shape === 'line') return { kind: 'line', x: t.x, z: t.z, dir: t.dir, length: t.r, width: t.width };
+  // a ring (the Cinder Ring): drawn as the ring itself, its safe middle left clear
+  if (t.shape === 'ring') return { kind: 'ring', x: t.x, z: t.z, dir: 0, inner: Math.max(0, Math.min(t.r, t.inner ?? 0)), r: t.r };
   return { kind: 'circle', x: t.x, z: t.z, r: t.r };
 }
 
@@ -76,6 +78,24 @@ export function decalGrid(s: Shape): { xz: number[]; uv: number[]; idx: number[]
       uv.push(i / nA, edge(Math.min(hw - Math.abs(aside), along, s.length - along)));
     }
     for (let i = 0; i < nA; i++) for (let j = 0; j < nW; j++) { const a = i * (nW + 1) + j, b = a + nW + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+    return { xz, uv, idx };
+  }
+  if (s.kind === 'ring') {
+    // rings from the inner edge out: u runs 0 (inner edge) .. 1 (outer edge), the rim on both edges
+    const R = s.r, r0 = s.inner, width = Math.max(0.01, R - r0), nR = Math.max(2, Math.ceil(width / STEP));
+    const nS = Math.max(32, Math.min(96, Math.ceil((2 * Math.PI * R) / STEP)));
+    for (let i = 0; i <= nR; i++) {
+      const r = r0 + (i / nR) * width;
+      for (let j = 0; j < nS; j++) {
+        const a = (j / nS) * Math.PI * 2;
+        xz.push(s.x + Math.sin(a) * r, s.z + Math.cos(a) * r);
+        uv.push(i / nR, edge(Math.min(r - r0, R - r)));
+      }
+    }
+    for (let i = 0; i < nR; i++) for (let j = 0; j < nS; j++) {
+      const a = i * nS + j, b = i * nS + ((j + 1) % nS), c = a + nS, d = b + nS;
+      idx.push(a, c, b, b, c, d);
+    }
     return { xz, uv, idx };
   }
   // circle or cone: rings out from the origin

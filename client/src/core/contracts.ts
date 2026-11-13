@@ -8,7 +8,7 @@ import type { Body, Displacement, ElementId, FutureJobId, JobId, WeaponId as Sha
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
-/** 'lampfall' (Plan 4's dungeon) has no client look yet: loadZone refuses it (Plan 4 Task 9 builds it). */
+/** 'lampfall' (Plan 4's dungeon): a plain placeholder look from its shared layout until Plan 4 Task 9 builds the real one. */
 export type ZoneId = 'grove' | 'beacon' | 'arena' | 'greenway' | 'lampfall';
 export type Quality = 'low' | 'med' | 'high';
 /** The shared weapons (one per job; the Staff is both mages'). */
@@ -291,9 +291,20 @@ export interface HudState {
     /** It is running to catch up (the chase surge). */
     surging?: boolean;
   }) | null;
-  party: HudBar[];                       // companions (empty when solo)
+  /** The other party members, in join order (empty without a party; the offline demo has none). */
+  party: PartyBar[];
+  /** The boss frame (a targeted boss, or an engaged boss in view), or null/absent. */
+  boss?: BossBar | null;
+  /** A passive line under the context prompt (the crater mouth's "a private dungeon for your party ..."), or null. */
+  hint?: string | null;
+  /** Online: the party button shows, teal in a party, with the pending invites counted (the offline demo has none). */
+  social?: { inParty: boolean; invites: number } | null;
+  /** Arrows at the screen edge toward party members off screen (CSS px; angle in rad, 0 = right). */
+  edges?: readonly { id: number; x: number; y: number; angle: number; initial: string }[];
   /** The adventurer focused for ally-aimed abilities (a tap on them), or null. */
-  ally?: (HudBar & { dead: boolean; inRange: boolean; glyph: string; cast: { name: string; frac: number } | null }) | null;
+  ally?: (HudBar & { dead: boolean; inRange: boolean; glyph: string; cast: { name: string; frac: number } | null;
+    /** Plan 4: its engine id, and whether the focus frame offers "Invite" (a stranger, and this adventurer may invite). */
+    eid?: number; canInvite?: boolean }) | null;
   slots: { ability: AbilityDef; cdRemaining: number; usable: boolean }[];   // 5 entries
   quest: { title: string; steps: { text: string; done: boolean }[] } | null;
   /** Context action near the player, e.g. "Talk to Old Marrow". null hides the button. */
@@ -312,7 +323,12 @@ export type HudEvent =
   | { type: 'openLoadout' }             // button or L key
   | { type: 'cycleAlly' }               // F key: the next adventurer within 18 m, nearest first
   | { type: 'clearAlly' }               // the focus frame's close button
-  | { type: 'clearTarget' };            // Esc key / tap on target frame close
+  | { type: 'clearTarget' }             // Esc key / tap on target frame close
+  | { type: 'openParty' }               // P key, the party button
+  | { type: 'invite'; eid: number }     // the focus frame's Invite
+  | { type: 'focusMember'; eid: number } // a tap on a party frame
+  | { type: 'release' }                 // dead in the Lampfall: get up at the checkpoint
+  | { type: 'leaveInstance' };          // the victory screen's "Leave the Lampfall"
 export interface HudApi {
   /** Live player settings (the Settings panel changes them; saved in this browser). */
   readonly settings: { readonly tapToWalk: boolean };
@@ -336,7 +352,19 @@ export interface HudApi {
    * opts.countdown: a line counting down `seconds` (its text has `{s}` for the seconds left);
    * opts.waitS: the buttons wake up after this long. Resolves with the button chosen, or -1 when dismissed.
    */
-  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts?: { countdown?: { seconds: number; text: string }; waitS?: number }): Promise<number>;
+  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts?: EndScreenOpts): Promise<number>;
+  /**
+   * The invite card ("Ann invites you to a party (2/4)", Accept / Decline): never modal, clear of the ability
+   * cluster and the middle of the screen. Several queue. Resolves true (Accept) or false (Decline, or it
+   * timed out after `seconds`, or closeInvite).
+   */
+  partyInvite(from: string, size: number, seconds?: number): Promise<boolean>;
+  /** Closes the invite card for `from` (or every one: null), if open or queued (each resolves false). */
+  closeInvite(from: string | null): void;
+  /** Screen rectangles (CSS px) edge markers keep out of: the joystick zone, the ability cluster, the frames. Cached; cheap. */
+  exclusions(): readonly { x0: number; y0: number; x1: number; y1: number }[];
+  /** The party sheet (P, the party button): resolves with what was asked for, or null when closed. */
+  partySheet(view: PartySheetView): Promise<PartyAction | null>;
   /** Closes the end screen, if one is open (it resolves with -1). */
   dismissEndScreen(): void;
   /** Closes the job board and the picks chooser, if open (each resolves as cancelled). */
@@ -348,6 +376,52 @@ export interface HudApi {
   /** Hide/show the combat HUD (cutscenes, dialogue). */
   setVisible(on: boolean): void;
 }
+/** opts.countdown: a line counting down; opts.waitS: the buttons wake after this; opts.title: instead of "Victory"/"Defeated". */
+export interface EndScreenOpts { countdown?: { seconds: number; text: string; doneText?: string }; waitS?: number; title?: string }
+
+/** One other party member as the party frames show it. */
+export interface PartyBar extends HudBar {
+  /** Its engine id in this room, or -1 (another room). */
+  eid: number; dead: boolean; leader: boolean; online: boolean;
+  /** Where it is when not in this room ("Offline", "Shady Grove", ...); null: here. */
+  zoneLabel: string | null;
+  /** In this room and within reach of ally abilities. */
+  inRange: boolean;
+  glyph: string; job: JobId | null; level: number;
+  /** Searing stacks (0..5). */
+  searing: number;
+}
+/** The boss frame. */
+export interface BossBar {
+  name: string; hp: number; maxHp: number;
+  /** 0-based (already the next one during a transition); phases: how many it has. */
+  phase: number; phases: number;
+  /** The hp fractions where the next phase starts (Wickhound [0.5], Warden [0.7, 0.35]). */
+  phaseMarks: number[];
+  phaseName: string;
+  warded: boolean;
+  /** Seconds to its enrage, shown from 60 s before it (0 once enraged); null otherwise. */
+  enrageIn: number | null;
+  stagger: number; maxStagger: number;
+  /** A Break is on (stunned, taking extra damage). */
+  broken: boolean;
+  /** Seconds until its stagger bar can fill again (0: it can). */
+  staggerImmune: number;
+  cast: { name: string; frac: number; interruptible: boolean; unavoidable: boolean } | null;
+  /** Between phases (invulnerable). */
+  transition: boolean;
+  /** It is this adventurer's target (the frame's close button clears it). */
+  targeted: boolean;
+}
+/** The party sheet. */
+export interface PartySheetView {
+  members: { name: string; leader: boolean; online: boolean; zone: string | null; job: string; level: number; glyph: string; me: boolean }[];
+  amLeader: boolean;
+  /** Without a party: inviting by name starts one. */
+  canInvite: boolean;
+}
+export type PartyAction = { kind: 'invite'; name: string } | { kind: 'kick'; name: string } | { kind: 'lead'; name: string } | { kind: 'leave' };
+
 /** The job board as the HUD shows it (hud/jobs.ts jobBoardView builds it from the shared job data). */
 export interface JobBoardView {
   current: JobId;

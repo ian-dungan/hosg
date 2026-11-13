@@ -1,5 +1,8 @@
 // All HUD CSS, injected once as a <style> so the build stays a single file.
 import { JOBS_CSS } from './jobs';
+import { PARTY_CSS } from './party';
+import { BOSS_CSS } from './boss';
+import { EDGE_CSS } from '../combat/edgeMarkers';
 
 const CSS = /* css */ `
 .sg-hud{
@@ -82,16 +85,13 @@ const CSS = /* css */ `
 .sg-pf-weapon{width:18px;height:18px;color:var(--goldl);opacity:.9}
 .sg-pf.low .sg-hp-player{animation:sg-low 1s ease-in-out infinite}
 @keyframes sg-low{50%{box-shadow:inset 0 0 0 1px rgba(255,120,100,.9),0 0 12px rgba(236,106,76,.8)}}
-.sg-party{display:flex;flex-direction:column;gap:6px;padding-left:16px}
-.sg-party-row{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:3px 8px;width:220px;
-  padding:5px 10px;border-radius:10px;background:linear-gradient(90deg,rgba(18,22,48,.5),rgba(18,22,48,.15))}
-.sg-party-row.off{display:none}
-.sg-party-name{font:600 13px var(--serif);grid-column:1/3}
-.sg-party-row .sg-bar{grid-column:1/3}
-.sg-party-row .sg-chips{grid-column:1/3}
+/* the focus frame's Invite (a stranger) */
+.sg-af-invite{display:none;align-items:center;justify-content:center;min-height:48px;margin-top:2px;padding:0 14px;border-radius:24px;font:600 14px var(--sans);
+  color:#0f2a28;text-shadow:none;background:linear-gradient(180deg,#bff3ec,#3FB0A6);box-shadow:0 0 0 1px rgba(200,255,250,.6)}
+.sg-af-invite.on{display:flex}
 
 /* ───────── target frame ───────── */
-.sg-tf{position:absolute;top:calc(var(--st) + var(--g));left:calc(var(--sl) + var(--g) + 320px);width:260px;
+.sg-tf{position:fixed;top:calc(var(--st) + var(--g));left:calc(var(--sl) + var(--g) + 320px);width:260px;
   padding:8px 12px 10px;border-radius:14px;background:linear-gradient(90deg,rgba(48,18,30,.55),rgba(18,22,48,.35));
   display:none;flex-direction:column;gap:5px}
 .sg-tf.on{display:flex}
@@ -420,8 +420,6 @@ const CSS = /* css */ `
   .sg-pf{padding:6px 10px 7px 6px;gap:8px}
   .sg-pf-emblem{width:38px;height:38px}.sg-pf-emblem span{font-size:16px}
   .sg-pf-name{font-size:15px}
-  .sg-party{padding-left:8px}
-  .sg-party-row{width:min(40vw,170px)}
   .sg-tf{left:auto;right:calc(var(--sr) + var(--g));width:calc(50vw - 1.5 * var(--g))}
   .sg-boss{top:calc(var(--st) + var(--g) + 70px);width:calc(100% - 2 * var(--g))}
   .sg-boss-name{font-size:17px}
@@ -460,7 +458,7 @@ const CSS = /* css */ `
   .sg-choice{flex:1 1 30%;min-height:44px;font-size:15px}
   .sg-touch .sg-castslot{top:58%;bottom:auto;width:220px}
   .sg-touch .sg-promptrow{bottom:calc(var(--sb) + 18px)}
-  .sg-joyzone{height:72vh}
+  .sg-joyzone{height:min(72vh,calc(100vh - var(--st) - var(--g) - var(--tlh,62px) - 8px))}
   .sg-dlg-text{font-size:16px;min-height:2.6em}
   .sg-title-credit{margin-top:8px}.sg-title-play{margin-top:16px}.sg-title-hint{margin-top:14px}
   .sg-title-name{font-size:52px}
@@ -470,7 +468,10 @@ const CSS = /* css */ `
 @media (max-width:700px) and (orientation:portrait){
   .sg-touch .sg-ab{transform:translate(-50%,-50%) translate(calc(var(--cx,0) * var(--k) * 1px),calc(var(--cy,0) * var(--k) * 1px))}
   /* the target frame takes the second row, under the player frame (the right column keeps the gear and Chat) */
-  .sg-tf{left:calc(var(--sl) + var(--g));right:auto;top:calc(var(--st) + var(--g) + 72px);width:calc(100% - 2 * var(--g) - 84px)}
+  /* portrait: the frames stack in the top-left column (player, party, boss, target, focus), so none overlaps another */
+  .sg-tl{width:min(270px,calc(100vw - 2 * var(--g) - 64px));gap:6px}
+  .sg-tf{position:relative;order:3;left:auto;right:auto;top:auto;width:auto}
+  .sg-tl>.sg-pf{order:0}.sg-tl>.sg-party{order:1}.sg-tl>.sg-bf{order:2}.sg-tl>.sg-af{order:4}
   /* Jobs and Picks: small, out of the way in the right-hand column under Chat (the cluster keeps to the bottom 30%) */
   .sg-touch .sg-ab-jobs,.sg-touch .sg-ab-loadout{width:52px;height:52px;border-radius:14px}
   .sg-touch .sg-ab-jobs .sg-ab-jobglyph{width:24px;height:24px;font-size:14px}
@@ -488,22 +489,22 @@ const CSS = /* css */ `
   .sg-pf-name{font-size:14px}
   .sg-tl{width:min(250px,calc(100vw - 2 * var(--g) - 64px))}
   .sg-pf{max-width:calc(100vw - 2 * var(--g) - 64px)}
-  .sg-boss{top:calc(var(--st) + var(--g) + 80px)}
-  .sg-has-boss .sg-quest{top:calc(var(--st) + var(--g) + 210px)}
+  .sg-boss{top:calc(var(--st) + var(--g) + var(--tlh,62px) + 8px)}
+  .sg-quest,.sg-has-target .sg-quest,.sg-has-boss .sg-quest{top:calc(var(--st) + var(--g) + var(--tlh,62px) + 8px)}
   /* with the ability cluster up the right edge, the prompt sits near the top, under the frames (never over the cluster or mid-screen) */
-  .sg-touch:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 150px);bottom:auto;justify-content:flex-start;padding-right:96px}
+  .sg-touch:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + var(--tlh,138px) + 8px);bottom:auto;justify-content:flex-start;padding-right:96px}
   .sg-touch:not(.sg-no-abilities) .sg-prompt{height:48px;border-radius:24px}
   .sg-touch:not(.sg-no-abilities) .sg-prompt-key{width:38px;height:38px;padding:8px}
-  .sg-touch.sg-has-boss:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + 214px)}
+  .sg-touch.sg-has-boss:not(.sg-no-abilities) .sg-promptrow{top:calc(var(--st) + var(--g) + var(--tlh,138px) + 76px)}
   /* the focused ally: under the target frame's row, in the top third; it carries the prompt (a revive) itself */
-  .sg-touch .sg-af{position:absolute;left:0;top:150px;margin:0;width:min(230px,calc(100vw - 2 * var(--g) - 96px))}
+  .sg-touch .sg-af{position:relative;margin:0;width:auto}
   .sg-touch .sg-af .sg-chips,.sg-touch .sg-af .sg-cast{display:none}
   .sg-touch.sg-has-ally:not(.sg-no-abilities) .sg-promptrow{display:none}
   .sg-touch.sg-has-ally .sg-af-act.on{display:flex}
   .sg-touch.sg-no-abilities .sg-promptrow{justify-content:flex-end;bottom:calc(var(--sb) + 132px)}
   .sg-touch .sg-prompt-text{font-size:16px}
   /* the joystick's (invisible) touch zone stays in the bottom third: a tap on an enemy mid-screen is never taken by it */
-  .sg-joyzone{height:33vh;width:38vw}
+  .sg-joyzone{height:min(33vh,calc(100vh - var(--st) - var(--g) - var(--tlh,138px) - 12px));width:38vw}
 }
 /* the narrowest phones (iPhone SE, 320 px): the grid packs a little tighter and the joystick a little smaller */
 @media (max-width:340px) and (orientation:portrait){
@@ -543,12 +544,21 @@ const CSS = /* css */ `
 @media (min-width:701px){ .sg-quest{top:calc(var(--st) + var(--g) + 52px)} }
 `;
 
+/** The passive line under the prompt (the crater mouth's note). */
+const HINT_CSS = /* css */ `
+.sg-hint{display:none;max-width:min(520px,100%);margin-top:6px;padding:6px 14px;border-radius:14px;font-size:13.5px;line-height:1.35;text-align:center;
+  background:rgba(20,25,50,.66);box-shadow:0 0 0 1px rgba(63,176,166,.55)}
+.sg-hint.on{display:block}
+.sg-promptrow{flex-direction:column;align-items:center}
+@media (max-width:700px) and (orientation:portrait){ .sg-touch:not(.sg-no-abilities) .sg-promptrow{align-items:flex-start} .sg-touch.sg-no-abilities .sg-promptrow{align-items:flex-end} .sg-hint{text-align:left;font-size:12.5px;max-width:calc(100vw - 2 * var(--g) - 96px)} }
+`;
+
 let injected = false;
 export function injectStyles(): void {
   if (injected || document.getElementById('sg-hud-css')) { injected = true; return; }
   injected = true;
   const s = document.createElement('style');
   s.id = 'sg-hud-css';
-  s.textContent = CSS + JOBS_CSS;
+  s.textContent = CSS + JOBS_CSS + PARTY_CSS + BOSS_CSS + EDGE_CSS + HINT_CSS;
   document.head.appendChild(s);
 }

@@ -1,6 +1,7 @@
 // Modal overlays: dialogue, title screen, loadout picker, end screen, fade.
 import type { JobId } from '@sg2/shared';
-import type { AbilityDef, JobBoardView } from '../core/contracts';
+import type { AbilityDef, EndScreenOpts, JobBoardView, PartyAction, PartySheetView } from '../core/contracts';
+import { openPartySheet } from './party';
 import { h } from './dom';
 import { abilityMeta, openJobBoard } from './jobs';
 import { Sheets } from './sheets';
@@ -224,14 +225,21 @@ export class Overlays {
     return p.finally(() => this.sheets.remove('jobs', closer));
   }
 
+  // ───────────── party sheet ─────────────
+  partySheet(view: PartySheetView): Promise<PartyAction | null> {
+    let closer: () => void = () => {};
+    const p = openPartySheet(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el), (c) => { closer = c; this.sheets.add('party', c); });
+    return p.finally(() => this.sheets.remove('party', closer));
+  }
+
   // ───────────── end screen ─────────────
   private endDone: ((i: number) => void) | null = null;
-  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts: { countdown?: { seconds: number; text: string }; waitS?: number } = {}): Promise<number> {
+  endScreen(kind: 'victory' | 'defeat', lines: string[], buttons: string[], opts: EndScreenOpts = {}): Promise<number> {
     this.endDone?.(-1); // one end screen at a time
     return new Promise((resolve) => {
       const root = h('div', 'sg-end sg-ctl ' + kind, this.layer);
       const box = h('div', 'sg-end-box', root);
-      h('div', 'sg-end-title', box, kind === 'victory' ? 'Victory' : 'Defeated');
+      h('div', 'sg-end-title', box, opts.title ?? (kind === 'victory' ? 'Victory' : 'Defeated'));
       h('div', 'sg-end-rule', box);
       for (const l of lines) h('div', 'sg-end-line', box, l);
       const row = h('div', 'sg-end-btns', box);
@@ -247,7 +255,11 @@ export class Overlays {
       const tick = () => {
         const el = (performance.now() - t0) / 1000;
         if (!awake && el >= (opts.waitS ?? 0)) { awake = true; for (const b of btns) b.classList.remove('waiting'); }
-        if (cd && opts.countdown) cd.textContent = opts.countdown.text.replace('{s}', String(Math.max(0, Math.ceil(opts.countdown.seconds - el))));
+        if (cd && opts.countdown) {
+          const left = Math.max(0, Math.ceil(opts.countdown.seconds - el));
+          const t = left === 0 && opts.countdown.doneText ? opts.countdown.doneText : opts.countdown.text.replace('{s}', String(left));
+          if (cd.textContent !== t) cd.textContent = t;
+        }
       };
       tick();
       timer = window.setInterval(tick, 200);
