@@ -9,6 +9,8 @@ import { createEdgeMarkers } from '../combat/edgeMarkers';
 import { AbilityBar } from './abilities';
 import { Joystick } from './joystick';
 import { QuestTracker } from './quest';
+import { QuestPointer } from './questPointer';
+import { QuestMoments } from './questMoment';
 import { FloatText } from './float';
 import { Overlays } from './overlays';
 import { Settings } from './settings';
@@ -86,7 +88,15 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   charBtn.addEventListener('click', () => emit({ type: 'openChar', tab: null }));
   const invites = new InviteCards(combat);
   const edges = createEdgeMarkers(fx);
-  const quest = new QuestTracker(combat);
+  // Plan 6: the tracker (a tap opens the journal), the pointer toward its objective, the moments, hints and cards
+  const quest = new QuestTracker(combat, () => emit({ type: 'openJournal' }));
+  const qPointer = new QuestPointer(combat, () => emit({ type: 'pointerTap' }));
+  // the heights the phone layout stacks under the frames: the tracker's and the elite's frame (the boss slot)
+  if (typeof ResizeObserver !== 'undefined') {
+    const watch = (el: HTMLElement, v: string) => { let last = -1; new ResizeObserver(() => { const hh = Math.round(el.getBoundingClientRect().height); if (hh !== last) { last = hh; host.style.setProperty(v, `${hh}px`); } }).observe(el); };
+    watch(quest.el, '--qh');
+    watch(target.boss, '--bsh');
+  }
   // the movement keys held now (a Shift dodge goes that way) and double taps of one of them
   const held = new Set<string>();
   const taps = createDoubleTap();
@@ -130,6 +140,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
   const toasts = h('div', 'sg-toasts', fx);
   const lootToasts = new LootToasts(fx);
   const levelBanner = new LevelBanner(fx);
+  const moments = new QuestMoments(fx, combat);
 
   // ── overlays ──
   const modalKinds = new Set<string>();
@@ -176,6 +187,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     else if (c === 'KeyL') { abar.flash('loadout'); emit({ type: 'openLoadout' }); }
     else if (c === 'KeyF') emit({ type: 'cycleAlly' });
     else if (c === 'KeyP') emit({ type: 'openParty' });
+    else if (c === 'KeyQ') emit({ type: 'openJournal' });
     else if (c === 'KeyO') { if (cache.gear) emit({ type: 'openChar', tab: 'wardrobe' }); else settings.toggle(); }
     else if (cache.gear && (c === 'KeyI' || c === 'KeyC' || c === 'KeyT')) emit({ type: 'openChar', tab: c === 'KeyI' ? 'bag' : c === 'KeyC' ? 'gear' : 'talents' });
     else if (c === 'Escape') emit({ type: 'clearTarget' });
@@ -195,7 +207,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     heldDigits.clear();
   });
 
-  const cache = { boss: false, combat: false, hasParty: false, bossFrame: false, social: false, inParty: false, invites: -1, gear: false, gearBadge: -1 };
+  const cache = { quest: false, boss: false, combat: false, hasParty: false, bossFrame: false, social: false, inParty: false, invites: -1, gear: false, gearBadge: -1 };
 
   // ── edge-marker exclusions: the joystick zone, the ability cluster and the frames (measured at most every 0.5 s) ──
   const exRects: { x0: number; y0: number; x1: number; y1: number }[] = [];
@@ -252,6 +264,7 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
       ally.prompt(s.ally ? s.prompt : null);
       toggle(root, 'sg-has-ally', !!s.ally);
       quest.update(s.quest);
+      if (!!s.quest !== cache.quest) { cache.quest = !!s.quest; toggle(root, 'sg-has-quest', cache.quest); }
       abar.update(s.slots, s.player);
       toggle(root, 'sg-no-abilities', s.slots.length === 0);
       if (s.inCombat !== cache.combat) { cache.combat = s.inCombat; toggle(root, 'sg-in-combat', s.inCombat); }
@@ -290,7 +303,14 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
       a.finished.then(() => el.remove(), () => el.remove());
     },
     floatText(x, y, text, kind) { floats.spawn(x, y, text, kind); },
-    dialogue: (speaker, lines, choices) => overlays.dialogue(speaker, lines, choices),
+    dialogue: (speaker, lines, choices, opts) => overlays.dialogue(speaker, lines, choices, opts),
+    closeDialogue: () => overlays.closeDialogue(),
+    journal: (view) => overlays.journal(view),
+    questDone: (g) => moments.done(g),
+    pointer: (p) => qPointer.update(p),
+    questHint: (text, seconds) => moments.hint(text, seconds),
+    questCard: (c) => moments.open(c),
+    closeQuestCard: () => moments.endCard(-1),
     titleScreen: () => overlays.titleScreen(),
     loadout: (pool, current, title, count) => overlays.loadout(pool, current, title, count),
     jobs: (view) => overlays.jobs(view),

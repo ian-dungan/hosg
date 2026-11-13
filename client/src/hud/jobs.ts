@@ -81,6 +81,9 @@ export function abilityCard(parent: HTMLElement, d: AbilityDef, cls = ''): HTMLE
   return c;
 }
 
+/** The quest's line for the board's header (Plan 6: the `board` step's boardHeader), or null. */
+export const boardHint: { line: string | null } = { line: null };
+
 /**
  * Opens the sheet in `layer`; resolves with the job chosen, or null when closed. `push` registers its key
  * handler as the top-most modal and returns the function that removes it.
@@ -102,6 +105,8 @@ export function openJobBoard(
     const x = h('div', 'sg-jb-close', head);
     x.innerHTML = ICONS.close;
     if (v.note) h('div', 'sg-jb-note', panel, v.note);
+    // Plan 6: while the quest's board step is on, its line says what to do here (online.ts sets boardHint.line)
+    if (boardHint.line) h('div', 'sg-jb-quest', panel, boardHint.line);
     const list = h('div', 'sg-jb-list', panel);
     let open: HTMLElement | null = null;
     let answered = false;
@@ -193,6 +198,8 @@ export const JOBS_CSS = /* css */ `
 .sg-jb-close{flex:none;width:48px;height:48px;padding:13px;border-radius:50%;color:var(--cream);background:rgba(255,255,255,.1);cursor:pointer}
 .sg-jb-note{margin:0 14px 8px;padding:10px 14px;border-radius:12px;font-size:14px;font-weight:600;line-height:1.35;
   color:#ffe8c4;background:rgba(236,106,76,.22);box-shadow:inset 0 0 0 1px rgba(255,170,130,.5)}
+.sg-jb-quest{margin:0 14px 8px;padding:9px 14px;border-radius:12px;font-size:14px;line-height:1.4;
+  background:rgba(63,176,166,.16);box-shadow:inset 0 0 0 1px rgba(63,176,166,.55)}
 .sg-jb-list{flex:1;min-height:0;overflow:auto;touch-action:pan-y;padding:4px 10px 14px;display:flex;flex-direction:column;gap:6px;overscroll-behavior:contain}
 .sg-jb-row{border-radius:14px;background:rgba(255,246,230,.06);box-shadow:inset 0 0 0 1px rgba(255,226,160,.16);flex:none}
 .sg-jb-row.cur{box-shadow:inset 0 0 0 2px var(--gold2);background:rgba(242,183,66,.12)}

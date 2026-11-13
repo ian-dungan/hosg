@@ -4,6 +4,11 @@ import { PARTY_CSS } from './party';
 import { BOSS_CSS } from './boss';
 import { EDGE_CSS } from '../combat/edgeMarkers';
 import { GEAR_CSS } from './gearStyle';
+import { TRACKER_CSS } from './quest';
+import { JOURNAL_CSS } from './journal';
+import { POINTER_CSS } from './questPointer';
+import { MOMENT_CSS } from './questMoment';
+import { DIALOGUE_SHEET_CSS } from './dialogueSheet';
 
 const CSS = /* css */ `
 .sg-hud{
@@ -560,6 +565,6 @@ export function injectStyles(): void {
   injected = true;
   const s = document.createElement('style');
   s.id = 'sg-hud-css';
-  s.textContent = CSS + JOBS_CSS + PARTY_CSS + BOSS_CSS + EDGE_CSS + HINT_CSS + GEAR_CSS;
+  s.textContent = CSS + JOBS_CSS + PARTY_CSS + BOSS_CSS + EDGE_CSS + HINT_CSS + GEAR_CSS + TRACKER_CSS + JOURNAL_CSS + POINTER_CSS + MOMENT_CSS + DIALOGUE_SHEET_CSS;
   document.head.appendChild(s);
 }

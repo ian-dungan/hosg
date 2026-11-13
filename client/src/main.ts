@@ -1,8 +1,9 @@
 // Shady Grove 2 — walkable town demo.
 // Joins the world, the player rig, the NPCs and the HUD. No combat, no server.
-import { Scene, Vector3 } from '@babylonjs/core';
+import { Vector3 } from '@babylonjs/core';
 import type { AnchorName, CharacterView, HudState, TapInfo } from './core/contracts';
-import { BEACON_DIR } from './world/layout';
+import { BEACON_LINES } from '@sg2/shared';
+import { demoBeaconCamera } from './story/scenes';
 import { makeCharacter } from './player/character';
 import { bootGame } from './boot';
 
@@ -14,13 +15,6 @@ interface Interactable {
   pos: Vector3;
   view: CharacterView | null;
   talk: () => Promise<void>;
-}
-
-/** Horizontal direction from the statue toward the sky island (the way Ellie points). */
-function beaconDir(scene: Scene): Vector3 {
-  const d = new Vector3(BEACON_DIR.x, 0, BEACON_DIR.z);
-  void scene;
-  return d.normalize();
 }
 
 async function boot(): Promise<void> {
@@ -148,37 +142,10 @@ async function boot(): Promise<void> {
   });
 
   async function solstice(): Promise<void> {
-    await say('Old Marrow', ['Wait. Look at the spyglass. The bronze is humming!']);
+    await say(BEACON_LINES.before.speaker, [...BEACON_LINES.before.lines]);
     hud.setVisible(false);
-    try {
-      // Turn the camera to look along Ellie's pointing arm, up at the sky.
-      rig.setCinematic(true);
-      const cam = rig.camera;
-      const look = beaconDir(scene);
-      cam.upperBetaLimit = Math.PI;
-      // Camera goes behind the statue, above the roofs, looking up along the beam.
-      const TILT = 0.14, BACK = 24, HEIGHT = 12, R = 40;
-      const camPos = new Vector3(-look.x * BACK, HEIGHT, -look.z * BACK);
-      const t1 = camPos.add(new Vector3(look.x * Math.cos(TILT) * R, Math.sin(TILT) * R, look.z * Math.cos(TILT) * R));
-      const tStart = cam.target.clone();
-      const a0 = cam.alpha, b0 = cam.beta, r0 = cam.radius;
-      const a1 = Math.atan2(-look.z, -look.x), b1 = Math.PI / 2 + TILT, r1 = R;
-      const t0 = performance.now();
-      const ease = () => {
-        const k = Math.min(1, (performance.now() - t0) / 2200), e = k * k * (3 - 2 * k);
-        let da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
-        cam.alpha = a0 + da * e; cam.beta = b0 + (b1 - b0) * e; cam.radius = r0 + (r1 - r0) * e;
-        Vector3.LerpToRef(tStart, t1, e, cam.target);
-        if (k < 1) requestAnimationFrame(ease);
-      };
-      ease();
-      await world.raiseBeacon();
-      await new Promise((r) => setTimeout(r, 2500));
-      rig.setCinematic(false);
-    } catch (e) {
-      console.warn('raiseBeacon failed', e);
-      rig.setCinematic(false);
-    }
+    // Turn the camera to look along Ellie's pointing arm, up at the sky, while the Beacon rises (story/scenes.ts).
+    await demoBeaconCamera(rig, world);
     hud.setVisible(true);
     done.beacon = true;
     hud.banner('The Beacon', 'An island appears in the sky');

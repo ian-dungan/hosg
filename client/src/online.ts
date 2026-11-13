@@ -22,6 +22,7 @@ import {
   type PartyOp,
   type PartyView,
   type QuestsView,
+  type QuestGiven,
   type S2C,
   type VictoryView,
   type ZoneId,
@@ -54,6 +55,9 @@ import { createStalls, type Stalls } from './world/stalls';
 import { InvClient } from './net/inventory';
 import { createGearCtl, type GearCtl } from './net/gearCtl';
 import { routeTap } from './net/tapOrder';
+import { browserHintStore, createQuestClient, type QuestClient } from './story/questClient';
+import { createClientQuests } from './net/quests';
+import { journalHook } from './net/questHooks';
 import {
   UNREACHABLE,
   connect,
@@ -167,6 +171,16 @@ interface NetDebug {
   stats: InventoryView['stats'] | null;
   levelUps: { job: string; level: number }[];
   stall: string | null;
+  /** Plan 6: the last quests view, the last 20 completions and refusals, the tracker, the pointer, whether a
+   *  dialogue is open, the Beacon's state, and this zone's story spots. */
+  quests: QuestsView | null;
+  questDone: QuestGiven[];
+  questRefusals: string[];
+  tracker: { title: string; lines: string[] } | null;
+  pointer: { label: string; onScreen: boolean } | null;
+  readonly dialogueOpen: boolean;
+  readonly beaconRaised: boolean;
+  story: { id: string; eid: number; x: number; z: number }[];
 }
 /** What ended a connection: a reason for the login screen, or a travel to another zone (an instance by id). */
 type Ended = { reason: string } | { travel: ZonePlace };
@@ -182,6 +196,10 @@ function boot(): void {
   /** The room being played (set on joining, before the adventurer is in it): the Lampfall's gates come from its state. */
   let joining: ZoneRoom | null = null;
 
+  /** Plan 6: the quest in this room (made on entering it), and the quest state kept across rooms. */
+  let quest: QuestClient | null = null;
+  const questState = createClientQuests();
+  const hintStore = browserHintStore();
   const game = bootGame({
     busy: () => !room, onTap: (tap) => onTap(tap),
     // the Lampfall's shut lamp-gates are walls (as on the server) and its lamp-lift opens after the Warden
@@ -196,7 +214,7 @@ function boot(): void {
   const tapIs = { enemy: isEnemy, story: (eid: number) => storyIdOf(eid) !== null, booth: (eid: number) => stallOfEid(eid) !== null };
   function onTap(tap: TapInfo): boolean {
     const route = routeTap(tap, tapIs);
-    if (route === 'story' && story?.handleTap(tap)) return true;
+    if (route === 'story' && (quest?.onTap(tap) ?? false)) return true; // walk over, then talk (Plan 6)
     if (route === 'booth' && gearCtl?.onTap(tap)) return true;
     return combat?.onTap(tap) ?? false;
   }
@@ -235,6 +253,10 @@ function boot(): void {
     party: null, invites: [], partyRefusals: [], instance: null, roomId: '', boss: null, victory: null, chatLog: [], screen: '', corrections: 0, edges: 0,
     look: '', lookFree: false, creatorOpen: false, remoteLooks: {}, gold: 0,
     inventory: null, lastLoot: null, invRefusals: inv.refusals, stats: null, levelUps: inv.levelUps, stall: null,
+    quests: null, questDone: [], questRefusals: [], tracker: null, pointer: null,
+    get dialogueOpen() { return !!document.querySelector('.sg-hud.sg-dialogue-open'); },
+    get beaconRaised() { return game.world.beaconRaised; },
+    story: [],
   };
   const logChat = (from: string, text: string, channel: string) => { net.chatLog.push({ from, text, channel }); if (net.chatLog.length > 50) net.chatLog.shift(); };
   // ── Plan 4: the party (it outlives each room), invites, party chat ──
@@ -268,7 +290,14 @@ function boot(): void {
       else sendParty({ op: a.kind, name: a.name });
     });
   };
-  hud.on((e) => { if (e.type === 'openParty') openPartySheet(); else if (!gearCtl?.onHud(e)) combat?.onHud(e); });
+  hud.on((e) => {
+    if (e.type === 'openParty') openPartySheet();
+    else if (e.type === 'openJournal') quest?.openJournal();
+    else if (e.type === 'pointerTap') quest?.pointerTap();
+    else if (e.type === 'interact' && quest?.interact()) return; // a story spot's prompt (the nearest wins)
+    else if (!gearCtl?.onHud(e)) combat?.onHud(e);
+  });
+  journalHook.open = () => quest?.openJournal();
   // Plan 5: looks. The cache holds every adventurer's look by engine id for the room (cleared on leaving it).
   const lookCache = new LookCache();
   let ownLookVer = 0;
@@ -367,6 +396,11 @@ function boot(): void {
     gearCtl?.update(dt); // after the controller: a stall in reach takes the prompt when nothing else wants it
     stalls?.update(dt);
     net.stall = gearCtl?.stall ?? null;
+    if (quest) {
+      quest.update(dt);
+      if (quest.holding) game.rig.setMoveScale(0); // a scene holds the adventurer still (after the controller's own scale)
+      net.tracker = quest.debug.tracker; net.pointer = quest.debug.pointer;
+    }
     if (combat) {
       const d = combat.debug;
       net.self = d.self; net.fxSeen = d.fxSeen; net.jobs = d.jobs; net.refusals = d.refused; net.allyFocus = d.allyFocus;
@@ -511,6 +545,7 @@ function boot(): void {
       // Plan 5: the inventory (the only source of what the adventurer owns), loot and level-ups
       r.onMessage('inventory', (m: S2C['inventory']) => {
         if (typeof m?.gold === 'number') net.gold = m.gold;
+        questMsg('inventory', m); // the quest's equip prompt finds the new piece in it
         if (!inv.onInventory(m)) return;
         net.inventory = inv.view; net.stats = inv.view?.stats ?? null;
         gearCtl?.inventory();
@@ -534,8 +569,16 @@ function boot(): void {
       r.onMessage('quests', (m: S2C['quests']) => {
         questView = m;
         story?.setView(m);
+        // (before the quest flow's own handling: a returning adventurer past the plaque sees the Beacon up)
         if (!beaconSet) { beaconSet = true; game.world.setBeaconRaised(beaconRaisedFor(m)); }
+        questMsg('quests', m);
+        net.quests = questState.view;
       });
+      // Plan 6: completions (one per step, after jobXp/jobs/levelUp and before quests), refusals; inventory too
+      const questMsg = (type: string, m: unknown) => { if (quest) quest.message(type, m); else questEarly.push([type, m]); };
+      const questEarly: [string, unknown][] = [];
+      r.onMessage('questDone', (m: S2C['questDone']) => { questMsg('questDone', m); net.questDone = questState.history; });
+      r.onMessage('questRefused', (m: S2C['questRefused']) => { questMsg('questRefused', m); net.questRefusals = questState.refusals; });
       r.onMessage('notice', (m: S2C['notice']) => hud.toast(m.text));
       r.onMessage('travel', (m: S2C['travel']) => {
         // The server has moved the adventurer to `m.zone` and ends this session: fade out meanwhile.
@@ -590,6 +633,15 @@ function boot(): void {
         if (inv.view) gearCtl.inventory();
         net.combat = combat.debug;
         for (const [type, m] of early.splice(0)) combat.message(type, m);
+        quest = createQuestClient({
+          game, hud, state, zone, quests: questState, story: () => story, combat: () => combat,
+          send: (act) => { if (room !== r || r.reconnection.isReconnecting) return false; send(r, 'quest', act); return true; },
+          sendInv: (op) => { if (room !== r || r.reconnection.isReconnecting) return false; send(r, 'inv', op); return true; },
+          learned: hintStore,
+        });
+        net.story = (story?.spots ?? []).map((s) => ({ id: s.id, eid: s.eid, x: s.x, z: s.z }));
+        for (const [type, m] of questEarly.splice(0)) quest.message(type, m);
+        quest.flow.entered();
         rig.setMoveScale(1);
         hud.setVisible(true);
         netUi.className = '';
@@ -624,6 +676,8 @@ function boot(): void {
         clearTimeout(lostTimer);
         clearTimeout(travelTimer);
         clearInterval(sendTimer);
+        quest?.dispose(); // its dialogue, cards, hints and pointer go with the room
+        quest = null;
         combat?.dispose();
         combat = null;
         gearCtl?.dispose(); // its sheets belong to this room: their answers would go nowhere

@@ -5,7 +5,7 @@
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
 import type { CharSheetHandle, CharSheetView, CharTab, LevelShow, LootShow, SheetAct, SheetHandle, VendorView } from './gearViews';
-import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, JobId, Look as AdventurerLook, WeaponId as SharedWeaponId } from '@sg2/shared';
+import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, JobId, Look as AdventurerLook, QuestId, WeaponId as SharedWeaponId } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
@@ -326,7 +326,11 @@ export interface HudState {
     /** Plan 4: its engine id, and whether the focus frame offers "Invite" (a stranger, and this adventurer may invite). */
     eid?: number; canInvite?: boolean }) | null;
   slots: { ability: AbilityDef; cdRemaining: number; usable: boolean }[];   // 5 entries
-  quest: { title: string; steps: { text: string; done: boolean }[] } | null;
+  /**
+   * The tracked quest (Plan 6): its current step's objective lines with counts; `hint` is the step's hint (shown
+   * when the tracker is tapped open on wide screens and in the journal), `more` the number of other active quests.
+   */
+  quest: { title: string; steps: { text: string; done: boolean }[]; hint?: string | null; more?: number; kicker?: string } | null;
   /** Context action near the player, e.g. "Talk to Old Marrow". null hides the button. */
   prompt: string | null;
   inCombat: boolean;
@@ -349,6 +353,8 @@ export type HudEvent =
   | { type: 'openParty' }               // P key, the party button
   | { type: 'invite'; eid: number }     // the focus frame's Invite
   | { type: 'focusMember'; eid: number } // a tap on a party frame
+  | { type: 'openJournal' }             // Q, a tap on the quest tracker (Plan 6)
+  | { type: 'pointerTap' }              // a tap on the quest pointer chip: walk toward its target (Plan 6)
   | { type: 'release' }                 // dead in the Lampfall: get up at the checkpoint
   | { type: 'leaveInstance' }           // the victory screen's "Leave the Lampfall"
   | { type: 'openChar'; tab: CharTab | null }; // the menu button (null: the last tab), I (bag), C (gear and stats), O (wardrobe), T (talents)
@@ -364,8 +370,25 @@ export interface HudApi {
   toast(text: string): void;                                     // small message, e.g. "Out of range"
   /** Floating combat text at a screen position (px). */
   floatText(x: number, y: number, text: string, kind: 'damage' | 'crit' | 'heal' | 'combo' | 'hurt' | 'info' | 'other'): void;
-  /** Dialogue box; resolves with the index of the chosen option (0 if there are no choices) after the last line. */
-  dialogue(speaker: string, lines: string[], choices?: string[]): Promise<number>;
+  /**
+   * Dialogue box; resolves with the index of the chosen option (0 if there are no choices) after the last line.
+   * With opts.closable it has a close button (and Esc closes it); closing it, or closeDialogue(), resolves -1.
+   */
+  dialogue(speaker: string, lines: string[], choices?: string[], opts?: DialogueOpts): Promise<number>;
+  /** Closes the open dialogue (it resolves -1) and drops any queued behind it; nothing when none is open. */
+  closeDialogue(): void;
+  /** Plan 6: the journal sheet (Q, the tracker): resolves with an act (accept, abandon, skip), a re-track, or null on close. */
+  journal(view: JournalView): Promise<JournalAnswer | null>;
+  /** Plan 6: the completion moment of a quest step (a gold banner, the reward chips, a title toast). */
+  questDone(g: QuestMoment): void;
+  /** Plan 6: the edge pointer toward the tracked objective (screen px of the target; off screen it clamps to the edge with an arrow); null hides it. */
+  pointer(p: { x: number; y: number; label: string; onScreen: boolean; angle: number } | null): void;
+  /** Plan 6: a short, dismissible teaching hint (never modal); resolves true when the adventurer dismissed it, false when it went by itself or was replaced. */
+  questHint(text: string | null, seconds?: number): Promise<boolean>;
+  /** Plan 6: a small non-modal card (the epilogue's offer, the equip prompt): resolves with the button chosen, or -1 (closed, replaced, closeQuestCard). */
+  questCard(card: QuestCardOpts): Promise<number>;
+  /** Closes the quest card, if one is up (it resolves -1). */
+  closeQuestCard(): void;
   titleScreen(): Promise<void>;                                  // "Shady Grove 2" + Play
   /** Pick `count` abilities from the pool; resolves with the chosen ids. `title` names it (the job's name). */
   loadout(pool: AbilityDef[], current: string[], title: string, count?: number): Promise<string[]>;
@@ -428,6 +451,30 @@ export interface CreatorOpts {
   validateName: (s: string) => string | null;
   /** A line shown over the buttons until the first change (why the creator opened again: a taken name, ...). */
   notice?: string;
+}
+/** The dialogue's options (Plan 6): a close button, the page to start on, and each page as it shows. */
+export interface DialogueOpts { closable?: boolean; start?: number; onPage?: (page: number) => void }
+/** The completion moment: the quest's name, the step's line, the rewards, the title earned, and whether the quest is done. */
+export interface QuestMoment { title: string; step: string; xp: number; gold: number; item: string | null; title2: string | null; questDone: boolean }
+/** A quest card: a kicker, a title, a line, its buttons (the first is gold). */
+export interface QuestCardOpts { kicker: string; title: string; text: string; buttons: string[]; seconds?: number }
+/** What the journal sheet answers. */
+export type JournalAnswer =
+  | { act: 'accept' | 'abandon' | 'skip'; quest: QuestId }
+  | { act: 'track'; quest: QuestId };
+/** The journal as the HUD shows it (net/quests.ts journalView builds it from the view and the shared text). */
+export interface JournalView {
+  active: {
+    id: QuestId; name: string; blurb: string; kind: 'main' | 'side' | 'daily' | 'epilogue'; tracked: boolean;
+    /** Past steps (struck, or skipped), then the current one with its lines, counts and hint. */
+    steps: { text: string; state: 'done' | 'skipped' | 'current'; lines?: { text: string; done: boolean }[]; hint?: string | null }[];
+    rewards: string;
+    canDrop: boolean; canSkip: boolean;
+  }[];
+  offers: { id: QuestId; name: string; blurb: string; giver: string | null; rewards: string; canAccept: boolean }[];
+  done: { id: QuestId; name: string; times: number; today: boolean; daily: boolean; title: string | null }[];
+  /** The tab to open on. */
+  tab?: 'active' | 'offers' | 'done';
 }
 /** opts.countdown: a line counting down; opts.waitS: the buttons wake after this; opts.title: instead of "Victory"/"Defeated". */
 export interface EndScreenOpts { countdown?: { seconds: number; text: string; doneText?: string }; waitS?: number; title?: string }

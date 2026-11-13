@@ -4,6 +4,9 @@ import { TICK_HZ } from '@sg2/shared';
 import { createHud } from './index';
 import { jobBoardView } from './jobs';
 import { bossBar, victoryLines } from './boss';
+import { QUESTS, type QuestsView } from '@sg2/shared';
+import { createClientQuests, journalView, onQuests, trackerOf } from '../net/quests';
+import { pointerLayout } from './questPointer';
 
 const ABILITIES: AbilityDef[] = [
   { id: 'cleave', name: 'Tide Cleave', glyph: '⟋', desc: 'A wide slash that Soaks foes; Soaked foes take bonus lightning.', cooldown: 6, range: 3, castTime: 0, job: 'warrior', support: false, kind: 'damage' },
@@ -66,6 +69,16 @@ let loadout = ['cleave', 'parry', 'ember', 'mend', 'ward'];
 const weapon: WeaponId = 'blade';
 const cds = [0, 0, 0, 0, 0];
 let quest: HudState['quest'] = { title: 'The Solstice Crossing', steps: [{ text: 'Speak with Old Marrow', done: false }, { text: 'Find where the Two are pointing', done: false }] };
+// Plan 6: ?quest=<main step id>[&qc=2,1,0,0][&side] puts the real tracker on (from the shared quest data and text)
+const devQuests = createClientQuests();
+const questView = (step: string, counts?: number[]): QuestsView => {
+  const i = Math.max(0, QUESTS.solstice_crossing.steps.findIndex((x) => x.id === step));
+  const c = counts ?? QUESTS.solstice_crossing.steps[i]!.objectives.map(() => 0);
+  return { active: [{ id: 'solstice_crossing', step: i, counts: c }, ...(params.has('side') ? [{ id: 'bristle_bounty' as const, step: 0, counts: [4] }] : [])],
+    done: params.has('side') ? [{ id: 'grans_waymarks', times: 1, today: false }] : [], offers: ['grans_waymarks'].filter(() => !params.has('side')) as QuestsView['offers'], skipped: [] };
+};
+const devTouch = () => document.querySelector('.sg-hud')?.classList.contains('sg-touch') ? 'touch' as const : 'desktop' as const;
+if (params.get('quest')) { onQuests(devQuests, questView(params.get('quest')!, params.get('qc')?.split(',').map(Number))); quest = trackerOf(devQuests, devTouch()); }
 let prompt: string | null = params.has('noprompt') ? null : 'Talk · Old Marrow';
 let party = params.has('party');
 
@@ -105,6 +118,7 @@ hud.on((e) => {
   else if (e.type === 'openLoadout') { void dev.loadout(); }
   else if (e.type === 'interact') { void demoDialogue(); }
   else if (e.type === 'clearTarget') { if (scene !== 'town') scene = 'town'; }
+  else if (e.type === 'openJournal') { void dev.journal(); }
 });
 
 async function demoDialogue(): Promise<number> {
@@ -211,6 +225,17 @@ const dev = {
   burst,
   fade: async () => { await hud.fade(true, '#FFFAF3', 0.6); await hud.fade(false, '#FFFAF3', 0.6); },
   hidden: false,
+  // Plan 6: the journal, the completion moment, a hint, the quest card, the pointer, a closable dialogue
+  journal: (tab?: 'active' | 'offers' | 'done') => hud.journal(journalView(devQuests.view ? devQuests : (onQuests(devQuests, questView('duo')), devQuests), devTouch(), tab)),
+  moment: (big = false) => hud.questDone(big
+    ? { title: 'The Solstice Crossing', step: 'Look into the crater', xp: 40, gold: 30, item: null, title2: 'Witness of the Crossing', questDone: true }
+    : { title: 'The Solstice Crossing', step: 'Defeat Thornlings', xp: 60, gold: 10, item: null, title2: null, questDone: false }),
+  hint: (t = 'When your Momentum bar is half full, press your finisher (button 2, or key 2).') => hud.questHint(t, 600),
+  card: () => hud.questCard({ kicker: 'New quest', title: "The Keeper's Lamp", text: 'Climb down into the Lampfall and find what fell. Best with friends.', buttons: ['Accept', 'Not now'] }),
+  /** The pointer toward a target projected at (x, y) (off screen: it goes to the edge, out of the controls' way). */
+  pointer: (x = -100, y = 300, label = 'Nell Thistlewood') => { const l = pointerLayout(x, y, true, innerWidth, innerHeight, hud.exclusions()); hud.pointer({ ...l, label }); },
+  talk: () => hud.dialogue('Nell Thistlewood, the road-keeper', ['You\'ll do. Better than do, even.', 'Here. The smiths in town send me spares for anyone who\'s earned them. Pick what suits you.'],
+    ['Mossweave Robe — cloth: stronger abilities', 'Thornrunner Jerkin — light: faster Momentum', 'Rootbound Hauberk — heavy: they come for you, not your friends'], { closable: true, start: 1 }),
   toggleHud() { this.hidden = !this.hidden; hud.setVisible(!this.hidden); },
 };
 (window as unknown as { dev: typeof dev }).dev = dev;
@@ -224,6 +249,8 @@ const btns: [string, () => unknown][] = [
   ['Floats', burst], ['Loadout', dev.loadout], ['Jobs', dev.jobs], ['Victory', dev.victory], ['Defeat', dev.defeat],
   ['Wickhound', () => dev.setScene('wickhound')], ['Warden', () => dev.setScene('warden')], ['Invite', dev.invite], ['Party sheet', () => dev.partySheet()],
   ['Fallen', dev.fallen], ['Wipe', dev.wipe], ['Lampfall victory', () => dev.lampVictory()],
+  ['Journal', () => dev.journal()], ['Quest moment', () => dev.moment()], ['Quest done', () => dev.moment(true)], ['Hint', () => dev.hint()], ['Quest card', dev.card],
+  ['Pointer', () => dev.pointer()], ['Reward talk', dev.talk],
 ];
 for (const [label, fn] of btns) {
   const b = document.createElement('button'); b.textContent = label;

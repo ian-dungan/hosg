@@ -1,6 +1,7 @@
 // Modal overlays: dialogue, title screen, loadout picker, end screen, fade.
 import type { JobId } from '@sg2/shared';
-import type { AbilityDef, EndScreenOpts, JobBoardView, PartyAction, PartySheetView } from '../core/contracts';
+import type { AbilityDef, DialogueOpts, EndScreenOpts, JobBoardView, JournalAnswer, JournalView, PartyAction, PartySheetView } from '../core/contracts';
+import { openJournal } from './journal';
 import { openPartySheet } from './party';
 import { h } from './dom';
 import { abilityMeta, openJobBoard } from './jobs';
@@ -15,6 +16,10 @@ export class Overlays {
   /** The top-most modal's key handler (null when nothing modal is open). */
   private handlers: KeyHandler[] = [];
   private dlgChain: Promise<unknown> = Promise.resolve();
+  /** Bumped by closeDialogue: dialogues queued before it resolve -1 without showing. */
+  private dlgGen = 0;
+  /** Closes the dialogue on screen (it resolves -1), if any. */
+  private dlgClose: (() => void) | null = null;
   private fadeEl: HTMLElement;
   /** The open job board and picks chooser (closeSheets closes them). */
   readonly sheets = new Sheets();
@@ -44,17 +49,35 @@ export class Overlays {
   private show(el: HTMLElement): void { requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('in'))); }
 
   // ───────────── dialogue ─────────────
-  dialogue(speaker: string, lines: string[], choices?: string[]): Promise<number> {
-    const run = this.dlgChain.then(() => this.runDialogue(speaker, lines.length ? lines : [''], choices ?? []));
+  dialogue(speaker: string, lines: string[], choices?: string[], opts: DialogueOpts = {}): Promise<number> {
+    const gen = this.dlgGen;
+    const run = this.dlgChain.then(() => (gen !== this.dlgGen ? -1 : this.runDialogue(speaker, lines.length ? lines : [''], choices ?? [], opts)));
     this.dlgChain = run.catch(() => 0);
     return run;
   }
-  private runDialogue(speaker: string, lines: string[], choices: string[]): Promise<number> {
+  /** Closes the open dialogue (it resolves -1) and every one queued behind it. */
+  closeDialogue(): void {
+    this.dlgGen++;
+    this.dlgClose?.();
+  }
+  private runDialogue(speaker: string, lines: string[], choices: string[], opts: DialogueOpts): Promise<number> {
     return new Promise((resolve) => {
-      const root = h('div', 'sg-dlg sg-ctl', this.layer);
+      // a closable dialogue (Plan 6) is a bottom sheet: only the panel takes taps, the world above it stays live
+      const root = h('div', 'sg-dlg sg-ctl' + (opts.closable ? ' sg-dlg-sheet' : ''), this.layer);
       const panel = h('div', 'sg-dlg-panel', root);
-      const name = h('div', 'sg-dlg-name', panel, speaker);
+      // "Nell Thistlewood, the road-keeper": the name, with what they are in smaller type
+      const comma = opts.closable ? speaker.indexOf(', ') : -1;
+      const name = h('div', 'sg-dlg-name', panel, comma > 0 ? speaker.slice(0, comma) : speaker);
+      if (comma > 0) h('span', 'sg-dlg-role', name, speaker.slice(comma + 2));
       name.hidden = !speaker;
+      if (!speaker) root.classList.add('sg-dlg-narration');
+      if (opts.closable) {
+        const x = h('button', 'sg-dlg-x', panel);
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Close');
+        x.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+        x.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); finish(-1); });
+      }
       const text = h('div', 'sg-dlg-text', panel);
       const shown = document.createTextNode('');
       const hiddenSpan = h('span', 'sg-dlg-ghost');
@@ -66,7 +89,7 @@ export class Overlays {
       const next = h('div', 'sg-dlg-next', foot);
       next.textContent = this.isTouch() ? 'Tap to continue' : 'Enter to continue';
       const chWrap = h('div', 'sg-dlg-choices', panel);
-      let li = 0, chars = 0, typing = false, raf = 0, last = 0, sel = 0, finished = false, shownAt = 0;
+      let li = Math.max(0, Math.min(lines.length - 1, Math.floor(opts.start ?? 0))), chars = 0, typing = false, raf = 0, last = 0, sel = 0, finished = false, shownAt = 0;
       let choiceEls: HTMLElement[] = [];
       const CPS = 48;
       const tick = (t: number) => {
@@ -85,6 +108,7 @@ export class Overlays {
         shown.data = ''; hiddenSpan.textContent = lines[li];
         pipEls.forEach((p, i) => p.classList.toggle('on', i <= li));
         root.classList.remove('waiting');
+        opts.onPage?.(li);
         raf = requestAnimationFrame(tick);
       };
       const lineDone = () => {
@@ -120,21 +144,27 @@ export class Overlays {
         if (finished) return;
         finished = true;
         cancelAnimationFrame(raf);
+        if (this.dlgClose === closeMe) this.dlgClose = null;
         off();
         this.close(root);
         resolve(i);
       };
-      root.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); advance(); });
+      const closeMe = () => finish(-1);
+      this.dlgClose = closeMe;
+      // the sheet: the panel advances (the whole of it is the tap target); the backdrop stays the world's
+      (opts.closable ? panel : root).addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); advance(); });
       const off = this.push('dialogue', (e) => {
         const k = e.code;
         if (choiceEls.length) {
           if (k === 'ArrowDown' || k === 'KeyS') setSel((sel + 1) % choiceEls.length);
           else if (k === 'ArrowUp' || k === 'KeyW') setSel((sel + choiceEls.length - 1) % choiceEls.length);
           else if (k === 'Enter' || k === 'Space' || k === 'KeyE' || k === 'NumpadEnter') finish(sel);
+          else if (k === 'Escape' && opts.closable) finish(-1);
           else { const d = /^(?:Digit|Numpad)([1-9])$/.exec(k); if (d && +d[1] <= choiceEls.length) finish(+d[1] - 1); else return false; }
           return true;
         }
         if (k === 'Enter' || k === 'Space' || k === 'KeyE' || k === 'NumpadEnter') { if (!e.repeat) advance(); return true; }
+        if (k === 'Escape' && opts.closable) { finish(-1); return true; }
         return k === 'Escape' ? (advance(), true) : false;
       });
       this.show(root);
@@ -226,6 +256,13 @@ export class Overlays {
     let closer: () => void = () => {};
     const p = openJobBoard(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el), (c) => { closer = c; this.sheets.add('jobs', c); });
     return p.finally(() => this.sheets.remove('jobs', closer));
+  }
+
+  // ───────────── journal (Plan 6) ─────────────
+  journal(view: JournalView): Promise<JournalAnswer | null> {
+    let closer: () => void = () => {};
+    const p = openJournal(this.layer, view, (kind, keys) => this.push(kind, keys), (el) => this.show(el), (el) => this.close(el), (c) => { closer = c; this.sheets.add('journal', c); });
+    return p.finally(() => this.sheets.remove('journal', closer));
   }
 
   // ───────────── party sheet ─────────────
