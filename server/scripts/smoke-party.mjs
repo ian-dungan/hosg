@@ -63,6 +63,7 @@ let helpers = null;
 async function open(label, contextOptions) {
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
+  page.setDefaultTimeout(WAIT_MS); // (a page renders at about 1 fps: a click waits for a stable element)
   page.on('pageerror', (err) => pageErrors.push(`${label}: ${err.message}`));
   await page.goto(page0.href, { timeout: LOAD_MS, waitUntil: 'domcontentloaded' });
   const p = { label, context, page, name: '' };
@@ -122,13 +123,20 @@ async function inLampfall(p, ms = WAIT_MS * 2) {
 
 const net = (p, f, arg) => p.page.evaluate(f, arg);
 const waitFor = (p, f, arg, ms, why) => p.page.waitForFunction(f, arg, { timeout: ms, polling: 300 }).then((h) => h.jsonValue(), () => { throw new Error(`${p.label}: ${why}`); });
-/** Tap-to-walk's own walk to (x, z); resolves once there or stopped. */
+/** Tap-to-walk's own walk to (x, z), tried again (up to 5 times) until it stands within 1.5 m. */
 async function walkTo(p, to, ms = WAIT_MS) {
-  await p.page.evaluate(({ x, z }) => {
-    const g = window.__sg2.game, V = g.rig.position.constructor;
-    g.walkTo(new V(x, g.world.groundAt(x, z) ?? g.rig.position.y, z));
-  }, to);
-  await waitFor(p, ({ x, z }) => { const r = window.__sg2.rig.position; return Math.hypot(r.x - x, r.z - z) < 1.5 || !window.__sg2.game.walking; }, to, ms, `walk to ${to.x.toFixed(1)}, ${to.z.toFixed(1)}`);
+  const until = Date.now() + ms;
+  for (let tries = 0; tries < 5 && Date.now() < until; tries++) {
+    await p.page.evaluate(({ x, z }) => {
+      const g = window.__sg2.game, V = g.rig.position.constructor;
+      g.walkTo(new V(x, g.world.groundAt(x, z) ?? g.rig.position.y, z));
+    }, to);
+    await p.page.waitForTimeout(1500); // (a frame or two at about 1 fps before the walk shows)
+    const there = await p.page.waitForFunction(({ x, z }) => { const r = window.__sg2.rig.position; return Math.hypot(r.x - x, r.z - z) < 1.5 || !window.__sg2.game.walking; }, to, { timeout: Math.max(1000, until - Date.now()), polling: 500 })
+      .then(() => p.page.evaluate(({ x, z }) => { const r = window.__sg2.rig.position; return Math.hypot(r.x - x, r.z - z) < 1.5; }, to), () => false);
+    if (there) return;
+  }
+  throw new Error(`${p.label}: could not walk to ${to.x.toFixed(1)}, ${to.z.toFixed(1)}`);
 }
 /** The room's clock in seconds of game time. */
 const gameS = (p) => p.page.evaluate(() => (window.__sg2.room?.state?.clock ?? 0) / 15);
@@ -189,15 +197,24 @@ try {
 
   await check('A taps B and invites it from the focus frame; B accepts on its card; each shows the other in a party frame', async () => {
     await waitFor(a, (n) => window.__sg2net.remotes.some((r) => r.name === n), b.name, WAIT_MS, 'A never saw B');
-    // a tap on B's body focuses it; the focus frame then offers "Invite to party"
-    const at = await waitFor(a, (n) => {
-      const r = window.__sg2net.remotes.find((x) => x.name === n);
-      const pt = r && window.__sg2.screenOf(r.x, r.y + 1.0, r.z);
-      return pt && pt.x > 0 && pt.y > 0 && pt.x < innerWidth && pt.y < innerHeight ? pt : null;
-    }, b.name, WAIT_MS, 'B is not on A\'s screen');
-    await a.page.mouse.click(at.x, at.y);
-    await waitFor(a, () => document.querySelector('.sg-af-invite.on') !== null, null, WAIT_MS, 'no Invite button in A\'s focus frame');
-    await a.page.click('.sg-af-invite.on');
+    // B steps 5 m west first (both start on the same spot: a tap there may pick A itself)
+    await walkTo(b, { x: DATA.arrive.x - 5, z: DATA.arrive.z + 1 });
+    // a tap on B's body focuses it; the focus frame then offers "Invite to party" (tried again if the frame closed
+    // before the click landed: a page draws about one frame a second)
+    for (let tries = 0; ; tries++) {
+      const at = await waitFor(a, (n) => {
+        const r = window.__sg2net.remotes.find((x) => x.name === n);
+        const pt = r && window.__sg2.screenOf(r.x, r.y + 1.0, r.z);
+        return pt && pt.x > 0 && pt.y > 0 && pt.x < innerWidth && pt.y < innerHeight ? pt : null;
+      }, b.name, WAIT_MS, 'B is not on A\'s screen');
+      // (a second tap on a focused adventurer clears the focus: tap only when nobody is focused)
+      if ((await net(a, () => window.__sg2net.allyFocus)) === null) await a.page.mouse.click(at.x, at.y);
+      // force: at about 1 fps the frame never holds still for two frames, which a plain click waits for
+      const ok = await a.page.waitForSelector('.sg-af-invite.on', { timeout: 60_000 }).then(() => a.page.click('.sg-af-invite.on', { timeout: 20_000, force: true })).then(() => true, () => false);
+      if (ok) break;
+      if (tries === 2) throw new Error('A could not invite B from the focus frame (3 tries)');
+      console.log('     the focus frame closed before the click; tapping B again');
+    }
     await waitFor(b, () => document.querySelector('.sg-invite.on') !== null, null, WAIT_MS, 'no invite card on B');
     const card = await net(b, () => document.querySelector('.sg-invite-text')?.textContent ?? '');
     if (!card.includes(a.name)) throw new Error(`B's invite card does not name A: "${card}"`);
@@ -262,6 +279,7 @@ try {
     // down the corridor in short tap-to-walk legs
     for (const leg of DATA.route) await Promise.all([walkTo(a, leg), walkTo(b, { x: leg.x - 1, z: leg.z + 1.5 })]);
     const seen = new Map(); // the pack's enemies (eid -> kind) as first seen in the Root Cellar
+    const tabs = new Map(), hit = new Set(); // Tab presses per page; pages whose target was an enemy of the pack
     for (;;) {
       for (const p of [a, b]) {
         const view = await net(p, (c) => window.__sg2net.enemies.filter((e) => Math.hypot(e.x - c.x, e.z - c.z) <= c.r + 3).map((e) => ({ eid: e.eid, kind: e.kind, mode: e.mode })), DATA.cellar);
@@ -270,17 +288,17 @@ try {
           if (e.mode === 'dead') s.dead = true;
           seen.set(e.eid, s);
         }
-        // Tab to the next enemy when it has none alive; then its skills (autos run by themselves)
-        const live = await net(p, () => window.__sg2net.enemies.some((v) => v.eid === window.__sg2net.self?.target && v.mode !== 'dead'));
-        if (!live) await p.page.keyboard.press('Tab');
-        else {
-          await p.page.evaluate(() => { // a tap on the target: tap-to-walk walks into reach
-            const n = window.__sg2net, e = n.enemies.find((v) => v.eid === n.self?.target), r = window.__sg2.rig.position;
-            if (e && Math.hypot(e.x - r.x, e.z - r.z) > 2.5) { const g = window.__sg2.game, V = r.constructor; g.walkTo(new V(e.x, g.world.groundAt(e.x, e.z) ?? r.y, e.z)); }
-          });
-          await p.page.keyboard.press('Digit2');
-          await p.page.keyboard.press('Digit1');
-        }
+        // Tab to the next enemy when it has none alive; out of reach, a tap-to-walk into reach (no key presses while
+        // it walks: a key ends the walk); in reach, its skills (autos run by themselves)
+        const st = await net(p, () => {
+          const n = window.__sg2net, e = n.enemies.find((v) => v.eid === n.self?.target && v.mode !== 'dead'), r = window.__sg2.rig.position;
+          return { live: !!e, far: e ? Math.hypot(e.x - r.x, e.z - r.z) : 0, e: e ? { x: e.x, z: e.z } : null, walking: window.__sg2.game.walking, dead: n.self?.dead };
+        });
+        if (st.live) hit.add(p);
+        if (st.dead || st.walking) continue;
+        if (!st.live) { await p.page.keyboard.press('Tab'); tabs.set(p, (tabs.get(p) ?? 0) + 1); }
+        else if (st.far > 2.6) await p.page.evaluate(({ x, z }) => { const g = window.__sg2.game, r = g.rig.position, V = r.constructor; g.walkTo(new V(x, g.world.groundAt(x, z) ?? r.y, z)); }, st.e);
+        else { await p.page.keyboard.press('Digit2'); await p.page.keyboard.press('Digit1'); }
       }
       const cleared = await net(a, () => window.__sg2net.instance?.cleared ?? []);
       const kinds = [...seen.values()];
@@ -296,6 +314,7 @@ try {
       await a.page.waitForTimeout(500);
     }
     const kinds = [...seen.values()].map((k) => k.kind).sort().join(',');
+    for (const p of [a, b]) if (!tabs.get(p) || !hit.has(p)) throw new Error(`${p.label} never targeted an enemy with Tab`);
     if (kinds !== [...DATA.pack].sort().join(',')) throw new Error(`the Root Cellar's pack was ${kinds}, not ${DATA.pack.join(',')}`);
     for (const p of [a, b]) if ((await net(p, () => window.__sg2net.roomId)) !== roomId) throw new Error(`${p.label} is not in the instance any more`);
     console.log(`     the pack (${kinds}) died ${((await gameS(a)) - t0).toFixed(0)} s of game time after the walk began`);

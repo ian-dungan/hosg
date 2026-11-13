@@ -982,7 +982,12 @@ class Bot {
     room.onMessage('partyRefused', (m: S2C['partyRefused']) => bump(partyStats.refused, m.reason));
     room.onMessage('instance', (m: S2C['instance']) => {
       this.instanceView = m;
-      if (this.plan && this.zone === 'lampfall') noteInstance(this.roomId, this.plan, m);
+      if (this.plan && this.zone === 'lampfall') {
+        noteInstance(this.roomId, this.plan, m);
+        // a wipe ends a Warden run (seen here too: dead members do not step)
+        const rec = wardenRecs.get(this.plan.k);
+        if (rec && !rec.done && rec.wakeAt !== null && m.wipeIn !== null) { rec.outcome = 'wipe'; rec.endAt = performance.now(); rec.done = true; }
+      }
     });
     room.onMessage('victory', (m: S2C['victory']) => { if (this.plan) bump(partyStats.victories, m.boss); });
     room.onMessage('notice', (m: S2C['notice']) => {
