@@ -275,6 +275,8 @@ const REVIVE_WAIT_MS = 20_000;
 const MEDIC_FOLLOW_M = 8;
 /** A follower (the odd bot of a duo) with nothing to fight walks to its leader once it is farther than this, in m. */
 const DUO_FOLLOW_M = 6;
+/** --assist on hold: how far the helpers stay from the adventurer (Second Dawn reaches 12 m; camps aggro at 7-9 m). */
+const ASSIST_HOLD_M = 11;
 /** Path search settings for a bot's walks (camps, the grove's east gate): coarse, so cheap. */
 const PATH_OPTS = { cell: 1, maxNodes: 60_000 };
 /** Clearance kept from walls on a walk (as the browser's tap-to-walk). */
@@ -1749,7 +1751,9 @@ class Bot {
       : leadBot && leadBot.zone === this.zone && !leadBot.switching && !leadBot.disconnected ? leadBot.position : null;
     if (assist !== null && !leadAt) return; // not in view: it waits where it is
     if (leadAt) {
-      const keep = this.medicOf !== null || (assist !== null && this.index === 1) ? MEDIC_FOLLOW_M : DUO_FOLLOW_M;
+      // (--assist on hold: they keep back, inside Second Dawn's 12 m but out of the camp's aggro, so the White Mage is up
+      // to revive when the adventurer falls: at 82 hp, level 1, it fell beside it in the smoke test)
+      const keep = assist !== null && assistHold ? ASSIST_HOLD_M : this.medicOf !== null || (assist !== null && this.index === 1) ? MEDIC_FOLLOW_M : DUO_FOLLOW_M;
       const d = dist(leadAt, this.body);
       this.campGoal = null;
       if (d > keep) {
