@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COSTUMES, DYE_PRICE, ITEMS, JOBS, RESPEC_PRICE, SETS, TOWN_STALLS, inventoryView, itemStats, newInventory, newJobsSave, applyInvOp,
+  COSTUMES, DYE_PRICE, ITEMS, ITEM_IDS, JOBS, RESPEC_PRICE, SETS, TOWN_STALLS, inventoryView, itemStats, newInventory, newJobsSave, applyInvOp,
   type InvCtx, type InvOp, type InventorySave, type InventoryView, type JobId, type JobsSave, type JobsView,
 } from '@sg2/shared';
+import type { Comparison } from '../core/gearViews';
 import {
   InvClient, OP_GATE_MS, charSheetView, compare, ctxFor, equipBlock, itemColour, levelShow, lootShow, newOpId, opKey, refusalLine,
   setProgress, talentsView, vendorView, type GearCtx,
@@ -37,6 +38,33 @@ function serverState(job: JobId = 'ranger', gold = 2000, seals = 0, xp = 0) {
 const levelOf = (xp: number) => { let l = 1, need = [100, 140, 190, 250, 320, 400, 490, 590, 700], t = 0; for (const n of need) { if (xp >= t + n) { t += n; l++; } else break; } return l; };
 const uidOf = (v: InventoryView, item: string) => v.bag.find((i) => i.item === item)!.uid;
 const ctxOf = (st: ReturnType<typeof serverState>, extra: Partial<GearCtx> = {}): GearCtx => ({ ...ctxFor(st.jobsView(), { zone: 'grove', x: 0, z: 0, inCombat: false, dead: false, busy: false, sealed: false }), ...extra });
+
+const STATS = ['power', 'defence', 'maxHp', 'focus', 'flow', 'guard'] as const;
+const SHORT: Record<(typeof STATS)[number], string> = { power: 'Power', defence: 'Defence', maxHp: 'hp', focus: 'Focus', flow: 'Flow', guard: 'Guard' };
+const d10 = (x: number) => Math.round(x * 10) / 10;
+const sgn = (d: number) => (d > 0 ? `+${d}` : d < 0 ? `\u2212${-d}` : '');
+/** The summary the item data implies for swapping `from` for `to` (kit totals move by the items' own stats). */
+function expectedSummary(from: string, to: string): string {
+  const a = itemStats(from), b = itemStats(to);
+  const parts = STATS.map((k) => [k, d10(b[k] - a[k])] as const).filter(([, d]) => d !== 0).map(([k, d]) => `${sgn(d)} ${SHORT[k]}`);
+  return parts.length ? parts.join(', ') : 'No change to your stats';
+}
+/** Every line follows the data: a line for each stat that is not 0 on both sides; its delta and better/worse flag
+ *  from the items' difference (null only when the stat does not change; never null when it does). */
+function expectFollowsData(cmp: Comparison, v: InventoryView, from: string, to: string): void {
+  const a = itemStats(from), b = itemStats(to);
+  for (const k of STATS) {
+    const d = d10(b[k] - a[k]);
+    const line = cmp.lines.find((l) => l.key === k);
+    const before = v.stats[k];
+    if (before === 0 && before + d === 0) { expect(line, k).toBeUndefined(); continue; }
+    expect(line, k).toBeDefined();
+    expect(Number(line!.after) - Number(line!.before)).toBeCloseTo(d, 5);
+    expect(line!.delta, k).toBe(sgn(d));
+    expect(line!.up, k).toBe(d > 0 ? true : d < 0 ? false : null);
+  }
+  expect(cmp.summary).toBe(expectedSummary(from, to));
+}
 
 describe('InvClient follows the server', () => {
   it('takes inventory, loot, levelUp and refusals; ignores malformed messages', () => {
@@ -87,32 +115,43 @@ describe('InvClient follows the server', () => {
 });
 
 describe('comparison and sets', () => {
-  it('compare: the chest swap shows the right differences and kit totals', () => {
+  it('compare: the chest swap shows exactly the differences the item data gives, and the kit totals', () => {
     const st = serverState('ranger');
     st.apply({ op: 'buy', stall: 'smithy', item: 'thornrunner_chest' });
     const v = st.view();
     const cmp = compare(v, uidOf(v, 'thornrunner_chest'), ctxOf(st))!;
-    const a = itemStats('thornrunner_chest'), b = itemStats('plain_chest');
-    const def = cmp.lines.find((l) => l.key === 'defence')!;
-    expect(Number(def.after) - Number(def.before)).toBeCloseTo(a.defence - b.defence, 5);
-    expect(Number(def.before)).toBeCloseTo(v.stats.defence, 5);
-    expect(def.up).toBe(true);
-    const flow = cmp.lines.find((l) => l.key === 'flow')!;
-    expect(flow.delta).toBe(`+${a.flow}`);
-    expect(cmp.summary).toMatch(/Defence/);
-    expect(cmp.summary).toMatch(/hp/);
     expect(cmp.replaces).toBe(ITEMS.plain_chest.name);
+    expectFollowsData(cmp, v, 'plain_chest', 'thornrunner_chest');
+    // before is the kit the server reports
+    for (const l of cmp.lines) expect(Number(l.before)).toBeCloseTo(v.stats[l.key], 5);
   });
 
   it('compare: a worse piece shows red (minus) differences', () => {
+    // a T1 chest that is worse than the heavy one worn in some stat (picked from the data, not by name)
+    const worse = ITEM_IDS.find((id) => ITEMS[id]!.tier === 1 && ITEMS[id]!.slot === 'chest' && ITEMS[id]!.price !== undefined
+      && STATS.some((k) => itemStats(id)[k] < itemStats('rootbound_chest')[k]))!;
+    expect(worse).toBeDefined();
     const st = serverState('paladin');
-    st.apply({ op: 'buy', stall: 'smithy', item: 'mossweave_chest' }); // cloth on a heavy job: less defence than heavy T1
+    st.apply({ op: 'buy', stall: 'smithy', item: worse });
     st.apply({ op: 'buy', stall: 'smithy', item: 'rootbound_chest' });
     st.apply({ op: 'equip', uid: uidOf(st.view(), 'rootbound_chest'), slot: 'chest' });
     const v = st.view();
-    const cmp = compare(v, uidOf(v, 'mossweave_chest'), ctxOf(st))!;
-    expect(cmp.lines.find((l) => l.key === 'defence')!.up).toBe(false);
-    expect(cmp.summary).toMatch(/−\d/);
+    const cmp = compare(v, uidOf(v, worse), ctxOf(st))!;
+    expectFollowsData(cmp, v, 'rootbound_chest', worse);
+    expect(cmp.lines.some((l) => l.up === false)).toBe(true);
+    expect(cmp.summary).toMatch(/\u2212\d/);
+  });
+
+  it('compare: the same piece again changes nothing and says so', () => {
+    const st = serverState('ranger');
+    st.apply({ op: 'buy', stall: 'smithy', item: 'thornrunner_chest' });
+    st.apply({ op: 'equip', uid: uidOf(st.view(), 'thornrunner_chest'), slot: 'chest' });
+    st.apply({ op: 'buy', stall: 'smithy', item: 'thornrunner_chest' });
+    const v = st.view();
+    const spare = v.bag.find((i) => i.item === 'thornrunner_chest' && i.worn.length === 0)!;
+    const cmp = compare(v, spare.uid, ctxOf(st))!;
+    expect(cmp.summary).toBe('No change to your stats');
+    expect(cmp.lines.every((l) => l.up === null && l.delta === '')).toBe(true);
   });
 
   it('set progress counts per set, with the bonus lines lit when active', () => {
@@ -185,7 +224,7 @@ describe('sheets and stalls', () => {
     const chest = light.find((r) => r.item.item === 'thornrunner_chest')!;
     expect(chest.ok).toBe(false);
     expect(chest.why).toBe(`Need ${ITEMS.thornrunner_chest.price! - 20} more gold`);
-    expect(chest.item.equip?.cmp?.summary).toMatch(/Defence/);
+    expect(chest.item.equip?.cmp?.summary).toBe(expectedSummary('plain_chest', 'thornrunner_chest'));
     const weapons = v.rows.weapons;
     expect(weapons.find((r) => r.item.item === 'ashwood_longbow')!.forMe).toBe(true);
     expect(weapons.find((r) => r.item.item === 'millward_sword')!.fitsLabel).toBe(JOBS.paladin.name);
