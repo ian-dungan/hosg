@@ -64,6 +64,8 @@ export interface Game {
   loadZone(zone: ZoneId): void;
   /** Called after every loadZone, with the zone now loaded. */
   onZoneLoaded(cb: (zone: ZoneId) => void): void;
+  /** Called when the render loop steps the quality down by itself, with the new tier. */
+  onQualityChange(cb: (q: Quality) => void): void;
   /**
    * Tap-to-walk: find a way to `p` and walk it (null stops). With `arrive`, stop `within` metres of it and call
    * `then`. Does nothing while the "Tap to walk" setting is off; toasts "Can't get there" when there is no way.
@@ -76,6 +78,8 @@ export interface Game {
   readonly walkOverriddenAt: number;
   /** Starts the render loop; `frame(dt)` runs after the rig and world update, before the scene renders. */
   start(frame: (dt: number) => void): void;
+  /** While paused the loop updates and draws nothing (an opaque screen with its own 3D view covers the game: the creator). */
+  setPaused(on: boolean): void;
 }
 
 const isTyping = (e: KeyboardEvent) => {
@@ -218,6 +222,8 @@ export function bootGame(opts: GameOpts = {}): Game {
   rigRef = rig;
 
   const zoneLoaded: ((z: ZoneId) => void)[] = [];
+  const qualityChanged: ((q: Quality) => void)[] = [];
+  let paused = false;
   /** True while a zone change is half done (its scene is being replaced): the render loop draws nothing. */
   let swapping = false;
   function swapTo(z: ZoneId): void {
@@ -277,13 +283,17 @@ export function bootGame(opts: GameOpts = {}): Game {
     get walkOverriddenAt() { return overriddenAt; },
     loadZone,
     onZoneLoaded(cb) { zoneLoaded.push(cb); },
+    onQualityChange(cb) { qualityChanged.push(cb); },
     walkTo,
+    setPaused(on) { paused = on; },
     start(frame) {
       let last = performance.now();
       let lastFrameMs = last;
       engine.runRenderLoop(() => {
         if (swapping || scene.isDisposed) return; // a zone change that failed half way: nothing to draw
         const now = performance.now();
+        // paused: no frame, and the time under the cover counts neither as game time nor as a slow frame
+        if (paused) { last = lastFrameMs = now; return; }
         // game time follows real time down to 10 fps (the server checks jumps against real time)
         const dt = Math.min(0.1, (now - last) / 1000);
         last = now;
@@ -295,6 +305,7 @@ export function bootGame(opts: GameOpts = {}): Game {
           if (slowTime > 4) {
             quality = quality === 'high' ? 'med' : 'low';
             world.setQuality(quality);
+            for (const cb of qualityChanged) cb(quality);
             slowTime = 0; fpsSettle = 4;
           }
         }

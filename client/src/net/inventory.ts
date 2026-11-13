@@ -525,6 +525,14 @@ export class InvClient {
     this.keys.add(key);
     return { ...op, id: newOpId() } as InvOp;
   }
+  /** Takes back the gate of an op begun but never sent (no room to send it to). */
+  unbegin(op: InvOp): void {
+    const key = opKey(op);
+    const k = this.pending.findIndex((p) => p.key === key);
+    if (k < 0) return;
+    this.keys.delete(key);
+    this.pending.splice(k, 1);
+  }
   pendingKeys(): ReadonlySet<string> { return this.keys; }
   /** Drops gates older than OP_GATE_MS; true when any went. */
   expire(now: number): boolean {
@@ -543,4 +551,16 @@ export class InvClient {
   }
   /** Forget everything (a sign-out). */
   reset(): void { this.view = null; this.lastLoot = null; this.pending = []; this.keys.clear(); }
+}
+
+/**
+ * An op sent from outside the gear screens (the quest's "Equip now"), through the same gate: it carries a fresh id, a
+ * double tap sends nothing, and its `inventory` answer settles its own wait (never another op's). False: not sent.
+ */
+export function sendGated(inv: InvClient, op: InvOp, send: (op: InvOp) => boolean, now: number): boolean {
+  const gated = inv.begin(op, now);
+  if (!gated) return false;
+  if (send(gated)) return true;
+  inv.unbegin(op);
+  return false;
 }

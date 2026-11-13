@@ -31,6 +31,11 @@ export class Overlays {
     const hd = this.handlers[this.handlers.length - 1];
     return hd ? hd(e) : false;
   }
+  /**
+   * A modal that draws itself outside this layer (the creator): while held, the game's keys wait (the HUD's
+   * keyboard handler sees `active`) and the HUD hides as for any sheet. Returns the release (call it once).
+   */
+  hold(kind: string): () => void { return this.push(kind, () => false); }
   private push(kind: string, hd: KeyHandler): () => void {
     this.handlers.push(hd);
     this.setModal(kind, true);

@@ -25,3 +25,13 @@ export function firstOf(tap: TapInfo, pick: (eid: number) => boolean): number | 
   for (const e of ids) if (pick(e)) return e;
   return null;
 }
+
+/**
+ * The story spot a tap routed to the story (routeTap) is about: the first one in the hit list, whatever stands in
+ * front of it (an adventurer in the crowd round an NPC, your own body; an enemy in front already routed to combat).
+ */
+export function storyOfTap<T>(tap: TapInfo, idOf: (eid: number) => T | null): T | null {
+  const ids = tap.entityIds ?? (tap.entityId === null ? [] : [tap.entityId]);
+  for (const e of ids) { const id = idOf(e); if (id !== null) return id; }
+  return null;
+}

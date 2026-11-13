@@ -1098,12 +1098,15 @@ export function buildGreenway(scene: Scene): WorldApi {
   const tmpTarget = new Vector3();
   return {
     addShadowCaster: (root: TransformNode) => {
+      look.update(); // disposed casters (adventurers gone) leave the list first: it never only grows
       for (const m of root.getChildMeshes(false)) {
+        if (m.isDisposed()) continue;
         if (casters.includes(m)) continue;
         if ((m.material as StandardMaterial | null)?.disableLighting) continue; // glowing bits cast no shadow
         casters.push(m);
         look.addCaster(m);
       }
+      for (let i = blobs.length - 1; i >= 0; i--) if (blobs[i].root.isDisposed()) { blobs[i].disc.dispose(); blobs.splice(i, 1); }
       if (!blobs.some(b => b.root === root)) {
         const disc = MeshBuilder.CreateGround('gw_blob_' + blobs.length, { width: 1.3, height: 1.3 }, scene);
         disc.material = blobMat; disc.isPickable = false; disc.setEnabled(quality === 'low');

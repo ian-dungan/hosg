@@ -4,6 +4,7 @@
 // room: the cache is cleared on every room change (a travel, a relog, a reconnect into a new room).
 // Also: the free creator visit (`lookFree`) and the Barber's refusals (`invRefused` with op 'look'). Pure: unit-tested.
 import { decodeGearLook, decodeLook, type GearLook, type Look, type S2C } from '@sg2/shared';
+import type { CreatorOpts } from '../core/contracts';
 
 export interface LookEntry {
   /** The codes as sent (compare them to see a change). */
@@ -53,6 +54,12 @@ export class LookCache {
     for (const [eid, e] of this.byEid) out[eid] = e.code;
     return out;
   }
+  /** eid → gear code (the debug hook's `remoteGear`; only rows that passed the checks). */
+  gearCodes(): Record<number, string> {
+    const out: Record<number, string> = {};
+    for (const [eid, e] of this.byEid) out[eid] = e.gearCode;
+    return out;
+  }
   get size(): number { return this.byEid.size; }
   /** Forget everything (a room change: engine ids are per room). */
   clear(): void { this.byEid.clear(); this.free = null; }
@@ -87,3 +94,40 @@ export function emoteToPlay(seenAt: number, emote: string | undefined, emoteAt: 
 /** The Barber's entry point: the online client fills `open` (the creator in Barber mode, then a `look`); the Barber
  *  stall's tap (Plan 5 Task 10) calls it. Null in the offline demo. */
 export const barberHook: { open: (() => Promise<void>) | null } = { open: null };
+
+/** What the Barber session needs from the page (online.ts); `R` is the room. */
+export interface BarberDeps<R> {
+  /** The room being played (null between rooms). */
+  room(): R | null;
+  /** This adventurer's look in that room (undefined: not sent yet). */
+  look(r: R): Look | undefined;
+  opts(look: Look): CreatorOpts;
+  /** Opens the creator in Barber mode (hud.creator): a modal over the game, closable from outside. */
+  open(o: CreatorOpts): { done: Promise<{ look: Look; name?: string } | null>; close(): void };
+  /** Stops the adventurer where they stand (a walk under way ends); while `open`, the page holds the move scale at 0. */
+  hold(): void;
+  send(r: R, look: Look): void;
+}
+/**
+ * The Barber: one creator at a time, the adventurer held still behind it, and closed when its room ends (a kick, a
+ * disconnect, a travel), so it never stays over the login screen; a Done that lands in another room sends nothing.
+ */
+export function createBarber<R>(d: BarberDeps<R>): { readonly open: boolean; show(): Promise<void>; close(): void } {
+  let session: { close(): void } | null = null;
+  return {
+    get open() { return session !== null; },
+    async show() {
+      const r = d.room();
+      if (!r || session) return;
+      const look = d.look(r);
+      if (!look) return;
+      const s = d.open(d.opts(look));
+      session = s;
+      d.hold();
+      let res: { look: Look } | null = null;
+      try { res = await s.done; } finally { if (session === s) session = null; }
+      if (res && d.room() === r) d.send(r, res.look);
+    },
+    close() { const s = session; session = null; s?.close(); },
+  };
+}

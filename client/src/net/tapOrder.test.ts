@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { routeTap } from './tapOrder';
+import { routeTap, storyOfTap } from './tapOrder';
 import { STALL_EID } from '../world/stallIds';
 import { equipHook } from './equipHook';
 
@@ -19,6 +19,20 @@ describe('tap order: enemy > story NPC or prop > booth > adventurer > ground', (
     expect(routeTap(tap(7, STALL_EID.vault), is)).toBe('booth');
     expect(routeTap(tap(7), is)).toBe('rest');
     expect(routeTap({ entityId: null, point: null }, is)).toBe('rest');
+  });
+});
+
+describe('storyOfTap: the story spot a tap routed to the story is about', () => {
+  const idOf = (e: number) => (e <= -100 ? `spot${-e}` : null);
+  it('finds the story spot behind adventurers (a crowd round Old Marrow, or your own body, eid 0)', () => {
+    expect(storyOfTap(tap(0, -101), idOf)).toBe('spot101');
+    expect(storyOfTap(tap(7, 12, -102, -101), idOf)).toBe('spot102');
+    expect(storyOfTap(tap(-101), idOf)).toBe('spot101');
+  });
+  it('is null when no story spot is under the tap', () => {
+    expect(storyOfTap(tap(7, STALL_EID.smithy), idOf)).toBeNull();
+    expect(storyOfTap({ entityId: null, point: null }, idOf)).toBeNull();
+    expect(storyOfTap({ entityId: -103, point: null }, idOf)).toBe('spot103');
   });
 });
 

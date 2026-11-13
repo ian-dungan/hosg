@@ -1,5 +1,5 @@
 // The creator's live 3D preview: a small scene of its own (its own canvas and engine, made when the creator opens and
-// disposed when it closes) with one look-driven adventurer on a plinth, warm key light and a cool fill so the toon
+// disposed when it closes, its WebGL context with it; the game's own loop pauses meanwhile: online.ts) with one look-driven adventurer on a plinth, warm key light and a cool fill so the toon
 // shading reads as in the world. Drag turns it, pinch or the wheel zooms between the whole body and the face.
 import {
   ArcRotateCamera, Color3, Color4, DirectionalLight, Engine, HemisphericLight, MeshBuilder, Scene, StandardMaterial, Vector3,
@@ -13,7 +13,8 @@ export function createCreatorPreview(): CreatorPreview {
   const canvas = document.createElement('canvas');
   canvas.style.cssText = 'width:100%;height:100%;display:block;outline:none;touch-action:none';
   el.appendChild(canvas);
-  const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: false, antialias: true }, true);
+  // its WebGL context goes with it on close (contexts would pile up, and the browser drops the oldest: the game's)
+  const engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false, antialias: true, loseContextOnDispose: true }, true);
   engine.setHardwareScalingLevel(1 / Math.min(2, window.devicePixelRatio || 1));
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.16, 0.15, 0.3, 1);

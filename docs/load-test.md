@@ -411,6 +411,10 @@ a `questDone` with scene `beacon` and `beaconRaised`; B's quest state never move
 Marrow) and its websocket bytes in the 20 s before and after A's plaque differ by under 5%; killing the server
 shows "Connection lost". Any page error fails it.
 
+The smoke tests open the page with `?checks` in its URL: the `window.__sg2` and `window.__sg2barber` hooks they
+drive the game with exist only in development or with that flag (`window.__sg2net`, read-only, is always there).
+A playtest by hand in a browser adds `?checks` the same way.
+
 ## What a client receives (interest management)
 
 Each client's room state is its own view (a Colyseus `StateView` per client, `server/src/rooms/interest.ts`):

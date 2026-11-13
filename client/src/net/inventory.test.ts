@@ -5,7 +5,7 @@ import {
 } from '@sg2/shared';
 import type { Comparison } from '../core/gearViews';
 import {
-  InvClient, OP_GATE_MS, charSheetView, compare, ctxFor, equipBlock, itemColour, levelShow, lootShow, newOpId, opKey, refusalLine,
+  InvClient, OP_GATE_MS, charSheetView, sendGated, compare, ctxFor, equipBlock, itemColour, levelShow, lootShow, newOpId, opKey, refusalLine,
   setProgress, talentsView, vendorView, type GearCtx,
 } from './inventory';
 
@@ -103,6 +103,28 @@ describe('InvClient follows the server', () => {
     // a lost answer frees the gate after a while
     c.begin(buy, 1000);
     expect(c.begin(buy, 1000 + OP_GATE_MS + 1)).not.toBeNull();
+  });
+
+  it("the quest's Equip now goes through the gate (sendGated): an id, no double send, its answer settles its own op", () => {
+    const c = new InvClient();
+    const sent: InvOp[] = [];
+    const send = (op: InvOp) => { sent.push(op); return true; };
+    const buy: InvOp = { op: 'buy', stall: 'smithy', item: 'thornrunner_chest' };
+    const equip: InvOp = { op: 'equip', uid: 7, slot: 'chest' };
+    expect(c.begin(buy, 0)).not.toBeNull();
+    expect(sendGated(c, equip, send, 5)).toBe(true);
+    expect(sent.length).toBe(1);
+    expect(sent[0]!.id).toMatch(/^[A-Za-z0-9_-]{12,40}$/);
+    expect(sendGated(c, equip, send, 6)).toBe(false); // a double tap on "Equip now"
+    expect(sent.length).toBe(1);
+    c.onInventory(serverState().view()); // the buy's answer
+    expect(c.pendingKeys().has(opKey(equip))).toBe(true);
+    expect(c.pendingKeys().has(opKey(buy))).toBe(false);
+    c.onInventory(serverState().view()); // the equip's answer
+    expect(c.pendingKeys().size).toBe(0);
+    // a send that could not go (between rooms) leaves no gate behind
+    expect(sendGated(c, equip, () => false, 10)).toBe(false);
+    expect(c.pendingKeys().size).toBe(0);
   });
 
   it('refusal lines say what to do', () => {

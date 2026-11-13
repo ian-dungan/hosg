@@ -43,6 +43,7 @@ const DATA = shared(`import { TOWN_STALLS, GROVE_EAST_GATE, ITEMS, COSTUMES, fin
 const url = new URL(positionals[0]);
 const page0 = new URL(url.href);
 page0.searchParams.set('lockq', '');
+page0.searchParams.set('checks', ''); // the page's window.__sg2 hooks (playtests and browser checks only)
 const killCommand = values.kill ?? null;
 console.log(`gear smoke test of ${url.href}; ${killCommand ? `the server will be killed with: ${killCommand}` : 'no --kill given: the "Connection lost" step is skipped'}`);
 const LOAD_MS = 300_000;

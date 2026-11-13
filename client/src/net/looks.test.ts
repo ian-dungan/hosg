@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EMOTES, defaultLook, encodeGearLook, encodeLook, resolveGearLook, validateAdventurerName } from '@sg2/shared';
-import { LookCache, barberRefusal, creatorPlan, emoteToPlay } from './looks';
+import { LookCache, barberRefusal, createBarber, creatorPlan, emoteToPlay } from './looks';
 import { accountIdOf, lookInfoResult, saveLookResult, startingLook } from './lookApi';
 
 const a = defaultLook('a'), b = defaultLook('b');
@@ -88,5 +88,63 @@ describe('emoteToPlay', () => {
     expect(emoteToPlay(0, 'sit', 100, 100 + 15 * 60, 15)).toBe('sit');
     expect(emoteToPlay(0, '', 0, 10, 15)).toBeNull();
     for (const e of EMOTES) expect(emoteToPlay(1, e, 2, 2, 15)).toBe(e);
+  });
+});
+
+describe('the Barber session', () => {
+  type Room = { id: string };
+  function setup() {
+    let room: Room | null = { id: 'r1' };
+    const sent: [string, unknown][] = [];
+    let answer: (v: { look: typeof a } | null) => void = () => {};
+    let opened = 0, closed = 0, held = 0;
+    const barber = createBarber<Room>({
+      room: () => room,
+      look: () => a,
+      opts: (look) => ({ look, mode: 'barber', needsName: false, gold: 10, free: false, validateName: validateAdventurerName }),
+      open: () => {
+        opened++;
+        const done = new Promise<{ look: typeof a } | null>((r) => { answer = r; });
+        return { done, close: () => { closed++; answer(null); } };
+      },
+      hold: () => { held++; },
+      send: (r, look) => { sent.push([r.id, look]); },
+    });
+    return { barber, sent, setRoom: (r: Room | null) => { room = r; }, answer: (v: { look: typeof a } | null) => answer(v), counts: () => ({ opened, closed, held }) };
+  }
+
+  it('holds the adventurer while open, and sends the look on Done in the same room', async () => {
+    const t = setup();
+    const p = t.barber.show();
+    expect(t.barber.open).toBe(true);
+    expect(t.counts().held).toBe(1);
+    void t.barber.show(); // a second tap: one Barber
+    expect(t.counts().opened).toBe(1);
+    t.answer({ look: b });
+    await p;
+    expect(t.barber.open).toBe(false);
+    expect(t.sent).toEqual([['r1', b]]);
+  });
+
+  it('closes when the room ends (a kick, a disconnect, a travel): nothing is sent, the screen goes', async () => {
+    const t = setup();
+    const p = t.barber.show();
+    t.setRoom(null);
+    t.barber.close();
+    await p;
+    expect(t.counts().closed).toBe(1);
+    expect(t.barber.open).toBe(false);
+    expect(t.sent).toEqual([]);
+    t.barber.close(); // nothing open: nothing to do
+    expect(t.counts().closed).toBe(1);
+  });
+
+  it('a Done that lands in another room sends nothing', async () => {
+    const t = setup();
+    const p = t.barber.show();
+    t.setRoom({ id: 'r2' });
+    t.answer({ look: b });
+    await p;
+    expect(t.sent).toEqual([]);
   });
 });

@@ -17,6 +17,8 @@ const SHADOW_NEAR_M = 20;
 const LABEL_LIFT = 0.45;
 /** Parked characters wait here, out of sight (their ground shadow follows them). */
 const PARK = new Vector3(0, -1000, 0);
+/** A reused view waits at most this long for its adventurer's look before it shows anyway, in ms. */
+const REUSED_HIDDEN_MS = 3000;
 
 const CSS = /* css */ `
 .sg-labels{z-index:0}
@@ -65,6 +67,8 @@ interface Remote {
   /** The look drawn (LookCache version for its eid; 0: none yet) and the last emote's clock step seen. */
   lookVer: number;
   emoteAt: number;
+  /** A reused view still wearing its last adventurer's body: hidden until this one's look is drawn (or a while passed; ms). */
+  hiddenSince: number | null;
 }
 
 export interface Remotes {
@@ -127,11 +131,13 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
 
   function add(sessionId: string): Remote {
     let view = spare.pop();
+    const reused = !!view;
     if (!view) {
       view = makeCharacter(scene, { kind: 'player' });
       world.addShadowCaster(view.root);
     }
-    view.root.setEnabled(true);
+    // a spare view keeps the body and costume of whoever had it last: it shows once this adventurer's look is on it
+    view.root.setEnabled(!(reused && looks));
     view.setPose('idle');
     const label = document.createElement('div');
     label.className = 'sg-nl';
@@ -149,7 +155,8 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
     label.append(top, hpEl, castEl);
     layer.appendChild(label);
     const r: Remote = { view, label, nameEl, jobEl, castEl, castName, castFill, castId: '', castAt: 0, castTotal: 1, castSince: 0,
-      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', shadow: true, hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false, lookVer: 0, emoteAt: -1 };
+      want: { weapon: 'sword', tint: undefined, casting: false, faded: false }, drawn: { weapon: '', tint: undefined, casting: false, faded: false, job: '' }, eid: -1, job: '', shadow: true, hpEl, hpFill, hp: -1, buf: new PoseBuffer(), name: '', running: false, placed: false, lookVer: 0, emoteAt: -1,
+      hiddenSince: reused && looks ? performance.now() : null };
     remotes.set(sessionId, r);
     return r;
   }
@@ -260,6 +267,7 @@ export function createRemotes(scene: Scene, world: WorldApi, room: ZoneRoom, myS
           if (near !== r.shadow) { r.shadow = near; r.view.setCastShadow(near); }
         }
         r.view.update(dt);
+        if (r.hiddenSince !== null && (r.lookVer > 0 || now - r.hiddenSince > REUSED_HIDDEN_MS)) { r.hiddenSince = null; root.setEnabled(true); }
 
         // Name label: project the point above the head to CSS pixels.
         let shown = false;

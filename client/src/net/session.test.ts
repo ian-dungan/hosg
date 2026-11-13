@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TICK_HZ } from '@sg2/shared';
-import { SIGN_IN_AGAIN, UNREACHABLE, forgetToken, retryJoin, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, telegraphElapsedS, windupElapsedS, zoneFor } from './session';
+import { SIGN_IN_AGAIN, UNREACHABLE, connect, forgetToken, retryJoin, login, nameResult, poseWorthSending, rememberName, savedAccount, savedToken, serverUrl, telegraphElapsedS, windupElapsedS, zoneFor } from './session';
 
 const page = (search: string) => ({ origin: 'http://game.example:2570', search });
 
@@ -157,6 +157,11 @@ describe('zoneFor', () => {
     await expect(zoneFor('tok')).rejects.toThrow(UNREACHABLE);
     answer(200, { zone: 'greenway', instance: 7 });
     await expect(zoneFor('tok')).resolves.toEqual({ zone: 'greenway' });
+  });
+
+  it('the Lampfall is never joined without an instance id (a `travel` that names none, too)', async () => {
+    await expect(connect('tok', 'lampfall')).rejects.toThrow(UNREACHABLE);
+    await expect(connect('tok', 'lampfall', '')).rejects.toThrow(UNREACHABLE);
   });
 
   it('a refused token means signing in again; anything else is an unreachable server', async () => {

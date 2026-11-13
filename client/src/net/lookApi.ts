@@ -1,6 +1,7 @@
 // The character creator's HTTP route (server/src/routes/look.ts): GET /api/look says whether the one free creator visit
 // is still unused (new and existing adventurers alike) and gives the stored look and name; POST /api/look spends it.
 import { defaultLook, parseLook, type Look } from '@sg2/shared';
+import { UNREACHABLE, withTimeout } from './session';
 
 export interface LookInfo { look: Look | null; free: boolean; name: string | null; guest: boolean }
 export type LookInfoResult = { kind: 'ok'; info: LookInfo } | { kind: 'signIn'; error: string } | { kind: 'error'; error: string };
@@ -52,12 +53,20 @@ export function accountIdOf(token: string): string {
 /** The look the creator starts from: the stored one, else the account's default look. */
 export const startingLook = (info: LookInfo, token: string): Look => info.look ?? defaultLook(accountIdOf(token));
 
+/** One call to /api/look, within the session's timeout (a half-open server: "Cannot reach the server", never a blank page). */
 async function call(method: 'GET' | 'POST', token: string, body?: unknown): Promise<{ status: number; body: unknown }> {
-  const res = await fetch('/api/look', {
-    method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return { status: res.status, body: await res.json().catch(() => null) };
+  const controller = new AbortController();
+  try {
+    const res = await withTimeout(fetch('/api/look', {
+      method, headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    }), UNREACHABLE);
+    return { status: res.status, body: await withTimeout(res.json(), UNREACHABLE).catch(() => null) };
+  } catch {
+    controller.abort();
+    throw new Error(UNREACHABLE);
+  }
 }
 export async function fetchLookInfo(token: string): Promise<LookInfoResult> {
   try { const r = await call('GET', token); return lookInfoResult(r.status, r.body); }

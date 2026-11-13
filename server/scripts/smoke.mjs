@@ -49,6 +49,9 @@ const DATA = JSON.parse(execFileSync('npx', ['tsx', '-e', `import { ABILITIES, G
   console.log(JSON.stringify({ gate: GROVE_EAST_GATE, route, notHere: REASON_JOB_NOT_HERE, whmGlyph: JOBS.white_mage.glyph, ninja: JOBS.ninja.name, whm: JOBS.white_mage.name, quick: ABILITIES[JOBS.white_mage.bar[0]].name }))`], { cwd: serverDir, encoding: 'utf8' }).trim().split('\n').pop());
 const REACTIONS = ['blast', 'conduct', 'steam', 'bedrock'];
 const url = new URL(positionals[0]);
+/** The page as this test opens it: with the flag that turns on its window.__sg2 hooks (playtests and browser checks only). */
+const pageUrl = new URL(url.href);
+pageUrl.searchParams.set('checks', '');
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']); // URL keeps the brackets on IPv6
 // Never a default for a remote host (it would kill whatever holds that port HERE) or for a URL
 // without an explicit port (that would be 80 or 443, typically another site's web server).
@@ -113,7 +116,7 @@ async function open(label, contextOptions, token) {
   if (token) await context.addInitScript((t) => sessionStorage.setItem('sg2.token', t), token);
   const page = await context.newPage();
   page.on('pageerror', (err) => pageErrors.push(`${label}: ${err.message}`));
-  await page.goto(url.href, { timeout: LOAD_MS });
+  await page.goto(pageUrl.href, { timeout: LOAD_MS });
   const opened = { label, context, page };
   pages.push(opened);
   return opened;

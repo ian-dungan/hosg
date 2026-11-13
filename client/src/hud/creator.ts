@@ -125,7 +125,6 @@ export interface CreatorHandle {
 export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: string }): CreatorHandle {
   injectCss();
   const st = new CreatorState(o);
-  if (o.notice === undefined) { /* nothing */ }
   const root = h('div', 'sg-cr', host);
   root.setAttribute('role', 'dialog');
   const pv = h('div', 'sg-cr-pv', root);
@@ -136,7 +135,7 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
   const pnl = h('div', 'sg-cr-pnl', root);
   const head = h('div', 'sg-cr-head', pnl);
   h('div', 'sg-cr-title', head, o.mode === 'barber' ? 'The Trimmed Hedge' : 'Your adventurer');
-  const goldEl = h('div', 'sg-cr-gold', head, o.mode === 'barber' && !o.free ? `${o.gold} gold` : '');
+  h('div', 'sg-cr-gold', head, o.mode === 'barber' && !o.free ? `${o.gold} gold` : '');
   let closeBtn: HTMLButtonElement | null = null;
   if (o.mode === 'barber') { closeBtn = h('button', 'sg-cr-x', head, '×'); closeBtn.setAttribute('aria-label', 'Close'); }
   const tabsEl = h('div', 'sg-cr-tabs', pnl);
@@ -146,7 +145,6 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
   const surprise = h('button', '', foot, 'Surprise me');
   const undo = h('button', '', foot, 'Undo');
   const done = h('button', 'done', foot, st.doneLabel);
-  void goldEl;
 
   let tab: CreatorTab = st.startTab(o.notice);
   let resolve!: (v: { look: Look; name?: string } | null) => void;
@@ -358,8 +356,7 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
 
   place();
   showLook();
-  renderTab();
-  if (o.needsName) { /* the Name tab is last; Done's blocker line says a name is needed */ }
+  renderTab(); // (a needed name: the Name tab is last, and Done's blocker line says so)
   return { done: promise, close: () => finish(null), state: st };
 }
 

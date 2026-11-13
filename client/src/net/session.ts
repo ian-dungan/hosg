@@ -244,7 +244,8 @@ export function rememberName(name: string): void {
 }
 
 /** Rejects with `Error(message)` if `p` has not settled within TIMEOUT_MS. */
-function withTimeout<T>(p: Promise<T>, message: string): Promise<T> {
+/** `p`, or a rejection with `message` after TIMEOUT_MS (a half-open server never leaves the page waiting). */
+export function withTimeout<T>(p: Promise<T>, message: string): Promise<T> {
   let timer = 0;
   const timeout = new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error(message)), TIMEOUT_MS); });
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
@@ -356,6 +357,8 @@ export async function zoneFor(token: string): Promise<ZonePlace> {
  * Error with the server's reason if the join is refused.
  */
 export async function connect(token: string, zone: ZoneId = 'grove', instance?: string): Promise<ZoneRoom> {
+  // the Lampfall is only ever joined by its instance's id (as zoneFor): never joinOrCreate a bare Lampfall room
+  if (zone === 'lampfall' && !instance) throw new Error(UNREACHABLE);
   const client = new Client(serverUrl());
   for (let attempt = 1; ; attempt++) {
     const joining = instance ? client.joinById<ZoneState>(instance, { token }) : client.joinOrCreate<ZoneState>(zone, { token });

@@ -34,7 +34,7 @@ import { setCharacterDetail, setGearBuilder } from './player/character';
 import { gearHooks } from './player/gearModels';
 import { setCreatorPreview } from './hud/creator';
 import { createCreatorPreview } from './player/creatorPreview';
-import { LookCache, barberHook, barberRefusal, creatorPlan } from './net/looks';
+import { LookCache, barberHook, barberRefusal, createBarber, creatorPlan } from './net/looks';
 import { fetchLookInfo, saveLook, startingLook } from './net/lookApi';
 import type { HudState, TapInfo } from './core/contracts';
 import { bootGame, isZoneBuilt } from './boot';
@@ -52,7 +52,7 @@ import { createGuildBoard } from './world/guildBoard';
 import { beaconRaisedFor, createStoryWorld, storyIdOf, type StoryWorld } from './world/storyNpcs';
 import { stallOfEid } from './world/stallIds';
 import { createStalls, type Stalls } from './world/stalls';
-import { InvClient } from './net/inventory';
+import { InvClient, sendGated } from './net/inventory';
 import { createGearCtl, type GearCtl } from './net/gearCtl';
 import { routeTap } from './net/tapOrder';
 import { browserHintStore, createQuestClient, type QuestClient } from './story/questClient';
@@ -77,13 +77,12 @@ import {
 const CONNECTION_LOST = 'Connection lost';
 const CONNECTING = 'Connecting…';
 const RECONNECTING = 'Reconnecting…';
-/** Join refusals that say nothing against the account: its saved token is kept, so "Continue as" stays on offer. */
 /** The page could not build the zone the adventurer is in (the previous one was put back, or the page reloads). */
 const LOAD_FAILED = "Couldn't load that area, try again";
-/** The adventurer is in a zone this version of the client cannot draw. */
 /** A zone this client cannot build: the sign-in is kept (the adventurer is fine; this version of the game is old). */
 class ZoneClosedError extends Error {}
 const zoneClosedNotice = (zone: ZoneId) => `Your adventurer is in ${zoneDef(zone).name}, which this version of the game can't show yet. Reload to update the game, or try again later.`;
+/** Join refusals that say nothing against the account: its saved token is kept, so "Continue as" stays on offer. */
 const KEEP_TOKEN_ON = new Set([LOAD_FAILED, UNREACHABLE, zoneFullReason('grove'), zoneFullReason('greenway'), zoneFullReason('lampfall')]);
 /** How long the screen takes to fade out and back in around a zone change, in s. */
 const TRAVEL_FADE_S = 0.6;
@@ -160,7 +159,7 @@ interface NetDebug {
    *  the creator (or the Barber) is open, and every look code the room has sent (engine id → code). */
   look: string;
   lookFree: boolean;
-  creatorOpen: boolean;
+  readonly creatorOpen: boolean;
   remoteLooks: Record<number, string>;
   /** Every gear code the room has sent (engine id → code), for browser checks. */
   remoteGear: Record<number, string>;
@@ -186,6 +185,13 @@ interface NetDebug {
 }
 /** What ended a connection: a reason for the login screen, or a travel to another zone (an instance by id). */
 type Ended = { reason: string; notEntered?: true } | { travel: ZonePlace };
+
+/**
+ * The window.__sg2 hooks that drive the game (walk, tap, open the Barber, read the room) are for playtests and browser
+ * checks only: on in development, and on a built page only with `?checks` in its URL (server/scripts/smoke*.mjs add it).
+ * window.__sg2net (a read-only view of what the room said) is always there.
+ */
+const checks = import.meta.env.DEV || new URLSearchParams(location.search).has('checks');
 
 function boot(): void {
   let room: ZoneRoom | null = null;
@@ -253,7 +259,7 @@ function boot(): void {
     remotes: [], enemies: [], zone: game.zone as ZoneId, travels: 0, lastTravelMs: 0, lastLoadMs: 0, self: null, fxSeen: 0, combat: null, moves: 0,
     jobs: null, refusals: [], allyFocus: null, guildBoard: { x: GUILD_BOARD.x, z: GUILD_BOARD.z },
     party: null, invites: [], partyRefusals: [], instance: null, roomId: '', boss: null, victory: null, chatLog: [], screen: '', corrections: 0, edges: 0,
-    look: '', lookFree: false, creatorOpen: false, remoteLooks: {}, remoteGear: {}, gold: 0,
+    look: '', lookFree: false, get creatorOpen() { return creating || barber.open; }, remoteLooks: {}, remoteGear: {}, gold: 0,
     inventory: null, lastLoot: null, invRefusals: inv.refusals, stats: null, levelUps: inv.levelUps, stall: null,
     quests: null, questDone: [], questRefusals: [], tracker: null, pointer: null,
     get dialogueOpen() { return !!document.querySelector('.sg-hud.sg-dialogue-open'); },
@@ -303,8 +309,18 @@ function boot(): void {
   // Plan 5: looks. The cache holds every adventurer's look by engine id for the room (cleared on leaving it).
   const lookCache = new LookCache();
   let ownLookVer = 0;
-  setCreatorPreview(createCreatorPreview);
+  /** The free creator visit is on screen (before joining a room). */
+  let creating = false;
+  // the creator covers the whole screen with its own 3D preview: the game's render loop pauses while it is open
+  setCreatorPreview(() => {
+    const pv = createCreatorPreview();
+    game.setPaused(true);
+    let gone = false;
+    return { ...pv, dispose() { pv.dispose(); if (!gone) { gone = true; game.setPaused(false); } } };
+  });
   setCharacterDetail(game.quality);
+  // a step-down on a slow device rebuilds every body at the lower detail (queued, a few a frame), not at the next zone
+  game.onQualityChange((q) => setCharacterDetail(q));
   // Plan 5 Task 9: worn gear and costumes on every adventurer (gear codes arrive with the looks)
   setGearBuilder(gearHooks);
   /** This adventurer's own look onto its rig, when the room has sent a new one. */
@@ -316,25 +332,30 @@ function boot(): void {
     net.look = e.code;
     game.rig.view.setAppearance(e.look, e.gear);
   };
-  /** The Barber (Task 10's stall tap calls barberHook.open): the creator in Barber mode, then a `look` for the server to price. */
-  const openBarber = async () => {
-    const r = room;
-    if (!r || net.creatorOpen) return;
-    const me = r.state.players?.get(r.sessionId);
-    const e = me && typeof me.eid === 'number' ? lookCache.get(me.eid) : undefined;
-    if (!e) return;
-    net.creatorOpen = true;
-    const res = await hud.creator({ look: e.look, mode: 'barber', needsName: false, gold: net.gold, free: lookCache.free === true, validateName: validateAdventurerName });
-    net.creatorOpen = false;
-    if (res && room === r) send(r, 'look', { look: res.look });
-  };
+  /**
+   * The Barber (Task 10's stall tap calls barberHook.open): the creator in Barber mode, then a `look` for the server
+   * to price. A modal: the adventurer is held still behind it (the frame loop keeps the move scale at 0) and the
+   * game's keys wait; the room's end closes it (r.onLeave).
+   */
+  const barber = createBarber<ZoneRoom>({
+    room: () => room,
+    look: (r) => { const me = r.state.players?.get(r.sessionId); return me && typeof me.eid === 'number' ? lookCache.get(me.eid)?.look : undefined; },
+    opts: (look) => ({ look, mode: 'barber', needsName: false, gold: net.gold, free: lookCache.free === true, validateName: validateAdventurerName }),
+    open: (o) => hud.creator(o),
+    hold: () => { game.walkTo(null); game.rig.setMoveScale(0); },
+    send: (r, look) => send(r, 'look', { look }),
+  });
+  const openBarber = () => barber.show();
   barberHook.open = openBarber;
-  (window as unknown as Record<string, unknown>).__sg2barber = openBarber; // browser checks: the Barber without its stall
+  // browser checks: the Barber without its stall (only with the smoke-test flag: see `checks` below)
+  if (checks) (window as unknown as Record<string, unknown>).__sg2barber = openBarber;
   // the emote button (the wheel: wave, bow, cheer, laugh, sit, point); played here at once, and sent for the others
-  // (inside a .sg-hud layer: its place uses the HUD's safe-area and gap variables, which netUi does not have; without
-  // them the button sat at the top-left corner over the player frame)
-  const emoteBtn = h('button', 'sg-emote-btn', h('div', 'sg-hud', netUi), '☺');
+  // (in the HUD's combat layer: its place uses the HUD's safe-area and gap variables, and it hides with the HUD
+  // under every sheet, the creator and a cinematic)
+  const emoteBtn = h('button', 'sg-emote-btn', hudRoot.querySelector<HTMLElement>('.sg-hud .sg-combat') ?? h('div', 'sg-hud', netUi), '☺');
+  emoteBtn.type = 'button';
   emoteBtn.setAttribute('aria-label', 'Emotes');
+  emoteBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
   emoteBtn.addEventListener('click', () => {
     void hud.emoteWheel().then((e: EmoteId | null) => {
       if (!e || !room) return;
@@ -344,8 +365,8 @@ function boot(): void {
   });
   (window as unknown as { __sg2net: NetDebug }).__sg2net = net;
   // Like the offline demo's window.__sg2: for playtests and browser checks (the server still checks every move).
-  // Getters: a zone change replaces the scene, world and rig.
-  (window as unknown as Record<string, unknown>).__sg2 = {
+  // Getters: a zone change replaces the scene, world and rig. Only with the `checks` flag (above).
+  if (checks) (window as unknown as Record<string, unknown>).__sg2 = {
     get rig() { return game.rig; }, get world() { return game.world; }, get scene() { return game.scene; },
     hud, engine: game.engine, game,
     /** Where a world point is on screen, in CSS px (null behind the camera): for playtests that tap things. */
@@ -400,6 +421,7 @@ function boot(): void {
     gearCtl?.update(dt); // after the controller: a stall in reach takes the prompt when nothing else wants it
     stalls?.update(dt);
     net.stall = gearCtl?.stall ?? null;
+    if (barber.open) game.rig.setMoveScale(0); // the Barber holds the adventurer still (after the controller's own scale)
     if (quest) {
       quest.update(dt);
       if (quest.holding) game.rig.setMoveScale(0); // a scene holds the adventurer still (after the controller's own scale)
@@ -535,9 +557,10 @@ function boot(): void {
       });
       // Plan 5: looks by engine id (own included), the free creator visit, the Barber's refusals, gold
       r.onMessage('looks', (m: S2C['looks']) => {
-        for (const [eid, , gear] of m.a) net.remoteGear[eid] = gear;
+        // (the debug view from the checked cache: a malformed `looks` throws nothing here)
         if (lookCache.handle(m).length === 0) return;
         net.remoteLooks = lookCache.codes();
+        net.remoteGear = lookCache.gearCodes();
         if (room === r) applyOwnLook();
       });
       r.onMessage('lookFree', (m: S2C['lookFree']) => { lookCache.handleFree(m); net.lookFree = lookCache.free === true; });
@@ -641,7 +664,8 @@ function boot(): void {
         quest = createQuestClient({
           game, hud, state, zone, quests: questState, story: () => story, combat: () => combat,
           send: (act) => { if (room !== r || r.reconnection.isReconnecting) return false; send(r, 'quest', act); return true; },
-          sendInv: (op) => { if (room !== r || r.reconnection.isReconnecting) return false; send(r, 'inv', op); return true; },
+          // (through the op gate, as the gear screens send: its answer settles its own wait)
+          sendInv: (op) => sendGated(inv, op, (g) => { if (room !== r || r.reconnection.isReconnecting) return false; send(r, 'inv', g); return true; }, performance.now()),
           learned: hintStore,
         });
         net.story = (story?.spots ?? []).map((s) => ({ id: s.id, eid: s.eid, x: s.x, z: s.z }));
@@ -681,6 +705,7 @@ function boot(): void {
         clearTimeout(lostTimer);
         clearTimeout(travelTimer);
         clearInterval(sendTimer);
+        barber.close(); // the Barber belongs to this room: it never stays over the login screen
         quest?.dispose(); // its dialogue, cards, hints and pointer go with the room
         quest = null;
         combat?.dispose();
@@ -759,9 +784,9 @@ function boot(): void {
       if (!plan.open) return { ok: true, name: got.info.name };
       let look = startingLook(got.info, token), line: string | undefined, name: string | undefined;
       for (;;) {
-        net.creatorOpen = true;
-        const res = await hud.creator({ look, mode: 'create', needsName: plan.needsName, gold: 0, free: true, validateName: validateAdventurerName, notice: line, ...(name !== undefined ? { name } : {}) });
-        net.creatorOpen = false;
+        creating = true;
+        const res = await hud.creator({ look, mode: 'create', needsName: plan.needsName, gold: 0, free: true, validateName: validateAdventurerName, notice: line, ...(name !== undefined ? { name } : {}) }).done;
+        creating = false;
         if (!res) return { ok: true, name: got.info.name };
         look = res.look;
         name = res.name;
@@ -825,7 +850,10 @@ function boot(): void {
       connecting = true;
       try {
         if (arriving) await arriving.fade; // build the next zone behind the faded screen
-        joined = await join(token, arriving ? { zone: arriving.zone, ...(arriving.instance ? { instance: arriving.instance } : {}) } : null);
+        // (a travel into the Lampfall that names no instance asks /api/zone where the seat is: the Lampfall is only
+        // ever joined by its instance's id, and connect() refuses it without one)
+        const known = arriving && !(arriving.zone === 'lampfall' && !arriving.instance);
+        joined = await join(token, known && arriving ? { zone: arriving.zone, ...(arriving.instance ? { instance: arriving.instance } : {}) } : null);
       } catch (err) {
         connecting = false;
         endTravel();

@@ -21,6 +21,7 @@ import { TAVERN_YAW } from '../world/layout';
 import { createQuestFlow, type HintStore, type QuestFlow } from '../net/questFlow';
 import { currentStep, pointerTarget, shortName, trackerOf, type ClientQuests, type PointerTarget, type StoryId } from '../net/quests';
 import { equipHook } from '../net/equipHook';
+import { storyOfTap } from '../net/tapOrder';
 import { newPieceHook } from '../net/questHooks';
 import { createStoryScenes, type StoryScenes } from './scenes';
 
@@ -194,14 +195,8 @@ export function createQuestClient(o: QuestClientOpts): QuestClient {
     message(type, m) { flow.message(type, m); },
     onTap(tap) {
       if (disposed) return false;
-      const ids = tap.entityIds ?? (tap.entityId !== null ? [tap.entityId] : []);
-      // a story spot under the tap wins unless something nearer in the list is a person or a foe (combat's own)
-      let id: StoryId | null = null;
-      for (const e of ids) {
-        const sid = storyIdOf(e);
-        if (sid) { id = sid; break; }
-        if (e >= 0) return false;
-      }
+      // a story spot under the tap wins over the adventurers in front of it (an enemy in front: routeTap sent it to combat)
+      const id = storyOfTap(tap, storyIdOf);
       if (!id || !spotOf(id)) return false;
       approach(id);
       return true;

@@ -1767,7 +1767,14 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
 export const DETAIL: Record<Quality, number> = { high: 1, med: 0.55, low: 0.38 };
 let detailNow: Quality = 'high';
 /** The quality new (and rebuilt) look-driven bodies are built at. */
-export function setCharacterDetail(q: Quality): void { detailNow = q; }
+export function setCharacterDetail(q: Quality): void {
+  if (q === detailNow) return;
+  detailNow = q;
+  // every live look-driven body built at the game's detail is rebuilt at the new one (queued: REBUILDS_PER_FRAME)
+  for (const requeue of detailViews) requeue();
+}
+/** The live look-driven bodies that follow setCharacterDetail: each queues a rebuild of its current look. */
+const detailViews = new Set<() => void>();
 /** At most this many look rebuilds per rendered frame (the rest wait their turn): changing a look is off the hot path. */
 export const REBUILDS_PER_FRAME = 2;
 const rebuildBudget = new WeakMap<Scene, { frame: number; left: number }>();
@@ -2062,6 +2069,9 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   blob.setEnabled(blobsEnabled);
   const live = { blob };
   liveViews.add(live);
+  // a quality step-down rebuilds this body at the new detail (only a look-driven body that follows the game's detail)
+  const requeueDetail = () => { if (look && opts.detail === undefined) pending ??= { look, gear }; };
+  detailViews.add(requeueDetail);
 
   let ring: Mesh | null = null;
   let targeted = false;
@@ -2406,6 +2416,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     },
     dispose() {
       liveViews.delete(live);
+      detailViews.delete(requeueDetail);
       root.dispose(false, false);
       skeleton.dispose();
       glowMat?.dispose();

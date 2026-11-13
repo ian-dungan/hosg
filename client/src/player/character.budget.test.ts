@@ -71,3 +71,28 @@ describe('the look-driven adventurer', () => {
     v.dispose();
   });
 });
+
+describe('the quality step-down', () => {
+  it('rebuilds every live look-driven body at the new detail (queued, on a later update)', () => {
+    setCharacterDetail('high');
+    const v = makeCharacter(scene, { kind: 'player', look: randomLook(prng(4)) });
+    const high = characterStats.lastActiveTriangles;
+    const plain = makeCharacter(scene, { kind: 'player', weapon: 'none' }); // the default adventurer: built as written
+    const before = characterStats.rebuilds;
+    v.update(1 / 60); plain.update(1 / 60);
+    expect(characterStats.rebuilds).toBe(before);
+    try {
+      setCharacterDetail('low');
+      v.update(1 / 60); plain.update(1 / 60);
+      expect(characterStats.rebuilds).toBe(before + 1);
+      expect(characterStats.lastActiveTriangles).toBeLessThan(high);
+      setCharacterDetail('low'); // no change: nothing queued
+      v.update(1 / 60);
+      expect(characterStats.rebuilds).toBe(before + 1);
+    } finally { setCharacterDetail('high'); }
+    v.dispose(); plain.dispose();
+    const after = characterStats.rebuilds;
+    setCharacterDetail('med'); setCharacterDetail('high'); // disposed views are not rebuilt
+    expect(characterStats.rebuilds).toBe(after);
+  });
+});

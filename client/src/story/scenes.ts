@@ -124,8 +124,8 @@ export function createStoryScenes(o: StoryScenesOpts): StoryScenes {
   const look = new Vector3(), head = new Vector3(), camPos = new Vector3(), tmp = new Vector3(), fromPos = new Vector3(), shaken = new Vector3();
   let cut = false;
 
-  let homeFov = 0.8;
-  const saveHome = () => { const c = cam(); homeFov = c.fov; home.alpha = c.alpha; home.beta = c.beta; home.radius = c.radius; home.target.copyFrom(c.target); };
+  let homeFov = 0.8, homeBetaLimit: number | null = null;
+  const saveHome = () => { const c = cam(); homeFov = c.fov; homeBetaLimit = c.upperBetaLimit; home.alpha = c.alpha; home.beta = c.beta; home.radius = c.radius; home.target.copyFrom(c.target); };
   const saveFrom = () => { const c = cam(); from.alpha = c.alpha; from.beta = c.beta; from.radius = c.radius; from.target.copyFrom(c.target); };
   const easeCam = (e: number, to: { alpha: number; beta: number; radius: number; target: Vector3 }) => {
     const c = cam();
@@ -152,6 +152,10 @@ export function createStoryScenes(o: StoryScenesOpts): StoryScenes {
     if (hideHud) o.hudVisible(false);
   };
   const end = (hideHud: boolean) => {
+    // the camera as the scene found it: its lens and how far up it may look
+    const c = cam();
+    c.fov = homeFov;
+    if (homeBetaLimit !== null) c.upperBetaLimit = homeBetaLimit;
     o.rig.setCinematic(false);
     if (hideHud) o.hudVisible(true);
     holding = false;

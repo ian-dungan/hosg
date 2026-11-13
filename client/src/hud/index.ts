@@ -314,7 +314,13 @@ export const createHud: CreateHud = (host: HTMLElement): HudApi => {
     titleScreen: () => overlays.titleScreen(),
     loadout: (pool, current, title, count) => overlays.loadout(pool, current, title, count),
     jobs: (view) => overlays.jobs(view),
-    creator: (o) => openCreator(host, o).done,
+    creator: (o) => {
+      // a modal like the sheets: the game's keys (walk, 1–5, I/C/T/P/Q) wait, and the HUD hides behind it
+      const c = openCreator(host, o);
+      const release = overlays.hold('creator');
+      void c.done.finally(release);
+      return { done: c.done, close: () => c.close() };
+    },
     emoteWheel: () => openEmoteWheel(host),
     endScreen: (kind, lines, buttons, opts) => overlays.endScreen(kind, lines, buttons, opts),
     partyInvite: (from, size, seconds = 60) => invites.open(from, size, seconds),

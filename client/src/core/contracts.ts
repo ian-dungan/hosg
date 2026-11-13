@@ -423,9 +423,10 @@ export interface HudApi {
   setVisible(on: boolean): void;
   /**
    * The character creator (mode 'create': the first visit, free) or the Barber (mode 'barber': priced by barberCost,
-   * free on the free visit). Resolves with the look (and the name, when `needsName`) on Done, or null when closed.
+   * free on the free visit). A modal: the game's keys wait while it is open. `done` resolves with the look (and the
+   * name, when `needsName`) on Done, or null when closed (by the player, or by close(): its room ended).
    */
-  creator(o: CreatorOpts): Promise<{ look: AdventurerLook; name?: string } | null>;
+  creator(o: CreatorOpts): CreatorSession;
   /** The emote wheel: resolves with the emote chosen, or null when closed. */
   emoteWheel(): Promise<EmoteId | null>;
   /**
@@ -440,6 +441,11 @@ export interface HudApi {
   loot(l: LootShow): void;
   /** The level-up moment; onTalent: its "New talent row" button. */
   levelUp(l: LevelShow, onTalent: () => void): void;
+}
+/** An open creator (or Barber): its answer, and a way to close it from outside (null answer). */
+export interface CreatorSession {
+  readonly done: Promise<{ look: AdventurerLook; name?: string } | null>;
+  close(): void;
 }
 export interface CreatorOpts {
   look: AdventurerLook;
