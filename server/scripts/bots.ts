@@ -622,6 +622,8 @@ const BOT_COSTUME: CostumeId = 'straw_sunhat';
 const DUO_WAIT_MS = 60_000;
 /** --quest: a fighting step whose acts are still missing after this long gets a nudge (a dodge in a fight, a finisher). */
 const NUDGE_AFTER_MS = 30_000;
+/** --quest: how many bots fight one enemy of a kind their step asks for (each with a tenth of the damage is credited). */
+const QUEST_FIGHTERS = 4;
 /** Refusals that are no failure: 'combat' and 'busy' (the bots try out of combat; a fight can start meanwhile). */
 const GEAR_OK_REFUSALS = ['combat', 'busy'];
 /** questRefused reasons that are no failure: a bot that raced its own walk, a busy moment, a full bag. */
@@ -1553,7 +1555,10 @@ class Bot {
       const qk = this.questKinds;
       if (qk && qk !== 'any' && !qk.includes(e.kind) && e.eid !== this.sentTarget && e.target !== mine) return;
       // a hunter takes only an elite (whoever else is on it); the others leave elites to one adventurer
-      if (this.hunter ? !elite : (claimed.get(e.eid) ?? 0) >= (elite ? FIGHTERS_PER_ELITE : FIGHTERS_PER_ENEMY)) return;
+      // (--quest: up to QUEST_FIGHTERS on a kind its step asks for: every one with a tenth of the damage is credited, as
+      // players crowd the first camp; one each left most of 100 bots short of three Thornlings in 240 s)
+      const cap = qk && qk !== 'any' && qk.includes(e.kind) ? QUEST_FIGHTERS : elite ? FIGHTERS_PER_ELITE : FIGHTERS_PER_ENEMY;
+      if (this.hunter ? !elite : (claimed.get(e.eid) ?? 0) >= cap) return;
       // a White Mage leading a Black Mage takes the toughest enemy in reach (its partner needs a fight long enough for
       // Skyfall Arc on its Soaked: Conduct); everyone else the nearest
       if (this.toughFirst && elite) return; // (it leaves elites to others)
