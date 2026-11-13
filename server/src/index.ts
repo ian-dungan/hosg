@@ -1,9 +1,10 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { GOLD_MAX, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type ZoneId } from '@sg2/shared';
+import { GOLD_MAX, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type QuestId, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
 import type { Store } from './store/types';
+import { parseTestQuest, testQuestSave } from './rooms/quests';
 
 function fail(message: string): never {
   console.error(`Shady Grove 2 server: ${message}`);
@@ -141,11 +142,27 @@ function testGms(): string[] | undefined {
   return names;
 }
 
+/**
+ * SG2_TEST_QUEST=<quest>:<step id> (test servers only, never in Docker, off by default; SG2_STORE=memory only, refused
+ * when NODE_ENV=production): an adventurer with no stored quests starts with every earlier main-quest step done
+ * (nothing paid) and that quest at that step (another quest: the main quest done and that one at that step).
+ */
+function testQuest(): { quest: QuestId; step: number } | undefined {
+  const raw = process.env.SG2_TEST_QUEST;
+  if (raw === undefined || raw === '') return undefined;
+  if (process.env.NODE_ENV === 'production') fail('SG2_TEST_QUEST is refused when NODE_ENV=production.');
+  if (process.env.SG2_STORE !== 'memory') fail('SG2_TEST_QUEST works only with SG2_STORE=memory.');
+  const spec = parseTestQuest(raw);
+  if (!spec) fail(`SG2_TEST_QUEST must be <quest>:<step id>, for example solstice_crossing:first_fight, or empty (got "${raw}").`);
+  return spec;
+}
+
 const port = positiveInt('SG2_PORT', 2570);
 const gms = testGms();
 const startGold = testStartGold();
 const lootAlways = testLoot();
 const startKit = testKit();
+const startQuest = testQuest();
 const newAdventurer = { ...(startGold !== undefined ? { gold: startGold } : {}), ...(startKit ? { kit: startKit } : {}) };
 const mouthStart = startAt();
 const instanceStart = testInstanceStart();
@@ -167,7 +184,8 @@ const clientDir = process.env.SG2_CLIENT_DIR || undefined;
 let store: Store;
 if (process.env.SG2_STORE === 'memory') {
   console.warn('Shady Grove 2 server: SG2_STORE=memory, nothing is saved across restarts.');
-  store = createMemoryStore({ start, newAdventurer, ...(gms ? { testGms: gms } : {}) });
+  const quests = startQuest ? (day: string) => testQuestSave(startQuest, day) : undefined;
+  store = createMemoryStore({ start, newAdventurer: { ...newAdventurer, ...(quests ? { quests } : {}) }, ...(gms ? { testGms: gms } : {}) });
 } else {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) fail('DATABASE_URL is not set (or set SG2_STORE=memory to run without a database).');
@@ -196,6 +214,7 @@ if (dummyZones) console.log('Shady Grove 2 server: SG2_TEST_DUMMY=1; a Training 
 if (startGold !== undefined) console.log(`Shady Grove 2 server: SG2_TEST_START_GOLD=${startGold}; new adventurers start with that gold (test servers only).`);
 if (lootAlways) console.log('Shady Grove 2 server: SG2_TEST_LOOT=always; every credited kill drops an item (test servers only).');
 if (startKit) console.log(`Shady Grove 2 server: SG2_TEST_KIT=t${startKit}; new adventurers wear that tier's kit (test servers only).`);
+if (startQuest) console.log(`Shady Grove 2 server: SG2_TEST_QUEST=${process.env.SG2_TEST_QUEST}; new adventurers start the quests there (test servers only).`);
 if (gms) console.log(`Shady Grove 2 server: SG2_TEST_GMS=${gms.join(',')}; those usernames are game masters when they register (test servers only).`);
 if (exitsOpen) console.log(`Shady Grove 2 server: SG2_OPEN_EXITS=${process.env.SG2_OPEN_EXITS}; those exits are open.`);
 console.log(

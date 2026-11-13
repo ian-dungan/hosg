@@ -145,6 +145,23 @@ import {
   type InvRefusedReason,
   type Kit,
   type Look,
+  BAG_SLOTS,
+  MAIN_QUEST,
+  QUEST_EVENTS_PER_STEP,
+  QUEST_OPS_PER_S,
+  QUEST_TEXT,
+  applyQuestAct,
+  applyQuestEvents,
+  bagUsed,
+  parseQuestAct,
+  questCares,
+  questsView,
+  type InvState,
+  type QuestAct,
+  type QuestEvent,
+  type QuestGiven,
+  type QuestRefusal,
+  type QuestSave,
 } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer'; // (a relog of the dead inside: re-added dead)
 import { verifyToken } from '../auth/tokens';
@@ -152,6 +169,7 @@ import type { MemberStatus, Parties } from '../party/parties';
 import { utcDay, type Adventurer, type AdventurerSave, type Store } from '../store/types';
 import { InventoryQueue, TokenBucket, WriteLock, type InvSnapshot, type InvTask, type TaskResult } from './inventoryQueue';
 import { applyLoot, clearXp, itemName, killXp, talentRowFor, type LootAward } from './rewards';
+import { actsFromFx, jumpCounts, payQuests, placeEvents, questDay, watchEither, type QuestPay, type QuestWatch } from './quests';
 import type { InstanceInfo, Instances } from './instances';
 import { gmVerb, isGmLine, runGmLine, type GmHost, type GmProcess } from '../gm/commands';
 import { applyGrant, grantThing, type GmGrant, type GrantOutcome } from '../gm/grant';
@@ -216,6 +234,12 @@ const LOOT_TRIES = 3;
 const LOOT_RETRY_MS = 500;
 /** A stale loot write is re-read and rolled again up to this many times. */
 const LOOT_STALE_RETRIES = 5;
+/** The main quest's keepsake title (its last step's reward): given back on join if a done quest lacks it. */
+const MAIN_TITLE = 'Witness of the Crossing';
+/** A jump counts for a quest at most this often per session (ms). */
+const JUMP_EVERY_MS = 1000;
+/** What a quest change of a task paid (for its settle and its landed hook). */
+interface QuestOut { pay: QuestPay; changed: boolean }
 
 /** An instance's timings (s): the Numbers by default, shorter in tests. */
 export interface InstanceTimings { reconnectS: number; evictS: number; wipeS: number; releaseMinS: number; autoReleaseS: number; sealS: number }
@@ -520,6 +544,21 @@ interface Session {
   looksSent: Map<number, string>;
   /** Adventurers whose codes this client is due (they came into its view, or changed): sent at the step's end. */
   looksOut: Set<Session>;
+  // ───────── Plan 6 ─────────
+  /** This step's quest events (each one questCares about), written with the step's loot as one task (≤ QUEST_EVENTS_PER_STEP). */
+  questEvents: QuestEvent[];
+  /** QUEST_OPS_PER_S for `quest` messages. */
+  questBucket: TokenBucket;
+  /** Which per-step quest work this adventurer needs (from its current steps): places, jumps, combat acts, equips. */
+  questWatch: QuestWatch;
+  /** The last `quests` view sent, as JSON ('' = none yet). */
+  questSent: string;
+  /** `quests` is to be sent on the next step (a join or a reconnect). */
+  questDue: boolean;
+  /** When a jump last counted (wall ms). */
+  jumpedAt: number;
+  /** The quests a task computed and is writing now (events for its next step are kept meanwhile); undefined once settled. */
+  questAhead?: QuestSave;
 }
 
 const NO_ENEMIES: readonly EnemySchema[] = [];
@@ -698,6 +737,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.onMessage('inv', this.guard('inv', (client, message) => this.onInv(client, message)));
     this.onMessage('look', this.guard('look', (client, message) => this.onLook(client, message)));
     this.onMessage('emote', this.guard('emote', (client, message) => this.onEmote(client, message)));
+    this.onMessage('quest', this.guard('quest', (client, message) => this.onQuest(client, message)));
     // (intents spend the intent budget, every other message the message budget: see guard)
     this.clock.setInterval(() => {
       this.forgetIdleAllowances();
@@ -860,6 +900,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       looksOut: new Set(),
       isGm: isGm === true,
       roleCheckedAt: this.wallMs(),
+      questEvents: [],
+      questBucket: new TokenBucket(this.wallMs(), QUEST_OPS_PER_S, QUEST_OPS_PER_S),
+      questWatch: watchEither(adventurer.quests, undefined),
+      questSent: '',
+      questDue: true,
+      jumpedAt: -Infinity,
     };
     session.queue = this.makeQueue(snapshot, lock, adventurer.id, accountId, () => session.jobs, (j) => {
       // (inside the write lock: a save waiting on it reads these jobs, even if the session ended meanwhile)
@@ -898,6 +944,23 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         settle: (r) => { if (r.status === 'failed') this.logFailure('inventory', 'Writing back a repaired inventory failed', r.error); },
       });
     }
+    // ...and quests the store had to repair: written back once (quests only; the inventory as it is stored).
+    if (adventurer.questsRepaired) {
+      void session.queue.push({
+        retries: 1,
+        run: (s, jobs) => ({ kind: 'write', write: { inventory: s.inv, dGold: 0, dSeals: 0, quests: s.quests }, next: { inv: s.inv, gold: s.gold, seals: s.seals, jobs, look: s.look, lookFree: s.lookFree, quests: s.quests }, info: null }),
+        settle: (r) => { if (r.status === 'failed') this.logFailure('quests', 'Writing back repaired quests failed', r.error); },
+      });
+    }
+    // A done main quest whose title went missing (its write landed, the title's did not): given again (idempotent).
+    if (adventurer.quests.done[MAIN_QUEST] && !adventurer.titles.includes(MAIN_TITLE)) {
+      void this.store.addTitle(adventurer.id, MAIN_TITLE).catch((err) => this.logFailure('quests', 'Giving back a quest title failed', err));
+    }
+    // Being in this zone (the Greenway's gate step, the Lampfall's descent), and wherever it stands.
+    this.safely('quest join', () => {
+      this.questEvent(session, { e: 'reach', zone: this.zone.id, x: start.x, z: start.z });
+      for (const ev of placeEvents(adventurer.quests, this.zone.id, start.x, start.z)) this.questEvent(session, ev);
+    });
   }
 
   onDrop(client: Client) {
@@ -923,6 +986,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     session.lastSelf = '';
     session.jobsDue = true;
     session.invDue = true;
+    session.questSent = '';
+    session.questDue = true;
     // its looks: everything in its view again (what it held may be gone with the old connection)
     session.looksSent.clear();
     session.looksOut.add(session);
@@ -1063,6 +1128,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.combat.setPose(session.eid, pose.x, pose.z, pose.y, pose.facing);
     const damage = fallDamage(landedDrop);
     if (damage > 0) this.fall(session, damage);
+    this.safely('quest pose', () => this.questPose(session, pose, now));
     if (exit?.instance) this.enterInstance(session, before);
     else if (exit && destination) this.travel(session, { to: exit.to, arrive: exit.arrive }, destination, before);
     return true;
@@ -1250,6 +1316,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     const name = op?.op ?? null;
     if (!session.invBucket.take(this.wallMs())) return this.refuseInv(session, name, 'rate');
     if (!op) return this.refuseInv(session, null, 'unknown');
+    let quest: QuestOut | undefined;
     void session.queue.push<null>({
       retries: 1,
       recheck: RECHECK,
@@ -1259,13 +1326,35 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         const r = applyInvOp({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, op, this.invCtx(session));
         if ('refusal' in r) return { kind: 'refuse', reason: r.refusal };
         if (r.dup) return { kind: 'none', info: null };
+        // an equip a quest step asks for: its completion and reward join this same write
+        let state: InvState = r.state, dGold = r.dGold, quests = s.quests;
+        quest = undefined;
+        const item = op.op === 'equip' ? r.state.inv.bag.find((i) => i.uid === op.uid)?.item : undefined;
+        if (op.op === 'equip' && item) {
+          const ev: QuestEvent = { e: 'equip', slot: op.slot, item };
+          if (questCares(s.quests, ev)) {
+            const q = applyQuestEvents(s.quests, [ev], questDay(s.quests, utcDay(this.wallMs())));
+            const pay = q.changed ? payQuests(r.state, q.done, jobs.current) : null;
+            if (pay) {
+              ({ state } = pay);
+              dGold += pay.dGold;
+              quests = q.save;
+              quest = { pay, changed: true };
+              this.questsAhead(session, quests);
+            }
+          }
+        }
         return {
           kind: 'write', info: null,
-          write: { inventory: r.state.inv, jobs: r.state.jobs, dGold: r.dGold, dSeals: r.dSeals },
-          next: { ...r.state, look: s.look, lookFree: s.lookFree, quests: s.quests },
+          write: { inventory: state.inv, jobs: state.jobs, dGold, dSeals: r.dSeals, ...(quest ? { quests } : {}) },
+          next: { ...state, look: s.look, lookFree: s.lookFree, quests },
         };
       },
-      settle: (r) => this.settleInv(session, op.op, r),
+      landed: () => { if (quest) this.questXp(session, quest.pay); },
+      settle: (r) => {
+        this.questSettled(session, r, r.status === 'applied' ? quest : undefined);
+        this.settleInv(session, op.op, r);
+      },
     });
   }
 
@@ -1362,33 +1451,63 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     return true;
   }
 
-  /** A loot task for `awards`: rolled from the queued state, at most once per kill key; then `loot`, its notices and the view. */
-  private lootTask(session: Session, awards: LootAward[], tries: number): InvTask<ReturnType<typeof applyLoot>['given']> {
+  /**
+   * A reward task for one step's `awards` (loot) and quest `events`, written as one: the loot rolled from the queued
+   * state (at most once per kill key), then the events applied to the stored quests and any completed step paid
+   * (gold and items once per step key, xp to the current job, applied to the session's live jobs as the write lands).
+   * Then `loot`, its notices, `questDone` and the views.
+   */
+  private rewardTask(session: Session, awards: LootAward[], events: QuestEvent[], tries: number): InvTask<{ loot: ReturnType<typeof applyLoot>['given']; quest?: QuestOut }> {
+    let ran: QuestOut | undefined;
     return {
       retries: LOOT_STALE_RETRIES,
-      unbounded: true, // never refused for a full queue (a stalled store must not drop loot)
+      unbounded: true, // never refused for a full queue (a stalled store must not drop loot or quest progress)
       run: (s, jobs) => {
-        const out = applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, awards, this.lootAlways);
-        if (out.given.every((g) => g.dup)) return { kind: 'none', info: out.given };
+        ran = undefined;
+        const loot = awards.length > 0 ? applyLoot({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, awards, this.lootAlways) : undefined;
+        let state: InvState = loot?.state ?? { inv: s.inv, gold: s.gold, seals: s.seals, jobs };
+        let dGold = loot?.dGold ?? 0, quests = s.quests;
+        if (events.length > 0) {
+          const q = applyQuestEvents(s.quests, events, questDay(s.quests, utcDay(this.wallMs())));
+          if (q.changed) {
+            const pay = payQuests(state, q.done, jobs.current);
+            if (pay) {
+              state = pay.state;
+              dGold += pay.dGold;
+              quests = q.save;
+              ran = { pay, changed: true };
+              this.questsAhead(session, quests);
+            } else this.logFailure('quests', 'Quest progress could not be paid (a full bag) and was dropped', new Error(`${session.accountId}: ${JSON.stringify(q.done)}`));
+          }
+        }
+        const lootGiven = loot?.given ?? [];
+        if (!ran && lootGiven.every((g) => g.dup)) return { kind: 'none', info: { loot: lootGiven } };
         return {
-          kind: 'write', info: out.given,
-          write: { inventory: out.state.inv, jobs, dGold: out.dGold, dSeals: 0 },
-          next: { ...out.state, look: s.look, lookFree: s.lookFree, quests: s.quests },
+          kind: 'write', info: { loot: lootGiven, ...(ran ? { quest: ran } : {}) },
+          write: { inventory: state.inv, jobs: state.jobs, dGold, dSeals: 0, ...(ran ? { quests } : {}) },
+          next: { ...state, look: s.look, lookFree: s.lookFree, quests },
         };
       },
+      landed: () => { if (ran) this.questXp(session, ran.pay); },
       settle: (r) => {
+        this.questSettled(session, r, r.status === 'applied' ? r.info.quest : undefined);
         if (r.status === 'failed' || r.status === 'stale') {
           if (r.status === 'failed') this.logFailure('loot', 'A loot write failed', r.error);
-          // tried again a little later (a kill key is rewarded once however often it is tried); then given up
+          // tried again a little later (a kill key is rewarded once however often it is tried); then given up.
+          // A failed write may have landed: its combat acts are not tried again (a count could double); kills keep
+          // their keys, and places, jumps, jobs and equips count once whatever happens.
+          const again = r.status === 'failed' ? events.filter((e) => e.e !== 'act') : events;
           if (tries + 1 < LOOT_TRIES) {
             // (held as in flight from now: a rejoin meanwhile waits for it, and reads the store after it lands)
-            const retry = new Promise<void>((resolve) => setTimeout(resolve, LOOT_RETRY_MS)).then(() => session.queue.push(this.lootTask(session, awards, tries + 1)));
+            const retry = new Promise<void>((resolve) => setTimeout(resolve, LOOT_RETRY_MS)).then(() => session.queue.push(this.rewardTask(session, awards, again, tries + 1)));
             this.accounts.inventoryInFlight(session.accountId, retry.then(() => {}));
-          } else this.logFailure('loot', 'Loot was given up after its tries', new Error(`${awards.length} awards for ${session.accountId}`));
+          } else this.logFailure('loot', 'Loot was given up after its tries', new Error(`${awards.length} awards and ${events.length} quest events for ${session.accountId}`));
           return;
         }
         if (r.status === 'dropped') {
-          this.offlineLoot(session, awards); // the session ended first: written for the adventurer all the same
+          // the session ended first: loot is written for the adventurer all the same (its quest events are not:
+          // progress may be lost, never paid twice)
+          if (awards.length > 0) this.offlineLoot(session, awards);
           return;
         }
         if (r.status === 'refused') {
@@ -1396,22 +1515,175 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           return;
         }
         if (r.status !== 'applied' || this.sessions.get(session.client.sessionId) !== session) return;
-        for (const g of r.info) {
+        for (const g of r.info.loot) {
           if (g.dup || session.reconnection) continue;
           this.sendTo(session.client, 'loot', { items: g.items, gold: g.gold, soldFor: g.soldFor, x: g.award.x, z: g.award.z });
           for (const sold of g.sold) this.sendTo(session.client, 'notice', { text: bagFullText(itemName(sold.item), sold.gold) });
           if (g.lost > 0) this.sendTo(session.client, 'notice', { text: purseFullText(g.lost) });
         }
-        this.sendInventory(session);
+        if (r.info.loot.some((g) => !g.dup) || (r.info.quest?.pay.given.length ?? 0) > 0) this.sendInventory(session);
       },
     };
   }
 
-  /** The step's loot rolls for the session, as one write. */
-  private flushLoot(session: Session) {
-    if (session.loot.length === 0) return;
-    const awards = session.loot.splice(0);
-    void session.queue.push(this.lootTask(session, awards, 0));
+  /** The step's loot rolls and quest events for the session, as one write (nothing to write: no task at all). */
+  private flushRewards(session: Session) {
+    if (session.loot.length === 0 && session.questEvents.length === 0) return;
+    const awards = session.loot.splice(0), events = session.questEvents.splice(0);
+    void session.queue.push(this.rewardTask(session, awards, events, 0));
+  }
+
+  // ───────── Plan 6: quests ─────────
+
+  /**
+   * A server-made quest event for the session's step write, only when one of its current steps can use it (on the
+   * stored quests, or the ones a write in flight is landing): anything else costs nothing. At most
+   * QUEST_EVENTS_PER_STEP a step (more are dropped, logged); a place, jump or job already queued this step is not
+   * queued again.
+   */
+  private questEvent(session: Session, ev: QuestEvent) {
+    const stored = session.queue.snapshot.quests, ahead = session.questAhead;
+    if (!questCares(stored, ev) && !(ahead && ahead !== stored && questCares(ahead, ev))) return;
+    if ((ev.e === 'reach' || ev.e === 'jump' || ev.e === 'job') && session.questEvents.some((q) => q.e === ev.e)) return;
+    if (session.questEvents.length >= QUEST_EVENTS_PER_STEP) {
+      this.logFailure('quest-events', 'Quest events past QUEST_EVENTS_PER_STEP in one step were dropped', new Error(`${session.accountId}: ${ev.e}`));
+      return;
+    }
+    session.questEvents.push(ev);
+  }
+
+  /** A task computed new quests (its write is on its way): events and watch flags follow them meanwhile too. */
+  private questsAhead(session: Session, quests: QuestSave) {
+    session.questAhead = quests;
+    session.questWatch = watchEither(session.queue.snapshot.quests, quests);
+  }
+
+  /** An accepted pose's quest events: a place a current step asks for, and a jump (at most one a JUMP_EVERY_MS). */
+  private questPose(session: Session, pose: Pose, now: number) {
+    const w = session.questWatch;
+    if (!w.place && !w.jump) return;
+    if (w.place) {
+      const evs = placeEvents(session.questAhead ?? session.queue.snapshot.quests, this.zone.id, pose.x, pose.z);
+      const more = session.questAhead ? placeEvents(session.queue.snapshot.quests, this.zone.id, pose.x, pose.z) : [];
+      for (const ev of [...evs, ...more]) this.questEvent(session, ev);
+    }
+    if (w.jump && now - session.jumpedAt >= JUMP_EVERY_MS && jumpCounts(pose.y, this.zone.surface(pose.x, pose.z), session.movement.air.airStartY)) {
+      session.jumpedAt = now;
+      this.questEvent(session, { e: 'jump' });
+    }
+  }
+
+  /** The owner's `quests` view, only when it changed since the last one sent (or when it is back). */
+  private sendQuests(session: Session) {
+    if (session.reconnection) {
+      session.questDue = true;
+      return;
+    }
+    const s = session.queue.snapshot.quests;
+    const view = questsView(s, questDay(s, utcDay(this.wallMs())));
+    const json = JSON.stringify(view);
+    if (json === session.questSent) return;
+    session.questSent = json;
+    this.sendTo(session.client, 'quests', view);
+  }
+
+  /**
+   * A task that may change quests has ended: titles for the steps it paid (best effort; the join gives a missing one
+   * back), the watch flags again, and, for the owner if it is still here: `questDone` per paid step and the view.
+   */
+  private questSettled(session: Session, r: TaskResult<unknown>, quest: QuestOut | undefined) {
+    if (r.status === 'dropped') return;
+    for (const g of quest?.pay.given ?? []) {
+      if (g.title) void this.store.addTitle(session.adventurerId, g.title).catch((err) => this.logFailure('quests', 'Adding a quest title failed', err));
+    }
+    if (!session.queue.busy) session.questAhead = undefined;
+    session.questWatch = watchEither(session.queue.snapshot.quests, session.questAhead);
+    if (this.sessions.get(session.client.sessionId) !== session) return;
+    if (!session.reconnection) for (const g of quest?.pay.given ?? []) this.sendTo(session.client, 'questDone', g);
+    this.sendQuests(session);
+  }
+
+  /**
+   * A quest write landed (inside the write lock): its xp onto the session's live jobs, so kill xp gained while it was
+   * in flight is kept, and the next save stores both. The xp goes to the job it was earned with.
+   */
+  private questXp(session: Session, pay: QuestPay) {
+    if (pay.xp <= 0) return;
+    const live = this.sessions.get(session.client.sessionId) === session;
+    if (live && session.jobs.current === pay.job) {
+      this.gainXpAmount(session, pay.xp);
+      return;
+    }
+    this.setJobs(session, addJobXp(session.jobs, pay.job, pay.xp).save);
+    if (live) this.sendJobs(session);
+  }
+
+  private refuseQuest(session: Session, act: QuestAct['act'] | null, reason: QuestRefusal | 'save') {
+    if (session.reconnection) return;
+    this.sendTo(session.client, 'questRefused', { act, reason, text: reason === 'save' ? INV_SAVE_TEXT : QUEST_TEXT[reason] });
+  }
+
+  /**
+   * `quest`: an act (parseQuestAct: ids only) at most QUEST_OPS_PER_S a second, checked against the server's own
+   * state when it runs (the last accepted pose, alive, not travelling, displaced or inside a sealed boss arena, the
+   * bag's free slots), and written with whatever it pays in one write. A talk that completes nothing writes and
+   * says nothing.
+   */
+  private onQuest(client: Client, message: unknown) {
+    const session = this.sessions.get(client.sessionId);
+    if (!session) return;
+    const act = parseQuestAct(message);
+    if (!session.questBucket.take(this.wallMs())) return this.refuseQuest(session, act?.act ?? null, 'rate');
+    if (!act) return this.refuseQuest(session, null, 'unknown');
+    let quest: QuestOut | undefined;
+    void session.queue.push<null>({
+      retries: 1,
+      recheck: ['bag-full'],
+      run: (s, jobs) => {
+        quest = undefined;
+        const day = questDay(s.quests, utcDay(this.wallMs()));
+        const { x, z } = session.lastGood;
+        const r = applyQuestAct(s.quests, act, {
+          zone: this.zone.id, x, z, day,
+          dead: session.dead || !(this.combat.get(session.eid)?.alive ?? false),
+          busy: session.travelling !== undefined || session.awaitingDisplace || this.inSealedArena(session),
+          bagFree: BAG_SLOTS - bagUsed(s.inv),
+        });
+        if ('refusal' in r) return { kind: 'refuse', reason: r.refusal };
+        if ('none' in r || !r.changed) return { kind: 'none', info: null };
+        const pay = payQuests({ inv: s.inv, gold: s.gold, seals: s.seals, jobs }, r.done, jobs.current);
+        if (!pay) return { kind: 'refuse', reason: 'bag-full' };
+        quest = { pay, changed: true };
+        this.questsAhead(session, r.save);
+        return {
+          kind: 'write', info: null,
+          write: { inventory: pay.state.inv, ...(pay.xp > 0 ? { jobs: pay.state.jobs } : {}), dGold: pay.dGold, dSeals: 0, quests: r.save },
+          next: { ...pay.state, look: s.look, lookFree: s.lookFree, quests: r.save },
+        };
+      },
+      landed: () => { if (quest) this.questXp(session, quest.pay); },
+      settle: (r) => {
+        this.questSettled(session, r, r.status === 'applied' ? quest : undefined);
+        if (this.sessions.get(session.client.sessionId) !== session) return;
+        switch (r.status) {
+          case 'applied':
+            if (quest && quest.pay.given.some((g) => g.gold > 0 || g.item !== null)) this.sendInventory(session);
+            return;
+          case 'refused':
+            this.refuseQuest(session, act.act, r.reason as QuestRefusal);
+            if (r.reread) this.sendInventory(session);
+            return;
+          case 'stale':
+          case 'failed':
+            if (r.status === 'failed') this.logFailure('quests', 'A quest write failed', r.error);
+            this.refuseQuest(session, act.act, 'save');
+            this.sendInventory(session); // the stored truth (its quests went out above)
+            return;
+          default:
+            return;
+        }
+      },
+    });
   }
 
   /** Loot for an adventurer whose session ended before its write: a queue of its own on the stored truth (the kill keys keep it once). */
@@ -1486,6 +1758,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     if (!this.intent(session, 'loadout', { t: 'loadout', picks: [picks[0], picks[1]] as [AbilityId, AbilityId] })) return;
     this.takeJob(session);
     this.sendJobs(session);
+    this.safely('quest job', () => this.questEvent(session, { e: 'job' }));
   }
 
   /**
@@ -1506,6 +1779,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     this.refreshKit(session, true);
     this.sendJobs(session);
     if (JSON.stringify(before) !== JSON.stringify(session.jobs)) this.saveJobs(session);
+    this.safely('quest job', () => this.questEvent(session, { e: 'job' }));
   }
 
   /** The engine's job and picks become the ones saved with the adventurer. */
@@ -2972,7 +3246,18 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
           this.sendInventory(session);
           this.sendTo(session.client, 'lookFree', { free: session.queue.snapshot.lookFree });
         }
-        this.flushLoot(session);
+        if (session.questDue && !session.reconnection) {
+          session.questDue = false;
+          this.sendQuests(session);
+        }
+        if (session.questWatch.acts && fx.length > 0) {
+          this.safely('quest acts', () => {
+            const job = session.jobs.current;
+            const acts = actsFromFx(fx, session.eid, job, recordFor(session.jobs, job).picks, this.combat.self(session.eid)?.inCombat ?? false);
+            for (const ev of acts) this.questEvent(session, ev);
+          });
+        }
+        this.flushRewards(session);
         if (session.kitPending) this.refreshKit(session);
       });
     }
@@ -3023,6 +3308,14 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       const at = this.combat.get(kill.enemy) ?? this.state.enemies.get(this.keyOf(kill.enemy));
       const day = utcDay(this.wallMs());
       const hasLoot = (() => { const row = lootTable({ kind: kill.kind, zone: this.zone.id }); return row.gold[1] > 0 || row.tier !== null; })();
+      const creditedAccounts = new Set([...credited].map((c) => c.accountId));
+      for (const session of credited) {
+        // the quest's kill (once per adventurer: its key): `party` when a member of its party was credited too
+        this.safely('quest kill', () => {
+          const party = this.parties.partyOf(session.accountId)?.members.some((m) => m.accountId !== session.accountId && creditedAccounts.has(m.accountId)) ?? false;
+          this.questEvent(session, { e: 'kill', kind: kill.kind, key: `${this.roomId}:${kill.enemy}:${counter}`, party });
+        });
+      }
       for (const session of credited) {
         this.safely('credit', () => {
           this.sendTo(session.client, 'credit', { kind: kill.kind });

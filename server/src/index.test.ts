@@ -243,3 +243,62 @@ describe('SG2_TEST_GMS (test servers only)', () => {
     expect(pg.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_GMS works only with SG2_STORE=memory; with a database, use the role CLI (npm run gm -w server -- grant <username>).');
   }, 60_000);
 });
+
+/** Runs src/index.ts with `env` (memory store) until it listens; a guest's first `quests` view in the grove, then it is stopped. */
+async function guestQuests(env: Record<string, string>): Promise<any> {
+  const { port, release } = await heldPort();
+  await release();
+  const child = spawn(process.execPath, ['--import', 'tsx', entry], {
+    env: { PATH: process.env.PATH ?? '', SG2_JWT_SECRET: SECRET, SG2_STORE: 'memory', SG2_PORT: String(port), ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    let out = '';
+    child.stdout.on('data', (chunk) => (out += chunk));
+    child.stderr.on('data', () => {});
+    await waitFor(() => out.includes('listening'), 15_000);
+    const url = `http://127.0.0.1:${port}`;
+    const { token } = (await (await fetch(`${url}/api/guest`, { method: 'POST' })).json()) as { token: string };
+    const zone = (await (await fetch(`${url}/api/zone`, { headers: { authorization: `Bearer ${token}` } })).json()) as { zone: string };
+    const room = await new Client(url).joinOrCreate(zone.zone ?? 'grove', { token });
+    let view: any;
+    room.onMessage('*', (type: string | number, message: any) => { if (type === 'quests') view ??= message; });
+    await waitFor(() => view, 5000);
+    await room.leave();
+    return view;
+  } finally {
+    child.kill('SIGTERM');
+  }
+}
+
+describe('SG2_TEST_QUEST (test servers only)', () => {
+  it('is off by default (never set in Docker or docker-compose.yml), sets the start step, and exits with one line for anything else', async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const file of ['../../docker-compose.yml', '../../Dockerfile']) {
+      const text = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+      expect(text, file).not.toMatch(/SG2_TEST_QUEST/);
+    }
+    expect((await guestQuests({})).active).toEqual([{ id: 'solstice_crossing', step: 0, counts: [0] }]);
+    const at = await guestQuests({ SG2_TEST_QUEST: 'solstice_crossing:first_fight', SG2_START_ZONE: 'greenway' });
+    expect(at.active).toEqual([{ id: 'solstice_crossing', step: 8, counts: [0, 0, 0, 0] }]);
+    expect(at.done).toEqual([]);
+    const lamp = await guestQuests({ SG2_TEST_QUEST: 'keepers_lamp:hound' });
+    expect(lamp.active).toEqual([{ id: 'keepers_lamp', step: 1, counts: [0] }]);
+    expect(lamp.done.map((d: any) => d.id)).toEqual(['solstice_crossing']);
+    for (const [value, line] of [
+      ['solstice_crossing', 'SG2_TEST_QUEST must be <quest>:<step id>, for example solstice_crossing:first_fight, or empty (got "solstice_crossing").'],
+      ['solstice_crossing:nowhere', 'SG2_TEST_QUEST must be <quest>:<step id>, for example solstice_crossing:first_fight, or empty (got "solstice_crossing:nowhere").'],
+      ['dragons:lair', 'SG2_TEST_QUEST must be <quest>:<step id>, for example solstice_crossing:first_fight, or empty (got "dragons:lair").'],
+    ] as const) {
+      const r = await runServer({ SG2_STORE: 'memory', SG2_TEST_QUEST: value });
+      expect(r.code, value).toBe(1);
+      expect(r.stderr.trim()).toBe(`Shady Grove 2 server: ${line}`);
+    }
+    const prod = await runServer({ SG2_STORE: 'memory', SG2_TEST_QUEST: 'solstice_crossing:gate', NODE_ENV: 'production' });
+    expect(prod.code).toBe(1);
+    expect(prod.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_QUEST is refused when NODE_ENV=production.');
+    const pg = await runServer({ SG2_TEST_QUEST: 'solstice_crossing:gate', DATABASE_URL: 'postgres://nobody@127.0.0.1:1/none' });
+    expect(pg.code).toBe(1);
+    expect(pg.stderr.trim()).toBe('Shady Grove 2 server: SG2_TEST_QUEST works only with SG2_STORE=memory.');
+  }, 90_000);
+});

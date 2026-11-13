@@ -4,7 +4,9 @@ import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { matchMaker } from '@colyseus/core';
 import { Client, type Room } from '@colyseus/sdk';
-import { LAMPFALL_MOUTH, TICK_HZ, groveTownSurface, worldOf as worldOfCombat, zoneDef, type InvOp, type Surface, type ZoneId } from '@sg2/shared';
+import {
+  LAMPFALL_MOUTH, TICK_HZ, groveTownSurface, worldOf as worldOfCombat, zoneDef, type InvOp, type QuestAct, type QuestSave, type QuestsView, type Surface, type ZoneId,
+} from '@sg2/shared';
 import { killEnemy } from '../../../shared/src/combat/adventurer';
 import { createApp, type AppOptions } from '../app';
 import { signToken } from '../auth/tokens';
@@ -272,4 +274,23 @@ export function trackLooks(room: Room<any, any>): { messages: any[]; look(eid: n
     return found;
   };
   return { messages, look: (eid) => latest(eid)?.[1], gear: (eid) => latest(eid)?.[2] };
+}
+
+// ───────── Plan 6 ─────────
+
+/** Sends a `quest` act (anything: the server parses it). */
+export function sendQuest(room: Room<any, any>, act: QuestAct | Record<string, unknown> | unknown): void {
+  room.send('quest', act as never);
+}
+
+/** Every `quests` view the room gets from its join on (the latest last). */
+export function questsOf(room: Room<any, any>): QuestsView[] {
+  return collectFromJoin(room, 'quests');
+}
+
+/** Stores `quests` for the account's adventurer (one compare-and-set write, before it joins). */
+export async function storeQuests(store: Store, accountId: string, quests: QuestSave): Promise<void> {
+  const a = await store.getOrCreateAdventurer(accountId);
+  const w = await store.writeInventory(a.id, a.invVersion, { inventory: a.inventory, dGold: 0, dSeals: 0, quests });
+  if (!w) throw new Error('storeQuests: stale');
 }
