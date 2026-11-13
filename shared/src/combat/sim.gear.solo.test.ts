@@ -18,7 +18,8 @@ describe('the Fallen Warden in gear, solo', { timeout: 240_000 }, () => {
     expect(t3.filter(([, rs]) => wins(rs) >= 6).length, table(t3)).toBeGreaterThanOrEqual(3);
   });
   // NOT MET (deferred to live tuning): the jobs that heal or shield themselves (Paladin, Dark Knight, White
-  // Mage) win alone in T3 whether they miss 30% of the telegraphs or none; see the Task 5 report.
+  // Mage) win alone in T3 whether they miss 30% of the telegraphs or none: 46 and 48 of 140 (seeds 1–20 and
+  // 1001–1020, whole-number stats); see the Task 5 report.
   it.skip('G5: sloppy solo in T3 wins at most 28 of 140 (deferred to live tuning)', () => {
     expect(total(runs('sloppy', 3))).toBeLessThanOrEqual(28);
   });

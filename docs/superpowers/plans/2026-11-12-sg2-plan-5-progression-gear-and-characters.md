@@ -186,9 +186,11 @@ New constants live in the files named. Combat-side constants go in `shared/src/c
 
 | | level 1 | per level | level 10 |
 |---|---|---|---|
-| power | 6 (tunable 5–7) | (9 − L1) / 9 | **9** |
-| defence | 5 (tunable 4–6) | (8 − L1) / 9 | **8** |
+| power | 6 (tunable 5–7) | (9 − L1) / 9, rounded down per level (6 6 6 7 7 7 8 8 8 9) | **9** |
+| defence | 5 (tunable 4–6) | (8 − L1) / 9, rounded down per level (5 5 5 6 6 6 7 7 7 8) | **8** |
 | maxHp | 72 (tunable 64–80) | (90 − L1) / 9, rounded down per level | **90** |
+
+**Whole numbers (owner rule):** every base stat, every stat an item gives and every kit total is a whole number; an item that gives a stat gives at least 1. Power and defence rise at levels 4, 7 and 10 (the talent levels). Level 1 in the starter kit is 7 / 7 / 82.
 
 Level 10 is fixed, so that level 10 plus the starter kit is exactly `STARTER_STATS` (10, 10, 100). **A fresh level-10 adventurer in starter gear is the adventurer every Plan 3b and Plan 4 band was tuned for.** This is the parity rule P1.
 
@@ -217,10 +219,10 @@ Level 10 is fixed, so that level 10 plus the starter kit is exactly `STARTER_STA
 
 | weapon | off-hand kind | power share |
 |---|---|---|
-| blade | buckler | weapon 0.75, off-hand 0.25 |
-| bow | quiver | weapon 0.75, off-hand 0.25 |
-| sword | shield | weapon 0.75, off-hand 0.25 |
-| staff | tome | weapon 0.75, off-hand 0.25 |
+| blade | buckler | off-hand round(0.25 × kit power), at least 1 (0 for the starter); weapon the rest |
+| bow | quiver | as blade |
+| sword | shield | as blade |
+| staff | tome | as blade |
 | greatsword | none (two-handed) | weapon 1.0 |
 | daggers | none (a pair) | weapon 1.0 |
 
@@ -231,14 +233,15 @@ A weapon fits every job whose `JOBS[job].weapon` is its `WeaponId`, so a staff f
 | tier | item level | where from | power | defence | health | special |
 |---|---|---|---|---|---|---|
 | starter (`plain`) | 1 | everyone owns it | 1 | 2 | 10 | 0 |
-| T1 Greenway | 4 | Greenway drops, the Smithy | 2.5 (tunable ±25%) | 4 (±25%) | 22 (±25%) | 6 (±30%) |
+| T1 Greenway | 4 | Greenway drops, the Smithy | **3** (was 2.5: whole numbers; tunable ±25%) | 4 (±25%) | 22 (±25%) | 6 (±30%) |
 | T2 Lampfall | 7 | Lampfall packs and the Wickhound | 4 (±25%) | 6 (±25%) | 40 (±25%) | 12 (±30%) |
-| T3 Warden | 10 | the Fallen Warden and the Lampwright (Seals) | **8.3** (was 11, ±25%) | **12** (was 16, ±25%) | **68** (was 90, ±25%) | **14** (was 20, ±30%) |
+| T3 Warden | 10 | the Fallen Warden and the Lampwright (Seals) | **9** (was 11, then 8.3; whole numbers and the ±25% floor of 8.25) | **12** (was 16, ±25%) | **68** (was 90, ±25%) | **14** (was 20, ±30%) |
 
 At level 10, a full kit gives these totals:
 - starter: 10 / 10 / 100, which is Plan 3b's `STARTER_STATS`;
 - T2: 13 / 14 / 130, which is Plan 4's G1 mid-tier stand-in;
-- T3: 17.3 / 20 / 158 (Task 5 tuning; was 20 / 24 / 180, Plan 4's G1 top-tier stand-in), before set bonuses and specials. At 20 / 24 / 180 sloppy duos killed the Warden in 105–124 s with no deaths and careful solo won 108 of 140; every T3 number is now at the bottom of its range (see Task 5's Outcome).
+- T1: 12 / 12 / 112;
+- T3: 18 / 20 / 158 (Task 5 tuning, in whole numbers; was 20 / 24 / 180, Plan 4's G1 top-tier stand-in), before set bonuses and specials. At 20 / 24 / 180 sloppy duos killed the Warden in 105–124 s with no deaths and careful solo won 108 of 140; every T3 number is now at the bottom of its range (see Task 5's Outcome).
 
 **Spreading a kit over the pieces:**
 - Power is split between the weapon and the off-hand only, by the off-hand table.
@@ -262,7 +265,16 @@ At level 10, a full kit gives these totals:
   | cloth | × **0.5** (was 0.6; tunable 0.5–0.8) | × **0.75** (was 0.85; 0.75–0.95) | Focus |
   | plain | × 1 | × 1 | none |
 
-- Rounding: power and defence to 0.1, health to a whole number, specials to a whole number. A full kit's sum is within ±0.3 of the table (health and specials ±2).
+- Rounding (whole numbers, owner rule): each armour type's kit totals are rounded first (defence = round(table × type defence), health = round(table × type health)), then split over the pieces by slot weight with the largest remainder, so every piece's stats are whole and a full kit sums exactly to its type's totals. Power: weapon + off-hand = the table's power. A piece of a higher tier is never worse than a lower tier's in a stat they share (tested).
+- Weapon and off-hand power per tier: starter 1 + 0, T1 2 + 1, T2 3 + 1, T3 7 + 2 (a two-handed weapon or a pair: 1, 3, 4, 9).
+- Full-kit totals at level 10 (power / defence / health / special):
+
+  | tier | light | heavy | cloth |
+  |---|---|---|---|
+  | starter (plain) | 10 / 10 / 100 / 0 | — | — |
+  | T1 | 12 / 12 / 112 / 6 | 12 / 14 / 116 / 6 | 12 / 10 / 107 / 6 |
+  | T2 | 13 / 14 / 130 / 12 | 13 / 17 / 138 / 12 | 13 / 11 / 120 / 12 |
+  | T3 | 18 / 20 / 158 / 14 | 18 / 26 / 172 / 14 | 18 / 14 / 141 / 14 |
 - `itemStats(id)` computes a piece's stats from the tables, so tuning a row retunes every piece.
 
 **Sets** (`SETS`). Each set has six armour pieces. Piece ids are `<set>_<slot>`, and piece names are `<set name> <noun>`.
@@ -643,7 +655,7 @@ If p̂ is 0 or 1, use p̂ = 0.5/n (or 1 − 0.5/n). When the headroom is short, 
 | **G7** (Task 5) | top gear usually wins for an average duo: GEAR_PAIRS sloppy in T3 | 80 | ≥ 64 of 80 | — |
 
 **Tuned by Task 5** (two passes; every value at its new place in the tables above):
-- KIT_TABLE T3: power 11 → 8.3, defence 16 → 12, health 90 → 68, special 20 → 14 (the bottom of each range). At the old values sloppy duos beat the Warden in 105–124 s with no deaths, careful solo won 108 of 140 and a T3 Black Mage or White Mage killed a Thornling in 2–3 s.
+- KIT_TABLE T3: power 11 → 8.3 (then 9 and T1 2.5 → 3 for whole numbers), defence 16 → 12, health 90 → 68, special 20 → 14 (the bottom of each range). At the old values sloppy duos beat the Warden in 105–124 s with no deaths, careful solo won 108 of 140 and a T3 Black Mage or White Mage killed a Thornling in 2–3 s.
 - Cloth `TYPE_MULT`: defence 0.6 → 0.5, health 0.85 → 0.75; Lenslight `given` × 1.15 → × 1.105 and `finisherCost` −10 → −7. Lenslight was the fastest set for every job in every scenario (Focus); it still is for six jobs by about 5% (see Task 5's report: a ruling on Focus is needed).
 - `SIM_TALENTS`: see Talents (every pick now acts on the duo picks).
 - Not met after tuning, `it.skip` with the measured numbers (deferred to live tuning): G2's starter ceiling (51 and 55 of 80, P1 makes it Plan 4's number), G5 sloppy (52 of 140: self-healing jobs win alone sloppy or careful), F1's Thornling floor (the Ranger 2.9 s). Passing with less than 3 SD headroom on seeds 1–20: G2's per-pair floor (Dark Knight + Ranger 12 of 20) and L2's level-1 ceiling (100 of 140; Greenway outcomes are per job, not random).

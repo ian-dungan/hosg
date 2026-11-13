@@ -28,15 +28,21 @@ export type Tier = 0 | 1 | 2 | 3;
 export const OFFHAND_FOR: Readonly<Record<WeaponId, OffhandKind | null>> = deepFreeze({
   blade: 'buckler', bow: 'quiver', sword: 'shield', staff: 'tome', greatsword: null, daggers: null,
 });
-/** The weapon's share of a kit's power when an off-hand is worn (the off-hand gets the rest). */
+/**
+ * The weapon's share of a kit's power when an off-hand is worn: the off-hand gets the rest, rounded to a
+ * whole number and at least 1 above the starter tier (the starter off-hand gives no power).
+ */
 export const WEAPON_POWER_SHARE = 0.75;
 
-/** A full kit's bonus over baseStats(10), per tier, for light armour (the reference type). Tunable by Task 5 only. */
+/**
+ * A full kit's bonus over baseStats(10), per tier, for light armour (the reference type). Whole numbers
+ * (owner rule: stats are whole numbers). Tunable by Task 5 only.
+ */
 export const KIT_TABLE: Readonly<Record<Tier, { readonly power: number; readonly defence: number; readonly maxHp: number; readonly special: number }>> = deepFreeze({
   0: { power: 1, defence: 2, maxHp: 10, special: 0 },
-  1: { power: 2.5, defence: 4, maxHp: 22, special: 6 },
+  1: { power: 3, defence: 4, maxHp: 22, special: 6 },
   2: { power: 4, defence: 6, maxHp: 40, special: 12 },
-  3: { power: 8.3, defence: 12, maxHp: 68, special: 14 },
+  3: { power: 9, defence: 12, maxHp: 68, special: 14 },
 });
 /** Each armour type's multipliers on its pieces' defence and health. Tunable by Task 5 only. */
 export const TYPE_MULT: Readonly<Record<ArmourType, { readonly defence: number; readonly maxHp: number }>> = deepFreeze({
@@ -253,14 +259,20 @@ function apportion(total: number): Record<ArmourSlot, number> {
   return Object.fromEntries(ARMOUR_SLOTS.map((s, i) => [s, base[i]!])) as Record<ArmourSlot, number>;
 }
 
+/** An off-hand's power at a tier: the kit's power × (1 − WEAPON_POWER_SHARE), rounded, at least 1 above the starter tier (0 for the starter). */
+export function offhandPower(tier: Tier): number {
+  return tier === 0 ? 0 : Math.max(1, Math.round(KIT_TABLE[tier].power * (1 - WEAPON_POWER_SHARE)));
+}
+
 const statCache = new Map<ItemId, Readonly<Required<Stats>>>();
 const ZERO: Readonly<Required<Stats>> = Object.freeze({ power: 0, defence: 0, maxHp: 0, focus: 0, flow: 0, guard: 0 });
 
 /**
- * A piece's own contribution (no base stats), computed from KIT_TABLE, TYPE_MULT and SLOT_WEIGHT:
- * power splits between the weapon (WEAPON_POWER_SHARE, to 0.1) and the off-hand (the rest), or all to a
- * weapon that takes none; defence (to 0.1), health and the type's special split over the six armour
- * pieces by slot weight after the type's multipliers. An unknown id gives zeros. Frozen.
+ * A piece's own contribution (no base stats), in whole numbers, computed from KIT_TABLE, TYPE_MULT and
+ * SLOT_WEIGHT: power splits between the off-hand (offhandPower) and the weapon (the rest), or all to a
+ * weapon that takes none; the armour type's multipliers make whole kit totals (defence and health
+ * rounded per type), which split over the six armour pieces by slot weight (largest remainder), as does
+ * the type's special. So a piece shows exactly what it adds. An unknown id gives zeros. Frozen.
  */
 export function itemStats(id: ItemId): Required<Stats> {
   const hit = statCache.get(id);
@@ -268,13 +280,12 @@ export function itemStats(id: ItemId): Required<Stats> {
   if (!isItemId(id)) return ZERO as Required<Stats>;
   const it = ITEMS[id]!, k = KIT_TABLE[it.tier];
   const out = { power: 0, defence: 0, maxHp: 0, focus: 0, flow: 0, guard: 0 };
-  const powerTenths = Math.round(k.power * 10);
-  const weaponTenths = Math.round(powerTenths * WEAPON_POWER_SHARE);
-  if (it.slot === 'weapon') out.power = (OFFHAND_FOR[it.weapon!] ? weaponTenths : powerTenths) / 10;
-  else if (it.slot === 'offhand') out.power = (powerTenths - weaponTenths) / 10;
+  const off = offhandPower(it.tier);
+  if (it.slot === 'weapon') out.power = OFFHAND_FOR[it.weapon!] ? k.power - off : k.power;
+  else if (it.slot === 'offhand') out.power = off;
   else {
     const slot = it.slot as ArmourSlot, m = TYPE_MULT[it.type!];
-    out.defence = apportion(Math.round(k.defence * m.defence * 10))[slot] / 10;
+    out.defence = apportion(Math.round(k.defence * m.defence))[slot];
     out.maxHp = apportion(Math.round(k.maxHp * m.maxHp))[slot];
     const sp = TYPE_SPECIAL[it.type!];
     if (sp) out[sp] = apportion(k.special)[slot];

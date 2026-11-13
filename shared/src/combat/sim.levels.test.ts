@@ -37,7 +37,8 @@ describe('levels in the simulation', { timeout: 120_000 }, () => {
     for (const [job, rs] of r) expect(meanTtk(rs), job + fightTable(r)).toBeGreaterThanOrEqual(14);
   });
   // NOT MET (deferred to live tuning): in T3 the Ranger kills a Thornling in 2.9 s on average (a full
-  // Charged Shot and a follow-up); every other job takes 4.1–7.0 s. See the Task 5 report.
+  // Charged Shot and a follow-up); every other job takes 4.06–6.33 s (whole-number stats, the same on seeds
+  // 1001–1020). See the Task 5 report.
   it.skip('F1: every job at level 10 in T3 takes at least 4.0 s on average to kill a Thornling (deferred to live tuning)', () => {
     const r = rows('thornling', { gear: 3, talents: 'sim' });
     for (const [job, rs] of r) expect(meanTtk(rs), job + fightTable(r)).toBeGreaterThanOrEqual(4);

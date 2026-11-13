@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ARMOUR_SLOTS, COSTUMES, COSTUME_IDS, DYES, GEAR_SLOTS, ITEMS, ITEM_IDS, JOB_ARMOUR, KIT_TABLE, OFFHAND_FOR, SETS, SET_IDS, SLOT_WEIGHT, TYPE_MULT,
+  ARMOUR_SLOTS, COSTUMES, COSTUME_IDS, DYES, GEAR_SLOTS, ITEMS, ITEM_IDS, JOB_ARMOUR, KIT_TABLE, OFFHAND_FOR, offhandPower, SETS, SET_IDS, SLOT_WEIGHT, TYPE_MULT,
   fits, isArmourSlot, isItemId, itemStats, kitItems, starterItems, tierSet, type ArmourType, type GearSlot, type ItemId,
 } from './items';
 import { kitFor, setCounts } from './kit';
@@ -69,12 +69,12 @@ describe('items', () => {
           def += st.defence; hp += st.maxHp; sp += st.focus + st.flow + st.guard;
           expect(st.power).toBe(0);
           expect(Number.isInteger(st.maxHp)).toBe(true);
-          expect(Math.round(st.defence * 10)).toBeCloseTo(st.defence * 10, 9);
+          expect(Number.isInteger(st.defence)).toBe(true);
         }
         const k = KIT_TABLE[tier];
-        expect(Math.abs(def - k.defence * TYPE_MULT[type].defence), `${set} defence`).toBeLessThanOrEqual(0.3 + 1e-9);
-        expect(Math.abs(hp - k.maxHp * TYPE_MULT[type].maxHp), `${set} hp`).toBeLessThanOrEqual(2);
-        expect(Math.abs(sp - k.special), `${set} special`).toBeLessThanOrEqual(2);
+        expect(def, `${set} defence`).toBe(Math.round(k.defence * TYPE_MULT[type].defence));
+        expect(hp, `${set} hp`).toBe(Math.round(k.maxHp * TYPE_MULT[type].maxHp));
+        expect(sp, `${set} special`).toBe(k.special);
         if (type === 'light' || type === 'plain') { expect(def).toBeCloseTo(k.defence, 9); expect(hp).toBe(k.maxHp); expect(sp).toBe(k.special); }
       }
       for (const job of JOB_IDS) {
@@ -82,7 +82,7 @@ describe('items', () => {
         const o = tier === 0 ? starterGear(job).offhand : kitItems(tier, job).offhand ?? undefined;
         const p = itemStats(w).power + (o ? itemStats(o).power : 0);
         expect(p, `${job} T${tier}`).toBeCloseTo(KIT_TABLE[tier].power, 9);
-        if (o) expect(itemStats(w).power).toBeCloseTo(Math.round(KIT_TABLE[tier].power * 7.5) / 10, 9);
+        if (o) expect(itemStats(o).power).toBe(offhandPower(tier));
       }
     }
     expect(SLOT_WEIGHT.chest + SLOT_WEIGHT.legs + SLOT_WEIGHT.head + SLOT_WEIGHT.hands + SLOT_WEIGHT.feet + SLOT_WEIGHT.back).toBeCloseTo(1, 9);
@@ -185,15 +185,15 @@ describe('kitFor', () => {
     expect(warrior.stats).toEqual({ power: 13, defence: 14, maxHp: 130, focus: 0, flow: 12, guard: 0 });
     expect(warrior.mods).toEqual([...SETS.cinderstep.bonus3, ...SETS.cinderstep.bonus5]);
     const t3 = kitFor({ job: 'warrior', level: 10, gear: full(3, 'warrior'), talents: [] });
-    // T3 as tuned by Plan 5 Task 5 (was 20 / 24 / 180 / 20)
-    expect(t3.stats).toMatchObject({ power: 17.3, defence: 20, maxHp: 158, flow: 14 });
+    // T3 as tuned by Plan 5 Task 5 (was 20 / 24 / 180 / 20), in whole numbers
+    expect(t3.stats).toMatchObject({ power: 18, defence: 20, maxHp: 158, flow: 14 });
     expect(t3.mods).toEqual([...SETS.tollwind.bonus3, ...SETS.tollwind.bonus5, ...ITEMS.last_bell!.named!.mods]);
     const pal = kitFor({ job: 'paladin', level: 10, gear: full(2, 'paladin'), talents: [] }).stats;
-    expect(pal.defence).toBeCloseTo(8 + 6 * TYPE_MULT.heavy.defence, 9);
+    expect(pal.defence).toBe(8 + Math.round(6 * TYPE_MULT.heavy.defence));
     expect(pal.maxHp).toBe(90 + Math.round(40 * TYPE_MULT.heavy.maxHp));
     expect(pal.guard).toBe(12);
     const wm = kitFor({ job: 'white_mage', level: 10, gear: full(2, 'white_mage'), talents: [] }).stats;
-    expect(wm.defence).toBeCloseTo(8 + 6 * TYPE_MULT.cloth.defence, 9);
+    expect(wm.defence).toBe(8 + Math.round(6 * TYPE_MULT.cloth.defence));
     expect(wm.maxHp).toBe(90 + Math.round(40 * TYPE_MULT.cloth.maxHp));
     expect(wm.focus).toBe(12);
     // 5 Mossweave pieces (and a starter back): both bonuses, in order

@@ -35,7 +35,7 @@ const tenth = (v: number) => Math.round(v * 10) / 10;
 /**
  * baseStats(level) plus every worn piece's itemStats (gear that is missing, unknown or does not fit the
  * job and slot counts as the starter piece, so an old save with no gear is the starter kit); power and
- * defence to 0.1, specials summed per type and capped at SPECIAL_CAP. Mods, in order: each set's 3-piece
+ * defence whole (every piece's stats are whole numbers), specials summed per type and capped at SPECIAL_CAP. Mods, in order: each set's 3-piece
  * bonus (≥ 3 pieces) and 5-piece bonus (≥ 5), in SET_IDS order; the named weapon's; then talentMods.
  * P1: level 10 in the starter kit with no talents is exactly STARTER_STATS (specials 0) and no mods.
  */

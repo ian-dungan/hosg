@@ -43,14 +43,16 @@ describe('the level curve', () => {
     }
   });
 
-  it('baseStats(10) is 9 / 8 / 90; baseStats(1) is 6 / 5 / 72; every step rises', () => {
+  it('baseStats(10) is 9 / 8 / 90; baseStats(1) is 6 / 5 / 72; whole numbers; hp rises every step, power and defence at levels 4, 7 and 10', () => {
     expect(baseStats(10)).toEqual({ power: 9, defence: 8, maxHp: 90 });
     expect(baseStats(1)).toEqual({ power: 6, defence: 5, maxHp: 72 });
+    expect([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((l) => baseStats(l).power)).toEqual([6, 6, 6, 7, 7, 7, 8, 8, 8, 9]);
     for (let l = 1; l < 10; l++) {
       const a = baseStats(l), b = baseStats(l + 1);
-      expect(b.power).toBeGreaterThan(a.power);
-      expect(b.defence).toBeGreaterThan(a.defence);
+      expect(b.power - a.power === (l + 1 === 4 || l + 1 === 7 || l + 1 === 10 ? 1 : 0)).toBe(true);
+      expect(b.defence - a.defence === (l + 1 === 4 || l + 1 === 7 || l + 1 === 10 ? 1 : 0)).toBe(true);
       expect(b.maxHp).toBeGreaterThan(a.maxHp);
+      expect(Number.isInteger(a.power) && Number.isInteger(a.defence)).toBe(true);
       expect(Number.isInteger(a.maxHp)).toBe(true);
     }
     expect(baseStats(0)).toEqual(baseStats(1));

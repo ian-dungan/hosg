@@ -215,7 +215,7 @@ describe('Task 6 review round 1', () => {
     await sleep(200);
     expect(adv.stats).toEqual(before);
     adv.lastCombatAt = -Infinity;
-    await waitFor(() => adv.stats.defence > before.defence, 3000);
+    await waitFor(() => adv.stats.maxHp > before.maxHp, 3000); // a T1 light chest adds hp (its whole-number defence equals the starter chest's 1)
   }, 15_000);
 
   it('P5-h: gear, talent and pick changes are refused inside a sealed boss arena', async () => {

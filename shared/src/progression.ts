@@ -65,12 +65,13 @@ export const BASE_STATS_L1: Readonly<Stats> = deepFreeze({ power: 6, defence: 5,
 export const BASE_STATS_L10: Readonly<Stats> = deepFreeze({ power: 9, defence: 8, maxHp: 90 });
 
 /**
- * The stats a job level gives before gear: power and defence rise evenly from BASE_STATS_L1 to
- * BASE_STATS_L10, maxHp evenly rounded down per level. Levels outside 1..10 clamp. A fresh object.
+ * The stats a job level gives before gear, in whole numbers: each rises evenly from BASE_STATS_L1 to
+ * BASE_STATS_L10, rounded down per level. Levels outside 1..10 clamp. A fresh object.
  */
 export function baseStats(level: number): Stats {
   const steps = clampLevel(level) - 1, n = JOB_LEVEL_CAP - 1;
-  const lerp = (a: number, b: number) => a + ((b - a) * steps) / n;
+  // whole numbers at every level (owner rule): the even rise rounded down, so level 10 is BASE_STATS_L10 exactly
+  const lerp = (a: number, b: number) => a + Math.floor(((b - a) * steps) / n + 1e-9);
   return {
     power: lerp(BASE_STATS_L1.power, BASE_STATS_L10.power),
     defence: lerp(BASE_STATS_L1.defence, BASE_STATS_L10.defence),
