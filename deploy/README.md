@@ -18,7 +18,10 @@ Shady Grove 2 runs in Docker as two containers, and it creates **only these thin
 It does not stop, change or remove any other container. Your other games' containers (`ffxi-*`,
 `sg-*`, `ac-*`) keep running. The names all start with `sg2-` (with a 2), so they never match `sg-*`.
 
-The server uses about 100 MB of memory with 100 players online, and the database about 60 MB.
+The server uses about 150–180 MB of memory at its peak with 100 players online (measured with 100 bots:
+165 MB with all of them crowded together in the grove, 176 MB with them fighting in the Greenway and
+143–169 MB with them running the Lampfall; `docs/load-test.md`), and the database about 60 MB. The
+server's container may use up to 1 GB.
 
 Every command below goes in a terminal on the server (log in with `ssh`). Lines that start with `$`
 are commands: type what follows the `$`. Lines under them show what you should see.
@@ -138,11 +141,18 @@ are commands: type what follows the `$`. Lines under them show what you should s
 
    ```
    $ curl http://localhost:2570/healthz
-   {"ok":true,"players":0,"tickHz":15,"rssMb":85,"peakRssMb":85}
+   {"ok":true,"players":0,"tickHz":15}
    ```
 
    `"ok":true` means the game server is running and its database works. `tickHz` is the number of
-   updates a second it sends to players (15 when all is well); `rssMb` is its memory in MB.
+   updates a second it sends to players (15 when all is well). Anyone on the internet can ask for
+   this, so it says no more. The full detail (memory in MB as `rssMb` and `peakRssMb`, each zone's
+   numbers, the instances, errors caught) is given only from inside the container:
+
+   ```
+   $ docker compose exec sg2-server node -e "fetch('http://127.0.0.1:2570/healthz').then((r) => r.text()).then(console.log)"
+   {"ok":true,"players":0,"tickHz":15,"zones":{...},"rssMb":85,"peakRssMb":85,...,"unhandledRejections":0,"uncaughtExceptions":0}
+   ```
 
    The server's own messages:
 
@@ -395,6 +405,18 @@ $ docker compose down -v
 $ docker image rm sg2-server
 $ sudo ufw delete allow 2570/tcp     # only if you added the rule in step 8
 ```
+
+## Not yet done
+
+- **No scheduled backups.** The database is backed up only when you run the `pg_dump` command in
+  "Back up the database" yourself. Run it before every update, and regularly.
+- **No HTTPS by default.** The first installation serves the game over plain `http://` on the IP
+  address, so passwords cross the internet unencrypted until you follow "Later: a web address with
+  HTTPS" below.
+- **The Docker image has not been built from these files as committed.** The development
+  environment where the game was finished could not build it, so the `Dockerfile` as it is now has
+  not been built and started end to end; the first `docker compose up -d --build` on the server is
+  its first real test. If it fails, the error is in the build output (`docker compose build sg2-server`).
 
 ## Later: a web address with HTTPS (shadygrove2.mooo.com)
 
