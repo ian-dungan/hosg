@@ -8,7 +8,8 @@
 // sheet). Nothing is allocated per frame.
 import { Color3, Mesh, MeshBuilder, StandardMaterial, Vector3, type ArcRotateCamera, type Scene } from '@babylonjs/core';
 import { BEACON_DIR, SKY_ISLAND } from '../world/layout';
-import { STAR_S, FLASH_S, groveStarPath } from '../world/storySky';
+import { STAR_S, groveStarPath } from '../world/storySky';
+import { RUMBLE_DELAY_S, RUMBLE_S, landingAt } from '../world/starLanding';
 import type { PlayerRig, WorldApi } from '../core/contracts';
 
 const smooth = (k: number) => k * k * (3 - 2 * k);
@@ -120,7 +121,7 @@ export function createStoryScenes(o: StoryScenesOpts): StoryScenes {
   // the camera's own place before a scene (to ease back to)
   const home = { alpha: 0, beta: 0, radius: 0, target: new Vector3() };
   const from = { alpha: 0, beta: 0, radius: 0, target: new Vector3() };
-  const look = new Vector3(), head = new Vector3(), camPos = new Vector3(), tmp = new Vector3(), fromPos = new Vector3();
+  const look = new Vector3(), head = new Vector3(), camPos = new Vector3(), tmp = new Vector3(), fromPos = new Vector3(), shaken = new Vector3();
   let cut = false;
 
   let homeFov = 0.8;
@@ -222,7 +223,16 @@ export function createStoryScenes(o: StoryScenesOpts): StoryScenes {
         bez(starPath, 1, head);
         head.y += 25; // the flash rises over the hills there: keep the horizon low in the frame
         tmp.copyFrom(head).subtractInPlace(camPos).normalize().scaleInPlace(60).addInPlace(camPos);
-        await step('hold', (dt) => { Vector3.LerpToRef(look, tmp, 1 - Math.exp(-3 * dt), look); aimFrom(camPos, look); return t >= Math.max(STAR_HOLD_S, FLASH_S); });
+        // the landing: a rumble a beat after the flash (a small, quickly fading shake; a short buzz on a phone)
+        try { navigator.vibrate?.([0, Math.round(RUMBLE_DELAY_S * 1000), 90, 60, 160]); } catch { /* not allowed: fine */ }
+        await step('hold', (dt) => {
+          Vector3.LerpToRef(look, tmp, 1 - Math.exp(-3 * dt), look);
+          const rb = landingAt(t).rumble;
+          shaken.copyFrom(camPos);
+          if (rb > 0) { shaken.x += Math.sin(t * 53) * 0.45 * rb; shaken.y += Math.sin(t * 71 + 1) * 0.3 * rb; shaken.z += Math.cos(t * 47) * 0.45 * rb; }
+          aimFrom(shaken, look);
+          return t >= Math.max(STAR_HOLD_S, RUMBLE_DELAY_S + RUMBLE_S);
+        });
       }
     } else if (!cut) {
       star = world.fallingStar();

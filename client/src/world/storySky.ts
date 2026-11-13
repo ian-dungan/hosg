@@ -11,10 +11,11 @@ import { buildSkyIsland } from './beacon';
 import { dotTex } from './life';
 import { BEACON_DIR } from './layout';
 import { GROVE_EAST_GATE, LAMPFALL_MOUTH } from '@sg2/shared';
+import { FLASH_S, LANDING_S, landingAt } from './starLanding';
 
-/** How long the streak takes, in s (the flash on the horizon follows and fades over FLASH_S). */
+export { FLASH_S };
+/** How long the streak takes, in s (the landing follows: starLanding.ts). */
 export const STAR_S = 3;
-export const FLASH_S = 1.6;
 const TRAIL_N = 40;
 /** The trail's length, as a fraction of the flight. */
 const TRAIL_FRAC = 0.32;
@@ -77,6 +78,12 @@ export function createFallingStar(scene: Scene, prefix: string): FallingStar {
   const flash = quad('star_flash', 1, new Color3(1, 0.8, 0.52));
   const band = quad('star_band', 1, new Color3(1, 0.62, 0.42));
   const pop = quad('star_pop', 1, new Color3(1, 0.9, 0.62));
+  // the landing (starLanding.ts): a white impact, a pillar of light standing up out of it, an afterglow that lingers
+  const impact = quad('star_impact', 1, new Color3(1, 1, 0.96));
+  const glow = quad('star_afterglow', 1, new Color3(1, 0.55, 0.32));
+  const pillar = quad('star_pillar', 1, new Color3(1, 0.84, 0.6));
+  pillar.m.billboardMode = Mesh.BILLBOARDMODE_Y;
+  const landing = [flash, band, impact, glow, pillar];
   // sparks shed along the way
   const sparks = new ParticleSystem(`${prefix}_star_sparks`, 160, scene);
   sparks.particleTexture = dot; sparks.emitter = new Vector3();
@@ -101,6 +108,7 @@ export function createFallingStar(scene: Scene, prefix: string): FallingStar {
       // sizes follow how far the path is from where it starts (a far Beacon gets a bigger star)
       scale = Math.max(0.6, Vector3.Distance(p.from, p.to) / 900);
       t = 0; flashT = -1;
+      for (const q of landing) q.m.setEnabled(false);
       trail.setEnabled(true); core.m.setEnabled(true); halo.m.setEnabled(true); pop.m.setEnabled(true);
       pop.m.position.copyFrom(p.from);
       return new Promise<void>((res) => done.push(res));
@@ -108,13 +116,16 @@ export function createFallingStar(scene: Scene, prefix: string): FallingStar {
     update(dt, cam) {
       if (flashT >= 0) {
         flashT += dt;
-        const f = flashT / FLASH_S;
-        if (f >= 1) { flashT = -1; flash.m.setEnabled(false); band.m.setEnabled(false); }
+        if (flashT >= LANDING_S) { flashT = -1; for (const q of landing) q.m.setEnabled(false); }
         else {
-          const up = Math.min(1, flashT / 0.18), a = up * (1 - f) ** 1.5;
-          flash.mat.alpha = a; band.mat.alpha = a;
-          flash.m.scaling.setAll((110 + 150 * Math.sqrt(f)) * scale);
-          band.m.scaling.set((420 + 380 * f) * scale, (26 + 20 * f) * scale, 1);
+          const l = landingAt(flashT), f = Math.min(1, flashT / FLASH_S);
+          flash.mat.alpha = l.flash; band.mat.alpha = Math.max(l.flash, l.afterglow * 0.7);
+          flash.m.scaling.setAll((130 + 170 * Math.sqrt(f)) * scale);
+          band.m.scaling.set((460 + 420 * Math.sqrt(Math.min(1, flashT / LANDING_S))) * scale, (30 + 22 * f) * scale, 1);
+          impact.mat.alpha = l.impact; impact.m.scaling.setAll((70 + 260 * Math.sqrt(Math.min(1, flashT / 0.45))) * scale);
+          glow.mat.alpha = l.afterglow; glow.m.scaling.set(520 * scale, 120 * scale, 1);
+          pillar.mat.alpha = l.pillar * 0.85; pillar.m.scaling.set((22 + 30 * (1 - l.pillar)) * scale, (260 + 140 * Math.min(1, flashT / 1.5)) * scale, 1);
+          pillar.m.position.y = path ? path.to.y + (130 + 70 * Math.min(1, flashT / 1.5)) * scale : pillar.m.position.y;
         }
       }
       if (t < 0 || !path) return;
@@ -152,16 +163,15 @@ export function createFallingStar(scene: Scene, prefix: string): FallingStar {
         sparks.emitRate = 0;
         // the soft flash where it came down, and a warm band along the horizon
         flashT = 0;
-        flash.m.position.copyFrom(path.to); band.m.position.copyFrom(path.to);
-        flash.m.position.y += 45 * scale; band.m.position.y += 22 * scale;
-        flash.m.setEnabled(true); band.m.setEnabled(true);
+        for (const q of landing) { q.m.position.copyFrom(path.to); q.m.setEnabled(true); q.mat.alpha = 0; }
+        flash.m.position.y += 45 * scale; band.m.position.y += 22 * scale; impact.m.position.y += 40 * scale; glow.m.position.y += 30 * scale;
         const d = done; done = [];
         for (const r of d) r();
       }
     },
     dispose() {
       sparks.dispose(false);
-      for (const m of [trail, core.m, halo.m, flash.m, band.m, pop.m]) { m.material?.dispose(); m.dispose(); }
+      for (const m of [trail, core.m, halo.m, pop.m, ...landing.map((q) => q.m)]) { m.material?.dispose(); m.dispose(); }
       const d = done; done = []; for (const r of d) r();
     },
   };
