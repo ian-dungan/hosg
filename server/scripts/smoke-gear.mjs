@@ -213,7 +213,7 @@ try {
       await a.page.keyboard.press('Digit1');
       await a.page.waitForTimeout(700);
     }
-    console.log(`     loot: ${loot.items.map((i) => DATA.names[i] ?? i).join(', ')} and ${loot.gold} gold`);
+    console.log(`     loot: ${loot.items.join(', ')} and ${loot.gold} gold`);
     await shot(a, 'a-loot');
   });
 
@@ -222,7 +222,8 @@ try {
     await a.page.keyboard.press('Escape'); // (no target: nothing more to fight)
     await a.page.waitForTimeout(8000);
     const before = await ev(a, () => ({ stats: window.__sg2net.stats, inv: window.__sg2net.inventory, job: window.__sg2net.self?.job, level: window.__sg2net.jobs?.jobs[window.__sg2net.jobs.current]?.level ?? 1 }));
-    const it = before.inv.bag.find((i) => loot.items.includes(i.item) && i.worn.length === 0);
+    // (lastLoot names the items: the bag holds them by id)
+    const it = before.inv.bag.find((i) => loot.items.includes(DATA.names[i.item]) && i.worn.length === 0);
     if (!it) throw new Error('the dropped item is not in the bag');
     await a.page.click('.sg-char-btn');
     await clickText(a, '.sg-gs-tab', 'Bag');
