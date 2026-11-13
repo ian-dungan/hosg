@@ -748,7 +748,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // (intents spend the intent budget, every other message the message budget: see guard)
     this.clock.setInterval(() => {
       this.forgetIdleAllowances();
-      void this.saveAll();
+      this.saveAll().catch((err) => this.logFailure('save', 'A periodic save failed', err));
     }, options.saveSeconds * 1000);
     if (this.inst) {
       // instances' steps spread over the tick (12 of them would otherwise all land at once): the n-th
@@ -2063,7 +2063,12 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
         this.sendTo(session.client, 'travel', into ? { zone: 'lampfall', instance: into } : { zone: exit.to });
         session.client.leave(CloseCode.CONSENTED);
       }
-    })().finally(() => this.travels.delete(sessionId));
+    })().catch((err) => {
+      // (a throw mid-travel: logged, and the adventurer is not left travelling forever)
+      this.logFailure('travel', 'A travel failed', err);
+      destination.releaseArrival(session.accountId);
+      if (session.travelling === travelling) session.travelling = undefined;
+    }).finally(() => this.travels.delete(sessionId));
     session.travelling = travelling;
     this.travels.set(sessionId, travelling);
   }
@@ -2125,9 +2130,17 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // A GM's badge: its role is read again at most every GM_ROLE_RECHECK_MS of chat (a revoked GM loses it soon).
     if (session.isGm && this.wallMs() - session.roleCheckedAt >= GM_ROLE_RECHECK_MS) {
       session.roleCheckedAt = this.wallMs();
+      // (the line runs again once the role is read, outside guard: its throws are caught here)
+      const again = () => {
+        try {
+          this.onChat(client, message);
+        } catch (err) {
+          this.logFailure('handler:chat', 'The chat handler failed', err);
+        }
+      };
       void this.store.findAccountById(session.accountId).then(
-        (a) => { session.isGm = a?.isGm === true; this.onChat(client, message); },
-        (err) => { this.logFailure('gm', 'Reading a GM role failed', err); this.onChat(client, message); },
+        (a) => { session.isGm = a?.isGm === true; again(); },
+        (err) => { this.logFailure('gm', 'Reading a GM role failed', err); again(); },
       );
       return;
     }
@@ -2951,7 +2964,10 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
       session.travelling = undefined;
       this.travel(session, { to: 'lampfall', arrive: LAMPFALL_MOUTH.arrive }, room, before, false, room.roomId);
       await session.travelling;
-    })().finally(() => { if (this.travels.get(sessionId) === entering) this.travels.delete(sessionId); });
+    })().catch((err) => {
+      this.logFailure('instance', 'Entering an instance failed', err);
+      if (session.travelling === entering) session.travelling = undefined;
+    }).finally(() => { if (this.travels.get(sessionId) === entering) this.travels.delete(sessionId); });
     session.travelling = entering;
     this.travels.set(sessionId, entering);
   }

@@ -5,6 +5,10 @@ import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
 import type { Store } from './store/types';
 import { parseTestQuest, testQuestSave } from './rooms/quests';
+import { installProcessGuard } from './processGuard';
+
+// An unhandled rejection or uncaught exception is logged and counted (/healthz), never the end of the process.
+installProcessGuard();
 
 function fail(message: string): never {
   console.error(`Shady Grove 2 server: ${message}`);

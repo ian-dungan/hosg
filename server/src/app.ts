@@ -19,6 +19,7 @@ import { gmProcess } from './gm/commands';
 import type { Store } from './store/types';
 import { Parties } from './party/parties';
 import { Presence } from './rooms/presence';
+import { processFaults } from './processGuard';
 import { instanceRoomFor, zoneRoomFor, type InstanceTimings, type ZoneRoom, type ZoneRoomOptions } from './rooms/ZoneRoom';
 
 export interface AppOptions {
@@ -241,7 +242,7 @@ export function createApp(opts: AppOptions): App {
         // Memory in MB: resident now, and the most this process has held since it started (maxRSS is in KB).
         const rssMb = Math.round(process.memoryUsage.rss() / 2 ** 20);
         const peakRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-        res.json({ ok: true, ...stats(), parties: parties.size, rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms, event: gm.event });
+        res.json({ ok: true, ...stats(), parties: parties.size, rssMb, peakRssMb, eventLoopP99Ms: loopP99Ms, event: gm.event, ...processFaults });
       });
       if (opts.clientDir) app.use(express.static(opts.clientDir));
     },
