@@ -80,13 +80,15 @@ async function settle(p, quiet = 3000, ms = 60_000) {
     await p.page.waitForTimeout(700);
   }
 }
-/** Taps story spot `id` on A's screen (where screenOf puts it, `up` m above the ground). */
+/** The plaque itself: on the statue's plinth (client world/storyNpcs.ts PLAQUE), not its talk spot on the ground in front. */
+const PLAQUE_AT = { x: 0, y: 1.42, z: -2.62 };
+/** Taps story spot `id` on A's screen (where screenOf puts it, `up` m above the ground; the plaque where it hangs). */
 async function tapSpot(p, id, up = 1) {
-  const at = await waitFor(p, ([sid, h]) => {
+  const at = await waitFor(p, ([sid, h, pl]) => {
     const s = window.__sg2net.story.find((v) => v.id === sid);
-    const pt = s && window.__sg2.screenOf(s.x, (window.__sg2.world.groundAt(s.x, s.z) ?? 0) + h, s.z);
+    const pt = sid === 'plaque' ? window.__sg2.screenOf(pl.x, pl.y, pl.z) : s && window.__sg2.screenOf(s.x, (window.__sg2.world.groundAt(s.x, s.z) ?? 0) + h, s.z);
     return pt && pt.x > 4 && pt.y > 4 && pt.x < innerWidth - 4 && pt.y < innerHeight - 4 ? pt : null;
-  }, [id, up], WAIT_MS, `${id} never came on screen`);
+  }, [id, up, PLAQUE_AT], WAIT_MS, `${id} never came on screen`);
   await p.page.touchscreen.tap(at.x, at.y);
 }
 
