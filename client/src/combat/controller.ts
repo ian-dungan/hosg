@@ -36,6 +36,7 @@ import type { Enemies } from '../net/enemies';
 import type { Remotes } from '../net/remotes';
 import { windupElapsedS, type EnemyStateView, type PlayerView, type ZoneRoom } from '../net/session';
 import { ABILITY_DEFS } from './abilityDefs';
+import { mouthHintText } from './mouthHint';
 import { FOCUS_RANGE, aimHint, createAllyFocus, createFocusRing, createPartyRings, type AllyPos } from './allyFocus';
 import { article, jobBoardView, roleLabel } from '../hud/jobs';
 import { GUILD_BOARD_EID, GUILD_BOARD_REACH } from '../world/guildBoard';
@@ -1013,9 +1014,7 @@ export function createCombat(o: CombatOpts): CombatController {
       else {
         const v = party?.view;
         const mates = v ? v.members.filter((m) => m.name !== myName()).map((m) => m.name) : [];
-        mouthHint = mates.length
-          ? `The Lampfall: a private dungeon for your party (you, ${mates.join(', ')}). Party members who walk in join you.`
-          : 'The Lampfall: a private dungeon. Alone unless you form a party first (tap an adventurer, then Invite).';
+        mouthHint = mouthHintText(mates, jobBadge.level);
       }
     }
     if (!promptAction && mouthNear && o.zone === 'greenway' && !self?.inCombat && !dead) { promptAction = { kind: 'mouth' }; promptText = 'Enter the Lampfall'; }
