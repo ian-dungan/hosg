@@ -1766,7 +1766,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   /** Loot for an adventurer whose session ended before its write: a queue of its own on the stored truth (the kill keys keep it once). */
   private offlineLoot(session: Session, awards: LootAward[]) {
     const jobs = session.jobs;
-    const queue = this.makeQueue(session.queue.snapshot, new WriteLock(), session.adventurerId, session.accountId, () => jobs);
+    // (the session's own lock: its last save in flight lands first, so neither write reads around the other)
+    const queue = this.makeQueue(session.queue.snapshot, session.lock, session.adventurerId, session.accountId, () => jobs);
     queue.markStale();
     const flight = queue.push({
       retries: LOOT_STALE_RETRIES,

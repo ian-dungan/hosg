@@ -77,3 +77,19 @@ describe('unhandled rejections in the rooms (final review I1)', () => {
     await waitFor(() => grove.stepErrors > before, 3000);
   }, 15_000);
 });
+
+describe('offline loot (final review M1)', () => {
+  it("is written under the session's own write lock (after its save in flight), not a fresh one", async () => {
+    server = await startServer();
+    const a = await accountFor(server.store, 'Looter');
+    const { room } = await joinGrove(server.url, a.token);
+    const grove = serverRoom(room) as any;
+    const s = session(room);
+    const locks: unknown[] = [];
+    const make = grove.makeQueue;
+    grove.makeQueue = function (this: unknown, ...args: unknown[]) { locks.push(args[1]); return make.apply(this, args); };
+    grove.offlineLoot(s, []);
+    expect(locks).toEqual([s.lock]);
+    expect(locks[0]).toBe(s.lock);
+  }, 15_000);
+});
