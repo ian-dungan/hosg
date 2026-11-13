@@ -1,15 +1,16 @@
 // The game server: the accounts API, health check and client files over Express, and one Colyseus room per zone, on one port.
 import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
-import type { Server as HttpServer } from 'node:http';
+import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import express from 'express';
-import { Server, matchMaker } from '@colyseus/core';
+import { ErrorCode, Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import {
-  AUTO_RESPAWN_S, INSTANCE_EMPTY_S, INSTANCE_MAX_S, MAX_INSTANCES, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, SAVE_ZONE_IDS, jobSwitchAt, zoneDef,
+  AUTO_RESPAWN_S, INSTANCE_EMPTY_S, JOIN_RATE_PER_MIN, INSTANCE_MAX_S, MAX_INSTANCES, MAX_PLAYERS, RECONNECT_SECONDS, SAVE_SECONDS, SAVE_ZONE_IDS, jobSwitchAt, zoneDef,
   type CheckpointId, type SaveZoneId, type ZoneDef, type ZoneId,
 } from '@sg2/shared';
+import { createLimiter, requestAddress } from './auth/rateLimit';
 import { authRouter } from './auth/routes';
 import { leaderboardRouter } from './routes/leaderboard';
 import { lookRouter } from './routes/look';
@@ -27,6 +28,8 @@ export interface AppOptions {
   reconnectSeconds?: number;
   saveSeconds?: number;
   authRatePerMinute?: number;
+  /** Matchmake calls (joins, travels included) per address a minute (SG2_JOIN_RATE_PER_MIN; default JOIN_RATE_PER_MIN). */
+  joinRatePerMinute?: number;
   /** Reverse proxies in front of the server whose X-Forwarded-For is believed (Express's `trust proxy` hop count); none when unset. */
   trustProxy?: number;
   /** Test-only: smaller zones (default MAX_PLAYERS in each zone's room). */
@@ -89,6 +92,9 @@ export interface App {
   /** Opens or shuts the exits from `from` to `to`, at once, for every adventurer (gates are server state). */
   setExitOpen(from: ZoneId, to: ZoneId, open: boolean): void;
 }
+
+/** A matchmake call refused by the per-address limit (HTTP 429). */
+const REASON_JOIN_RATE = 'Too many joins from your address, try again in a minute';
 
 // Room messages are small; this leaves room for a full chat line (CHAT_MAX characters of any script).
 const MAX_WS_PAYLOAD = 16 * 1024;
@@ -305,6 +311,21 @@ export function createApp(opts: AppOptions): App {
         stopWatching.abort();
         for (const print of printers) http.on('error', print);
       }
+      // Matchmake calls are served by Colyseus's own request listener (no Express middleware sees them):
+      // they are limited per address here, in front of every listener (final review C1).
+      const joinLimiter = createLimiter(opts.joinRatePerMinute ?? JOIN_RATE_PER_MIN);
+      const handlers = http.listeners('request') as ((req: IncomingMessage, res: ServerResponse) => void)[];
+      http.removeAllListeners('request');
+      http.on('request', (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method === 'POST' && req.url?.startsWith('/matchmake/')
+          && !joinLimiter.hit(requestAddress(req.socket.remoteAddress, req.headers['x-forwarded-for'], opts.trustProxy))) {
+          const body = JSON.stringify({ code: ErrorCode.APPLICATION_ERROR, error: REASON_JOIN_RATE });
+          res.writeHead(429, { 'content-type': 'application/json', 'access-control-allow-origin': req.headers.origin ?? '*' });
+          res.end(body);
+          return;
+        }
+        for (const handle of handlers) handle.call(http, req, res);
+      });
       // Each zone's one room, made up front so joins and travellers find it (a join that got in first already made it).
       for (const id of SAVE_ZONE_IDS) if (!rooms.has(id)) await matchMaker.createRoom(id, {});
     },

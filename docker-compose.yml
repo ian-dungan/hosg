@@ -16,6 +16,8 @@ services:
       DATABASE_URL: postgres://sg2:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@sg2-db:5432/sg2
       # Logins per IP address a minute. Raise it only for a load test (docs/load-test.md).
       SG2_AUTH_RATE_PER_MIN: ${SG2_AUTH_RATE_PER_MIN:-10}
+      # Joins (matchmake calls) per IP address a minute; empty: 600. Raise it only for a load test.
+      SG2_JOIN_RATE_PER_MIN: ${SG2_JOIN_RATE_PER_MIN:-}
       # Set to 1 only behind Caddy, with SG2_PORT=127.0.0.1:2570 (deploy/README.md, "a web address").
       SG2_TRUST_PROXY: ${SG2_TRUST_PROXY:-}
     depends_on:

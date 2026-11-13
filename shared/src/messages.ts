@@ -29,6 +29,8 @@ export const REASON_GROVE_FULL = 'Shady Grove is full, try again soon';
  * where it is and joins that zone's room instead.
  */
 export const REASON_ELSEWHERE = 'Your adventurer is somewhere else';
+/** A matchmake refused because the same account's previous one has not opened its socket yet (at most one pending). */
+export const REASON_JOINING = 'Already joining, try again in a few seconds';
 /** Walking into the crater mouth mid-fight (corrected, with this notice). */
 export const REASON_IN_COMBAT = 'Finish the fight before you climb down into the Lampfall';
 /** Travel through an open exit that could not be saved (the adventurer stays where it was). */

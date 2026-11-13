@@ -9,6 +9,14 @@ export const MAX_PLAYERS = 100;
 /** How long a dropped adventurer stays in the world while the client reconnects. */
 export const RECONNECT_SECONDS = 30;
 /**
+ * How long a zone room keeps a seat reserved by matchmaking for the socket that should take it (s). A
+ * client opens its socket right after the matchmake answer; an account has at most one such seat
+ * pending at a time (a flood of matchmake calls cannot hold a zone's seats).
+ */
+export const SEAT_RESERVATION_S = 5;
+/** Matchmake calls (joins, including travels) per address a minute by default (SG2_JOIN_RATE_PER_MIN). */
+export const JOIN_RATE_PER_MIN = 600;
+/**
  * The client's automatic reconnection (the Colyseus SDK's `room.reconnection` settings): retry at
  * once however long the room has been up, at least every 2 s, until RECONNECT_SECONDS runs out
  * (the client gives up then, so the retry count is never the limit).

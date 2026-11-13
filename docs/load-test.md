@@ -30,6 +30,13 @@ With `--fight` they fight in the Greenway with the shared brain (see "Fighting b
    Do not leave `SG2_AUTH_RATE_PER_MIN` raised on a public server: the limit is what slows down
    password guessing.
 
+   Joins (every matchmake call: a sign-in's first join, each travel, each instance entry) are
+   limited too, per address: `SG2_JOIN_RATE_PER_MIN`, 600 a minute by default, which covers 100
+   bots joining at once and travelling. A larger or longer bot run from one address that sees
+   `Too many joins from your address` raises it (for example `SG2_JOIN_RATE_PER_MIN=5000`).
+   Separately, an account may have only one join pending (matchmade, socket not yet open) at a
+   time; a seat reserved by matchmaking is held 5 s (`SEAT_RESERVATION_S`).
+
 2. In a second terminal:
 
    ```sh

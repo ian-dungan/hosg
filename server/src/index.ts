@@ -1,5 +1,5 @@
 // Starts the Shady Grove 2 server from environment variables.
-import { GOLD_MAX, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type QuestId, type ZoneId } from '@sg2/shared';
+import { GOLD_MAX, JOIN_RATE_PER_MIN, LAMPFALL_MOUTH, SAVE_ZONE_IDS, isSaveZoneId, isZoneId, zoneDef, type CampSpawn, type CheckpointId, type QuestId, type ZoneId } from '@sg2/shared';
 import { createApp } from './app';
 import { createMemoryStore } from './store/memory';
 import { createPgStore } from './store/pg';
@@ -176,6 +176,7 @@ const exitsOpen = openExits();
 const dummyZones = testDummy();
 const trustProxy = trustProxyHops();
 const authRatePerMinute = positiveInt('SG2_AUTH_RATE_PER_MIN', 10);
+const joinRatePerMinute = positiveInt('SG2_JOIN_RATE_PER_MIN', JOIN_RATE_PER_MIN);
 const jwtSecret = process.env.SG2_JWT_SECRET;
 if (!jwtSecret) fail('SG2_JWT_SECRET is not set. Set it to a random string of at least 32 characters.');
 if (jwtSecret.length < 32) fail(`SG2_JWT_SECRET is too short (${jwtSecret.length} characters); use at least 32.`);
@@ -197,7 +198,7 @@ if (process.env.SG2_STORE === 'memory') {
 }
 
 const app = createApp({
-  store, jwtSecret, clientDir, authRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones, lootAlways,
+  store, jwtSecret, clientDir, authRatePerMinute, joinRatePerMinute, trustProxy, openExits: exitsOpen, zones: dummyZones, lootAlways,
   ...(instanceStart ? { instances: { startAt: instanceStart } } : {}),
 });
 try {

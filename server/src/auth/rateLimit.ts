@@ -29,6 +29,21 @@ export function createLimiter(perMinute: number): { hit(key: string): boolean } 
 /** The address a request came from (as express sees it: behind a trusted proxy, the client's). */
 export const ipOf = (req: { ip?: string; socket: { remoteAddress?: string } }): string => req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
+/**
+ * The address a raw HTTP request came from, as Express's numeric `trust proxy` reads it: with `hops`
+ * trusted proxies in front, the hop that many places back along X-Forwarded-For (the client's address
+ * as the outermost trusted proxy saw it); without, the socket's own address. A client's own
+ * X-Forwarded-For entries (further back) and X-Real-IP are never believed.
+ */
+export function requestAddress(remoteAddress: string | undefined, forwardedFor: string | string[] | undefined, hops: number | undefined): string {
+  const addrs = [remoteAddress ?? 'unknown'];
+  if (hops) {
+    const raw = Array.isArray(forwardedFor) ? forwardedFor.join(',') : forwardedFor ?? '';
+    addrs.push(...raw.split(',').map((s) => s.trim()).filter((s) => s !== '').reverse());
+  }
+  return addrs[Math.min(hops ?? 0, addrs.length - 1)]!;
+}
+
 export function rateLimit(perMinute: number, message: string): RequestHandler {
   const limiter = createLimiter(perMinute);
   return (req, res, next) => {

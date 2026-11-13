@@ -37,7 +37,9 @@ import {
   parsePartyOp,
   SPAWN,
   REASON_ELSEWHERE,
+  REASON_JOINING,
   REASON_NAME_FIRST,
+  SEAT_RESERVATION_S,
   REASON_SIGNED_IN_ELSEWHERE,
   REASON_TRAVEL_FAILED,
   STEP_SLACK,
@@ -696,6 +698,8 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
     // Admission is decided by canAdmit, so Colyseus must never see the room as full (it would open
     // a second one): leave room for an account's new session joining before its old one is kicked.
     this.maxClients = this.maxPlayers * 2;
+    // A reserved seat counts toward maxClients until its socket connects: kept short (final review C1).
+    this.seatReservationTimeout = SEAT_RESERVATION_S;
     this.reconnectSeconds = this.inst ? this.inst.t.reconnectS : options.reconnectSeconds;
     this.travelKeepMs = options.reconnectSeconds * 1000;
     this.accounts = options.presence;
@@ -757,6 +761,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
   async onJoin(client: Client) {
     const { accountId, isGm } = client.auth as JoinAuth;
     const sessionId = client.sessionId;
+    this.accounts.endJoin(accountId); // the matchmade seat was taken
     // Checked again here because two joins can pass onAuth at the same time.
     if (!this.canAdmit(accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(this.zone.id));
     // Claim the account before any await, in every room at once, so a later join of the same account
@@ -3929,11 +3934,19 @@ export function zoneRoomFor(options: ZoneRoomOptions, jwtSecret: string): typeof
     static async onAuth(_token: string, joinOptions: unknown, _context: AuthContext) {
       const auth = await authenticate(options.store, jwtSecret, joinOptions);
       if (!auth) return false;
-      const adventurer = await options.store.getOrCreateAdventurer(auth.accountId);
-      if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
-      if (adventurer.zone !== zone) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
-      const room = options.rooms.get(zone);
-      if (room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(zone));
+      // At most one matchmade seat pending per account (marked before any further await, so a burst of
+      // calls with one token gets one seat): the room's join clears it, else it lapses with the seat.
+      if (!options.presence.beginJoin(auth.accountId, SEAT_RESERVATION_S * 1000)) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_JOINING);
+      try {
+        const adventurer = await options.store.getOrCreateAdventurer(auth.accountId);
+        if (adventurer.name === null) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_NAME_FIRST);
+        if (adventurer.zone !== zone) throw new ServerError(ErrorCode.APPLICATION_ERROR, REASON_ELSEWHERE);
+        const room = options.rooms.get(zone);
+        if (room && !room.canAdmit(auth.accountId)) throw new ServerError(ErrorCode.APPLICATION_ERROR, zoneFullReason(zone));
+      } catch (err) {
+        options.presence.endJoin(auth.accountId);
+        throw err;
+      }
       return auth;
     }
   };

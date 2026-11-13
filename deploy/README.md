@@ -460,7 +460,8 @@ and passes everything, the game's live connection too, on to the game server.
    $ docker compose up -d
    ```
 
-   `SG2_TRUST_PROXY=1` makes the login limit count each player's own address, which Caddy passes on,
+   `SG2_TRUST_PROXY=1` makes the login limit (and the join limit, 600 joins a minute,
+   `SG2_JOIN_RATE_PER_MIN`) count each player's own address, which Caddy passes on,
    instead of Caddy's (otherwise all players together would share one limit of 10 sign-ins a
    minute). `SG2_PORT=127.0.0.1:2570` is not optional: with the setting on and the port still open
    to the internet, anyone could connect directly with a made-up address and dodge the login limit.

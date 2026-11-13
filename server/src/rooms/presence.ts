@@ -108,6 +108,26 @@ export class Presence {
     return this.invFlights.get(accountId) ?? Promise.resolve();
   }
 
+  /**
+   * Matchmade joins not taken yet, per account, and until when (ms): a zone room's seat reserved for a
+   * socket that has not connected. At most one per account (final review C1: a flood of matchmake calls
+   * with one token would otherwise hold every seat of a zone for the reservation time).
+   */
+  private readonly pendingJoins = new Map<string, number>();
+  /** Marks a matchmade join pending for `forMs`; false (nothing marked) when one is pending already. */
+  beginJoin(accountId: string, forMs: number): boolean {
+    const now = this.now();
+    if ((this.pendingJoins.get(accountId) ?? -Infinity) > now) return false;
+    // forget expired marks now and then, so the map never grows with every account ever seen
+    if (this.pendingJoins.size > 1000) for (const [id, until] of this.pendingJoins) if (until <= now) this.pendingJoins.delete(id);
+    this.pendingJoins.set(accountId, now + forMs);
+    return true;
+  }
+  /** The pending join was taken (the socket joined) or refused after it was marked. */
+  endJoin(accountId: string): void {
+    this.pendingJoins.delete(accountId);
+  }
+
   /** The session that holds the account now, if any (a copy). */
   get(accountId: string): Claim | undefined {
     const claim = this.claims.get(accountId);
