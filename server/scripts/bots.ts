@@ -55,6 +55,7 @@
 //   npm run bots -w server -- --url http://localhost:2570 --count 100 --seconds 60 [--zone greenway] [--stand] [--warmup 40] [--cluster 30] [--fight [--cycle] [--jobs mixed]] [--assist <name>]
 // The server's auth limiter allows 10 logins per IP a minute by default: start it with a higher
 // SG2_AUTH_RATE_PER_MIN (e.g. 1000) for a bot run.
+import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { Client, type Room } from '@colyseus/sdk';
 import {
@@ -135,6 +136,23 @@ import {
   type InstanceView,
   type PartyView,
   type Skill,
+  COSTUMES,
+  ITEMS,
+  QUESTS,
+  STALL_REACH,
+  TOWN_STALLS,
+  fits,
+  kitItems,
+  prng,
+  questGoal,
+  randomLook,
+  type CostumeId,
+  type GearSlot,
+  type InventoryView,
+  type QuestGoal,
+  type QuestId,
+  type QuestsView,
+  type StallId,
 } from '@sg2/shared';
 
 const MIN_MEAN_HZ = 14;
@@ -290,8 +308,17 @@ const { values } = parseArgs({
     warden: { type: 'string' },
     join: { type: 'string' },
     skill: { type: 'string' },
+    looks: { type: 'boolean', default: false },
+    gear: { type: 'boolean', default: false },
+    quest: { type: 'boolean', default: false },
   },
 });
+// --quest implies fighting (in the Greenway when a step needs it); --gear runs with --fight only
+if (values.quest) values.fight = true;
+if (values.gear && !(values.fight || values.cycle)) {
+  console.error('--gear runs with --fight (or --cycle, or --quest)');
+  process.exit(2);
+}
 if (values.jobs !== undefined && (values.jobs !== 'mixed' || !(values.fight || values.cycle))) {
   console.error('--jobs takes only "mixed", and only with --fight (or --cycle)');
   process.exit(2);
@@ -401,6 +428,8 @@ interface Health {
   zones?: Record<string, { players: number; tickHz: number; tickMs?: number; patchMs?: number }>;
   /** Lampfall instances: open now, adventurers inside, the worst instance's step p95 (ms). */
   instances?: { open: number; players: number; tickMsP95Max: number };
+  /** Plan 5: inventory (and quest) writes a second over the last window. */
+  invWritesPerS?: number;
 }
 
 async function health(): Promise<Health> {
@@ -561,6 +590,44 @@ function findEnemy(room: Room<any, any>, eid: number): any {
   let found: any = null;
   room.state.enemies?.forEach((e: any) => { if (e.eid === eid) found = e; });
   return found;
+}
+
+// ───────── --looks, --gear, --quest (Plans 5 and 6) ─────────
+const looksMode = values.looks;
+const gearMode = values.gear;
+const questMode = values.quest;
+/** A random client operation id (OP_ID: 12–40 of A–Z a–z 0–9 _ -), new for every operation. */
+const newOpId = () => randomBytes(15).toString('base64url');
+/** --gear: every this long, a fighting bot (out of combat) takes a worn piece off and puts it on again. */
+const GEAR_SWAP_MS = 60_000;
+/** An operation or quest act with no answer is sent again (the same op id: a dup is answered with the truth) after this. */
+const OP_RETRY_MS = 5000;
+const QUEST_RETRY_MS = 3000;
+/** The cheapest Tailor costume a --gear bot buys when it can (and wears). */
+const BOT_COSTUME: CostumeId = 'straw_sunhat';
+/** --quest: a duo leader gives up on its party kill (and skips the optional step) after this long at the step. */
+const DUO_WAIT_MS = 90_000;
+/** --quest: a fighting step whose acts are still missing after this long gets a nudge (a dodge in a fight, a finisher). */
+const NUDGE_AFTER_MS = 60_000;
+/** Refusals that are no failure: 'combat' and 'busy' (the bots try out of combat; a fight can start meanwhile). */
+const GEAR_OK_REFUSALS = ['combat', 'busy'];
+/** questRefused reasons that are no failure: a bot that raced its own walk, a busy moment, a full bag. */
+const QUEST_OK_REFUSALS = ['where', 'busy', 'bag-full'];
+const MAX_INV_WRITES_P95 = 40;
+const gearStats = {
+  purchases: 0, costumes: 0, wears: 0, sales: 0, equips: 0, unequips: 0, swaps: 0, talents: 0, drops: 0, lootGold: 0, saleGold: 0,
+  refused: {} as Record<string, number>, gearCodeChanges: 0,
+};
+const questStats = { acts: 0, done: 0, scenes: {} as Record<string, number>, refused: {} as Record<string, number>, completed: {} as Record<string, number>, gold: 0, items: 0, nudges: 0, invites: 0 };
+/** Where a bot stands to use a stall (in front of its booth, on walkable ground). */
+function stallSpot(id: StallId): Vec2 {
+  const s = TOWN_STALLS[id];
+  const pass = passableIn('grove');
+  for (const k of [1.6, 1.2, 2.2, 0.8, 0]) {
+    const p = { x: s.x + Math.sin(s.facing) * k, z: s.z + Math.cos(s.facing) * k };
+    if (pass(p.x, p.z)) return p;
+  }
+  return { x: s.x, z: s.z };
 }
 
 class Bot {
@@ -762,10 +829,56 @@ class Bot {
   deathsInside = 0;
   revivedInside = 0;
 
+  // --looks, --gear, --quest
+  /** The look code and gear code the room sent for each engine id (its `looks` messages), this room only. */
+  /** The zone it first joined. */
+  startZone: ZoneId | null = null;
+  seenLooks = new Map<number, string>();
+  seenGear = new Map<number, string>();
+  /** The last `inventory` view (kept across rooms), and the ledger checked against each new one. */
+  inv: InventoryView | null = null;
+  private ledgerLootGold = 0;
+  private ledgerQuestGold = 0;
+  private lootUids = new Set<number>();
+  private questItems: string[] = [];
+  private soldUids = new Set<number>();
+  private unequipSent = false;
+  private everUids = new Set<number>();
+  /** Ledger mismatches (the first few in full), uids seen again after they went, resyncs after a travel (offline loot). */
+  ledgerBad: string[] = [];
+  uidRepeats = 0;
+  ledgerResyncs = 0;
+  private invSinceJoin = 0;
+  /** --gear: what it shops for in the grove ('done': nothing more), the op in flight, the piece it bought. */
+  private shop: 'smithy' | 'tailor' | 'done' = gearMode ? 'smithy' : 'done';
+  private shopOp: { key: string; msg: Record<string, unknown>; at: number } | null = null;
+  private boughtUid: number | null = null;
+  private swapAt = 0;
+  private opWaitUntil = 0;
+  private talentRows: (0 | 1 | 2)[] = [];
+  private talentAt = 0;
+  /** --quest: the last `quests` view, the act in flight, quests it dropped, the fight it is on for a step. */
+  quests: QuestsView | null = null;
+  private questAct: { key: string; at: number } | null = null;
+  private dropped: QuestId[] = [];
+  private questKinds: readonly string[] | 'any' | null = null;
+  private questFightSince: number | null = null;
+  private questFightKey = '';
+  private hopping = false;
+  private lastHopAt = 0;
+  private duoSince: number | null = null;
+  private inviteAt = 0;
+  /** --quest duo pairs: the leader (ri % 8 === 1) invites the next bot to a party at the optional duo step. */
+  readonly questLead: boolean;
+  readonly questFollow: boolean;
+  get inParty(): boolean { return (this.partyView?.members.length ?? 0) >= 2; }
+
   constructor(readonly index: number) {
     // party bots come first (--dungeon, --warden); the Greenway bots' roles count from the first bot after them
     this.ri = index - PARTY_BOTS;
     this.plan = partyPlans.find((p) => p.members.includes(index)) ?? null;
+    this.questLead = questMode && !this.plan && this.ri % 8 === 1 && index + 1 < count;
+    this.questFollow = questMode && !this.plan && this.ri % 8 === 2;
     this.careful = this.plan ? this.plan.skill !== 'careless' && !this.plan.careless.includes(index) : this.ri % 4 !== 3;
     this.hunter = fight && !this.plan && HUNTERS.includes(this.ri);
     this.predictor = fight && !this.plan && this.ri % 5 === PREDICTOR;
@@ -821,6 +934,12 @@ class Bot {
     }
     this.name = body.name ?? `bot ${this.index}`;
     this.token = body.token;
+    if (looksMode) {
+      // the creator's one free visit, with a random look seeded by its index (a guest has no name to give)
+      const look = randomLook(prng(this.index + 1));
+      const r = await fetch(`${url}/api/look`, { method: 'POST', headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ look }) });
+      if (!r.ok) throw new Error(`POST /api/look failed: ${r.status} ${await r.text()}`);
+    }
     await this.connect(fight ? await this.askZone() : zoneId);
   }
 
@@ -846,6 +965,7 @@ class Bot {
   /** Joins `zone`'s room and waits until this adventurer is in its state. */
   private async connect(zone: ZoneId, instance: string | null = null) {
     this.zone = zone;
+    this.startZone ??= zone;
     // inside the Lampfall a shut lamp-gate is a wall, as the server's own surface has it (gatedSurface over the state's gates)
     this.surface = zone === 'lampfall' ? gatedSurface(zoneDef('lampfall').surface, () => (this.room?.state?.gates as number | undefined) ?? 0) : zoneDef(this.zone).surface;
     this.ack = 0; // each session numbers its displacements from 0
@@ -871,6 +991,40 @@ class Bot {
       if ((mixed || this.plan) && !this.switchCounted && this.jobAskedAt > -Infinity && m.current === this.loadout.job) { this.switchCounted = true; mixedStats.switches++; }
     });
     room.onMessage('fx', (m: S2C['fx']) => this.onFx(m));
+    this.seenLooks = new Map();
+    this.seenGear = new Map();
+    this.invSinceJoin = 0;
+    room.onMessage('looks', (m: S2C['looks']) => {
+      for (const [eid, look, gearCode] of m.a) {
+        const before = this.seenGear.get(eid);
+        if (before !== undefined && before !== gearCode) gearStats.gearCodeChanges++;
+        this.seenLooks.set(eid, look);
+        this.seenGear.set(eid, gearCode);
+      }
+    });
+    room.onMessage('loot', (m: S2C['loot']) => {
+      gearStats.drops += m.items.length;
+      gearStats.lootGold += m.gold + m.soldFor;
+      this.ledgerLootGold += m.gold + m.soldFor;
+      for (const it of m.items) this.lootUids.add(it.uid);
+    });
+    room.onMessage('inventory', (m: S2C['inventory']) => this.onInventory(m));
+    room.onMessage('invRefused', (m: S2C['invRefused']) => {
+      bump(gearStats.refused, `${m.op} ${m.reason}`);
+      this.shopOp = null; // asked again later, with a new op id (the next inventory shows what is true)
+      this.opWaitUntil = performance.now() + 2000;
+    });
+    room.onMessage('levelUp', (m: S2C['levelUp']) => { if (m.talentRow !== null && gearMode) this.talentRows.push(m.talentRow); });
+    room.onMessage('quests', (m: S2C['quests']) => { this.quests = m; this.questAct = null; });
+    room.onMessage('questDone', (m: S2C['questDone']) => {
+      questStats.done++;
+      if (m.scene) bump(questStats.scenes, m.scene);
+      if (m.questDone) bump(questStats.completed, m.quest);
+      questStats.gold += m.gold;
+      this.ledgerQuestGold += m.gold;
+      if (m.item) { questStats.items++; this.questItems.push(m.item); }
+    });
+    room.onMessage('questRefused', (m: S2C['questRefused']) => { bump(questStats.refused, `${m.act} ${m.reason}`); });
     room.onMessage('credit', (m: S2C['credit']) => {
       this.kills++;
       killsByKind[m.kind] = (killsByKind[m.kind] ?? 0) + 1;
@@ -977,6 +1131,10 @@ class Bot {
     room.onMessage('partyInvite', (m: S2C['partyInvite']) => {
       // a member accepts its own leader's invite (and only that)
       const leader = this.plan?.leaderName ?? (this.plan && this.plan.members[0] !== this.index ? bots[this.plan.members[0]].name : null);
+      if (this.questFollow && !this.plan && m.from.toLowerCase() === bots[this.index - 1]?.name.toLowerCase()) {
+        this.room.send('party', { op: 'accept', partyId: m.partyId });
+        return;
+      }
       if (this.plan && leader !== null && m.from.toLowerCase() === leader.toLowerCase()) {
         if (joinName !== null) console.log(`join: accepted ${m.from}'s invite`);
         this.room.send('party', { op: 'accept', partyId: m.partyId });
@@ -1353,6 +1511,9 @@ class Bot {
       const d = dist(e, this.body);
       if (e.eid === this.sentTarget && d <= TARGET_RANGE + 5) current = e;
       if (e.target === mine && d <= TARGET_RANGE) attacker = e;
+      // --quest: a step's kinds only (its current target and what attacks it whatever the kind)
+      const qk = this.questKinds;
+      if (qk && qk !== 'any' && !qk.includes(e.kind) && e.eid !== this.sentTarget && e.target !== mine) return;
       // a hunter takes only an elite (whoever else is on it); the others leave elites to one adventurer
       if (this.hunter ? !elite : (claimed.get(e.eid) ?? 0) >= (elite ? FIGHTERS_PER_ELITE : FIGHTERS_PER_ENEMY)) return;
       // a White Mage leading a Black Mage takes the toughest enemy in reach (its partner needs a fight long enough for
@@ -1470,6 +1631,9 @@ class Bot {
         this.atBoard = true;
       }
       if (!this.jobReady) return this.askJob(now);
+      // --gear: the Smithy and the Tailor first (and a sale on the way back from a death); --quest: its quest's steps
+      if (this.gearInGrove(dt, now)) return;
+      if (this.questStep(this.agedSelf(now) ?? this.freshSelf(), dt, now)) return;
       this.maybeSprint(dist(GROVE_EAST_GATE, this.body), this.agedSelf(now) ?? this.freshSelf(), now);
       this.walkRoute(GROVE_EAST_GATE, dt, now, 1, true);
       return;
@@ -1490,11 +1654,35 @@ class Bot {
       this.room.send('job', { job: JOB_IDS[(this.index + 1) % JOB_IDS.length] });
     }
 
+    if (questMode || gearMode) {
+      const sv = this.agedSelf(now) ?? this.freshSelf();
+      if (this.questStep(sv, dt, now)) return;
+      this.gearSwap(sv, now);
+    }
     const target = this.chooseEnemy();
     const targetId: number | null = target ? target.eid : null;
     if (targetId !== this.sentTarget) {
       this.sentTarget = targetId;
       this.room.send('target', { id: targetId });
+    }
+    if (this.questNudge && target && now - this.nudgeAt > 4000) {
+      // --quest: a step's act still missing after a minute of fighting (a careless bot never dodges, say)
+      const sv = this.agedSelf(now) ?? this.freshSelf();
+      if (this.questNudge.includes('dodge') && sv.inCombat && sv.dodgeCharges > 0) {
+        this.nudgeAt = now;
+        questStats.nudges++;
+        const a = Math.atan2(target.x - this.body.x, target.z - this.body.z) + Math.PI / 2;
+        this.dodgesSent++;
+        this.dodgeSentAt = now;
+        this.room.send('dodge', { x: this.body.x, z: this.body.z, y: this.body.y, facing: this.heading, moving: false, ack: this.ack, dx: Math.sin(a), dz: Math.cos(a) });
+        return;
+      }
+      if (this.questNudge.includes('finisher') && sv.gcd <= 0 && (sv.cd[1] ?? 1) <= 0) {
+        this.nudgeAt = now;
+        questStats.nudges++;
+        this.pressedAt = now;
+        this.room.send('ability', { slot: 1, phase: 'press' });
+      }
     }
     const thought = this.think(me, now, target, null);
     if (!thought) return; // it rolled
@@ -1532,9 +1720,12 @@ class Bot {
     // Nothing to fight in range: to the nearest camp not visited lately, where it waits a while at a
     // spot just outside it (clear of every spawn point, so it never holds a respawn up).
     const camps = greenwayLayout().camps;
+    const qk = this.questKinds && this.questKinds !== 'any' ? this.questKinds : null;
+    if (JSON.stringify(qk) !== this.campKinds) { this.campKinds = JSON.stringify(qk); this.campGoal = null; this.route = null; }
     if (this.campGoal === null) {
       let best = -1, bestD = Infinity;
       camps.forEach((c, k) => {
+        if (qk && !c.spawns.some((sp) => qk.includes(sp.kind))) return; // --quest: a camp of the step's kinds
         const visited = this.campVisited.get(k);
         if (visited !== undefined && now - visited < CAMP_REVISIT_MS) return;
         // the first walk spreads the bots over the camps; after that, the nearest
@@ -1751,6 +1942,270 @@ class Bot {
     if (this.dead) return now - this.diedAt > (this.zone === 'lampfall' ? (AUTO_RELEASE_S + 15) * 1000 : 40_000);
     return now - this.progressAt > PROGRESS_MS;
   }
+
+  // ───────── --gear, --quest ─────────
+
+  /**
+   * Each `inventory` against the last one: gold moves by loot (and drops the bag sold) + quest gold + sales − purchases,
+   * every new uid is a drop, a quest item, a purchase or a re-minted starter piece, every uid that went was sold, and
+   * no uid ever comes back. The first view after joining a room after a travel may hold loot written while it was
+   * between rooms (no `loot` message reaches it): that one resyncs the ledger (counted).
+   */
+  private onInventory(m: InventoryView) {
+    const prev = this.inv;
+    this.inv = m;
+    this.invSinceJoin++;
+    this.shopOp = null; // its op was answered (or the truth came anyway: what to do next is read from this view)
+    const now = new Map(m.bag.map((i) => [i.uid, i.item]));
+    if (prev === null) {
+      for (const uid of now.keys()) this.everUids.add(uid);
+      this.ledgerLootGold = this.ledgerQuestGold = 0;
+      return;
+    }
+    const before = new Map(prev.bag.map((i) => [i.uid, i.item]));
+    let expect = prev.gold + this.ledgerLootGold + this.ledgerQuestGold;
+    this.ledgerLootGold = this.ledgerQuestGold = 0;
+    const odd: string[] = [];
+    for (const [uid, item] of now) {
+      if (before.has(uid)) continue;
+      if (this.everUids.has(uid)) this.uidRepeats++;
+      this.everUids.add(uid);
+      const qi = this.questItems.indexOf(item);
+      if (this.lootUids.delete(uid)) continue;
+      if (qi >= 0) { this.questItems.splice(qi, 1); continue; }
+      const it = ITEMS[item];
+      if (it?.tier === 0 && this.unequipSent) continue; // a starter piece minted by an unequip
+      if (it?.price !== undefined) { expect -= it.price; gearStats.purchases++; continue; }
+      odd.push(`new uid ${uid} (${item})`);
+    }
+    for (const [uid, item] of before) {
+      if (now.has(uid)) continue;
+      if (this.soldUids.delete(uid)) { expect += ITEMS[item]?.sell ?? 0; gearStats.sales++; gearStats.saleGold += ITEMS[item]?.sell ?? 0; continue; }
+      odd.push(`uid ${uid} (${item}) gone`);
+    }
+    for (const c of m.wardrobe) if (!prev.wardrobe.includes(c)) { expect -= COSTUMES[c]?.price ?? 0; gearStats.costumes++; }
+    this.unequipSent = false;
+    if (expect === m.gold && odd.length === 0) return;
+    if (this.invSinceJoin === 1 && this.travels > 0) { this.ledgerResyncs++; return; } // offline loot (see above)
+    if (this.ledgerBad.length < 50) this.ledgerBad.push(`${this.name}: gold ${m.gold}, expected ${expect}${odd.length ? `; ${odd.join(', ')}` : ''}`);
+  }
+
+  /** Sends an inventory operation (and remembers it to send again with the same op id if no answer comes). */
+  private sendInv(msg: Record<string, unknown>, now: number) {
+    const key = JSON.stringify({ ...msg, id: undefined });
+    this.shopOp = { key, msg, at: now };
+    this.room.send('inv', msg);
+  }
+
+  /** An op in flight (or just refused): wait. One with no answer for OP_RETRY_MS goes again with the same id. */
+  private opBusy(now: number): boolean {
+    if (now < this.opWaitUntil) return true;
+    const op = this.shopOp;
+    if (!op) return false;
+    if (now - op.at < OP_RETRY_MS) return true;
+    op.at = now;
+    this.room.send('inv', op.msg);
+    return true;
+  }
+
+  /** The worn uid in `slot` for its current job (null: none, or the starter piece). */
+  private worn(slot: GearSlot): number | null {
+    const uid = this.inv?.gear[this.jobNow.job]?.[slot];
+    if (uid === undefined) return null;
+    const it = this.inv!.bag.find((i) => i.uid === uid);
+    return it && ITEMS[it.item]?.tier !== 0 ? uid : null;
+  }
+
+  /**
+   * --gear in the grove (with its job): to the Smithy for one T1 piece (the chest of its job's kit) and on with it, to the
+   * Tailor for a costume when the gold reaches, then the talents its levels gave (a town); later, on the way back from a
+   * death, it sells one unworn drop at the Smithy. True while it is busy with this (the tick is used).
+   */
+  private gearInGrove(dt: number, now: number): boolean {
+    if (!gearMode || !this.inv) return false;
+    const sv = this.agedSelf(now) ?? this.freshSelf();
+    if (sv.inCombat) return false;
+    if (this.talentRows.length && now - this.talentAt > OP_RETRY_MS) {
+      // a town: its talent for the row (choice by index); a row already chosen is refused 'taken' (counted)
+      this.talentAt = now;
+      const row = this.talentRows.shift()!;
+      this.room.send('inv', { op: 'talent', row, choice: this.index % 3 });
+      gearStats.talents++;
+    }
+    if (this.opBusy(now)) return true;
+    const inv = this.inv;
+    if (this.shop === 'smithy') {
+      const piece = kitItems(1, this.jobNow.job).chest;
+      const have = piece ? inv.bag.find((i) => i.item === piece) : undefined;
+      if (!piece || (!have && inv.gold < (ITEMS[piece]?.price ?? Infinity))) { this.shop = 'tailor'; return false; }
+      if (have) {
+        if (inv.gear[this.jobNow.job]?.chest === have.uid) { this.boughtUid = have.uid; this.shop = 'tailor'; return false; }
+        this.sendInv({ op: 'equip', uid: have.uid, slot: 'chest' }, now);
+        gearStats.equips++;
+        return true;
+      }
+      const spot = stallSpot('smithy');
+      if (dist(spot, this.body) > 0.6) { this.walkRoute(spot, dt, now, 1, false); return true; }
+      this.sendInv({ op: 'buy', stall: 'smithy', item: piece, id: this.opIdFor(`buy:${piece}`) }, now);
+      return true;
+    }
+    if (this.shop === 'tailor') {
+      const price = COSTUMES[BOT_COSTUME].price ?? Infinity;
+      const owned = inv.wardrobe.includes(BOT_COSTUME);
+      if (!owned && inv.gold < price) { this.shop = 'done'; return false; }
+      if (owned) {
+        const outfit = this.jobOutfitHead;
+        if (outfit === BOT_COSTUME) { this.shop = 'done'; return false; }
+        this.sendInv({ op: 'wear', slot: COSTUMES[BOT_COSTUME].slot, costume: BOT_COSTUME }, now);
+        this.jobOutfitHead = BOT_COSTUME; // (the view carries no outfit: the `jobs` view does; worn once is enough)
+        gearStats.wears++;
+        return true;
+      }
+      const spot = stallSpot('tailor');
+      if (dist(spot, this.body) > 0.6) { this.walkRoute(spot, dt, now, 1, false); return true; }
+      this.sendInv({ op: 'buyCostume', costume: BOT_COSTUME, id: this.opIdFor(`costume:${BOT_COSTUME}`) }, now);
+      return true;
+    }
+    // back from a death: one unworn drop sold at the Smithy on the way
+    if (this.diedAt !== null || this.sellDue) {
+      const drop = inv.bag.find((i) => i.worn.length === 0 && (ITEMS[i.item]?.sell ?? 0) > 0 && ITEMS[i.item]?.slot !== 'chest' && !this.soldUids.has(i.uid));
+      if (!drop) { this.sellDue = false; return false; }
+      this.sellDue = true;
+      const spot = stallSpot('smithy');
+      if (dist(spot, this.body) > 0.6) { this.walkRoute(spot, dt, now, 1, false); return true; }
+      this.soldUids.add(drop.uid);
+      this.sendInv({ op: 'sell', uid: drop.uid }, now);
+      this.sellDue = false;
+      return true;
+    }
+    return false;
+  }
+  private jobOutfitHead: CostumeId | null = null;
+  /** One random op id per purchase it means to make: sent again (after any view) it is a dup, never a second purchase. */
+  private opIds = new Map<string, string>();
+  private opIdFor(what: string): string {
+    let id = this.opIds.get(what);
+    if (!id) this.opIds.set(what, (id = newOpId()));
+    return id;
+  }
+  private sellDue = false;
+
+  /** --gear in the Greenway: every GEAR_SWAP_MS, out of combat, the worn T1 piece off and on again. */
+  private gearSwap(sv: SelfView, now: number) {
+    if (!gearMode || !this.inv || sv.inCombat || sv.cast || sv.charge !== null || now - this.swapAt < GEAR_SWAP_MS || this.opBusy(now)) return;
+    this.swapAt = now;
+    const uid = this.worn('chest');
+    if (uid === null) return;
+    this.unequipSent = true;
+    this.room.send('inv', { op: 'unequip', slot: 'chest' });
+    this.sendInv({ op: 'equip', uid, slot: 'chest' }, now);
+    gearStats.unequips++;
+    gearStats.equips++;
+    gearStats.swaps++;
+  }
+
+  /** Sends a quest act, again after QUEST_RETRY_MS while nothing has changed. */
+  private sendQuest(act: Record<string, unknown>, now: number) {
+    const key = JSON.stringify(act);
+    if (this.questAct && this.questAct.key === key && now - this.questAct.at < QUEST_RETRY_MS) return;
+    this.questAct = { key, at: now };
+    this.room.send('quest', act);
+    questStats.acts++;
+  }
+
+  /** A jump in place (a real rise of about 1.45 m), at most one every 1.2 s: poses every tick until it lands. */
+  private hop(dt: number, now: number) {
+    if (!this.hopping && (!this.body.grounded || now - this.lastHopAt < 1200)) return;
+    const b = { ...this.body };
+    const s = stepFor(b, { vx: 0, vz: 0, jump: !this.hopping }, dt, this.surface);
+    if (!this.hopping) { this.hopping = true; this.lastHopAt = now; this.jumps++; }
+    else if (s.landed || b.grounded) this.hopping = false;
+    this.body = b;
+    const next = { x: b.x, z: b.z, y: b.y, facing: this.heading, moving: false, ack: this.ack };
+    this.room.send('move', next);
+    this.lastSent = next;
+  }
+
+  /**
+   * --quest: one tick of its quest follower (questGoal on its own view). True when the tick is used; false lets the
+   * bot go on as it would (fight in the Greenway, or walk out of the grove when its quests are done).
+   */
+  private questStep(sv: SelfView, dt: number, now: number): boolean {
+    this.questKinds = null;
+    if (!questMode || !this.quests || this.plan) return false;
+    if (this.hopping) { this.hop(dt, now); return true; }
+    const mainActive = this.quests.active.some((a) => a.id === 'solstice_crossing');
+    let g: QuestGoal = questGoal(this.quests, { zone: this.zone, x: this.body.x, z: this.body.z, job: this.loadout.job, inParty: this.inParty, index: this.index, dropped: this.dropped });
+    const main = this.quests.active.find((a) => a.id === 'solstice_crossing');
+    const duo = main !== undefined && QUESTS.solstice_crossing.steps[main.step]?.id === 'duo';
+    this.duoSince = duo ? this.duoSince ?? now : null;
+    if (duo) {
+      if (this.questLead && !this.inParty && now - this.inviteAt > INVITE_RETRY_MS) {
+        // the duo: it invites its partner (the next bot), which accepts
+        this.inviteAt = now;
+        const mate = bots[this.index + 1];
+        if (mate?.name) { this.room.send('party', { op: 'invite', name: mate.name }); questStats.invites++; }
+      }
+      if (this.questLead && !this.inParty && now - this.duoSince! < 30_000) g = { g: 'idle' }; // it waits for its partner a while
+      if (now - this.duoSince! > DUO_WAIT_MS) g = { g: 'skip', quest: 'solstice_crossing' }; // (no party kill, no Mossback: skipped)
+    }
+    if (g.g === 'fight') {
+      const key = `${main?.step ?? 'x'}:${JSON.stringify(g)}`;
+      if (key !== this.questFightKey) { this.questFightKey = key; this.questFightSince = now; }
+      this.questKinds = g.kinds;
+      // acts still missing after a minute of fighting: a nudge (a finisher; a dodge once in a fight)
+      this.questNudge = g.acts.length && now - this.questFightSince! > NUDGE_AFTER_MS ? g.acts : null;
+      return false;
+    }
+    this.questNudge = null;
+    if (sv.inCombat && this.zone === 'greenway') return false; // finish the fight first
+    switch (g.g) {
+      case 'goto': {
+        if (g.zone !== this.zone) {
+          if (this.zone === 'lampfall') return false;
+          const exit = this.zone === 'grove' ? GROVE_EAST_GATE : greenwayLayout().westGate;
+          this.maybeSprint(dist(exit, this.body), sv, now);
+          this.walkRoute(exit, dt, now, 1, true);
+          return true;
+        }
+        this.maybeSprint(dist(g, this.body), sv, now);
+        this.walkRoute({ x: g.x, z: g.z }, dt, now, 1, false);
+        return true;
+      }
+      case 'talk': this.sendQuest(g.choice === undefined ? { act: 'talk', npc: g.npc } : { act: 'talk', npc: g.npc, choice: g.choice }, now); return true;
+      case 'use': this.sendQuest({ act: 'use', prop: g.prop }, now); return true;
+      case 'accept': case 'skip': this.sendQuest({ act: g.g, quest: g.quest }, now); return true;
+      case 'abandon':
+        this.sendQuest({ act: 'abandon', quest: g.quest }, now);
+        if (!this.dropped.includes(g.quest)) this.dropped.push(g.quest);
+        return true;
+      case 'jump': this.hop(dt, now); return true;
+      case 'job':
+        if (!this.questAct || now - this.questAct.at >= QUEST_RETRY_MS) {
+          this.questAct = { key: 'job', at: now };
+          this.room.send('job', { job: this.loadout.job });
+          questStats.acts++;
+        }
+        return true;
+      case 'equip': {
+        const inv = this.inv;
+        if (!inv || this.opBusy(now)) return true;
+        const item = inv.bag.find((i) => ITEMS[i.item]?.slot === g.slot && (ITEMS[i.item]?.tier ?? 0) >= 1 && fits(i.item, g.slot, this.jobNow.job) && inv.gear[this.jobNow.job]?.[g.slot] !== i.uid);
+        const wornNow = inv.gear[this.jobNow.job]?.[g.slot];
+        // (already worn: the step waits for the server's event; else equip one that fits)
+        const target = item ?? inv.bag.find((i) => i.uid === wornNow && (ITEMS[i.item]?.tier ?? 0) >= 1);
+        if (!target) return mainActive;
+        this.sendInv({ op: 'equip', uid: target.uid, slot: g.slot }, now);
+        gearStats.equips++;
+        return true;
+      }
+      case 'idle': return mainActive && this.zone !== 'lampfall'; // (its step is met: the server's next view is on its way)
+    }
+    return false;
+  }
+  private questNudge: readonly string[] | null = null;
+  private nudgeAt = 0;
+  private campKinds = '';
 
   // ───────── --dungeon, --warden ─────────
 
@@ -2109,6 +2564,48 @@ if (fight) {
   console.log(`  fx events per bot a second: ${(sum((bot) => bot.fxEvents) / count / Math.max(1, measured + warmupMs / 1000)).toFixed(2)}; lowest hp a bot was seen alive at: ${Math.min(...bots.map((bot) => bot.hpSeenMin))}`);
 }
 
+// ───────── --looks, --gear, --quest: what they saw ─────────
+const invWrites = healthSamples.map((h) => h.invWritesPerS ?? 0).sort((a, b) => a - b);
+const invWritesP95 = invWrites.length ? invWrites[Math.min(invWrites.length - 1, Math.floor(invWrites.length * 0.95))] : 0;
+let looksDistinct = 0, looksInView = 0;
+if (looksMode) {
+  // bot 0: the look codes of the adventurers in its view at the end (its own included), and how many differ
+  const b0 = bots[0];
+  const eids: number[] = [];
+  b0.room?.state.players?.forEach((p: any) => eids.push(p.eid));
+  const codes = eids.map((e) => b0.seenLooks.get(e)).filter((c): c is string => c !== undefined);
+  looksInView = eids.length;
+  looksDistinct = new Set(codes).size;
+  console.log(`looks (--looks): bot 0 sees ${looksInView} adventurers, ${codes.length} with a look code, ${looksDistinct} distinct; gear code changes seen ${gearStats.gearCodeChanges}`);
+}
+const ledgerBad = bots.flatMap((b) => b.ledgerBad);
+const uidRepeats = sum((b) => b.uidRepeats);
+const invRefusalsBad = Object.entries(gearStats.refused).filter(([k]) => !GEAR_OK_REFUSALS.includes(k.split(' ')[1]));
+if (gearMode || questMode) {
+  const show = (r: Record<string, number>) => JSON.stringify(Object.fromEntries(Object.entries(r).sort()));
+  console.log(`gear (${gearMode ? '--gear' : 'quest equips only'}): purchases ${gearStats.purchases}, costumes bought ${gearStats.costumes} (worn ${gearStats.wears}), sales ${gearStats.sales} (${gearStats.saleGold} gold), equips sent ${gearStats.equips}, unequip-and-equip swaps ${gearStats.swaps}, talents sent ${gearStats.talents}, drops ${gearStats.drops}, loot gold ${gearStats.lootGold} (with drops sold from a full bag)`);
+  console.log(`  inventory refusals ${show(gearStats.refused)}; inventory writes a second (/healthz invWritesPerS): p95 ${invWritesP95}, max ${invWrites.length ? invWrites[invWrites.length - 1] : 0}`);
+  console.log(`  ledgers: ${ledgerBad.length} mismatches${ledgerBad.length ? ` (first: ${ledgerBad[0]})` : ''}; uids seen again ${uidRepeats}; resynced after a travel (loot written between rooms) ${sum((b) => b.ledgerResyncs)}; worn T1 chests at the end ${bots.filter((b) => b.inv && b.inv.bag.some((i) => i.uid === b.inv!.gear[b.job]?.chest && (ITEMS[i.item]?.tier ?? 0) >= 1)).length} of ${count}`);
+  for (const line of ledgerBad.slice(1, 5)) console.log(`  ledger: ${line}`);
+}
+const questBad = Object.entries(questStats.refused).filter(([k]) => !QUEST_OK_REFUSALS.includes(k.split(' ')[1]));
+const mainIds = QUESTS.solstice_crossing.steps.map((st) => st.id);
+const stepOf = (b: Bot): string => {
+  if (!b.quests) return '?';
+  const a = b.quests.active.find((q) => q.id === 'solstice_crossing');
+  return a ? mainIds[a.step] ?? '?' : b.quests.done.some((d) => d.id === 'solstice_crossing') ? 'done' : '?';
+};
+const pastStep = (id: string) => bots.filter((b) => { const st = stepOf(b); return st === 'done' || mainIds.indexOf(st) > mainIds.indexOf(id); }).length;
+const questBots = bots.filter((b) => !b.plan);
+if (questMode) {
+  const hist: Record<string, number> = {};
+  for (const b of questBots) bump(hist, stepOf(b));
+  const show = (r: Record<string, number>) => JSON.stringify(Object.fromEntries([...mainIds, 'done', '?'].filter((k) => r[k]).map((k) => [k, r[k]])));
+  console.log(`quests (--quest): bots by main-quest step at the end ${show(hist)}`);
+  console.log(`  past board ${pastStep('board')}, past first_fight ${pastStep('first_fight')}, main quest done ${hist.done ?? 0} of ${questBots.length}; quests completed ${JSON.stringify(questStats.completed)}; steps done (questDone) ${questStats.done}; scenes ${JSON.stringify(questStats.scenes)}`);
+  console.log(`  acts sent ${questStats.acts}; questRefused ${JSON.stringify(questStats.refused)}; quest gold ${questStats.gold}, items ${questStats.items}; nudges ${questStats.nudges}; duo invites ${questStats.invites}`);
+}
+
 const instSamples = healthSamples.map((h) => h.instances?.tickMsP95Max ?? 0);
 const maxInstanceP95 = Math.max(0, ...instSamples, final.instances?.tickMsP95Max ?? 0);
 /** The /healthz samples of the worst instance's p95 while instances were open: median and 90th percentile (a spike or a trend). */
@@ -2218,6 +2715,27 @@ if (wardenMode) {
   if (!(maxInstanceP95 <= MAX_INSTANCE_STEP_P95_MS)) failures.push(`instance step p95 reached ${maxInstanceP95} ms (over ${MAX_INSTANCE_STEP_P95_MS})`);
   if (!(peakRss <= MAX_PEAK_RSS_MB)) failures.push(`peak RSS ${peakRss} MB (over ${MAX_PEAK_RSS_MB})`);
   if (!(maxLoopP99 <= WARDEN_MAX_LOOP_P99_MS)) failures.push(`event-loop p99 reached ${maxLoopP99} ms (over ${WARDEN_MAX_LOOP_P99_MS})`);
+}
+if (looksMode && !(looksDistinct >= 0.9 * looksInView)) failures.push(`bot 0 saw ${looksDistinct} distinct looks among ${looksInView} adventurers in its view (under 90%)`);
+if (gearMode || questMode) {
+  if (invRefusalsBad.length) failures.push(`inventory refusals other than ${GEAR_OK_REFUSALS.join(', ')}: ${invRefusalsBad.map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  if (ledgerBad.length) failures.push(`${ledgerBad.length} ledger mismatches (first: ${ledgerBad[0]})`);
+  if (uidRepeats) failures.push(`${uidRepeats} item uids seen again`);
+  if (!(invWritesP95 <= MAX_INV_WRITES_P95)) failures.push(`inventory writes p95 ${invWritesP95} a second (over ${MAX_INV_WRITES_P95})`);
+  if (!(maxStepP95 <= MAX_STEP_P95_MS)) failures.push(`zone step p95 reached ${maxStepP95} ms (over ${MAX_STEP_P95_MS})`);
+}
+if (gearMode && gearStats.purchases < 1) failures.push('no purchase at the Smithy (start the server with SG2_TEST_START_GOLD >= 200)');
+if (questMode) {
+  if (questBad.length) failures.push(`questRefused other than ${QUEST_OK_REFUSALS.join(', ')}: ${questBad.map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  const n = questBots.length;
+  // (the step marks: a run of 420 s started in the grove; a Greenway run started at first_fight needs >= 80% past it)
+  const fromGrove = zoneId === 'grove' && bots.every((b) => b.startZone === 'grove');
+  if (fromGrove && seconds >= 400) {
+    if (pastStep('board') < 0.95 * n) failures.push(`${pastStep('board')} of ${n} past board (under 95%)`);
+    if (pastStep('first_fight') < 0.8 * n) failures.push(`${pastStep('first_fight')} of ${n} past first_fight (under 80%)`);
+    const done = questBots.filter((b) => stepOf(b) === 'done').length;
+    if (done < 0.5 * n) failures.push(`${done} of ${n} finished the main quest (under 50%)`);
+  } else if (!fromGrove && seconds >= 200 && pastStep('first_fight') < 0.8 * n) failures.push(`${pastStep('first_fight')} of ${n} past first_fight (under 80%)`);
 }
 console.log(failures.length ? `FAIL: ${failures.join('; ')}` : 'PASS');
 process.exit(failures.length ? 1 : 0);
