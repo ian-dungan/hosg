@@ -1178,4 +1178,27 @@ These are recorded so that reviewers can check the tasks against them.
 
 ## Outcome
 
-To be written by Task 11.
+Built by subagent-driven development: Tasks 1–7 (shared and server) each implemented and independently reviewed with a fix round; Tasks 8–10 (client and bots) built in parallel worktrees and checked live; one whole-branch review (client; server and shared) and one fix wave. This section was written by the coordinator.
+
+**What exists**
+- Parties of up to four: invite by tap or name, leader, party chat, party frames, edge markers, shared kill credit, allies are party members (a deliberate tap can still help a stranger).
+- The Lampfall: a private instance per party (at most 12), seven rooms, three packs, the Wickhound and the Fallen Warden; checkpoints, wipes, release after 10 s, sealed arenas whose shut gates are walls on the server and in the client; saved at the crater mouth; held seats 120 s; idle adventurers sent out after 300 s.
+- The Fallen Warden: three phases, Lens Shard wards, fire rings, two attacks that cannot be dodged (Keeper's Toll, Last Light), the Toll breakable during its wind-up, enrage at 330 s, health scaling by party size, a surge when nobody stays in reach.
+- Rewards: job xp, a Warden's Seal once a day, the title Lampbreaker, a kill leaderboard.
+
+**Verified by the coordinator on the final code (`e266db9`), machine quiet:** root `npm test` 1773 passed, 6 skipped; `npm run typecheck` clean; the offline and online client builds and the server build pass; the bundle scan with `SG2_REQUIRE_BUNDLE_SCAN=1` passes; the browser smoke tests are listed in Plan 6's outcome. Load numbers were measured by workers on a quiet machine (docs/load-test.md): walkers, clustered walkers, fight, cycle, dungeon and twelve Warden fights at once hold 15.0–15.2 Hz; clustered bandwidth is 10.7 KiB/s plain and 11.0 with looks, parties and T3 gear (the limit, no headroom). The pg store suite passed 550 tests on Postgres 16 (worker run).
+
+**Rulings**
+- P4-a The Wick Den's exit gate is shut until the Wickhound is cleared. P4-b A shut gate is a wall in the instance surface, shared with the client. P4-c Boss attacks and fields reach only adventurers inside the arena; nothing crosses a sealed arena edge.
+- P4-d 60 s before re-inviting someone who declined. P4-e No dodge pre-check at gates: the wall stops the roll.
+- P4-f `unavoidable` attacks. P4-g Duo pick defaults changed (Paladin, Ninja). P4-h Bands use a `skilled` skill (10% missed telegraphs), 20 seeds, headroom. P4-k The Toll takes ×8 stagger during its wind-up. P4-l Boss surge after 6 s with nobody in reach. P4-m Targets A–H.
+- Final review: one pending seat per account, seats held 15 s, a per-address join limit (`SG2_JOIN_RATE_PER_MIN`); an instance checks a join before reserving a seat; unhandled rejections are logged, not fatal; test switches refused in production.
+
+**Deferred to tuning with real players**
+- Skilled healer or tank duos win 99% (target 70–92%).
+- Some pairs cannot beat the Warden at starter power (two Ninjas never).
+- Duo picks are not clearly better than solo picks (+8.8 points).
+- The Warden is tuned at level 10; the crater mouth recommends level 8 or higher. Measured: level-4 duos and trios in T1 clear the packs and the Wickhound 20 of 20; at levels 6–8 sloppy duos win the Warden 15–19 of 20.
+- A hard mode (proposed: Warden health ×1.8, damage ×1.4) is not built.
+- Party-bot revives are rare and printed, not gated.
+- Never tested on a real phone.

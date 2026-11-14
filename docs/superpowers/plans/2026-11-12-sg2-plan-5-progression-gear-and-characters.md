@@ -1700,4 +1700,32 @@ These are recorded so that reviewers can check the tasks against them.
 
 ## Outcome
 
-To be written by Task 12.
+Built by subagent-driven development: Tasks 1–7 (shared and server) each implemented and independently reviewed with a fix round (Task 5's review was folded into the whole-branch review); Tasks 8–10 (client) built in parallel worktrees; Task 11 (bots and the live pass) together with Plan 6 Task 7; one whole-branch review and one fix wave. This section (Task 12) was written by the coordinator.
+
+**What exists**
+- Levels 1–10 per job on a real curve (3180 xp), with old xp migrated without losing a level; talents: three rows of three per job at levels 4, 7 and 10, first retrain free.
+- Gear: eight slots, three tiers, nine sets, seven named Warden weapons, each job with its own gear; personal server-rolled loot; Seals buy T3; bag 30, Vault 60; no trading. **All stats are whole numbers of at least 1** (user rule; `wholeStats.test.ts`).
+- Character creation: four peoples (Humans, Larchfolk, Knollfolk, Brindlekin — looks only), sliders, faces, hair, colours; the Barber; a hashed name blocklist.
+- Gear, weapons, costumes and dyes on the model, with each job's cue kept over any set.
+- Bag, equipment with before → after comparison, vendors, wardrobe, talents and Vault screens; loot and level-up feedback.
+- GM tools: role granted only from the server shell; `/gm` commands; an append-only audit log.
+
+**Verified by the coordinator on the final code (`e266db9`), machine quiet:** root `npm test` 1773 passed, 6 skipped; `npm run typecheck` clean; the offline and online client builds and the server build pass; the bundle scan with `SG2_REQUIRE_BUNDLE_SCAN=1` passes; the browser smoke tests are listed in Plan 6's outcome. Load numbers were measured by workers on a quiet machine (docs/load-test.md): walkers, clustered walkers, fight, cycle, dungeon and twelve Warden fights at once hold 15.0–15.2 Hz; clustered bandwidth is 10.7 KiB/s plain and 11.0 with looks, parties and T3 gear (the limit, no headroom). The pg store suite passed 550 tests on Postgres 16 (worker run).
+
+**Rulings**
+- P5-a Same-kind bonuses from different sources do not stack (the larger applies). P5-b No dead bonuses in a job's own sets or weapon (retunes). P5-c Heal shields trigger on ability heals, not lifesteal. P5-d Taunt triggers include Dread Howl.
+- P5-e Inventory operation ids are random, 12–40 characters, required for purchases and Vault moves. P5-f Twin Wicks' Momentum once a second. P5-g Wickthread's cleanse trigger once per 10 s. P5-h No gear, talent or pick changes inside a sealed arena.
+- Looks and gear codes travel in a `looks` message, once per adventurer per client.
+- Migration 006 never stamps `curve: 2` on old rows; there is no downgrade.
+
+**Deferred to tuning with real players**
+- In T3 the Warden is a formality for any duo that dodges; a hard mode is proposed, not built.
+- Four named weapons and twelve talents show little measurable effect in the simulation.
+- Lenslight is about 5% better for six of seven jobs.
+- Support picks make no difference in T3.
+- Skipped bands: G2 starter ceiling, G5 sloppy solo in T3, the Ranger's Thornling time.
+- Budgets missed: a low-quality body is about 1.75k triangles (target 1.2k); a look rebuild takes 15–50 ms (queued two per frame).
+- Clustered bandwidth is at its limit with looks, parties and T3 gear.
+- The append-only audit rule is a trigger and the shipped database role is a superuser (deploy/README.md, Known limits).
+- Not verified live: a talent's effect on an ability.
+- Never tested on a real phone.

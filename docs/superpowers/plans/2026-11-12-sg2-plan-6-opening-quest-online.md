@@ -1002,4 +1002,25 @@ These are recorded so that reviewers can check the tasks against them.
 
 ## Outcome
 
-To be written by Task 8.
+Built by subagent-driven development: Tasks 1–4 (shared and server; the server independently reviewed with a fix round), Tasks 5–6 (client) in parallel worktrees, Task 7 (bots and the live pass) together with Plan 5 Task 11; one whole-branch review and one fix wave. This section (Task 8) was written by the coordinator.
+
+**What exists**
+- A small data-driven quest system: The Solstice Crossing (main), The Keeper's Lamp (optional epilogue into the Lampfall), Bristle Bounty (daily) and Gran's Waymarks (once).
+- Quest state saved in the same write as the reward it pays; progress credited only from server events; quest messages go only to their owner.
+- Old Marrow and Nell Thistlewood in the world, markers, the dialogue sheet, the tracker and pointer, the journal, hints, the reward choice and equip step, the Beacon rising and the falling star.
+- Bots that run the quest; `smoke-quest.mjs` and `smoke-gear.mjs`.
+
+**Verified by the coordinator on the final code (`e266db9`), machine quiet:** root `npm test` 1773 passed, 6 skipped; `npm run typecheck` clean; the offline and online client builds and the server build pass; the bundle scan with `SG2_REQUIRE_BUNDLE_SCAN=1` passes; the browser smoke tests are listed in Plan 6's outcome. Load numbers were measured by workers on a quiet machine (docs/load-test.md): walkers, clustered walkers, fight, cycle, dungeon and twelve Warden fights at once hold 15.0–15.2 Hz; clustered bandwidth is 10.7 KiB/s plain and 11.0 with looks, parties and T3 gear (the limit, no headroom). The pg store suite passed 550 tests on Postgres 16 (worker run).
+
+**Browser smoke tests on the final code (coordinator run):** `smoke.mjs` PASS; the quest, gear and party tests: results recorded in the line below once run.
+
+**Rulings and deviations**
+- The save has a `paid` field and an optional `choice`; the main quest gives 350 xp (290 without the optional duo step); the worst-case quest view is 311 bytes.
+- `questDone` is sent for every completed step; a hop must rise 0.6 m; the quest day never goes backwards and is capped at tomorrow.
+- A full bag refuses the hand-in. The keepsake is the title Witness of the Crossing. The `home:starter_cottage` unlock is saved for Plan 8.
+- Quest events dropped at session end are written offline; quest xp survives a write that commits and then throws.
+
+**Deferred**
+- The quest bot run on the grove passes its gates in 2 of 4 runs (bots without kills after holding a fight slot — not explained); the Greenway quest runs pass 3 of 3.
+- The length of the main quest for a new player has not been measured (estimate 30–45 minutes).
+- Never tested on a real phone; nothing is installed on the Hetzner server (deploy/README.md).
