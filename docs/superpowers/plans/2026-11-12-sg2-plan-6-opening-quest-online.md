@@ -1012,7 +1012,7 @@ Built by subagent-driven development: Tasks 1–4 (shared and server; the server
 
 **Verified by the coordinator on the final code (`e266db9`), machine quiet:** root `npm test` 1773 passed, 6 skipped; `npm run typecheck` clean; the offline and online client builds and the server build pass; the bundle scan with `SG2_REQUIRE_BUNDLE_SCAN=1` passes; the browser smoke tests are listed in Plan 6's outcome. Load numbers were measured by workers on a quiet machine (docs/load-test.md): walkers, clustered walkers, fight, cycle, dungeon and twelve Warden fights at once hold 15.0–15.2 Hz; clustered bandwidth is 10.7 KiB/s plain and 11.0 with looks, parties and T3 gear (the limit, no headroom). The pg store suite passed 550 tests on Postgres 16 (worker run).
 
-**Browser smoke tests on the final code (coordinator run):** `smoke.mjs` PASS; the quest, gear and party tests: results recorded in the line below once run.
+**Browser smoke tests on the final code (coordinator run):** `smoke.mjs` PASS, `smoke-quest.mjs` PASS (10 steps), `smoke-gear.mjs` PASS (9 steps), `smoke-party.mjs --helpers` PASS. Without `--helpers` the party test fails at the first pack: two headless pages at about one frame a second cannot kill it alone.
 
 **Rulings and deviations**
 - The save has a `paid` field and an optional `choice`; the main quest gives 350 xp (290 without the optional duo step); the worst-case quest view is 311 bytes.
