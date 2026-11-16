@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMOTES, defaultLookV1 as defaultLook, encodeGearLook, encodeLookV1 as encodeLook, resolveGearLook, validateAdventurerName } from '@sg2/shared';
+import { EMOTES, defaultLook, encodeGearLook, encodeLook, resolveGearLook, validateAdventurerName } from '@sg2/shared';
 import { LookCache, barberRefusal, createBarber, creatorPlan, emoteToPlay } from './looks';
 import { accountIdOf, lookInfoResult, saveLookResult, startingLook } from './lookApi';
 

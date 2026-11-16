@@ -119,8 +119,12 @@ export function bodyFrame(l: Look): Frame {
     handL: 0.1 * k * S.hand * (fem ? 0.93 : 1), handW: 0.044 * k * S.hand * (fem ? 0.92 : 1) * (1 + 0.08 * mu),
     muscle, weight: we, fit: 1,
   };
-  const w = rawHalfWidth(f);
-  if (w > MAX_HALF_WIDTH) squeeze(f, MAX_HALF_WIDTH / w);
+  // squeezed until the widest part fits (the margins are fixed, so a few passes)
+  for (let i = 0; i < 6; i++) {
+    const w = rawHalfWidth(f);
+    if (w <= MAX_HALF_WIDTH) break;
+    squeeze(f, (MAX_HALF_WIDTH / w) * 0.999);
+  }
   return f;
 }
 
