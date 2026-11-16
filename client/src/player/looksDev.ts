@@ -7,6 +7,7 @@
 //   ?view=slider&field=build.height   one look at the field's low, middle and high (&close=1: the faces)
 //   ?view=pick&field=hair.style&from=0&to=10   every value of a field (&side=1 from the side, &back=1 from behind)
 //   ?view=lineup                 the five likeness people (&close=1: their faces)
+//   ?view=faces5                 five people differing only in the face (&close=1: their faces)
 //   ?view=presets&from=0&to=12   the presets
 //   ?view=jobs&body=male|female  the seven jobs in their gear on one body (&gear=1: each job's starter gear)
 //   ?view=poses                  walk, run, attack, cast, hurt and dead
@@ -129,6 +130,25 @@ export const LINEUP: { name: string; look: Look }[] = [
     nose: { length: 2, width: 5, bridge: 2, tip: 8 }, mouth: { width: 4, upperLip: 6, lowerLip: 7 }, brows: { shape: 4, thickness: 4 } }) },
 ];
 
+/** Five people who differ only in the face (the same body, hair, skin and clothes): faces alone carry identity. */
+export const FACES5: { name: string; look: Look }[] = (() => {
+  const base = tweak(mid(preset('reading_room')), { hair: { style: 7, colour: 0x3e2a1e, grey: 0 }, skin: { colour: 0xc99a74, freckles: 0, moles: 0, scar: 0, blush: 0 },
+    makeup: { lips: 0, shadow: 0, liner: 0 }, face: { age: 1 } });
+  const f = (name: string, o: Record<string, Record<string, unknown>>) => ({ name, look: tweak(base, o) });
+  return [
+    f('Long, fine', { face: { width: 2, length: 9, cheekbones: 6, jawWidth: 3, chinLength: 7, chinWidth: 3 }, eyes: { shape: 2, size: 4 }, brows: { shape: 0, thickness: 4 },
+      nose: { length: 9, width: 2, bridge: 9, tip: 3 }, mouth: { width: 3, upperLip: 1, lowerLip: 2 } }),
+    f('Round, soft', { face: { width: 9, length: 2, cheekbones: 3, jawWidth: 6, chinLength: 2, chinWidth: 7 }, eyes: { shape: 1, size: 8, openness: 8 }, brows: { shape: 1, thickness: 5, height: 7 },
+      nose: { length: 2, width: 5, bridge: 1, tip: 9 }, mouth: { width: 5, upperLip: 8, lowerLip: 9 } }),
+    f('Square, strong', { face: { width: 7, length: 5, cheekbones: 4, jawWidth: 10, chinLength: 5, chinWidth: 9, forehead: 3 }, eyes: { shape: 6, size: 3 }, brows: { shape: 5, thickness: 10, height: 2 },
+      nose: { length: 6, width: 10, bridge: 4, tip: 4 }, mouth: { width: 9, upperLip: 4, lowerLip: 5 } }),
+    f('Heart, bright', { face: { width: 6, length: 4, cheekbones: 10, jawWidth: 1, chinLength: 6, chinWidth: 0, forehead: 7 }, eyes: { shape: 11, size: 7, tilt: 8 }, brows: { shape: 2, thickness: 3, height: 8 },
+      nose: { length: 3, width: 1, bridge: 6, tip: 7 }, mouth: { width: 2, upperLip: 6, lowerLip: 6 } }),
+    f('Older, heavy-lidded', { face: { width: 5, length: 7, cheekbones: 5, jawWidth: 6, chinLength: 3, chinWidth: 5, age: 3 }, eyes: { shape: 5, size: 4, openness: 3 }, brows: { shape: 9, thickness: 7, tilt: 2 },
+      nose: { length: 10, width: 6, bridge: 7, tip: 0 }, mouth: { width: 6, upperLip: 0, lowerLip: 4, height: 3 } }),
+  ];
+})();
+
 if (view === 'bodies') {
   const base = mid(preset('harbour_pilot'));
   const m = tweak(base, { hair: { style: 1, facial: 0 }, face: { age: 0 }, skin: { colour: 0xd3a27c, freckles: 0, scar: 0 } });
@@ -182,6 +202,11 @@ if (view === 'bodies') {
   LINEUP.forEach((p, i) => put(p.look, x0 + (i - 2) * (close ? 0.5 : 1.05), zc, front, null, close ? '' : p.name));
   beta = 1.52;
   if (close) { target = new Vector3(x0, views[2]!.height * 0.88, zc); fitW = 2.5; fitH = 0.75; }
+  else { target = new Vector3(x0, 1.0, zc); fitW = 5.4; fitH = 2.3; }
+} else if (view === 'faces5') {
+  FACES5.forEach((p, i) => put(p.look, x0 + (i - 2) * (close ? 0.5 : 1.05), zc, front, null, close ? '' : p.name));
+  beta = 1.52;
+  if (close) { target = new Vector3(x0, views[0]!.height * 0.9, zc); fitW = 2.5; fitH = 0.45; }
   else { target = new Vector3(x0, 1.0, zc); fitW = 5.4; fitH = 2.3; }
 } else if (view === 'presets') {
   const from = Number(qs.get('from') ?? 0), to = Number(qs.get('to') ?? 12);
