@@ -21,10 +21,11 @@ import {
 } from '@babylonjs/core';
 import type { CharacterOpts, CharacterView, MakeCharacter, Pose, WeaponId, EntityKind, Quality } from '../core/contracts';
 import { PALETTE } from '../core/contracts';
-import { DYES, encodeGearLook, encodeLookV1 as encodeLook, type EmoteId, type GearLook, type LookV1 as AdventurerLook } from '@sg2/shared';
-import { bodyParams, faceParams, lookColours, makeWarp, stanceParams, walkParams, type BodyParams, type StanceParams, type WalkParams, type Warp, type WarpRegion } from './look';
-import { buildHead, buildTail, furPaint, pawPaint } from './faces';
-import { buildFacialHair, buildHair, LONG_HAIR } from './hair';
+import { DYES, LOOK_PRESETS, encodeGearLook, encodeLook, parseLook, type EmoteId, type GearLook, type Look as AdventurerLook } from '@sg2/shared';
+import { bodyFrame, lookColours, makeAttachWarp, stanceParams, walkParams, type Frame, type StanceParams, type WalkParams, type Warp, type WarpRegion } from './look';
+import { buildTail } from './faces';
+import { LONG_HAIR } from './hair';
+import { buildBody2, type Clothes } from './body2';
 import { EMOTE_S, emotePose } from './emotes';
 
 // ───────────────────────── colours (all derived from PALETTE) ─────────────────────────
@@ -124,7 +125,7 @@ function legacyPivots(): Pivots {
 
 // ───────────────────────── geometry ─────────────────────────
 /** A skinning group: a fixed joint, or a limb/body region split between two bones by height. */
-type Group = Joint | 'armL' | 'armR' | 'legL' | 'legR' | 'body' | 'cape';
+type Group = Joint | 'armL' | 'armR' | 'legL' | 'legR' | 'body' | 'cape' | 'neck';
 export type Paint = (w: Vector3, uv: [number, number], l: Vector3) => Color3 | undefined;
 interface Occ { c: Vector3; r: number; prim: number }
 
@@ -489,6 +490,42 @@ class Kit {
     (o.glow ? this.glow : this.g).add(W, OUT, tris, this.colorsFor(W, uv, L, col, o.paint), g, !!o.flat, []);
   }
 
+  /**
+   * A surface through a grid of points (model space, rows × cols; each row closes round when `wrap`), coloured per
+   * point. The outward reference of each point is `out` (a function of the grid cell) or away from its row's centre.
+   * Look v2's body, face, hair and beards are built with it (body2.ts, face2.ts, hair.ts).
+   */
+  grid(g: Group, P: V3[][], col: Color3 | ((i: number, j: number) => Color3), o: { wrap?: boolean; flat?: boolean; glow?: boolean; noOcc?: boolean; out?: (i: number, j: number) => V3 } = {}) {
+    const rN = P.length, cN = P[0]?.length ?? 0;
+    if (rN < 2 || cN < 2) return;
+    const wrap = !!o.wrap, s = this.s;
+    const W: Vector3[] = [], OUT: Vector3[] = [], cols: Color3[] = [];
+    const occ: { c: Vector3; r: number }[] = [];
+    for (let i = 0; i < rN; i++) {
+      const row = P[i]!;
+      let cx = 0, cy = 0, cz = 0;
+      for (const p of row) { cx += p[0]; cy += p[1]; cz += p[2]; }
+      cx /= cN; cy /= cN; cz /= cN;
+      let rr = 0;
+      for (let j = 0; j < cN; j++) {
+        const p = row[j]!;
+        W.push(new Vector3(p[0] * s, p[1] * s, p[2] * s));
+        const d = o.out ? o.out(i, j) : [p[0] - cx, p[1] - cy, p[2] - cz] as V3;
+        OUT.push(new Vector3(d[0], d[1], d[2]));
+        cols.push(typeof col === 'function' ? col(i, j) : col);
+        rr += Math.hypot(p[0] - cx, p[2] - cz);
+      }
+      if (!o.noOcc && wrap && i % 2 === 0) occ.push({ c: new Vector3(cx * s, cy * s, cz * s), r: (rr / cN) * s * 0.9 });
+    }
+    const tris: number[] = [];
+    const at = (i: number, j: number) => i * cN + (j % cN);
+    for (let i = 0; i < rN - 1; i++) for (let j = 0; j < (wrap ? cN : cN - 1); j++) {
+      const a = at(i, j), b = at(i, j + 1), c = at(i + 1, j), d = at(i + 1, j + 1);
+      tris.push(a, c, d, a, d, b);
+    }
+    (o.glow ? this.glow : this.g).add(W, OUT, tris, cols, g, !!o.flat, occ);
+  }
+
   // ── legacy flat helpers (enemies, weapons) ──
   private fromVD(g: Group, vd: VertexData, at: V3, col: Color3, rot?: V3, glow = false, scale?: V3) {
     const p = vd.positions!, ind = vd.indices!;
@@ -550,6 +587,8 @@ interface HumanSpec {
   handPaint?: (side: number) => Paint | undefined;
   /** The look: builds the head, face, ears, hair and facial hair in place of the fixed ones. */
   customHead?: (k: Kit) => void;
+  /** Look v2: the body, face and hair are body2.ts's (built from this look); buildHuman adds only the accessories. */
+  v2?: AdventurerLook;
   /** A story NPC under a hood (hat 'hood'): tufted ears through it in this colour. */
   hoodEars?: Color3;
   /** Task 9's gear: a worn back piece replaces the cape sheet and its folded hood (the job's tabard stays). */
@@ -583,14 +622,14 @@ function headPaint(skin: Color3, blush: number): Paint {
 }
 
 /** Build a stylised humanoid into the kit. Returns the head centre (for accessories). */
-function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
+function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots, acc = false) {
   const sh = pv.uArmR[0];
   const girth = sp.girth;
   const belly = sp.belly ?? 0;
   const brows = sp.brows ?? shade(sp.hair, 0.8);
   const HY = 1.565; // head centre y
-  // ── legs ──
-  for (const [g, x] of [['legL', pv.thighL[0]], ['legR', pv.thighR[0]]] as [Group, number][]) {
+  // ── legs ── (acc: a Look v2 body (body2.ts) is already built; only the accessories over it follow)
+  if (!acc) for (const [g, x] of [['legL', pv.thighL[0]], ['legR', pv.thighR[0]]] as [Group, number][]) {
     const bt = sp.bootTop ?? 0.38;
     if (sp.legs) k.lathe(g, [x, 0, 0], [[bt - 0.04, 0.062], [0.47, 0.072], [0.62, 0.083], [0.86, 0.092], [0.92, 0.07]], sp.legs, { seg: 10, sz: 1.05 });
     else k.lathe(g, [x, 0, 0], [[bt - 0.04, 0.056], [0.62, 0.066]], mix(P.rock, P.stone, 0.35), { seg: 8 });
@@ -601,7 +640,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
       paint: (w) => (w.y < 0.018 ? shade(sp.boots, 0.55) : undefined) });
   }
   // pelvis / seat
-  if (sp.legs) k.lathe('body', [0, 0, 0], [[0.74, 0.12], [0.8, 0.17 * girth], [0.94, 0.175 * girth], [0.98, 0.15]], sp.legs, { seg: 12, sz: 0.85 });
+  if (sp.legs && !acc) k.lathe('body', [0, 0, 0], [[0.74, 0.12], [0.8, 0.17 * girth], [0.94, 0.175 * girth], [0.98, 0.15]], sp.legs, { seg: 12, sz: 0.85 });
 
   // ── torso / tunic / coat ──
   const hem = sp.hem, fl = sp.flare;
@@ -612,13 +651,13 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
     [1.04, W * (1.0 + belly * 0.6)], [1.12, W * (1.03 + belly * 0.3)], [1.22, W * 1.02], [1.28, W * 0.86], [1.32, 0.11], [1.345, 0.065],
   ];
   if (hem > 0.86) prof.splice(0, 3, [hem, W * 0.92]);
-  k.lathe('body', [0, 0, 0], prof, top, { seg: 16, sz: 0.78 + belly * 0.25, paint: (w, uv) => {
+  if (!acc) k.lathe('body', [0, 0, 0], prof, top, { seg: 16, sz: 0.78 + belly * 0.25, paint: (w, uv) => {
     if (trim && w.y < hem + 0.035) return trim;
     // soft vertical fold shading on the skirt
     if (w.y < 0.9) return shade(top, 0.93 + 0.07 * Math.cos(uv[0] * Math.PI * 2 * 6));
     return undefined;
   } });
-  if (sp.vneck) {
+  if (sp.vneck && !acc) {
     // shirt front showing at the open collar, with lacing
     const zf = W * 1.02 * (0.78 + belly * 0.25);
     k.ellip('body', [0, 1.235, zf - 0.012], [0.052, 0.085, 0.02], sp.vneck, { seg: 8, lat: 6, power: 0.8, noOcc: true });
@@ -658,10 +697,10 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
     k.tube('body', [[-0.14, 0.95, z0 - 0.02], [-0.2, 0.95, -0.05], [0, 0.96, -0.16], [0.2, 0.95, -0.05], [0.14, 0.95, z0 - 0.02]], 0.012, sp.apron, { seg: 4, noOcc: true });
   }
   // neck
-  k.lathe('head', [0, 0, 0], [[1.3, 0.058], [1.42, 0.054]], shade(sp.skin, 0.93), { seg: 8, caps: false, noOcc: true, paint: sp.skinPaint });
+  if (!acc) k.lathe('head', [0, 0, 0], [[1.3, 0.058], [1.42, 0.054]], shade(sp.skin, 0.93), { seg: 8, caps: false, noOcc: true, paint: sp.skinPaint });
 
   // ── arms ──
-  for (const [g, side] of [['armL', -1], ['armR', 1]] as [Group, number][]) {
+  if (!acc) for (const [g, side] of [['armL', -1], ['armR', 1]] as [Group, number][]) {
     const ax = side * (sh + 0.012);
     const sleeve = sp.sleeveColor ?? top;
     k.ellip(g, [side * (sh - 0.012), 1.255, 0], [0.08, 0.072, 0.074], sleeve, { seg: 10, lat: 6 });
@@ -684,7 +723,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
 
   // ── head ──
   if (sp.customHead) sp.customHead(k);
-  else {
+  else if (!acc) {
   k.ellip('head', [0, HY, 0.01], [0.195, 0.205, 0.185], sp.skin, { seg: 18, lat: 12, paint: headPaint(sp.skin, sp.beard === 'full' ? 0.4 : 1),
     deform: (l) => {
       if (l.y < 0) { const t = -l.y; l.x *= 1 - 0.16 * t; l.z *= 1 - 0.05 * t; l.z += 0.06 * t * Math.max(0, l.z); } // softer jaw
@@ -780,7 +819,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots) {
   } // (the fixed head)
 
   // spectacles over a look-built face (a story NPC: Old Marrow)
-  if (sp.customHead && sp.glasses) {
+  if ((sp.customHead || acc) && sp.glasses) {
     for (const sx of [-1, 1]) {
       const ring: V3[] = [];
       for (let i = 0; i <= 10; i++) { const a = (i / 10) * Math.PI * 2; ring.push([sx * 0.07 + Math.cos(a) * 0.04, HY + Math.sin(a) * 0.038, 0.2]); }
@@ -1231,26 +1270,14 @@ function strHash(s: string): number {
   return h >>> 0;
 }
 
-/** The adventurer's body from a look: its free colours, the outfit's two dyes, and the look's head, hair and tail. */
-function adventurerSpec(l: AdventurerLook, detail: number, ov: GearBodyOverride | null = null): HumanSpec {
-  const col = lookColours(l), bp = bodyParams(l), fp = faceParams(l);
+/** The adventurer's clothes over a Look v2 body: the outfit's two dyes (the body, face and hair are body2.ts's). */
+function adventurerSpec(l: AdventurerLook, ov: GearBodyOverride | null = null, tunicColour?: string): HumanSpec {
   const dye = (d: number, undyed: Color3) => (d > 0 && d < DYES.length ? hex(DYES[d]!.hex) : undyed);
-  const tunic = dye(l.outfit.dye1, P.teal), legs = dye(l.outfit.dye2, C.cream);
-  const fur = l.fur;
-  const skinPaint: Paint | undefined = fur ? furPaint(col.skin, col.fur2!, fur.pattern)
-    : l.people === 'larchfolk' ? (w) => (Math.sin(w.y * 64 + Math.sin(w.x * 30) * 2) > 0.88 ? shade(col.skin, 0.86) : undefined) : undefined;
-  const tie = l.outfit.dye2 > 0 ? shade(legs, 0.8) : P.roof;
+  const tunic = tunicColour ? hex(tunicColour) : dye(l.outfit.dye1, P.teal), legs = dye(l.outfit.dye2, C.cream);
   const spec: HumanSpec = {
-    skin: col.skin, hair: col.hair, hairStyle: 'none', top: tunic, topTrim: P.gold, hem: 0.66, flare: 0.05, girth: 1,
+    skin: C.skin, hair: C.chestnut, hairStyle: 'none', top: tunic, topTrim: P.gold, hem: 0.66, flare: 0.05, girth: 1,
     sleeves: 'short', legs, boots: C.leather, belt: C.leather, buckle: P.gold, pouch: true,
-    cape: { color: P.skyDeep, trim: P.gold, len: 0.66 }, scarf: P.roof, hat: 'none',
-    skinPaint, handPaint: fur ? (side) => pawPaint(col.skin, col.fur2!, fur.pattern, side) : undefined,
-    customHead: (k) => {
-      buildHead(k, { fp, col, furPattern: fur ? fur.pattern : null, ear: bp.ear, earLen: bp.earLen, facial: l.hair.facial, bark: l.people === 'larchfolk', detail });
-      buildHair(k, l.hair.style, col.hair, tie);
-      buildFacialHair(k, l.hair.facial, col.facial, fur ? 0.06 : 0, tie);
-      if (fur) buildTail(k, fur.tail, col.skin, col.fur2!, fur.pattern);
-    },
+    cape: { color: P.skyDeep, trim: P.gold, len: 0.66 }, scarf: P.roof, hat: 'none', v2: l,
   };
   if (!ov) return spec;
   // worn gear (Task 9): its cut and colours over the default clothes
@@ -1266,17 +1293,19 @@ function adventurerSpec(l: AdventurerLook, detail: number, ov: GearBodyOverride 
   return spec;
 }
 
-function design(kind: EntityKind | 'npc', color: string | undefined, look: AdventurerLook | null = null, detail = 1, ov: GearBodyOverride | null = null): Design {
+/** The look the offline demo's hero (an adventurer with no look) is drawn with: a young man of the lanes, his hair tousled. */
+export const HERO_LOOK: AdventurerLook = (() => {
+  const base = LOOK_PRESETS.find((p) => p.id === 'pine_archer')!.look;
+  const l = parseLook({ ...base, people: 'human', fur: null, ears: { ...base.ears, style: 1 }, skin: { ...base.skin, colour: 0xe2b48f },
+    hair: { ...base.hair, style: 2, colour: 0x5a3a24, facialColour: 0x5a3a24 }, eyes: { ...base.eyes, colour: 0x4f6b3a } });
+  if (!l) throw new Error('character.ts: HERO_LOOK is not a valid look');
+  return l;
+})();
+
+function design(kind: EntityKind | 'npc', color: string | undefined, look: AdventurerLook | null = null, ov: GearBodyOverride | null = null): Design {
   const base = { hunch: 0, scale: 1, shoulder: 0.235, prop: null, stride: 1 } as const;
-  if (kind === 'player' && look) return { ...base, idle: 'hero', spec: adventurerSpec(look, detail, ov) };
-  if (kind === 'player') {
-    const tunic = color ? hex(color) : P.teal;
-    return { ...base, idle: 'hero', spec: {
-      skin: C.skin, hair: C.chestnut, hairStyle: 'hero', top: tunic, topTrim: P.gold, hem: 0.66, flare: 0.05, girth: 1,
-      sleeves: 'short', legs: C.cream, boots: C.leather, belt: C.leather, buckle: P.gold, pouch: true,
-      cape: { color: P.skyDeep, trim: P.gold, len: 0.66 }, scarf: P.roof, hat: 'none',
-    } };
-  }
+  // every adventurer is a Look v2 body (the offline hero: HERO_LOOK, its tunic in `color`)
+  if (kind === 'player') return { ...base, idle: 'hero', spec: adventurerSpec(look ?? HERO_LOOK, ov, look ? undefined : color) };
   if (kind === 'companion') {
     const coat = color ? hex(color) : P.roof;
     return { ...base, scale: 0.96, idle: 'relaxed', spec: {
@@ -1286,7 +1315,7 @@ function design(kind: EntityKind | 'npc', color: string | undefined, look: Adven
     } };
   }
   if (kind !== 'npc') return { ...base, spec: null, idle: 'relaxed' };
-  if (look) return npcLookDesign(look, color, detail);
+  if (look) return npcLookDesign(look, color);
   if (!color) {
     // Old Marrow: kindly elder with a white beard, spectacles and a cane.
     return { ...base, idle: 'cane', hunch: 0.3, scale: 0.94, prop: 'cane', stride: 0.55, spec: {
@@ -1340,9 +1369,9 @@ function design(kind: EntityKind | 'npc', color: string | undefined, look: Adven
  * a shawl, spectacles and a cane. Nell Thistlewood ('#6E8B3D'): a long moss-green hooded cloak edged in thistle
  * purple, a leather vest and a walking pole with a road lantern. Any other colour: a plain tunic in it.
  */
-function npcLookDesign(look: AdventurerLook, color: string | undefined, detail: number): Design {
+function npcLookDesign(look: AdventurerLook, color: string | undefined): Design {
   const base = { hunch: 0, scale: 1, shoulder: 0.235, prop: null, stride: 1 } as const;
-  const sp = adventurerSpec(look, detail);
+  const sp = adventurerSpec(look);
   const noKit = { cape: undefined, scarf: undefined, pouch: false } as const;
   if (!color) {
     return { ...base, idle: 'cane', hunch: 0.3, prop: 'cane', stride: 0.55, spec: { ...sp, ...noKit,
@@ -1357,7 +1386,7 @@ function npcLookDesign(look: AdventurerLook, color: string | undefined, detail: 
       top: C.cream, topTrim: undefined, hem: 0.62, flare: 0.04, girth: 0.95, vest: shade(C.leather, 1.25), sleeves: 'long', sleeveColor: shade(c, 0.8),
       legs: C.khaki, boots: C.leather, bootTop: 0.46, belt: C.leather, buckle: P.gold, pouch: true, scarf: undefined,
       cape: { color: c, trim: thistle, len: 0.95 }, hat: 'hood', hatColor: shade(c, 0.95), hatBand: thistle,
-      hoodEars: look.fur ? hex('#' + look.colours.skin.toString(16).padStart(6, '0')) : undefined } };
+      hoodEars: look.fur ? hex('#' + look.skin.colour.toString(16).padStart(6, '0')) : undefined } };
   }
   return { ...base, idle: 'relaxed', spec: { ...sp, ...noKit, top: c, topTrim: shade(c, 0.8), vneck: C.cream } };
 }
@@ -1727,6 +1756,37 @@ function regionOf(g: Group): WarpRegion {
   return 'torso';
 }
 
+/** The old humanoid's hip height (the emotes' sit drop scales from it). */
+const CANON_HIP = 0.88;
+/**
+ * The rig of a Look v2 body: every joint authored on the old humanoid fitted on by the attachment warp, then the
+ * body's own joints set exactly from its frame (hips, spine, neck, eyes, crown, shoulders, elbows, hips, knees).
+ */
+function v2Pivots(f: Frame, w: Warp, l: AdventurerLook): Pivots {
+  const canon = humanPivots(), piv = {} as Pivots, q = { x: 0, y: 0, z: 0 };
+  for (const j of JOINTS) {
+    const c = canon[j]; q.x = c[0]; q.y = c[1]; q.z = c[2];
+    w.apply(regionOf(j), q);
+    piv[j] = [q.x, q.y, q.z];
+  }
+  const elbowX = f.shX + (f.shY - f.elbowY) * 0.04;
+  piv.hips = [0, f.hipY, 0];
+  piv.torso = [0, f.hipY + (f.waistY - f.hipY) * 0.45, 0];
+  piv.head = [0, f.neckBaseY + 0.02 * (f.H / 1.75), 0];
+  piv.eyes = [0, f.headY + (0.02 + 0.06 * ((l.eyes.height - 5) / 5)) * f.headH * 0.5, f.headZ + f.headD * 0.8];
+  piv.hair = [0, f.headY + f.headH * 0.4, f.headZ - f.headD * 0.3];
+  piv.hairB = [0, f.headY - f.headH * 0.15, f.headZ - f.headD * 0.85];
+  piv.uArmL = [-f.shX, f.shY, 0]; piv.uArmR = [f.shX, f.shY, 0];
+  piv.fArmL = [-elbowX, f.elbowY, 0]; piv.fArmR = [elbowX, f.elbowY, 0];
+  piv.thighL = [-f.legX, f.hipY - 0.02, 0]; piv.thighR = [f.legX, f.hipY - 0.02, 0];
+  piv.shinL = [-f.legX * 0.84, f.kneeY, 0.006]; piv.shinR = [f.legX * 0.84, f.kneeY, 0.006];
+  return piv;
+}
+/** The clothes body2.ts paints from a spec (the old canon's heights). */
+function clothesOf(sp: HumanSpec): Clothes {
+  return { top: sp.top, topTrim: sp.topTrim, hem: sp.hem, flare: sp.flare, sleeves: sp.sleeves, sleeveColor: sp.sleeveColor, legs: sp.legs, boots: sp.boots, bootTop: sp.bootTop, vneck: sp.vneck };
+}
+
 /**
  * A standalone shape kit (no scene, no skeleton): Task 9's pieces are built into it for tests, budgets and the dev
  * page. With a look, vertices are warped exactly as on that adventurer's body. `read()` gives every vertex's
@@ -1739,15 +1799,13 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
   const geo = new Geo(resolve), glow = new Geo(resolve, 0);
   let s = 1;
   if (look) {
-    const w = makeWarp(bodyParams(look)), canon = humanPivots(), q = { x: 0, y: 0, z: 0 };
-    s = w.s;
-    const piv = {} as Pivots;
-    for (const j of JOINTS) { const c = canon[j]; q.x = c[0]; q.y = c[1]; q.z = c[2]; w.apply(regionOf(j), q); piv[j] = [q.x, q.y, q.z]; }
+    const w = makeAttachWarp(bodyFrame(look)), canon = humanPivots();
+    const piv = v2Pivots(bodyFrame(look), w, look);
     const wv = (g: Group, p: Vector3) => {
       if (RIGID_ARM.has(g) || RIGID_TORSO.has(g)) { const c = canon[g as Joint], v = piv[g as Joint]; p.x += v[0] - c[0]; p.y += v[1] - c[1]; p.z += v[2] - c[2]; return; }
       w.apply(regionOf(g), p);
     };
-    geo.warp = wv; glow.warp = wv; geo.scale = s; glow.scale = s;
+    geo.warp = wv; glow.warp = wv;
   }
   const k = new Kit(geo, glow, s);
   k.detail = detail;
@@ -1840,31 +1898,28 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const detailOf = () => DETAIL[opts.detail ?? detailNow];
   const planOf = (): GearPlan | null => (look && gear && gearHooks ? gearHooks.plan(gear, look) : null);
   let plan = planOf();
-  let des = design(kind, opts.color, look, detailOf(), plan?.body ?? null);
+  let des = design(kind, opts.color, look, plan?.body ?? null);
   const humanoid = !!des.spec;
   const root = new TransformNode(`char_${kind}_${id}`, scene);
   const rigRoot = new TransformNode(`rig_${id}`, scene);
   rigRoot.parent = root;
 
   // ── layout: the pivots (warped by the look), the uniform scale and the height ──
-  let piv!: Pivots, canon!: Pivots, s = 1, height = 0, bp: BodyParams | null = null, warp: Warp | null = null;
+  let piv!: Pivots, canon!: Pivots, s = 1, height = 0, frame: Frame | null = null, warp: Warp | null = null;
   let stance: StanceParams | null = null, walk: WalkParams | null = null;
   const layout = () => {
     canon = humanoid ? humanPivots(des.shoulder) : legacyPivots();
     if (kind === 'brute') { canon.uArmL = [-0.42, 1.03, 0]; canon.uArmR = [0.42, 1.03, 0]; canon.fArmL = [-0.42, 0.8, 0]; canon.fArmR = [0.42, 0.8, 0]; canon.thighL = [-0.14, 0.62, 0]; canon.thighR = [0.14, 0.62, 0]; canon.bladeHand = [0.42, 0.45, 0.05]; canon.bowHand = [-0.42, 0.45, 0.05]; }
     if (kind === 'warden') { canon.uArmL = [-0.38, 1.05, 0]; canon.uArmR = [0.38, 1.05, 0]; canon.fArmL = [-0.38, 0.8, 0]; canon.fArmR = [0.38, 0.8, 0]; canon.thighL = [-0.13, 0.62, 0]; canon.thighR = [0.13, 0.62, 0]; canon.head = [0, 1.16, 0]; }
     piv = { ...canon };
-    if (look && humanoid) {
-      bp = bodyParams(look); warp = makeWarp(bp); s = warp.s; height = bp.height * 1.06;
-      stance = stanceParams(look); walk = walkParams(look);
-      const q = { x: 0, y: 0, z: 0 };
-      for (const j of JOINTS) {
-        const c = canon[j]; q.x = c[0]; q.y = c[1]; q.z = c[2];
-        warp.apply(regionOf(j), q);
-        piv[j] = [q.x, q.y, q.z];
-      }
+    const v2 = humanoid ? des.spec?.v2 ?? null : null;
+    if (v2) {
+      // a Look v2 body: built in metres (s = 1) from its frame; everything authored on the old humanoid is fitted on
+      frame = bodyFrame(v2); warp = makeAttachWarp(frame); s = 1; height = frame.H * 1.03;
+      stance = look ? stanceParams(look) : null; walk = look ? walkParams(look) : null;
+      piv = v2Pivots(frame, warp, v2);
     } else {
-      bp = null; warp = null; stance = null; walk = null;
+      frame = null; warp = null; stance = null; walk = null;
       s = humanoid ? des.scale : tr.legacyScale;
       height = humanoid ? tr.height * des.scale : tr.height;
     }
@@ -1920,6 +1975,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       case 'legR': return split('thighR', 'shinR', piv.shinR[1], 0.05, y);
       case 'body': return split('torso', 'hips', piv.torso[1], 0.06, y);
       case 'cape': return split('capeA', 'capeB', piv.capeB[1], 0.12, y);
+      case 'neck': return split('torso', 'head', piv.head[1], 0.035, y);
       default: return [jIdx[g], jIdx[g], 1];
     }
   };
@@ -1954,6 +2010,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     let key: string | null = null;
     if (kind === 'player' && look) {
       try { key = `${detailOf()}|${encodeLook(look)}|${gear && gearHooks ? encodeGearLook(gear) : ''}`; } catch { key = null; }
+    } else if (kind === 'player') {
+      key = `${detailOf()}|hero|${opts.color ?? ''}`;
     }
     let got = key ? bodyCache.get(key) : undefined;
     if (got && key) { bodyCache.delete(key); bodyCache.set(key, got); characterStats.cacheHits++; }
@@ -1962,8 +2020,21 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       const glowGeo = new Geo(resolve, 0);
       if (warp) { geo.warp = warpVertex; geo.scale = s; glowGeo.warp = warpVertex; glowGeo.scale = s; }
       const kit = new Kit(geo, glowGeo, s);
-      if (look) kit.detail = detailOf();
-      if (des.spec) {
+      if (des.spec?.v2) kit.detail = detailOf();
+      if (des.spec?.v2 && frame && warp) {
+        // Look v2: the body, face and hair in metres (no warp), then the accessories, weapons, cues and gear fitted on
+        geo.warp = glowGeo.warp = null;
+        const sp = des.spec;
+        buildBody2(kit, { look: sp.v2!, frame, warp, clothes: clothesOf(sp), detail: kit.detail, tie: sp.v2!.outfit.dye2 > 0 ? shade(sp.legs ?? C.cream, 0.8) : P.roof });
+        geo.warp = glowGeo.warp = warpVertex;
+        buildHuman(kit, sp, canon, true);
+        if (sp.v2!.fur) { const lc = lookColours(sp.v2!); buildTail(kit, sp.v2!.fur.tail, lc.skin, lc.fur2!, sp.v2!.fur.pattern); }
+        if (plan) geo.skip = glowGeo.skip = new Set(plan.replaces);
+        if (kind !== 'npc') buildWeapons(kit, kind === 'player' ? P.cloud : P.teal, false);
+        geo.skip = glowGeo.skip = null;
+        buildProps(kit, des.prop);
+        if (look && gear && plan && gearHooks) gearHooks.build(kit, gear, look, plan);
+      } else if (des.spec) {
         buildHuman(kit, des.spec, canon);
         // (the player's shield is white and gold: a blue one read as the Black Mage's cape from behind)
         // (worn gear builds its own weapon and off-hand models: the default ones on those joints are not built)
@@ -1981,7 +2052,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         }
         if (kind !== 'warden') buildWeapons(kit, shade(P.rock, 1.2), true);
       }
-      geo.heightScale = s * (warp ? warp.y(1.7) / 1.7 : 1);
+      geo.heightScale = frame ? frame.H / 1.75 : s;
       geo.bakeAO(humanoid ? 0.7 : 0.4);
       got = { body: freeze(geo), glow: glowGeo.empty ? null : freeze(glowGeo) };
       if (key) {
@@ -2017,7 +2088,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     const R = Math.max(height, 1.2);
     bounds = new BoundingInfo(new Vector3(-R, -0.2, -R), new Vector3(R, height * 1.3, R));
     mesh.setBoundingInfo(bounds);
-    blobBase = humanoid ? 0.95 * s * (bp ? Math.sqrt(Math.max(1, bp.hip * bp.bulk * bp.fit)) : 1) : tr.ringR * 1.7;
+    blobBase = humanoid ? 0.95 * (frame ? Math.sqrt(frame.H / 1.75) * Math.max(1, frame.hipW / 0.16) : s) : tr.ringR * 1.7;
     if (glowMesh) {
       // a rebuild (a new look or gear): the emissive mesh follows, or is switched off when nothing glows
       if (!glowGeo) glowMesh.setEnabled(false);
@@ -2070,7 +2141,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const live = { blob };
   liveViews.add(live);
   // a quality step-down rebuilds this body at the new detail (only a look-driven body that follows the game's detail)
-  const requeueDetail = () => { if (look && opts.detail === undefined) pending ??= { look, gear }; };
+  const requeueDetail = () => { if (des.spec?.v2 && opts.detail === undefined) pending ??= { look: look ?? HERO_LOOK, gear, hero: !look }; };
   detailViews.add(requeueDetail);
 
   let ring: Mesh | null = null;
@@ -2161,12 +2232,12 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   };
 
   // ── a new look: rebuilt at most REBUILDS_PER_FRAME a frame (queued), never mid-way through anything else ──
-  let pending: { look: AdventurerLook; gear: GearLook | null } | null = null;
+  let pending: { look: AdventurerLook; gear: GearLook | null; hero?: boolean } | null = null;
   const rebuild = () => {
     if (!pending) return;
-    look = pending.look; gear = pending.gear; pending = null;
+    look = pending.hero ? null : pending.look; gear = pending.gear; pending = null;
     plan = planOf();
-    des = design(kind, opts.color, look, detailOf(), plan?.body ?? null);
+    des = design(kind, opts.color, look, plan?.body ?? null);
     layout();
     rebind();
     buildBody();
@@ -2338,7 +2409,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       }
       if (emote) {
         for (const c of CH) emo[c] = out[c];
-        emoteW = emotePose(emo, emote, emoteT, bp ? bp.limb : 1);
+        emoteW = emotePose(emo, emote, emoteT, frame ? frame.hipY / CANON_HIP : 1);
       } else emoteW = Math.max(0, emoteW - dt * 6);
       if (emoteW > 0.001) for (const c of CH) out[c] += (emo[c] - out[c]) * emoteW;
       // ── the cast loop: the staff raised, the free hand forward (over whatever the legs are doing) ──

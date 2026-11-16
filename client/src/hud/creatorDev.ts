@@ -2,7 +2,7 @@
 // URL: ?mode=create|barber  &free=0|1  &gold=120  &name=1 (a name is needed)  &tab=people|body|face|hair|colours|style|outfit|name
 //      &seed=3 (the starting look: defaultLook('dev-<seed>'))  &nopreview=1 (no 3D preview)
 // window.__creatorDev: { ready, state(), result } and the open handle.
-import { defaultLookV1 as defaultLook, validateAdventurerName } from '@sg2/shared';
+import { defaultLook, validateAdventurerName } from '@sg2/shared';
 import { injectStyles } from './style';
 import { openCreator, setCreatorPreview } from './creator';
 import { createCreatorPreview } from '../player/creatorPreview';

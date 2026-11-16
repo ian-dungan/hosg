@@ -4,7 +4,7 @@
 import {
   ArcRotateCamera, Color3, Color4, DirectionalLight, Engine, HemisphericLight, MeshBuilder, Scene, StandardMaterial, Vector3,
 } from '@babylonjs/core';
-import type { LookV1 as Look } from '@sg2/shared';
+import type { Look } from '@sg2/shared';
 import type { CreatorPreview } from '../hud/creator';
 import { makeCharacter } from './character';
 

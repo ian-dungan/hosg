@@ -10,7 +10,7 @@ import {
   Color3, Mesh, MeshBuilder, StandardMaterial, TransformNode, VertexBuffer, VertexData, Vector3, type Scene,
 } from '@babylonjs/core';
 import {
-  NPC_IDS, PROP_IDS, QUESTS, STORY_NPCS, STORY_PROPS, isQuestId, objectiveTarget, type LookV1 as Look, type NpcId, type Objective, type PropId, type QuestsView, type ZoneId,
+  NPC_IDS, PROP_IDS, QUESTS, STORY_NPCS, STORY_PROPS, isQuestId, objectiveTarget, parseLook, upgradeLookV1, type Look, type LookV1, type NpcId, type Objective, type PropId, type QuestsView, type ZoneId,
 } from '@sg2/shared';
 import type { CharacterView, Quality, TapInfo, WorldApi, ZoneId as ClientZoneId } from '../core/contracts';
 import { makeCharacter } from '../player/character';
@@ -86,29 +86,44 @@ export const MARKER_K = 0.058;
 export function markerHeight(d: number): number { return Math.min(40, Math.max(8, d)) * MARKER_K; }
 
 // ───────────────────────── looks ─────────────────────────
-/** The story NPCs' looks (Plan 5's Look), for when characters are built from a Look. */
+/** The story NPCs' looks (Look v2, authored), for when characters are built from a Look. */
+const v1Base = (l: LookV1): Look => upgradeLookV1(l);
+const authored = (l: Look, o: Record<string, unknown>): Look => {
+  const out: Record<string, unknown> = { ...l };
+  for (const [g, v] of Object.entries(o)) out[g] = typeof v === 'object' && v !== null ? { ...(l as unknown as Record<string, object>)[g], ...v } : v;
+  const ok = parseLook(out);
+  if (!ok) throw new Error('storyNpcs.ts: an authored story look is not valid');
+  return ok;
+};
 export const STORY_LOOKS: Readonly<Record<'marrow' | 'bram' | 'tamsin' | 'nell', Look>> = Object.freeze({
-  // an old human, stooped, white hair and beard, a long grey coat
-  marrow: { v: 1, people: 'human', body: { height: 7, build: 8, shoulders: 8, hips: 10, legs: 9, head: 11 },
+  // Old Marrow: an old human, stooped, white hair and a full white beard, heavy brows, kind deep-set eyes, a long grey coat
+  marrow: authored(v1Base({ v: 1, people: 'human', body: { height: 7, build: 8, shoulders: 8, hips: 10, legs: 9, head: 11 },
     face: { shape: 4, eyes: 1, brows: 6, nose: 5, mouth: 2, ears: 2, marks: 0 }, hair: { style: 3, facial: 3 },
     colours: { skin: 0xe8c4a4, hair: 0xe9e6df, facial: 0xe4e2dc, eyes: 0x4a6a8a, marks: 0x000000 }, fur: null,
-    style: { stance: 0, walk: 1 }, outfit: { dye1: 0, dye2: 0 } },
+    style: { stance: 0, walk: 1 }, outfit: { dye1: 0, dye2: 0 } }), {
+    body: 'male', build: { muscle: 6, weight: 9, neck: 9 }, face: { age: 4, cheekbones: 6, jawWidth: 4, chinLength: 6 },
+    eyes: { shape: 6, size: 5, openness: 4, tilt: 4 }, brows: { shape: 6, thickness: 9, height: 5, tilt: 3 },
+    nose: { length: 7, width: 6, bridge: 6, tip: 3 }, ears: { size: 7, angle: 5 },
+    hair: { style: 20, hairline: 3, grey: 4, facial: 12 }, skin: { moles: 1 << 4 },
+  }),
   // a broad knollfolk with a leather apron
-  bram: { v: 1, people: 'knollfolk', body: { height: 12, build: 18, shoulders: 17, hips: 14, legs: 8, head: 12 },
+  bram: v1Base({ v: 1, people: 'knollfolk', body: { height: 12, build: 18, shoulders: 17, hips: 14, legs: 8, head: 12 },
     face: { shape: 0, eyes: 2, brows: 4, nose: 6, mouth: 1, ears: 2, marks: 1 }, hair: { style: 1, facial: 5 },
     colours: { skin: 0xe9b494, hair: 0xb6652c, facial: 0xb6652c, eyes: 0x3b2617, marks: 0xc98a6a }, fur: null,
-    style: { stance: 1, walk: 1 }, outfit: { dye1: 0, dye2: 0 } },
+    style: { stance: 1, walk: 1 }, outfit: { dye1: 0, dye2: 0 } }),
   // a tall larchfolk ferrywoman in an oilskin, a coiled rope at the hip
-  tamsin: { v: 1, people: 'larchfolk', body: { height: 14, build: 9, shoulders: 10, hips: 9, legs: 13, head: 9 },
+  tamsin: authored(v1Base({ v: 1, people: 'larchfolk', body: { height: 14, build: 9, shoulders: 10, hips: 9, legs: 13, head: 9 },
     face: { shape: 1, eyes: 4, brows: 2, nose: 3, mouth: 4, ears: 3, marks: 1 }, hair: { style: 8, facial: 0 },
     colours: { skin: 0xbba98d, hair: 0x7b3e25, facial: 0x7b3e25, eyes: 0x3d4a52, marks: 0x8e7c60 }, fur: null,
-    style: { stance: 2, walk: 0 }, outfit: { dye1: 0, dye2: 0 } },
-  // a brindlekin road-keeper in a green hooded cloak with a staff-length walking pole
-  nell: { v: 1, people: 'brindlekin', body: { height: 10, build: 9, shoulders: 9, hips: 10, legs: 11, head: 10 },
+    style: { stance: 2, walk: 0 }, outfit: { dye1: 0, dye2: 0 } }), { body: 'female', face: { age: 2 } }),
+  // Nell Thistlewood: a brindlekin road-keeper in a green hooded cloak with a staff-length walking pole
+  nell: authored(v1Base({ v: 1, people: 'brindlekin', body: { height: 10, build: 9, shoulders: 9, hips: 10, legs: 11, head: 10 },
     face: { shape: 1, eyes: 3, brows: 2, nose: 2, mouth: 0, ears: 4, marks: 0 }, hair: { style: 1, facial: 0 },
     colours: { skin: 0xb07848, hair: 0x4e3d31, facial: 0x4e3d31, eyes: 0x6f8a3a, marks: 0x000000 },
-    fur: { pattern: 1, colour: 0x6c4b33, tail: 1 }, style: { stance: 2, walk: 3 }, outfit: { dye1: 0, dye2: 0 } },
-} satisfies Record<string, Look>);
+    fur: { pattern: 1, colour: 0x6c4b33, tail: 1 }, style: { stance: 2, walk: 3 }, outfit: { dye1: 0, dye2: 0 } }), {
+    body: 'female', face: { age: 2 }, eyes: { shape: 0, size: 6 }, fur: { muzzle: 3 },
+  }),
+});
 /** The NPC colours (the offline demo's): character.ts picks each one's costume from it (Marrow: none; Nell: her cloak). */
 export const STORY_NPC_COLOR: Readonly<Record<'marrow' | 'bram' | 'tamsin' | 'nell', string | undefined>> =
   Object.freeze({ marrow: undefined, tamsin: '#3FB0A6', bram: '#EC6A4C', nell: '#6E8B3D' });

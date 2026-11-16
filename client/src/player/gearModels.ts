@@ -23,7 +23,7 @@
 // PALETTE-derived colours, never black; every dye's lightness is clamped (look.ts renderColour) so nothing vanishes.
 import type { Color3 } from '@babylonjs/core';
 import {
-  ARMOUR_SLOTS, COSTUMES, COSTUME_IDS, DYES, GEAR_LOOK_SLOTS, ITEMS, SETS, SET_IDS, JOBS, OFFHAND_FOR, kitItems, resolveGearLook, starterFor, type ArmourSlot, type ArmourType, type CostumeId, type CostumeSlot, type GearLook, type GearLookSlot, type GearSlot, type JobId, type LookV1 as AdventurerLook, type OffhandKind, type SetId, type WeaponId,
+  ARMOUR_SLOTS, COSTUMES, COSTUME_IDS, DYES, GEAR_LOOK_SLOTS, ITEMS, SETS, SET_IDS, JOBS, OFFHAND_FOR, kitItems, resolveGearLook, starterFor, type ArmourSlot, type ArmourType, type CostumeId, type CostumeSlot, type GearLook, type GearLookSlot, type GearSlot, type JobId, type Look as AdventurerLook, type OffhandKind, type SetId, type WeaponId,
 } from '@sg2/shared';
 import type { Quality } from '../core/contracts';
 import { DETAIL, pieceKit, type GearBodyOverride, type GearHooks, type GearPlan, type ShapeKit, type V3 } from './character';

@@ -4,7 +4,7 @@
 // All five booths are two meshes (lit, and the lamps' glow), flat-shaded in PALETTE-derived vertex colours. A tap on a
 // booth reports STALL_EID[id] (its meshes and a larger invisible pick box carry metadata.entityId).
 import { Color3, Mesh, MeshBuilder, StandardMaterial, type Material, type Scene } from '@babylonjs/core';
-import { STALL_IDS, TOWN_STALLS, defaultLookV1 as defaultLook, type StallId } from '@sg2/shared';
+import { STALL_IDS, TOWN_STALLS, defaultLook, type StallId } from '@sg2/shared';
 import type { CharacterView, WorldApi } from '../core/contracts';
 import { makeCharacter } from '../player/character';
 import { Builder, hex, tint, type RGB } from './mesh';
