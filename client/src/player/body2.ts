@@ -96,8 +96,9 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   add(ribsY, lerp(f.waistW, f.chestW, 0.62), lerp(f.waistD, f.chestD, 0.6), { belly: 0.45, bust: 0.45 });
   add(f.chestY, f.chestW, f.chestD, { bust: 1, pec: 1 });
   add(upY, f.chestW * 1.02, f.chestD * 0.94, { bust: 0.35, pec: 0.7 });
-  add(f.shY, f.shX * 0.92, f.chestD * 0.84);
-  add(f.shTopY, f.shX * 0.55, f.chestD * 0.6);
+  // the shoulder's slope (trapezius) rounds over into the arm: no square corner at the top
+  add(f.shY - 0.008 * kk, f.shX * 0.88, f.chestD * 0.84);
+  add(f.shTopY, f.shX * 0.6, f.chestD * 0.62);
   add(f.neckBaseY + 0.012 * kk, f.neckR * 1.3, f.neckR * 1.2);
   // a short top's hem: two rows either side, so the shirt meets the trousers in a clean line
   if (hemY > f.crotchY + 0.01 && hemY < f.waistY) {
@@ -181,9 +182,10 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   for (const [g, sx] of [['armL', -1], ['armR', 1]] as const) {
     const axX = (y: number) => sx * armAxis(f, y);
     const aRows0: { y: number; r: number; z?: number }[] = [
-      { y: f.shY + f.uArmR * 0.62, r: f.uArmR * 0.25 },
-      { y: f.shY + f.uArmR * 0.35, r: f.uArmR * 0.85 },
-      { y: f.shY - f.uArmR * 0.35, r: f.uArmR * (1.22 + 0.15 * f.muscle) },
+      // a soft shoulder cap (the deltoid), rounding into the torso's slope rather than a puff on top
+      { y: f.shY + f.uArmR * 0.5, r: f.uArmR * 0.4 },
+      { y: f.shY + f.uArmR * 0.15, r: f.uArmR * 0.92 },
+      { y: f.shY - f.uArmR * 0.45, r: f.uArmR * (1.12 + 0.14 * f.muscle) },
       { y: lerp(f.shY, f.elbowY, 0.5), r: f.uArmR * (1.02 + 0.12 * f.muscle), z: 0.003 * kk },
       { y: f.elbowY + 0.035 * kk, r: f.fArmR * 1.02 },
       { y: f.elbowY, r: f.fArmR * 0.96 },

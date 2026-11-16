@@ -345,9 +345,12 @@ export interface LookColours {
   skin: Color3; hair: Color3; hair2: Color3 | null; facial: Color3; brows: Color3; eyes: Color3; eyes2: Color3;
   paint: Color3; fur2: Color3 | null; lips: Color3 | null; shadow: Color3 | null; liner: Color3 | null;
 }
-const GREY_HAIR = new Color3(0.78, 0.77, 0.75);
-/** The hair colour with its grey (0..4) mixed in. */
-const greyed = (c: Color3, grey: number) => Color3.Lerp(c, GREY_HAIR, [0, 0.22, 0.45, 0.7, 0.92][grey] ?? 0);
+export const GREY_HAIR = new Color3(0.78, 0.77, 0.75);
+/** How much of the hair has turned (grey 0..4). */
+export const greyAmount = (grey: number): number => [0, 0.22, 0.45, 0.7, 0.92][grey] ?? 0;
+/** The hair colour with its grey (0..4) mixed in: an even salt-and-pepper over the whole head (hair.ts lightens the
+ *  temples and a beard's chin a little more, as hair greys there first: smooth streaks, never patches). */
+const greyed = (c: Color3, grey: number) => Color3.Lerp(c, GREY_HAIR, greyAmount(grey));
 /** The look's colours as rendered (skin is the fur's base colour for the Brindlekin; fur2 is the pattern's colour). */
 export function lookColours(l: Look): LookColours {
   const h = l.hair, pal = (list: readonly { colour: number }[], i: number) => (i > 0 && list[i - 1] ? renderColour(list[i - 1]!.colour) : null);

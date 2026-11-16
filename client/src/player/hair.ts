@@ -10,12 +10,13 @@
 import { Color3 } from '@babylonjs/core';
 import { HAIR_STYLE_INFO, type HairTexture, type Look } from '@sg2/shared';
 import type { ShapeKit, V3 } from './character';
-import type { Frame, LookColours } from './look';
+import { GREY_HAIR, greyAmount, type Frame, type LookColours } from './look';
 import { dirOf, norm, type HeadShape } from './face2';
 
 const mix = (a: Color3, b: Color3, t: number) => Color3.Lerp(a, b, Math.max(0, Math.min(1, t)));
 const shade = (c: Color3, f: number) => new Color3(Math.min(1, c.r * f), Math.min(1, c.g * f), Math.min(1, c.b * f));
 const sm = (t: number) => { const x = Math.max(0, Math.min(1, t)); return x * x * (3 - 2 * x); };
+const G = (x: number, s: number) => Math.exp(-(x * x) / (s * s));
 type J = 'head' | 'hair' | 'hairB';
 
 /** Styles whose long hair swings on the nape spring (character.ts). */
@@ -75,12 +76,14 @@ export function scalpPaint(look: Look): ((d: V3) => number) | null {
 export function stubblePaint(look: Look): ((d: V3) => number) | null {
   const f = look.hair.facial;
   if (f === 0 || look.fur) return null;
-  const amt = f === 1 ? 0.5 : 0.35;
+  const amt = f === 1 ? 0.5 : 0.8;   // under a beard: nearly its colour, so its thin edges never show skin patches
   return (d) => {
     const [x, y, z] = d;
     if (z < -0.25 || y > -0.12) return 0;
     if (Math.abs(x) < 0.3 && y > -0.66 && y < -0.5) return 0;      // the lips
-    return amt * sm((-y - 0.12) / 0.12) * sm((z + 0.25) / 0.2) * (f === 6 ? (Math.abs(x) > 0.7 ? 1 : 0) : 1);
+    // under a beard only just round its line (a broad grey band above a beard read as patches on the cheeks)
+    const under = f >= 2 && f !== 6 ? sm((-0.1 - 0.36 * Math.max(0, 1 - Math.abs(x) / 0.85) + 0.04 - y) / 0.08) : 1;
+    return amt * under * sm((-y - 0.12) / 0.12) * sm((z + 0.25) / 0.2) * (f === 6 ? (Math.abs(x) > 0.7 ? 1 : 0) : 1);
   };
 }
 
@@ -91,6 +94,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
   if (info.length === 'bald' || info.length === 'shaved') return;
   const kh = hs.Hh / 0.12;
   const hc = col.hair, h2 = col.hair2;
+  const grey = greyAmount(look.hair.grey);
   const tex = info.texture;
   const fh = 0;
   const lo = detail < 0.5, mid = detail < 0.9;   // (mid: med and below — the heaviest styles thin out to stay near the mean)
@@ -108,9 +112,12 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
         const d = dirOf(Math.max(0.001, th), (Math.PI * 2 * jj) / seg);
         const c = cov(d);
         const bump = amp > 0 ? (0.5 + 0.5 * noise(d, tex === 'coiled' ? 23 : 15)) * amp * 0.008 * kh : 0;
-        const out = c > 0.02 ? (vol(d) + bump) * Math.pow(c, 0.6) + 0.0012 * kh : -0.004 * kh;
+        // the edge slopes into the skull over a band (a step between neighbours left a torn, patchy hairline)
+        const out = (c > 0.02 ? (vol(d) + bump) * Math.pow(c, 0.6) : 0) + (-0.004 + 0.0052 * sm(c / 0.2)) * kh;
         row.push(at(d, out));
-        let cc = shade(hc, 0.94 + 0.12 * Math.max(0, d[1]) + (amp > 0 ? 0.08 * noise(d, 31) : 0.03 * Math.sin(dirAng(d) * 22)));
+        // the shine on the crown and the strands' texture (quieter as the hair greys: grey hair has less contrast)
+        let cc = shade(hc, 0.94 + 0.12 * Math.max(0, d[1]) + (1 - 0.7 * grey) * (amp > 0 ? 0.08 * noise(d, 31) : 0.03 * Math.sin(dirAng(d) * 22)));
+        if (grey > 0) cc = mix(cc, GREY_HAIR, grey * 0.35 * G(Math.abs(d[0]) - 0.85, 0.22) * G(d[1] - 0.05, 0.35));   // the temples turn first
         if (h2 && Math.sin(dirAng(d) * 5 + d[1] * 2) > 0.62 && d[1] > -0.2) cc = mix(cc, h2, 0.8);
         cr.push(cc);
       }
@@ -369,7 +376,9 @@ export function buildFacialHair(k: ShapeKit, o: HairOpts): void {
         let c = 0;
         for (const [ex, ey] of [[0, 0], [0.06, 0], [-0.06, 0], [0, 0.05], [0, -0.05]] as const) c += m([d[0] + ex, d[1] + ey, d[2]]) / 5;
         const v = (vol[f] ?? 0.01) * kh * Math.min(1, c * 1.4);
-        let p = at(d, c > 0.15 ? Math.max(0.0025 * kh, v * (0.55 + 0.45 * Math.min(1, (-d[1] - 0.12) / 0.3))) : -0.004 * kh);
+        // (the edge slopes into the skin over a band: a step left a torn edge with skin showing in patches)
+        const e = sm((c - 0.05) / 0.35);
+        let p = at(d, -0.004 * kh * (1 - e) + e * Math.max(0.0025 * kh, v * (0.55 + 0.45 * Math.min(1, (-d[1] - 0.12) / 0.3))));
         // long beards fall from the chin
         const dr = (drop[f] ?? 0) * kh;
         if (c > 0 && dr > 0 && d[1] < -0.55) {
@@ -382,7 +391,14 @@ export function buildFacialHair(k: ShapeKit, o: HairOpts): void {
       }
       P.push(row);
     }
-    k.grid('head', P, (i, j) => shade(fc, 0.92 + 0.12 * Math.sin(i * 1.3 + j * 2.1)), { noOcc: true,
+    // smooth shading down the beard (no per-vertex noise: on a greyed beard it read as blotches), and the chin a
+    // little greyer than the cheeks, as beards grey there first
+    const grey = greyAmount(look.hair.grey);
+    k.grid('head', P, (i, j) => {
+      const d = dirOf(1.55 + (Math.PI - 1.55) * (i / lat) * 0.985, -1.95 + (3.9 * j) / seg);
+      const c = shade(fc, 0.98 - 0.1 * sm((-d[1] - 0.55) / 0.4) + 0.03 * Math.cos(j * 0.9));
+      return grey > 0 ? mix(c, GREY_HAIR, grey * 0.3 * G(d[0], 0.35) * sm((-d[1] - 0.55) / 0.3)) : c;
+    }, { noOcc: true,
       out: (i, j) => hs.normal(...dirOf(1.55 + (Math.PI - 1.55) * (i / lat) * 0.985, -1.95 + (3.9 * j) / seg)) });
   }
   // moustaches

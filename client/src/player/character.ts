@@ -878,7 +878,9 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots, acc = false) {
   if (sp.scarf) {
     const sc = sp.scarf;
     k.g.tagNow = 2;   // the scarf takes the job's colour too (it is what shows from the front)
-    k.lathe('torso', [0, 0, 0.0], [[1.26, 0.13], [1.29, 0.145], [1.35, 0.125], [1.38, 0.1]], sc, { seg: 14, sz: 0.95, paint: (w) => (Math.abs(w.y - 1.315) < 0.012 ? shade(sc, 0.82) : undefined) });
+    // a slim knotted scarf lying low round the neck's base (it was a high, thick collar that hid the neck and jaw)
+    k.lathe('torso', [0, 0, 0.0], sp.v2 ? [[1.255, 0.118], [1.275, 0.126], [1.305, 0.112], [1.322, 0.098]] : [[1.26, 0.13], [1.29, 0.145], [1.35, 0.125], [1.38, 0.1]], sc,
+      { seg: 14, sz: 0.95, paint: (w) => (Math.abs(w.y - (sp.v2 ? 1.29 : 1.315)) < 0.008 ? shade(sc, 0.82) : undefined) });
     const tail = (x0: number, len: number, wid: number) => {
       const grid: V3[][] = [];
       for (let i = 0; i <= 5; i++) {
@@ -913,7 +915,8 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots, acc = false) {
     k.g.tagNow = 1; k.g.tagSkip = cp.trim;   // the cloth takes the job's colour (setCape); the gold trim stays
     k.sheet('cape', grid, 0.022, cp.color, { paint: (w, uv) => (w.y < 1.31 - 0.93 * cp.len ? cp.trim : shade(cp.color, 0.96 + 0.04 * Math.cos(uv[0] * Math.PI * 6))) });
     // hood folded over the shoulders (not far off: the cape and the job's tabard carry it)
-    if (!(acc && k.detail < 0.5)) k.lathe('torso', [0, 0, -0.015], [[1.22, 0.2], [1.27, 0.215], [1.33, 0.17], [1.37, 0.12]], cp.color, { seg: 16, sz: 0.88, arc: [Math.PI * 0.42, Math.PI * 1.58],
+    // (v2: lower and rounder over the shoulders, so they are not squared off under the cape)
+    if (!(acc && k.detail < 0.5)) k.lathe('torso', [0, 0, -0.015], sp.v2 ? [[1.215, 0.19], [1.25, 0.198], [1.29, 0.168], [1.325, 0.122]] : [[1.22, 0.2], [1.27, 0.215], [1.33, 0.17], [1.37, 0.12]], cp.color, { seg: 16, sz: sp.v2 ? 0.84 : 0.88, arc: [Math.PI * 0.42, Math.PI * 1.58],
       paint: (w) => (w.y < 1.235 ? cp.trim : undefined) });
     }
     k.g.tagNow = 1; k.g.tagSkip = cp.trim;
