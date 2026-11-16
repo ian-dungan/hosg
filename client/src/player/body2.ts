@@ -10,7 +10,7 @@
 import { Color3 } from '@babylonjs/core';
 import type { Look } from '@sg2/shared';
 import type { Paint, ShapeKit, V3 } from './character';
-import { faceParams, lookColours, type Frame, type LookColours, type Warp } from './look';
+import { armAxis, faceParams, legAxis, lookColours, type Frame, type LookColours, type Warp } from './look';
 
 /** Rows (by height) with two rows added close either side of each cut, so painted edges (cuffs, boot tops, hems) are crisp. */
 function withCuts<T extends { y: number; r: number; z?: number }>(rows: T[], cuts: number[]): T[] {
@@ -179,7 +179,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   // ── arms and hands ──
   const ls = R.limb;
   for (const [g, sx] of [['armL', -1], ['armR', 1]] as const) {
-    const axX = (y: number) => sx * (f.shX + (f.shY - y) * 0.04);
+    const axX = (y: number) => sx * armAxis(f, y);
     const aRows0: { y: number; r: number; z?: number }[] = [
       { y: f.shY + f.uArmR * 0.62, r: f.uArmR * 0.25 },
       { y: f.shY + f.uArmR * 0.35, r: f.uArmR * 0.85 },
@@ -218,7 +218,8 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
 
   // ── legs and feet ──
   for (const [g, sx] of [['legL', -1], ['legR', 1]] as const) {
-    const axX = (y: number) => sx * (y > f.kneeY ? lerp(f.legX * 0.84, f.legX, (y - f.kneeY) / (f.hipY - f.kneeY)) : lerp(f.legX * 0.8, f.legX * 0.84, (y - f.ankleY) / (f.kneeY - f.ankleY)));
+    // knees and ankles come in by the frame's kneeIn (the female base stands knees in, feet closer)
+    const axX = (y: number) => sx * legAxis(f, y);
     const lRows0: { y: number; r: number; z?: number }[] = [
       { y: f.hipY + 0.03 * kk, r: f.thighR * 0.92 },
       { y: f.crotchY, r: f.thighR },

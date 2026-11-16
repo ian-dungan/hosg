@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { LOOK_LIMITS, LOOK_OPTIONAL_COLOURS, LOOK_PRESETS, PEOPLES, PEOPLE_IDS, parseLook, prng, randomLook, type Look } from '@sg2/shared';
-import { CANON, LIGHTNESS, MAX_HALF_WIDTH, bodyFrame, halfWidth, lookColours, makeAttachWarp, modelParams, renderColour } from './look';
+import { ADVENTURER_RADIUS, LOOK_LIMITS, LOOK_OPTIONAL_COLOURS, LOOK_PRESETS, PEOPLES, PEOPLE_IDS, parseLook, prng, randomLook, type Look } from '@sg2/shared';
+import { CANON, LIGHTNESS, MAX_HALF_WIDTH, bodyFrame, faceParams, halfWidth, lookColours, makeAttachWarp, modelParams, renderColour } from './look';
 
 const preset = (p: Look['people'], b: Look['body']) => LOOK_PRESETS.find((x) => x.look.people === p && x.look.body === b)!.look;
 const withPath = (l: Look, path: string, v: number | null): Look | null => {
@@ -84,6 +84,57 @@ describe('bodyFrame', () => {
     expect(m.shX).toBeGreaterThan(w.shX);
     expect(w.hipW / w.waistW).toBeGreaterThan(m.hipW / m.waistW);
     expect(w.bust).toBeGreaterThan(m.bust);
+  });
+
+  // live check: "the female is only slightly narrower" — the two bases must read apart at a glance, for every people
+  it('male and female defaults read as two silhouettes (stated margins), for every people, with the people offsets kept', () => {
+    const fp = (p: Look['people'], b: Look['body']) => {
+      const l = mid(preset(p, b));
+      return faceParams(parseLook({ ...l, face: { ...l.face, width: 5, jawWidth: 5, chinWidth: 5, chinLength: 5 } })!);
+    };
+    const sil = (f: ReturnType<typeof bodyFrame>) => f.shX + f.uArmR * 1.2;
+    for (const p of PEOPLE_IDS) {
+      const m = bodyFrame(mid(preset(p, 'male'))), w = bodyFrame(mid(preset(p, 'female')));
+      const tag = (s: string) => `${p}: ${s}`;
+      expect(sil(m) / m.hipW, tag('male shoulders over hips')).toBeGreaterThanOrEqual(1.55);
+      expect(sil(w) / w.hipW, tag('female shoulders over hips')).toBeLessThanOrEqual(1.22);
+      expect(sil(m) / m.hipW - sil(w) / w.hipW, tag('apart')).toBeGreaterThanOrEqual(0.4);
+      expect(m.waistW / m.hipW, tag('male waist over hips')).toBeGreaterThanOrEqual(0.9);
+      expect(w.waistW / w.hipW, tag('female waist over hips')).toBeLessThanOrEqual(0.62);
+      expect(w.waistW / w.chestW, tag('female waist over chest')).toBeLessThanOrEqual(0.8);
+      expect(m.chestD / w.chestD, tag('rib cage depth')).toBeGreaterThanOrEqual(1.2);
+      expect(w.neckR / m.neckR, tag('neck')).toBeLessThanOrEqual(0.72);
+      expect(w.handL / m.handL, tag('hand')).toBeLessThanOrEqual(0.9);
+      expect(w.footL / m.footL, tag('foot')).toBeLessThanOrEqual(0.9);
+      expect(w.bust).toBeGreaterThanOrEqual(0.6);
+      expect(w.kneeIn, tag('female knees in')).toBeGreaterThan(m.kneeIn + 0.08);
+      const fm = fp(p, 'male'), ff = fp(p, 'female');
+      expect(ff.jaw / fm.jaw, tag('jaw')).toBeLessThanOrEqual(0.85);
+      expect(ff.brow / fm.brow, tag('brow ridge')).toBeLessThanOrEqual(0.3);
+    }
+    // the peoples keep their own offsets on both bodies
+    for (const b of ['male', 'female'] as const) {
+      const H = (p: Look['people']) => bodyFrame(mid(preset(p, b))).H;
+      expect(H('larchfolk')).toBeGreaterThan(H('human')); expect(H('knollfolk')).toBeLessThan(H('human'));
+      expect(bodyFrame(mid(preset('knollfolk', b))).handL / H('knollfolk')).toBeGreaterThan(bodyFrame(mid(preset('human', b))).handL / H('human'));
+    }
+  });
+
+  it('every body slider still reaches across both bodies: a female at the male end of the sliders matches a default male, and back', () => {
+    const m = bodyFrame(mid(preset('human', 'male')));
+    const wide = bodyFrame(parseLook({ ...mid(preset('human', 'female')), build: { ...mid(preset('human', 'female')).build, shoulders: 20, waist: 20, hips: 0, chest: 20, neck: 20 } })!);
+    expect((wide.shX + wide.uArmR * 1.2) / wide.hipW).toBeGreaterThan(1.4);
+    expect(wide.waistW / wide.hipW).toBeGreaterThan(0.8);
+    const w = bodyFrame(mid(preset('human', 'female')));
+    const narrow = bodyFrame(parseLook({ ...mid(preset('human', 'male')), build: { ...mid(preset('human', 'male')).build, shoulders: 0, waist: 0, hips: 20, neck: 0 } })!);
+    expect((narrow.shX + narrow.uArmR * 1.2) / narrow.hipW).toBeLessThan(1.3);
+    expect(narrow.waistW / narrow.hipW).toBeLessThan(0.75);
+    void m; void w;
+  });
+
+  it('the gameplay hit size is fixed (the body never changes it)', () => {
+    expect(ADVENTURER_RADIUS).toBe(0.4);
+    expect(MAX_HALF_WIDTH).toBeCloseTo(ADVENTURER_RADIUS - 0.02, 9);
   });
 
   it('keeps the widest build of every people and body inside the hit radius', () => {

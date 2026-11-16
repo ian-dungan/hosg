@@ -47,6 +47,10 @@ export interface Frame {
   footL: number; footW: number; footH: number;
   // arms (from the shoulder joint at ±shX)
   elbowY: number; wristY: number; uArmR: number; fArmR: number; wristR: number; handL: number; handW: number;
+  /** How far the knees and ankles come in towards the middle (a share of legX: the female base stands knees in). */
+  kneeIn: number;
+  /** The forearm's carrying angle (m outwards per m below the elbow): the hands clear wide hips. */
+  carry: number;
   /** 0 slight .. 1 built (limb definition), and the weight -1..1. */
   muscle: number; weight: number;
   /** The width factor every x was given to keep the widest build inside MAX_HALF_WIDTH (1: none). */
@@ -73,7 +77,7 @@ export function bodyFrame(l: Look): Frame {
   const fat = (x: number) => 1 + x * (we > 0 ? 1 : 0.55) * we;  // weight: more out than in
   // head
   const headH = (H / S.heads) * (1 + 0.11 * u20(b.head)) * (1 + 0.1 * u10(l.face.length));
-  const headW = headH * (fem ? 0.37 : 0.385) * (1 + 0.14 * u10(l.face.width)) * fat(0.06);
+  const headW = headH * (fem ? 0.362 : 0.39) * (1 + 0.14 * u10(l.face.width)) * fat(0.06);
   const headD = headH * 0.43 * (1 + 0.03 * u10(l.face.width));
   const chinY = H - headH;
   const headY = H - headH * 0.5;
@@ -81,7 +85,7 @@ export function bodyFrame(l: Look): Frame {
   const neckLen = headH * 0.36 * (1 + 0.22 * u20(b.neck));
   const shTopY = chinY - neckLen * 0.62;
   const shY = shTopY - 0.03 * k;
-  const neckR = (fem ? 0.047 : 0.057) * ws * (1 + 0.24 * u20(b.neck)) * (1 + 0.15 * mu) * fat(0.12);
+  const neckR = (fem ? 0.041 : 0.062) * ws * (1 + 0.26 * u20(b.neck)) * (1 + 0.15 * mu) * fat(0.12);
   // legs
   const hipY = H * S.leg * (fem ? 0.995 : 1) * (1 + 0.07 * u20(b.legs));
   const kneeY = hipY * 0.53, ankleY = hipY * 0.085;
@@ -91,17 +95,20 @@ export function bodyFrame(l: Look): Frame {
   const waistY = hipY + span * (fem ? 0.36 : 0.33);
   const chestY = hipY + span * 0.74;
   // widths
-  const shX = (fem ? 0.163 : 0.188) * ws * (1 + 0.16 * u20(b.shoulders)) * (1 + 0.05 * mu) * fat(0.04);
-  const chestW = (fem ? 0.138 : 0.158) * ws * (1 + 0.14 * u20(b.chest)) * (1 + 0.05 * mu) * fat(0.14);
-  const chestD = (fem ? 0.1 : 0.112) * ws * (1 + 0.16 * u20(b.chest)) * (1 + 0.1 * mu) * fat(0.16);
-  const bust = fem ? Math.max(0, 0.5 + 0.48 * u20(b.chest)) * fat(0.25) : Math.max(0, 0.08 * mu);
-  const waistW = (fem ? 0.112 : 0.135) * ws * (1 + 0.2 * u20(b.waist)) * fat(0.34);
-  const waistD = (fem ? 0.088 : 0.1) * ws * (1 + 0.15 * u20(b.waist)) * fat(0.4);
+  // the two bases (2026-11 fix round: they read too alike): male shoulders well over the hips, a deep rib cage and a
+  // straight waist; female shoulders about the hips' width, a narrow waist, full hips and seat, a slimmer neck. Every
+  // slider reaches across: a female at the broad end matches a default male's shoulders over hips, and back.
+  const shX = (fem ? 0.15 : 0.196) * ws * (1 + 0.18 * u20(b.shoulders)) * (1 + 0.05 * mu) * fat(0.04);
+  const chestW = (fem ? 0.128 : 0.166) * ws * (1 + 0.14 * u20(b.chest)) * (1 + 0.05 * mu) * fat(0.14);
+  const chestD = (fem ? 0.09 : 0.118) * ws * (1 + 0.16 * u20(b.chest)) * (1 + 0.1 * mu) * fat(0.16);
+  const bust = fem ? Math.max(0, 0.66 + 0.5 * u20(b.chest)) * fat(0.25) : Math.max(0, 0.08 * mu);
+  const waistW = (fem ? 0.098 : 0.142) * ws * (1 + 0.22 * u20(b.waist)) * fat(0.34);
+  const waistD = (fem ? 0.085 : 0.104) * ws * (1 + 0.15 * u20(b.waist)) * fat(0.4);
   const belly = Math.max(0, we) * (fem ? 0.5 : 0.7) + Math.max(0, u20(b.waist)) * 0.15;
-  const hipW = (fem ? 0.168 : 0.152) * ws * (1 + 0.17 * u20(b.hips)) * fat(0.18);
-  const hipD = (fem ? 0.11 : 0.1) * ws * (1 + 0.12 * u20(b.hips)) * fat(0.2);
-  const glute = (fem ? 0.55 : 0.35) + 0.2 * u20(b.hips);
-  const legX = hipW * 0.56;
+  const hipW = (fem ? 0.172 : 0.148) * ws * (1 + 0.2 * u20(b.hips)) * fat(0.18);
+  const hipD = (fem ? 0.114 : 0.098) * ws * (1 + 0.12 * u20(b.hips)) * fat(0.2);
+  const glute = (fem ? 0.75 : 0.3) + 0.22 * u20(b.hips);
+  const legX = hipW * (fem ? 0.6 : 0.56);
   // limbs (radii), arms length
   const L = ws * S.limb;
   const limb = (x: number) => x * L * (1 + 0.17 * mu) * fat(0.22);
@@ -113,10 +120,11 @@ export function bodyFrame(l: Look): Frame {
     people: l.people, female: fem, H,
     headY, headZ: 0.012 * k, headH, headW, headD, chinY, neckR, neckBaseY: shTopY - 0.02 * k,
     shY, shX, shTopY, chestY, chestW, chestD, bust, waistY, waistW, waistD, belly, hipY, hipW, hipD, glute, crotchY,
-    legX, thighR: limb(fem ? 0.083 : 0.08), kneeY, kneeR: limb(fem ? 0.047 : 0.05), calfR: limb(fem ? 0.05 : 0.055), ankleY, ankleR: limb(fem ? 0.026 : 0.03),
+    legX, thighR: limb(fem ? 0.088 : 0.078), kneeY, kneeR: limb(fem ? 0.044 : 0.051), calfR: limb(fem ? 0.049 : 0.057), ankleY, ankleR: limb(fem ? 0.024 : 0.031),
     footL: 0.25 * k * S.foot * (fem ? 0.92 : 1), footW: 0.048 * k * S.foot * (fem ? 0.9 : 1), footH: 0.075 * k * Math.sqrt(S.foot),
-    elbowY, wristY, uArmR: limb(fem ? 0.04 : 0.046) * armMul, fArmR: limb(fem ? 0.034 : 0.039) * armMul, wristR: limb(fem ? 0.022 : 0.025),
+    elbowY, wristY, uArmR: limb(fem ? 0.036 : 0.049) * armMul, fArmR: limb(fem ? 0.031 : 0.041) * armMul, wristR: limb(fem ? 0.02 : 0.026),
     handL: 0.1 * k * S.hand * (fem ? 0.93 : 1), handW: 0.044 * k * S.hand * (fem ? 0.92 : 1) * (1 + 0.08 * mu),
+    kneeIn: fem ? 0.3 : 0.16, carry: 0,
     muscle, weight: we, fit: 1,
   };
   // squeezed until the widest part fits (the margins are fixed, so a few passes)
@@ -125,8 +133,23 @@ export function bodyFrame(l: Look): Frame {
     if (w <= MAX_HALF_WIDTH) break;
     squeeze(f, (MAX_HALF_WIDTH / w) * 0.999);
   }
+  // the carrying angle: the forearm turns out just enough that the hand clears the hips (and a skirt over them)
+  const clearAt = f.hipW * 1.06 + 0.026 * k + f.handW * 0.3;
+  f.carry = Math.max(0, Math.min(0.2, (clearAt - (f.shX + (f.shY - f.wristY) * ARM_SLOPE)) / (f.elbowY - f.wristY)));
   return f;
 }
+
+/** The hanging arm's outward slope (m per m below the shoulder). */
+export const ARM_SLOPE = 0.04;
+/** The hanging arm's axis (|x|, m) at height y: the shoulder joint, the slope, and below the elbow the carrying angle. */
+export const armAxis = (f: Frame, y: number): number => f.shX + (f.shY - y) * ARM_SLOPE + Math.max(0, f.elbowY - y) * f.carry;
+
+/** The leg's axis (|x|, m) at height y: the hip joint, in to the knee by kneeIn, a little more to the ankle. */
+export const legAxis = (f: Frame, y: number): number => {
+  const kIn = 1 - f.kneeIn, aIn = kIn - 0.04;
+  return y > f.kneeY ? lerp(f.legX * kIn, f.legX, Math.min(1, (y - f.kneeY) / (f.hipY - f.kneeY)))
+    : lerp(f.legX * aIn, f.legX * kIn, Math.max(0, (y - f.ankleY) / (f.kneeY - f.ankleY)));
+};
 
 /** The widest half width of the body (m): the arm's outer edge, the hips, the head (with a cape's and hem's room). */
 function rawHalfWidth(f: Frame): number {
@@ -198,8 +221,8 @@ export function faceParams(l: Look): FaceParams {
   const size = 1 + 0.26 * u10(e.size);
   const open = u10(e.openness);
   return {
-    forehead: u10(f.forehead), cheek: u10(f.cheekbones), jaw: (fem ? 0.84 : 0.95) * (1 + 0.22 * u10(f.jawWidth)),
-    chinLen: u10(f.chinLength), chinW: (fem ? 0.9 : 1) * (1 + 0.3 * u10(f.chinWidth)), fullness: u20(l.build.weight), brow: fem ? 0.25 : 0.7,
+    forehead: u10(f.forehead), cheek: u10(f.cheekbones), jaw: (fem ? 0.8 : 0.98) * (1 + 0.24 * u10(f.jawWidth)),
+    chinLen: u10(f.chinLength), chinW: (fem ? 0.84 : 1.04) * (1 + 0.3 * u10(f.chinWidth)), fullness: u20(l.build.weight), brow: fem ? 0.2 : 0.85,
     eyeW: es.w * size, eyeH: es.h * size * (1 + 0.22 * open), eyeTilt: es.tilt + 0.16 * u10(e.tilt),
     lid: Math.max(0, Math.min(0.85, es.lid - 0.26 * open)), lower: es.lower, crease: es.crease, depth: es.depth,
     eyeGap: 1 + 0.14 * u10(e.spacing), eyeY: u10(e.height),
@@ -246,6 +269,7 @@ export function makeAttachWarp(f: Frame): Warp {
   const newW = (y: number) => pwc([f.crotchY, f.hipY, f.waistY, f.chestY, f.shY, f.shTopY, f.neckBaseY + 0.03], [f.hipW, f.hipW * 0.98, f.waistW, f.chestW, f.chestW * 0.98, f.shX * 0.72, f.neckR], y);
   const newD = (y: number) => pwc([f.crotchY, f.hipY, f.waistY, f.chestY, f.shY, f.shTopY], [f.hipD, f.hipD, f.waistD + f.belly * 0.03, f.chestD + f.bust * 0.025, f.chestD * 0.85, f.neckR * 1.4], y);
   const oldD = (y: number) => pwc(OLD_T_Y, OLD_T_W, y) * 0.78;
+  const bellyW = (y: number) => pwc([f.hipY - 0.04, f.hipY, lerp(f.hipY, f.waistY, 0.5), f.waistY, lerp(f.waistY, f.chestY, 0.5), f.chestY], [0, 0.25, 0.7, 1, 0.45, 0], y);
   const hr = C.headR;
   const hx = f.headW / hr[0], hy = (f.headH * 0.5) / hr[1], hz = f.headD / hr[2];
   const armY = (y: number) => pw([C.wrist - 0.12, C.wrist, C.elbow, C.shoulderY, C.shoulderY + 0.1], [f.wristY - 0.12 * (f.handL / 0.1), f.wristY, f.elbowY, f.shY, f.shY + 0.1 * (f.uArmR / C.armR)], y);
@@ -262,7 +286,7 @@ export function makeAttachWarp(f: Frame): Warp {
           const ny2 = legY(p.y);
           let z = p.z * r;
           if (p.y < C.ankle + 0.06) z = (p.z - 0.04) * (f.footL / 0.25) + 0.04 * (f.footL / 0.25); // the foot's length
-          p.x = side * f.legX + (p.x - side * C.legX) * r; p.y = ny2; p.z = z;
+          p.x = side * legAxis(f, ny2) + (p.x - side * C.legX) * r; p.y = ny2; p.z = z;
           return;
         }
         case 'torso': case 'shoulder': {
@@ -270,12 +294,15 @@ export function makeAttachWarp(f: Frame): Warp {
           const wx = region === 'shoulder' ? (f.shX + f.uArmR * 0.6) / (C.shoulderX + 0.02) : newW(Y(yy)) / pwc(OLD_T_Y, OLD_T_W, yy);
           const wz = region === 'shoulder' ? Math.max(f.chestD, f.uArmR * 2.2) / 0.15 : newD(Y(yy)) / oldD(yy);
           p.x *= wx; p.z *= wz; p.y = Y(p.y);
+          // the belly as body2 shapes it (front only, strongest at the waist): worn pieces stay over it
+          if (region === 'torso' && p.z > 0 && f.belly > 0) p.z += f.belly * 0.065 * (f.H / 1.75) * bellyW(p.y);
           return;
         }
         case 'arm': {
           const side = p.x < 0 ? -1 : 1, r = armR(p.y);
           const cx = side * C.shoulderX;
-          p.x = side * f.shX + (p.x - cx) * r; p.z = p.z * r; p.y = armY(p.y);
+          const y2 = armY(p.y);
+          p.x = side * (f.shX + Math.max(0, f.elbowY - y2) * f.carry) + (p.x - cx) * r; p.z = p.z * r; p.y = y2;
           return;
         }
         case 'head': {
