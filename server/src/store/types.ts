@@ -1,6 +1,6 @@
 // What the server keeps between sessions: accounts and their adventurers.
 import {
-  GOLD_MAX, JOB_IDS, defaultLook, newJobsSave, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook, readLook, storedLookIsV1,
+  GOLD_MAX, JOB_IDS, defaultLook, newJobsSave, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook, withCollection, readLook, storedLookIsV1,
   parseQuests, type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type QuestSave, type ZoneId,
 } from '@sg2/shared';
 
@@ -100,9 +100,12 @@ export function highestLevel(jobs: JobsSave): number {
   return level;
 }
 
-/** Checks a write before it is applied (both stores): a valid inventory (parseInventory changes nothing), jobs, look and whole deltas. */
+/** Checks a write before it is applied (both stores): a valid inventory (its collection synced, then parseInventory changes nothing), jobs, look and whole deltas. */
 export function checkedInvWrite(w: InvWrite): InvWrite {
-  const inv = parseInventory(w?.inventory);
+  // the wardrobe collection is brought in step first (whoever built the inventory: every item held unlocks its look)
+  let raw: unknown = w?.inventory;
+  try { raw = withCollection(raw as InventorySave); } catch { /* not an inventory: refused below */ }
+  const inv = parseInventory(raw);
   if (inv.repaired) throw new TypeError('writeInventory: not an inventory');
   if (w.jobs !== undefined && !isJobsSave(w.jobs)) throw new TypeError('writeInventory: not a jobs save');
   let look: Look | undefined;
@@ -185,7 +188,7 @@ export function testKitInventory(tier: 1 | 2 | 3, dyes: [DyeId, DyeId] = [0, 0])
       (inv.gear[job] ??= {})[slot] = inst.uid;
     }
   }
-  return inv;
+  return withCollection(inv);
 }
 
 /**

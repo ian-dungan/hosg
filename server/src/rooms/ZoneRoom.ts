@@ -131,10 +131,10 @@ import {
   bagFullText,
   barberCost,
   defaultLook,
-  encodeGearLook,
+  encodeGearLookV2,
   encodeLook,
   gearItems,
-  gearLookOf,
+  gearLookV2Of,
   inventoryView,
   kitFor,
   levelForXp,
@@ -232,8 +232,8 @@ export interface ZoneRoomOptions {
   gm?: GmProcess;
 }
 
-/** Operations refused inside a sealed boss arena (ruling P5-h): gear and talents. */
-const SEALED_REFUSED: readonly InvOp['op'][] = ['equip', 'unequip', 'talent', 'respec'];
+/** Operations refused inside a sealed boss arena (ruling P5-h): gear and talents; the wardrobe's look and hide, like gear. */
+const SEALED_REFUSED: readonly InvOp['op'][] = ['equip', 'unequip', 'talent', 'respec', 'look', 'hide']; // and appearance changes, like gear
 /** Refusals an operation checks once more on a fresh read before giving them (balances and room). */
 const RECHECK: readonly string[] = ['gold', 'seals', 'bag-full', 'bank-full', 'purse-full'];
 /** Loot writes that fail (the store threw) are tried again this many times, this far apart (ms), then given up (logged). */
@@ -547,7 +547,7 @@ interface Session {
   maxHp: number;
   /** When the last emote was accepted (combat clock). */
   emoteAt: number;
-  /** Its look and gear codes (encodeLook, encodeGearLook): sent in `looks`, never in the state. */
+  /** Its look and gear codes (encodeLook, encodeGearLookV2): sent in `looks`, never in the state. */
   lookCode: string;
   gearCode: string;
   /** What this client was last sent of each adventurer's codes (by engine id; only adventurers in this room). */
@@ -1161,7 +1161,7 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /** What `job` shows (gear, costumes, the hidden head) as the state's code. */
   private gearCode(inv: InvSnapshot['inv'], jobs: JobsSave, job: JobId): string {
-    return encodeGearLook(gearLookOf(inv, job, recordFor(jobs, job).outfit));
+    return encodeGearLookV2(gearLookV2Of(inv, job, recordFor(jobs, job).outfit));
   }
 
   /**

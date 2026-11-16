@@ -2,7 +2,7 @@
 // inventory change, and at most once per grant key (a retried grant changes nothing). Pure: the caller writes the
 // result with the store's compare-and-set (writeInventory), online through the session's queue, offline in a loop.
 import {
-  BAG_SLOTS, COSTUMES, GOLD_MAX, ITEMS, RECENT_KILLS, bagUsed, isCostumeId, isItemId, parseInventory,
+  BAG_SLOTS, COSTUMES, GOLD_MAX, ITEMS, RECENT_KILLS, bagUsed, isCostumeId, isItemId, parseInventory, withCollection,
   type CostumeId, type InventorySave, type ItemId,
 } from '@sg2/shared';
 
@@ -52,16 +52,18 @@ export function applyGrant(inv: InventorySave, gold: number, g: GmGrant): { inv:
     next.bag.push({ uid: next.nextUid, item: g.item, dye: [0, 0] });
     next.nextUid += 1;
   } else if (g.costume !== undefined) {
-    if (next.wardrobe.includes(g.costume)) return { refusal: 'owned' };
+    if (next.wardrobe.includes(g.costume)) return { refusal: 'owned' }; // (every piece owned already)
     next.wardrobe.push(g.costume);
   }
   if (g.key !== undefined) {
     next.recentKills.push(g.key);
     if (next.recentKills.length > RECENT_KILLS) next.recentKills.splice(0, next.recentKills.length - RECENT_KILLS);
   }
-  // the same validation every write gets (writeInventory refuses an inventory parseInventory would repair)
-  if (parseInventory(next).repaired) return { refusal: 'invalid' };
-  return { inv: next, dGold };
+  // the wardrobe collection follows (a granted item or costume is unlocked for good), then the same validation
+  // every write gets (writeInventory refuses an inventory parseInventory would repair)
+  const synced = withCollection(next);
+  if (parseInventory(synced).repaired) return { refusal: 'invalid' };
+  return { inv: synced, dGold };
 }
 
 /** What a grant writes through (the store's own reads and compare-and-set writes). */

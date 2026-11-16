@@ -290,6 +290,19 @@ again, or restarting it, changes nothing. So:
    default look on the older version (it cannot read the new kind), and the older server does not give the
    free visit back. The saved new look is kept, and comes back when you update again.
 
+**The update that brings the wardrobe (looks collection, per-piece looks, saved outfits) has no database
+migration, but it has no way back.** The new data lives inside each adventurer's stored inventory (the same
+place as the bag), so it is saved together with every inventory change. The first time each adventurer joins
+after the update, the server unlocks the looks of everything they already hold (bag, worn gear, Vault, costumes)
+and saves the inventory once; doing it again changes nothing. An older server does not know the new data and
+throws it away on its next save: the looks collected from items sold since, the per-piece looks and dyes, the
+saved outfits and any costume pieces bought one at a time would be lost. So:
+
+1. Back up the database first (see "Back up the database" below).
+2. `git pull` and `docker compose up -d --build` as usual.
+3. **Do not go back** to a version from before this update. If you really must, restore the backup from step 1
+   instead (everything played since is lost).
+
 ### Back up the database
 
 ```

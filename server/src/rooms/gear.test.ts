@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Room } from '@colyseus/sdk';
 import {
-  GUILD_BOARD, INV_TEXT, ITEMS, LAMPWRIGHT_SEALS, RESPEC_PRICE, SMITHY_PRICE, TOWN_STALLS, COSTUMES, encodeGearLook, gearLookOf, itemStats, kitFor, newJobsSave,
+  GUILD_BOARD, INV_TEXT, ITEMS, LAMPWRIGHT_SEALS, RESPEC_PRICE, SMITHY_PRICE, TOWN_STALLS, COSTUMES, COSTUME_PIECES, DYE_PRICE, decodeGearLookV2, encodeGearLookV2, gearLookV2Of, itemStats, kitFor, newJobsSave,
   levelForXp, totalTo, worldOf, zoneDef, type InventorySave, type JobId, type StallId,
 } from '@sg2/shared';
 import { killAdventurer } from '../../../shared/src/combat/adventurer';
@@ -71,7 +71,7 @@ describe('gear', () => {
     await waitFor(() => b.room.state.players.get(a.room.sessionId));
     const before = { ...engine(a.room).a.stats };
     const gearBefore = gearOf(a);
-    expect(gearBefore).toBe(encodeGearLook(gearLookOf(a.last().bag && (await server!.store.getOrCreateAdventurer(a.accountId)).inventory, 'warrior', null)));
+    expect(gearBefore).toBe(encodeGearLookV2(gearLookV2Of(a.last().bag && (await server!.store.getOrCreateAdventurer(a.accountId)).inventory, 'warrior', null)));
     atStall(a, 'smithy');
     expect(await op(a, { op: 'buy', stall: 'smithy', item: 'thornrunner_chest' })).toBe('ok');
     expect(a.last().gold).toBe(START_GOLD - SMITHY_PRICE.chest);
@@ -85,7 +85,7 @@ describe('gear', () => {
     expect(a.last().stats).toMatchObject({ defence: after.defence, maxHp: after.maxHp });
     await waitFor(() => gearOf(a) !== gearBefore && me(a.room).maxHp === after.maxHp);
     const inv = (await server!.store.getOrCreateAdventurer(a.accountId)).inventory;
-    expect(gearOf(a)).toBe(encodeGearLook(gearLookOf(inv, 'warrior', null)));
+    expect(gearOf(a)).toBe(encodeGearLookV2(gearLookV2Of(inv, 'warrior', null)));
     await waitFor(() => b.looks.gear(me(a.room).eid) === gearOf(a));
     // unequip: back to the starter chest, the kit as before
     expect(await op(a, { op: 'unequip', slot: 'chest' })).toBe('ok');
@@ -106,7 +106,7 @@ describe('gear', () => {
     a.room.send('job', { job: 'ninja' });
     await waitFor(() => me(a.room).job === 'ninja' && gearOf(a) !== warriorGear);
     const store = (await server!.store.getOrCreateAdventurer(a.accountId)).inventory;
-    expect(gearOf(a)).toBe(encodeGearLook(gearLookOf(store, 'ninja', null)));
+    expect(gearOf(a)).toBe(encodeGearLookV2(gearLookV2Of(store, 'ninja', null)));
     expect(engine(a.room).a.stats).toEqual(kitFor({ job: 'ninja', level: 1, gear: {}, talents: [] }).stats);
     // a blade does not fit the Ninja's weapon slot
     expect(await op(a, { op: 'equip', uid: uidOf(a.last(), 'hedgecutter'), slot: 'weapon' })).toBe('fit');
@@ -227,6 +227,35 @@ describe('gear', () => {
     expect((await server!.store.getOrCreateAdventurer(a.accountId)).jobs.jobs.warrior!.talents).toEqual([]);
   }, 15_000);
 
+  it('the wardrobe: a costume piece bought alone, a per-slot look and hide anywhere, three dyes at the Tailor; stats never change; the view carries the collection', async () => {
+    await start();
+    const a = await join('Wren');
+    const bare = gearOf(a);
+    const hands = COSTUME_PIECES.lamplighter_coat_hands!;
+    expect(await op(a, { op: 'look', slot: 'hands', look: hands.model })).toBe('locked');
+    atStall(a, 'tailor');
+    expect(await op(a, { op: 'buyCostume', costume: hands.id })).toBe('ok');
+    expect(a.last().gold).toBe(START_GOLD - hands.price!);
+    expect(a.last().looks).toContain(hands.model);
+    expect(await op(a, { op: 'dyeSlot', slot: 'chest', ch: 2, dye: 9 })).toBe('ok');
+    expect(a.last().gold).toBe(START_GOLD - hands.price! - DYE_PRICE);
+    expect(a.last().appearance.chest.dyes[2]).toBe(9);
+    place(a.room, 0, 0); // away from every stall: looks and hiding are allowed anywhere
+    const statsBefore = { ...engine(a.room).a.stats };
+    expect(await op(a, { op: 'look', slot: 'hands', look: hands.model })).toBe('ok');
+    expect(await op(a, { op: 'hide', slot: 'head', hide: true })).toBe('ok');
+    expect(await op(a, { op: 'dyeSlot', slot: 'chest', ch: 1, dye: 9 })).toBe('where');
+    await waitFor(() => gearOf(a) !== bare);
+    const g = decodeGearLookV2(gearOf(a)!)!;
+    expect(g.hands!.model).toBe(hands.model);
+    expect(g.chest!.dye[2]).toBe(9);
+    expect(g.hidden.head).toBe(true);
+    expect(engine(a.room).a.stats).toEqual(statsBefore);
+    const stored = await server!.store.getOrCreateAdventurer(a.accountId);
+    expect(gearOf(a)).toBe(encodeGearLookV2(gearLookV2Of(stored.inventory, 'warrior', stored.jobs.jobs.warrior!.outfit)));
+    expect(a.last().stats).toEqual(a.views[0]!.stats);
+  });
+
   it('wear an owned costume per job; an unowned one is refused', async () => {
     await start();
     const a = await join('Alice');
@@ -246,12 +275,12 @@ describe('gear', () => {
     expect(await op(a, { op: 'hideHead', hide: true })).toBe('ok');
     const stored = await server!.store.getOrCreateAdventurer(a.accountId);
     expect(stored.jobs.jobs.warrior!.outfit).toEqual({ body: 'orchard_smock', head: null, back: null, hideHead: true });
-    await waitFor(() => gearOf(a) === encodeGearLook(gearLookOf(stored.inventory, 'warrior', stored.jobs.jobs.warrior!.outfit)));
-    expect(gearOf(a)).toBe(encodeGearLook(gearLookOf(stored.inventory, 'warrior', stored.jobs.jobs.warrior!.outfit)));
+    await waitFor(() => gearOf(a) === encodeGearLookV2(gearLookV2Of(stored.inventory, 'warrior', stored.jobs.jobs.warrior!.outfit)));
+    expect(gearOf(a)).toBe(encodeGearLookV2(gearLookV2Of(stored.inventory, 'warrior', stored.jobs.jobs.warrior!.outfit)));
     // per job: the Ninja wears none
     a.room.send('job', { job: 'ninja' });
     await waitFor(() => me(a.room).job === 'ninja');
-    await waitFor(() => gearOf(a) === encodeGearLook(gearLookOf(stored.inventory, 'ninja', null)));
+    await waitFor(() => gearOf(a) === encodeGearLookV2(gearLookV2Of(stored.inventory, 'ninja', null)));
   });
 
   it('equip refused in combat, dead, casting, charging, travelling', async () => {

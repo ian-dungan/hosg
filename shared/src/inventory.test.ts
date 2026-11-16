@@ -112,6 +112,7 @@ describe('inventory', () => {
       // a sale whose gold would pass GOLD_MAX would destroy the item for nothing
       ['sell with a full purse', { ...hedge, gold: GOLD_MAX - 5 }, { op: 'sell', uid: hedgeUid }, at('smithy'), 'purse-full'],
       // no uid left to mint: refused, never a lost item
+      ['show a look not yet collected', base, { op: 'look', slot: 'chest', look: ITEMS.beaconstone_chest!.model }, CTX, 'locked'],
       ['buy with no uid left', { ...base, inv: { ...base.inv, nextUid: 2 ** 31 } }, { op: 'buy', stall: 'smithy', item: 'hedgecutter' }, at('smithy'), 'uids'],
     ];
     const seen = new Set<InvRefusal>();
@@ -248,7 +249,7 @@ describe('inventory', () => {
         // gold moves only by the op's own price or sale
         if (op.op === 'sell') expect(dGold).toBe(Math.min(GOLD_MAX - s.gold, ITEMS[s.inv.bag.find(i => i.uid === op.uid)!.item]!.sell));
         else if (op.op === 'buy') { if (op.stall === 'smithy') expect(dGold).toBe(-ITEMS[op.item]!.price!); else expect([dGold, dSeals]).toEqual([0, -ITEMS[op.item]!.seals!]); }
-        else if (op.op === 'buyCostume') expect(dGold).toBe(-COSTUMES[op.costume].price!);
+        else if (op.op === 'buyCostume') expect(dGold).toBeLessThan(0); // the pieces not yet owned
         else if (op.op === 'dye') expect([0, -DYE_PRICE]).toContain(dGold);
         else if (op.op === 'respec') expect(dGold % RESPEC_PRICE).toBe(0);
         else expect(dGold).toBe(0);
