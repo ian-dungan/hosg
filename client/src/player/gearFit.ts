@@ -203,7 +203,7 @@ export class Fit {
     const angs = this.angles(o.region, o.mult ?? 1, o.arc), wrap = !o.arc;
     const offF = typeof o.off === 'number' ? (() => o.off as number) : o.off;
     const colF = typeof o.col === 'function' ? o.col : (() => o.col as Color3);
-    const lip = o.lip ?? 'both', over = o.over ?? true, kk = this.kk;
+    const lip = this.far ? 'none' : o.lip ?? 'both', over = o.over ?? true, kk = this.kk;   // (the far build: no lips)
     const lipOff = (MARGIN + 0.0008) * kk;
     // (rows the offset makes unneeded are left out: the body's own rows stay wherever the body bulges past the room)
     let minOff = Infinity;

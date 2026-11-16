@@ -118,7 +118,7 @@ function garment(x: Ctx) {
     F.skirt({ top: ST.HIP + 0.15, hem: hemF, flare: num(p.flare2, 0.05), clear: num(p.clear, 0.012), arc: open ? [open, TAU - open] : undefined,
       col: (t, a) => (t > 0.9 ? C.c : pat === 'panel' && Math.abs(Math.sin(a)) > 0.8 ? C.b : slit && Math.abs(Math.abs(Math.sin(a)) - 1) < 0.08 && t > 0.5 ? C.b : folds(C.a, a, 0.06, 8)) });
     const s2 = num(p.skirt2, 0);
-    if (s2 > 0) F.skirt({ top: ST.HIP + 0.3, hem: s2, flare: 0.03, clear: num(p.clear, 0.012) + 0.012, arc: open ? [open + 0.15, TAU - open - 0.15] : undefined, col: (t, a) => (t > 0.85 ? C.c : folds(C.b, a, 0.06, 8)) });
+    if (s2 > 0 && !F.far) F.skirt({ top: ST.HIP + 0.3, hem: s2, flare: 0.03, clear: num(p.clear, 0.012) + 0.012, arc: open ? [open + 0.15, TAU - open - 0.15] : undefined, col: (t, a) => (t > 0.85 ? C.c : folds(C.b, a, 0.06, 8)) });
   }
   // the collar
   if (neck === 'high') F.shell({ region: 'neck', rows: [ST.NECK - 0.05, ST.NECK + 0.5], off: off + 0.004, col: (u) => (u > ST.NECK + 0.38 ? C.c : C.a), hide: true });
@@ -191,7 +191,7 @@ function trousers(x: Ctx) {
       const fr = F.frame('leg', side, ST.KNEE + 0.05, 0, 0.004);
       F.mark('orn', 'leg', () => prism(F.k, side < 0 ? 'legL' : 'legR', fr, ring2d(F.fine ? 8 : 6, 0.034, 0.034), 0.006, knee === 'patch' ? C.b : C.c));
     }
-    if (knee === 'cop') kneeCop(x, side);
+    if (knee === 'cop' && !F.far) kneeCop(x, side);
   }
   if (p.cuisse) F.shell({ region: 'leg', rows: F.rowsFor('leg', ST.KNEE + 0.4, ST.CROTCH + 0.3), arc: [-1.25, 1.25], off: 0.022, col: (u) => (u < ST.KNEE + 0.55 || u > ST.CROTCH + 0.15 ? C.c : C.a), flat: true, hide: false });
   if (p.greave) F.shell({ region: 'leg', rows: F.rowsFor('leg', 1.25, ST.KNEE - 0.3), arc: [-1.35, 1.35], off: 0.02, col: (u) => (u > ST.KNEE - 0.45 ? C.c : C.a), flat: true, hide: false });
@@ -259,7 +259,7 @@ function hood(x: Ctx) {
     const path: V3[] = [top.p, [top.p[0], top.p[1] + pt * 0.35 * kk, top.p[2] - pt * 0.25 * kk], [top.p[0] + 0.01 * kk, top.p[1] + pt * 0.75 * kk, top.p[2] - pt * 0.55 * kk], [top.p[0] + 0.03 * kk, top.p[1] + pt * kk, top.p[2] - pt * 0.85 * kk]];
     F.mark('orn', 'head', () => F.k.tube('head', path, [0.07 * kk, 0.045 * kk, 0.022 * kk, 0.006 * kk], C.a, { seg: F.fine ? 6 : 4, noOcc: true }));
   }
-  if (p.drape) F.shell({ region: 'torso', rows: F.rowsFor('torso', ST.SH - 0.2, ST.NECK), off: 0.016, col: (u) => (u < ST.SH - 0.08 ? C.c : C.a), hide: false, lip: 'first', cls: 'loose' });
+  if (p.drape && !F.far) F.shell({ region: 'torso', rows: F.rowsFor('torso', ST.SH - 0.2, ST.NECK), off: 0.016, col: (u) => (u < ST.SH - 0.08 ? C.c : C.a), hide: false, lip: 'first', cls: 'loose' });
 }
 /** cap (and wrap, hat crown): a close shell to the brow, over the hair. p: front, side, back, off, band (trim band). */
 function cap(x: Ctx) {
@@ -835,11 +835,14 @@ const ROWS: Row[] = [
 /** Every armour and costume look's definition, by look id. */
 export const DEFS: ReadonlyMap<number, PieceDef> = new Map(ROWS.map(([id, slot, cls, tier, tpl, p, mods, pal, glow]) => [id, { id, slot, cls, tier, tpl, p, mods, pal, glow }]));
 
+/** The modules the far build keeps. */
+const FAR_MODULES: ReadonlySet<string> = new Set(['helmTop', 'tabard', 'capelet', 'tails', 'fins']);
 /** Builds a definition on a fitter with its colours (the fitter's `piece` captures it). */
 export function buildDef(F: Fit, d: PieceDef, C: Cols): void {
   const x: Ctx = { F, p: d.p, C, def: d, glow: d.glow ?? null };
   TEMPLATES[d.slot][d.tpl]!(x);
-  for (const [name, mp] of d.mods) MODULES[name]!(x, mp ?? {});
+  // far away only what changes the silhouette or the job's colour stays (no straps, studs, stitching or charms)
+  for (const [name, mp] of d.mods) if (!F.far || FAR_MODULES.has(name)) MODULES[name]!(x, mp ?? {});
 }
 /** A definition's signature (the distinctness test: no two looks share one). */
 export const defSignature = (d: PieceDef): string => JSON.stringify([d.slot, d.tpl, d.p, d.mods, d.pal.map((c) => c.toHexString()), d.glow?.toHexString() ?? null]);

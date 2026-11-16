@@ -9,7 +9,7 @@ import {
   COSTUME_PIECES, COSTUME_PIECE_IDS, ITEMS, ITEM_IDS, JOBS, JOB_IDS, LOOK_PRESETS, PEOPLE_IDS, PEOPLES, decodeGearLookV2, encodeGearLook, parseLook, prng, randomLook, resolveGearLook,
   type GearLookV2, type JobId, type Look, type PeopleId,
 } from '@sg2/shared';
-import { characterStats, capeFor, makeCharacter, setCharacterDetail, setGearBuilder, weaponScale } from './character';
+import { characterDev, characterStats, capeFor, makeCharacter, setCharacterDetail, setGearBuilder, weaponScale } from './character';
 import { GEAR_CACHE_SIZE, asV2, buildPiece, clearGearCache, fitGear, fitInputOf, gearCacheStats, gearHooks, kitGear, mixGear, modelInfo } from './gearModels';
 import { bodyFrame } from './look';
 import { staffTint } from '../combat/spells';
@@ -127,6 +127,21 @@ describe('budgets', () => {
     expect(r.med.worst).toBeLessThanOrEqual(1.4);
     expect(r.low.ratio).toBeLessThanOrEqual(1.3);
     expect(r.high.ratio).toBeLessThanOrEqual(1.3);
+  });
+  it('keeps the far build of a full T3 adventurer cheap (the silhouette pieces only)', () => {
+    characterDev.farM = 0;
+    let worst = 0, sum = 0;
+    try {
+      for (let i = 0; i < 7; i++) {
+        const job = JOB_IDS[i]!, v = makeCharacter(scene, { kind: 'player', look: randomLook(prng(300 + i)), gear: kitGear(3, job) });
+        v.setWeapon(JOBS[job].weapon, staffTint(job)); v.setCape(capeFor(job));
+        worst = Math.max(worst, characterStats.lastActiveTriangles); sum += characterStats.lastActiveTriangles;
+        v.dispose();
+      }
+    } finally { characterDev.farM = undefined; }
+    // eslint-disable-next-line no-console
+    console.log(`far T3: mean ${(sum / 7).toFixed(0)}, worst ${worst}`);
+    expect(worst).toBeLessThanOrEqual(1800);   // (bare far: ≤ 1.5k; measured T3 far: mean 1.58k, worst 1.72k)
   });
   it('builds T2 kits without an emissive mesh, and the starter kit as one mesh', () => {
     const look = lookOf('human', 10, 5);
