@@ -11,7 +11,7 @@ import { BARBER_BODY_PRICE, BARBER_PEOPLE_PRICE, BARBER_PRICE, EMOTES, LOOK_PRES
 import type { CreatorOpts } from '../core/contracts';
 import { h } from './dom';
 import { CreatorState, TAB_CAMERA, TAB_LABEL, controlsFor, dyeHex, dyeName, getPath, type Control, type CreatorTab } from './creatorState';
-import { creatorLayout } from './creatorLayout';
+import { PREVIEW_TOOLS, creatorLayout, previewToolsLayout, type PreviewTool, type PreviewToolId } from './creatorLayout';
 
 /** The 3D preview the creator shows (a canvas of its own; see player/creatorPreview.ts). */
 export interface CreatorPreview {
@@ -36,7 +36,7 @@ export const CREATOR_CSS = /* css */ `
   background:radial-gradient(ellipse at 30% 30%,#3b3a6e 0%,#1e1b3a 70%);touch-action:none;-webkit-user-select:none;user-select:none}
 .sg-cr *{box-sizing:border-box}
 .sg-cr-pv{position:absolute;overflow:hidden;touch-action:none;cursor:grab}
-.sg-cr-pv>canvas,.sg-cr-pv>div{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none}
+.sg-cr-pv>canvas,.sg-cr-pv>.sg-cr-view{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none}
 .sg-cr-ph{display:flex;align-items:center;justify-content:center;color:rgba(255,246,230,.5);font-size:14px}
 .sg-cr-pnl{position:absolute;display:flex;flex-direction:column;background:rgba(16,18,42,.92);border-left:1px solid rgba(255,226,160,.16)}
 .sg-cr.portrait .sg-cr-pnl{border-left:0;border-top:1px solid rgba(255,226,160,.22);border-radius:18px 18px 0 0}
@@ -94,12 +94,13 @@ export const CREATOR_CSS = /* css */ `
 `;
 /** Look v2's additions to the creator's style (48 px targets everywhere). */
 const CREATOR_CSS_V2 = /* css */ `
-.sg-cr-pv>.sg-cr-cams,.sg-cr-pv>.sg-cr-tools{inset:auto;width:auto;height:auto}
-.sg-cr-pv>.sg-cr-cams{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px;z-index:2}
-.sg-cr-cams button,.sg-cr-tools button{min-width:56px;height:48px;padding:0 12px;border-radius:24px;border:1px solid rgba(255,226,160,.35);background:rgba(16,18,42,.72);color:#fff6e6;font:600 14px/1 var(--sans,sans-serif);cursor:pointer}
-.sg-cr-cams button.on,.sg-cr-tools button.on{background:linear-gradient(180deg,#ffe49a,#F2B742);color:#3a2508}
-.sg-cr-pv>.sg-cr-tools{position:absolute;left:8px;top:8px;display:flex;gap:6px;z-index:2;flex-wrap:wrap;max-width:calc(100% - 90px)}
-.sg-cr-tools button:disabled{opacity:.4}
+.sg-cr-tool{position:absolute;z-index:2;margin:0;padding:0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  border:1px solid rgba(255,226,160,.4);background:rgba(16,18,42,.78);color:#fff6e6;font:600 14px/1 var(--sans,sans-serif);cursor:pointer;white-space:nowrap;overflow:hidden}
+.sg-cr-tool.cam{border-radius:14px}
+.sg-cr-tool.hist{border-radius:12px;font-size:11px;letter-spacing:.01em}
+.sg-cr-tool.hist i{font-style:normal;font-size:19px;line-height:1}
+.sg-cr-tool.on{background:linear-gradient(180deg,#ffe49a,#F2B742);color:#3a2508;border-color:transparent}
+.sg-cr-tool:disabled{opacity:.4;cursor:default}
 .sg-cr-rowh{display:flex;align-items:center;gap:8px}
 .sg-cr-rowh .sg-cr-lbl{flex:1;margin:0}
 .sg-cr-rst{flex:none;width:48px;height:48px;border-radius:24px;border:1px solid rgba(255,226,160,.25);background:rgba(255,246,230,.06);color:inherit;font-size:20px;cursor:pointer}
@@ -113,11 +114,12 @@ const CREATOR_CSS_V2 = /* css */ `
 .sg-cr-swb.none{background:repeating-linear-gradient(45deg,#6b6a7a 0 6px,#8c8b9a 6px 12px);color:#fff;font:600 12px var(--sans,sans-serif)}
 `;
 function injectCss() {
-  if (document.getElementById('sg-creator-css')) return;
-  const s = document.createElement('style');
-  s.id = 'sg-creator-css';
-  s.textContent = CREATOR_CSS + CREATOR_CSS_V2;
-  document.head.appendChild(s);
+  // (re)written every time: a style left by an older build of this screen dropped the v2 rules, and the preview's
+  // controls fell on top of each other ("Facedo Bodydo Full")
+  let s = document.getElementById('sg-creator-css') as HTMLStyleElement | null;
+  if (!s) { s = document.createElement('style'); s.id = 'sg-creator-css'; document.head.appendChild(s); }
+  const css = CREATOR_CSS + CREATOR_CSS_V2;
+  if (s.textContent !== css) s.textContent = css;
 }
 
 const toHex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -153,20 +155,28 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
   root.setAttribute('role', 'dialog');
   const pv = h('div', 'sg-cr-pv', root);
   const preview = previewFactory?.() ?? null;
-  if (preview) pv.appendChild(preview.el);
-  else h('div', 'sg-cr-ph', pv, 'Preview');
+  if (preview) { preview.el.classList.add('sg-cr-view'); pv.appendChild(preview.el); }
+  else h('div', 'sg-cr-ph sg-cr-view', pv, 'Preview');
   h('p', 'sg-cr-hint', pv, 'Drag to turn · pinch to zoom');
-  // the preview's tools: camera, undo/redo, compare
-  const cams = h('div', 'sg-cr-cams', pv);
-  const camBtns = (['face', 'body', 'full'] as const).map((f) => {
-    const b = h('button', '', cams, f === 'face' ? 'Face' : f === 'body' ? 'Body' : 'Full');
-    b.addEventListener('click', (e) => { e.stopPropagation(); setCam(f); });
+  // the preview's controls, two groups placed by previewToolsLayout: camera (Face, Body, Full) and history (Undo, Redo, Compare)
+  const toolBtn = (t: PreviewTool, kind: 'cam' | 'hist') => {
+    const b = h('button', `sg-cr-tool ${kind}`, pv);
+    b.type = 'button';
+    b.dataset.tool = t.id;
+    b.setAttribute('aria-label', t.aria);
+    b.title = t.aria;
+    if (t.icon) { h('i', '', b, t.icon).setAttribute('aria-hidden', 'true'); h('span', '', b, t.label); } else b.textContent = t.label;
     b.addEventListener('pointerdown', (e) => e.stopPropagation());
+    return b;
+  };
+  const tool = (id: PreviewToolId) => PREVIEW_TOOLS.find((t) => t.id === id)!;
+  const camBtns = (['face', 'body', 'full'] as const).map((f) => {
+    const b = toolBtn(tool(f), 'cam');
+    b.addEventListener('click', (e) => { e.stopPropagation(); setCam(f); });
     return [f, b] as const;
   });
-  const tools = h('div', 'sg-cr-tools', pv);
-  const undo = h('button', '', tools, '↶ Undo'), redo = h('button', '', tools, 'Redo ↷'), cmp = h('button', '', tools, 'Compare');
-  for (const b of [undo, redo, cmp]) b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  const [undo, redo, cmp] = (['undo', 'redo', 'compare'] as const).map((id) => toolBtn(tool(id), 'hist'));
+  cmp.setAttribute('aria-pressed', 'false');
   const pnl = h('div', 'sg-cr-pnl', root);
   const head = h('div', 'sg-cr-head', pnl);
   h('div', 'sg-cr-title', head, o.mode === 'barber' ? 'The Trimmed Hedge' : 'Your adventurer');
@@ -186,11 +196,12 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
   const promise = new Promise<{ look: Look; name?: string } | null>((r) => { resolve = r; });
   let finished = false;
 
-  const setCam = (f: 'face' | 'body' | 'full') => { cam = f; preview?.setFocus(f); for (const [k, b] of camBtns) b.classList.toggle('on', k === f); };
+  const setCam = (f: 'face' | 'body' | 'full') => { cam = f; preview?.setFocus(f); for (const [k, b] of camBtns) { b.classList.toggle('on', k === f); b.setAttribute('aria-pressed', String(k === f)); } };
   const showLook = () => preview?.setLook(st.shown);
   const refreshFoot = () => {
     undo.disabled = !st.canUndo; redo.disabled = !st.canRedo;
     cmp.classList.toggle('on', st.comparing);
+    cmp.setAttribute('aria-pressed', String(st.comparing));
     done.textContent = st.doneLabel;
     done.disabled = !!st.blocker;
     note.textContent = st.noteLine(tab, o.notice);
@@ -457,6 +468,12 @@ export function openCreator(host: HTMLElement, o: CreatorOpts & { notice?: strin
     for (const [el, r] of [[pv, L.preview], [pnl, L.panel]] as const) {
       el.style.left = `${r.x}px`; el.style.top = `${r.y}px`; el.style.width = `${r.w}px`; el.style.height = `${r.h}px`;
     }
+    const T = previewToolsLayout(L.preview.w, L.preview.h);
+    const at = (el: HTMLElement, r: { x: number; y: number; w: number; h: number }) => {
+      el.style.left = `${r.x}px`; el.style.top = `${r.y}px`; el.style.width = `${r.w}px`; el.style.height = `${r.h}px`;
+    };
+    camBtns.forEach(([, b], i) => at(b, T.camera[i]));
+    [undo, redo, cmp].forEach((b, i) => at(b, T.history[i]));
     preview?.resize();
   };
   window.addEventListener('resize', place);

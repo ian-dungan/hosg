@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BARBER_BODY_PRICE, BARBER_PEOPLE_PRICE, BARBER_PRICE, LOOK_LIMITS, LOOK_OPTIONAL_COLOURS, LOOK_PRESETS, LUMA_MIN, PEOPLES, defaultLook, encodeLook, lookLuma, parseLook, prng, randomLook, validateAdventurerName, type Look } from '@sg2/shared';
 import { CreatorState, UNDO_DEPTH, controlsFor, getPath, swatchesFrom, type CreatorStateOpts } from './creatorState';
-import { creatorLayout } from './creatorLayout';
+import { PREVIEW_TOOLS, creatorLayout, previewToolsLayout } from './creatorLayout';
 
 const look = (): Look => LOOK_PRESETS.find((p) => p.id === 'harbour_pilot')!.look;
 const opts = (o: Partial<CreatorStateOpts> = {}): CreatorStateOpts => ({ look: look(), mode: 'create', needsName: false, gold: 0, free: true, validateName: validateAdventurerName, ...o });
@@ -177,7 +177,36 @@ describe('creatorLayout', () => {
       if (w >= 1000) expect(L.panel.w).toBe(420);
       if (h > w) expect(L.preview.h).toBeCloseTo(h * 0.4, 0);
     });
+    // live check: the preview's top bar ran together ("Facedo Bodydo Full") on every phone
+    it(`lays the preview's camera and history controls out in two groups, none overlapping, at ${w}×${h}`, () => {
+      const L = creatorLayout(w, h);
+      const T = previewToolsLayout(L.preview.w, L.preview.h);
+      expect(T.camera).toHaveLength(3);
+      expect(T.history).toHaveLength(3);
+      const all = [...T.camera, ...T.history];
+      for (const r of all) {
+        expect(r.w).toBeGreaterThanOrEqual(48);
+        expect(r.h).toBeGreaterThanOrEqual(48);
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.y).toBeGreaterThanOrEqual(0);
+        expect(r.x + r.w).toBeLessThanOrEqual(L.preview.w);
+        expect(r.y + r.h).toBeLessThanOrEqual(L.preview.h);
+      }
+      for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) expect(overlaps(all[i], all[j]), `${i}/${j}`).toBe(false);
+      // the two groups stand apart (a clear gap between their boxes)
+      const box = (rs: DOMRectLike[]) => {
+        const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y));
+        return { x: x - 6, y: y - 6, w: Math.max(...rs.map((r) => r.x + r.w)) - x + 12, h: Math.max(...rs.map((r) => r.y + r.h)) - y + 12 };
+      };
+      expect(overlaps(box(T.camera), box(T.history))).toBe(false);
+    });
   }
+  it('every preview control has a short label and an accessible name', () => {
+    for (const c of PREVIEW_TOOLS) {
+      expect(c.aria.length).toBeGreaterThan(3);
+      expect(c.label.length).toBeLessThanOrEqual(7);
+    }
+  });
 });
 
 describe('the creator overlay', () => {
