@@ -1764,6 +1764,28 @@ function regionOf(g: Group): WarpRegion {
   return 'torso';
 }
 
+/**
+ * Attachment points per gear slot on a Look v2 body (for the per-piece gear models). Pieces are authored on the old
+ * canonical humanoid (humanPivots: head centre y 1.565, radii 0.195/0.205/0.185; shoulders ±0.235 at 1.265; hips 0.88;
+ * knees 0.47; ankles 0.1; wrists 0.765) on the skinning group named here, and look.ts makeAttachWarp fits them onto
+ * any body, region by region (head pieces round the skull, chest pieces by the torso's width and depth at each height,
+ * arms and legs round their own axes, rigid weapon joints by their pivot). `bodyFrame(look)` gives the real
+ * landmarks in metres for pieces built straight on the body. Hide rules: the `hair` bone (volume: afros, buns, crests,
+ * quiffs, high tails) is scaled away under a head piece or a job's headgear (GearPlan.hair false); the close cap and
+ * the scalp's painted hair colour stay, long hair on `hairB` hangs below the helm's rim.
+ */
+export const ATTACH: Readonly<Record<'head' | 'chest' | 'shoulders' | 'hands' | 'legs' | 'feet' | 'back' | 'mainHand' | 'offHand', { groups: readonly string[]; note: string }>> = Object.freeze({
+  head: { groups: ['head'], note: 'round the skull (headY, headW/headH/headD); hides the hair bone' },
+  chest: { groups: ['body', 'torso'], note: 'torso from hipY to shTopY: chestW/D, waistW/D, hipW/D, bust and belly' },
+  shoulders: { groups: ['cueW', 'cueD', 'cueWa', 'cueDa'], note: "region 'shoulder': ±shX at shY, over the deltoid" },
+  hands: { groups: ['armL', 'armR'], note: 'below the elbow rides fArm; wristY, handL, handW' },
+  legs: { groups: ['legL', 'legR', 'body'], note: 'thigh from hipY, knee kneeY, calf; a skirt on body (hips)' },
+  feet: { groups: ['legL', 'legR'], note: 'below ankleY: footL forward, footW, footH' },
+  back: { groups: ['capeA', 'capeB', 'cape', 'bowBack', 'gsBack', 'staffWBack', 'staffBBack', 'bladeBack', 'dagBack', 'shieldBack', 'offBack'], note: 'behind the torso at chestD' },
+  mainHand: { groups: ['bladeHand', 'gsHand', 'dagR', 'staffWHand', 'staffBHand', 'bowHand', 'prop'], note: 'rigid, follows the wrist pivot' },
+  offHand: { groups: ['offHand', 'shieldArm', 'dagL', 'propL', 'offHip', 'bladeHip'], note: 'rigid, follows the left wrist (or the hip when sheathed)' },
+});
+
 /** The old humanoid's hip height (the emotes' sit drop scales from it). */
 const CANON_HIP = 0.88;
 /**
