@@ -34,7 +34,8 @@ export function torsoRows(f: Frame): TorsoRow[] {
   // the shoulder's slope (trapezius) rounds over into the arm: no square corner at the top
   add(f.shY - 0.008 * kk, f.shX * 0.88, f.chestD * 0.84);
   add(f.shTopY, f.shX * 0.6, f.chestD * 0.62);
-  add(f.neckBaseY + 0.012 * kk, f.neckR * 1.3, f.neckR * 1.2);
+  // (the neck's ring stays inside the shoulders' top: a very thick neck would fold the roof over itself)
+  add(f.neckBaseY + 0.012 * kk, Math.min(f.neckR * 1.3, f.shX * 0.57), Math.min(f.neckR * 1.2, f.chestD * 0.59));
   return rows;
 }
 /** A torso row's point at angle a (body2's section: a superellipse with the bust, pectorals, belly and seat). */

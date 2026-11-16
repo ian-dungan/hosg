@@ -168,11 +168,10 @@ export class Fit {
    * Leaves out the body rows a shell `allow` m off the body does not need: a row whose bulge over the chord between
    * its neighbours is under the room the offset leaves (the shell's straight span then still clears the body).
    */
-  prune(region: Region, us: RowList, allow: number): number[] {
+  prune(region: Region, us: RowList, allow: number, angs: readonly number[] = [0, 0.9, 1.6, 2.3, 3.14, 3.9, 4.7, 5.4]): number[] {
     if (us.length <= 2 || allow <= 0) return us.slice();
     const keep = new Set([...(us.cuts ?? [])]);
     const out = [us[0]!];
-    const angs = [0, 0.9, 1.6, 2.3, 3.14, 3.9, 4.7, 5.4];
     for (let i = 1; i < us.length - 1; i++) {
       const u = us[i]!;
       if (keep.has(u)) { out.push(u); continue; }
@@ -210,13 +209,17 @@ export class Fit {
     let minOff = Infinity;
     for (const u of o.rows) for (const a of [0, 1.6, 3.14, 4.7]) minOff = Math.min(minOff, offF(u, a));
     let rows0 = o.rows as RowList;
+    if (o.region === 'torso' && rows0.some((u) => u > ST.NECK - 0.12)) {
+      // (a torso shell ends on the shoulders' roof just short of the neck's ring, its lip turning up into the neck)
+      rows0 = Object.assign([...new Set(rows0.map((u) => Math.min(u, ST.NECK - 0.12)))].sort((x, y) => x - y), { cuts: rows0.cuts });
+    }
     if (o.region === 'leg') {
       // (a leg shell starts above the foot: on a Knollfolk the big feet reach over its low ankles)
       const lo = this.footTopU();
       if (rows0.some((u) => u < lo)) rows0 = Object.assign([...new Set(rows0.map((u) => Math.max(u, lo)))].sort((a, b) => a - b), { cuts: rows0.cuts });
       if (rows0.length < 2) return;
     }
-    const us = o.rowU || o.prune === false ? rows0 : this.prune(o.region, rows0, (Math.max(minOff, MARGIN) - MARGIN * 0.9) * kk);
+    const us = o.rowU || o.prune === false ? rows0 : this.prune(o.region, rows0, (Math.max(minOff, MARGIN) - MARGIN * 0.9) * kk, angs);
     type RowSpec = { i: number; lip: boolean };
     const spec: RowSpec[] = us.map((_, i) => ({ i, lip: false }));
     if (lip === 'first' || lip === 'both') spec.unshift({ i: 0, lip: true });
@@ -595,7 +598,7 @@ export class Fit {
     const l = this.look;
     if (l.people === 'brindlekin') {
       const lop = l.ears.style === 5;
-      return [-1, 1].map((sx) => ({ d: norm(lop ? [sx * 0.9, 0.35, -0.05] : [sx * 0.5, 0.82, -0.08]), r: lop ? 0.44 : 0.4 }));
+      return [-1, 1].map((sx) => ({ d: norm(lop ? [sx * 0.9, 0.35, -0.05] : [sx * 0.56, 0.8, -0.08]), r: lop ? 0.46 : 0.66 }));
     }
     if (l.people === 'larchfolk') return [-1, 1].map((sx) => ({ d: norm([sx * 0.95, 0.18, -0.2]), r: 0.5 }));
     return [];
@@ -617,7 +620,7 @@ export class Fit {
         const ph = (TAU * j) / seg, th = Math.max(0.02, Math.min(1, t) * o.thMax(ph));
         const d: V3 = [Math.sin(th) * Math.sin(ph), Math.cos(th), Math.sin(th) * Math.cos(ph)];
         let out = offF(d) * kk + ((o.overHair ?? true) ? this.env(d) : 0);
-        if (t > 1) out = (MARGIN + 0.001) * kk;
+        if (t > 1) out = (MARGIN + 0.001) * kk + ((o.overHair ?? true) ? this.env(d) : 0);   // (the lip turns back to the hair or beard under it)
         out = Math.max(out, MARGIN * kk);
         const { p, n } = this.headAt(d, out);
         row.push(p); nr.push(n); dr.push(d);
@@ -655,20 +658,30 @@ export class Fit {
   }
   /** A brim round the head at polar angle th: `width` m out from the crown's edge, drooping or turned up. */
   brim(th: number, out: number, width: number, col: Color3, o: { droop?: number; tilt?: number; up?: number; paint?: (ph: number, t: number) => Color3 | undefined } = {}): void {
-    const kk = this.kk, seg = this.fine ? 16 : 10, P: V3[][] = [];
-    for (const t of [0, 0.5, 1]) {
-      const row: V3[] = [];
-      for (let j = 0; j <= seg; j++) {
-        const ph = (TAU * j) / seg, tt = th + (o.tilt ?? 0) * Math.cos(ph);
-        const d: V3 = [Math.sin(tt) * Math.sin(ph), Math.cos(tt), Math.sin(tt) * Math.cos(ph)];
-        const base = this.headAt(d, out * kk + this.env(d)).p;
-        const hx = Math.sin(ph), hz = Math.cos(ph), w = width * kk * t;
-        const up = (o.up ?? 0) * Math.max(0, Math.sin(ph)) * t * t * kk;
-        row.push([base[0] + hx * w, base[1] - (o.droop ?? 0) * kk * t * t + up, base[2] + hz * w]);
+    const kk = this.kk, seg = this.fine ? 16 : 10;
+    // ears that stand up through the hat (the Brindlekin's) part the brim: it is built in runs between them
+    const gaps = this.earHoles().filter((h) => h.d[1] > 0.5).map((h) => Math.atan2(h.d[0], h.d[2]));
+    const inGap = (ph: number) => gaps.some((g) => Math.abs(Math.atan2(Math.sin(ph - g), Math.cos(ph - g))) < 0.42);
+    const runs: number[][] = [];
+    let cur: number[] = [];
+    for (let j = 0; j <= seg; j++) { const ph = (TAU * j) / seg; if (inGap(ph)) { if (cur.length > 1) runs.push(cur); cur = []; } else cur.push(ph); }
+    if (cur.length > 1) runs.push(cur);
+    for (const run of runs) {
+      const P: V3[][] = [];
+      for (const t of [0, 0.5, 1]) {
+        const row: V3[] = [];
+        for (const ph of run) {
+          const tt = th + (o.tilt ?? 0) * Math.cos(ph);
+          const d: V3 = [Math.sin(tt) * Math.sin(ph), Math.cos(tt), Math.sin(tt) * Math.cos(ph)];
+          const base = this.headAt(d, out * kk + this.env(d)).p;
+          const hx = Math.sin(ph), hz = Math.cos(ph), w = width * kk * t;
+          const up = (o.up ?? 0) * Math.max(0, Math.sin(ph)) * t * t * kk;
+          row.push([base[0] + hx * w, base[1] - (o.droop ?? 0) * kk * t * t + up, base[2] + hz * w]);
+        }
+        P.push(row);
       }
-      P.push(row);
+      this.mark('orn', 'head', () => this.k.sheet('head', P, 0.01 * kk, col, { paint: o.paint ? (_w, uv) => o.paint!(uv[0] * TAU, uv[1]) : undefined }));
     }
-    this.mark('orn', 'head', () => this.k.sheet('head', P, 0.01 * kk, col, { paint: o.paint ? (_w, uv) => o.paint!(uv[0] * TAU, uv[1]) : undefined }));
   }
 }
 

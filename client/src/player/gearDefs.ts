@@ -264,7 +264,8 @@ function hood(x: Ctx) {
 /** cap (and wrap, hat crown): a close shell to the brow, over the hair. p: front, side, back, off, band (trim band). */
 function cap(x: Ctx) {
   const { F, p, C } = x;
-  const th = edge(num(p.front, 0.95), num(p.side, 1.35), num(p.back, 1.75));
+  // (round ears show below a cap: its side stays above them)
+  const th = edge(num(p.front, 0.95), Math.min(num(p.side, 1.35), 1.36), num(p.back, 1.75));
   F.headShell({ thMax: th, off: num(p.off, 0.008), col: (d) => (Math.acos(d[1]) > th(Math.atan2(d[0], d[2])) - num(p.band, 0.2) ? C.c : C.a), holes: holesUnder(F, th), flat: !!p.flat });
   if (p.tails) {
     // a wrap's tails flying behind
@@ -307,6 +308,11 @@ function band(x: Ctx) {
     const d: V3 = [0, Math.cos(th - 0.12), Math.sin(th - 0.12)];
     const fr = F.headFrame(d, num(p.off, 0.004) * F.kk + F.env(d) + 0.016 * F.kk);
     F.mark('orn', 'head', () => revolve(F.k, 'head', fr, [0, 0, 0], 'z', [[0, 0.016], [0.008, 0.016]], F.fine ? 8 : 5, p.gem === 'glow' && x.glow ? x.glow : C.c, p.gem === 'glow' && !!x.glow));
+  } else {
+    // a knot at the back, its two short tails in the trim
+    const d: V3 = [0, Math.cos(th + 0.25), -Math.sin(th + 0.25)];
+    const fr = F.headFrame(d, num(p.off, 0.004) * F.kk + F.env(d) + 0.012 * F.kk);
+    for (const sx of [-1, 1]) F.mark('orn', 'head', () => poly(F.k, 'head', [fr(0, 0.01, 0), fr(sx * 0.02, -0.06, 0.012), fr(sx * 0.035, -0.055, 0.014)], C.c));
   }
 }
 /** halo: a ring floating over the head (no contact), p: h (height over the crown), r. */
@@ -317,6 +323,8 @@ function halo(x: Ctx) {
   const ring = (r: number): V3[] => Array.from({ length: n + 1 }, (_, i) => { const a = (i / n) * TAU; return [Math.sin(a) * r, y, F.hs.cz + Math.cos(a) * r]; });
   F.mark('orn', 'head', () => F.k.tube('head', ring(R), 0.012 * kk, C.a, { seg: 4, noOcc: true, caps: false }));
   if (x.glow) F.mark('orn', 'head', () => F.k.tube('head', ring(R * 0.86), 0.01 * kk, x.glow!, { seg: 4, noOcc: true, caps: false, glow: true }));
+  // four little beacon cups on the ring, in the trim
+  for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU + Math.PI / 4; F.mark('orn', 'head', () => knob(F.k, 'head', (X, Y, Z) => [X, Y, Z], [Math.sin(a) * R, y + 0.008 * kk, F.hs.cz + Math.cos(a) * R], 0.018 * kk, C.c, false, 4)); }
 }
 
 // ───────── back ─────────
@@ -327,16 +335,18 @@ function capeTpl(x: Ctx) {
   const hem = hemS === 'jag' ? (v: number) => -0.12 * Math.abs(Math.sin((v + 1) * Math.PI * 2.5))
     : hemS === 'tatter' ? (v: number) => -0.18 * Math.abs(Math.sin((v + 1) * 7.3)) * Math.abs(Math.cos((v + 1) * 3.1))
       : hemS === 'round' ? (v: number) => -0.15 * v * v : hemS === 'swallow' ? (v: number) => -0.2 * (1 - Math.abs(v)) + 0.05 : hemS === 'leaf' ? (v: number) => -0.08 * Math.abs(Math.sin((v + 1) * Math.PI * 3)) : undefined;
-  const main = job ? JOB_CLOTH : C.a, trim = job ? GOLD_TRIM : C.c;
+  // the job's cape is the job's colour (setCape recolours it) unless its primary is dyed; its trim takes the trim dye
+  const jobCol = job && C.a === x.def.pal[0];
+  const main = jobCol ? JOB_CLOTH : C.a, trim = job && C.c === x.def.pal[2] ? GOLD_TRIM : C.c;
   const patch = [C.a, C.b, C.c, M.leatherLight, P.teal, mix(P.cloud, P.stone, 0.5)];
   const top = num(p.top, ST.SH - 0.25);
-  F.cape({ top, len: num(p.len, 0.7), width: num(p.width, 0.8), flare: num(p.flare, 0.22), hem, tag: job ? 1 : 0, tagSkip: job ? trim : undefined,
+  F.cape({ top, len: num(p.len, 0.7), width: num(p.width, 0.8), flare: num(p.flare, 0.22), hem, tag: jobCol ? 1 : 0, tagSkip: jobCol ? trim : undefined,
     col: (v, t) => (t > 0.9 ? trim : hemS === 'patch' ? patch[(Math.floor((v + 1) * 1.99) + Math.floor(t * 3.99) * 2) % 6]! : p.edge && Math.abs(v) > 0.86 ? trim : p.stripe && Math.abs(v) < 0.15 ? C.b : main) });
   const collar = str(p.collar, 'fold');
   if (collar === 'fold' || collar === 'mantle' || collar === 'high') {
     const lo = collar === 'mantle' ? ST.CHEST + 0.3 : ST.SH - 0.35;
-    if (job) F.k.g.tagNow = 1;
-    if (job) F.k.g.tagSkip = trim;
+    if (jobCol) F.k.g.tagNow = 1;
+    if (jobCol) F.k.g.tagSkip = trim;
     F.shell({ region: 'torso', rows: F.rowsFor('torso', lo, ST.NECK), arc: collar === 'mantle' ? undefined : [Math.PI * 0.42, Math.PI * 1.58], off: 0.012, col: (u) => (u < lo + 0.12 ? trim : collar === 'mantle' ? C.b : main), hide: false, lip: 'first', cls: 'loose' });
     F.k.g.tagNow = 0; F.k.g.tagSkip = null;
     if (collar === 'high') F.shell({ region: 'neck', rows: [ST.NECK - 0.1, ST.NECK + 0.6], arc: [Math.PI * 0.5, Math.PI * 1.5], off: 0.02, col: (u) => (u > ST.NECK + 0.45 ? trim : C.b), hide: false, cls: 'loose' });
@@ -363,20 +373,20 @@ function wings(x: Ctx) {
   const { F, p, C } = x;
   const kk = F.kk;
   for (const sx of [-1, 1]) {
-    const fr0 = F.frame('torso', 1, ST.CHEST, Math.PI - sx * 0.35, 0.02);
+    const fr0 = F.frame('torso', 1, ST.CHEST, Math.PI - sx * 0.35, 0.045);
     const fr = (X: number, Y: number, Z: number) => fr0(X, Y, Z + Math.max(0, -Y) * 0.5);
     if (p.kind === 'moth') {
-      F.mark('free', 'cape', () => poly(F.k, 'cape', [fr(0, 0.12, 0), fr(sx * -0.3, 0.2, -0.05), fr(sx * -0.34, -0.05, -0.06), fr(sx * -0.2, -0.24, -0.05), fr(sx * -0.02, -0.15, 0)], C.a));
-      F.mark('orn', 'cape', () => poly(F.k, 'cape', [fr(sx * -0.17, 0.06, -0.035), fr(sx * -0.22, 0.02, -0.04), fr(sx * -0.17, -0.03, -0.035), fr(sx * -0.12, 0.02, -0.03)], C.c));
+      F.mark('free', 'cape', () => poly(F.k, 'cape', [fr(0, 0.12, 0), fr(sx * -0.3, 0.2, 0.05), fr(sx * -0.34, -0.05, 0.06), fr(sx * -0.2, -0.24, 0.05), fr(sx * -0.02, -0.15, 0)], C.a));
+      F.mark('orn', 'cape', () => poly(F.k, 'cape', [fr(sx * -0.17, 0.06, 0.035), fr(sx * -0.22, 0.02, 0.04), fr(sx * -0.17, -0.03, 0.035), fr(sx * -0.12, 0.02, 0.03)], C.c));
     } else {
-      F.mark('free', 'cape', () => poly(F.k, 'cape', [fr(0, 0.2, 0), fr(sx * -0.2, 0.05, -0.07), fr(sx * -0.04, -0.5, -0.05), fr(0, -0.15, 0)], C.a));
-      F.mark('orn', 'cape', () => poly(F.k, 'cape', [fr(sx * -0.03, 0.1, -0.012), fr(sx * -0.13, 0.03, -0.055), fr(sx * -0.04, -0.28, -0.035)], C.c));
-      F.mark('orn', 'cape', () => F.k.tube('cape', [fr(0, 0.2, -0.004), fr(sx * -0.04, -0.5, -0.05)], 0.007 * kk, M.wood, { seg: 3, noOcc: true }));
+      F.mark('free', 'cape', () => poly(F.k, 'cape', [fr(0, 0.2, 0), fr(sx * -0.2, 0.05, 0.07), fr(sx * -0.04, -0.5, 0.05), fr(0, -0.15, 0)], C.a));
+      F.mark('orn', 'cape', () => poly(F.k, 'cape', [fr(sx * -0.03, 0.1, 0.012), fr(sx * -0.13, 0.03, 0.055), fr(sx * -0.04, -0.28, 0.035)], C.c));
+      F.mark('orn', 'cape', () => F.k.tube('cape', [fr(0, 0.2, 0.004), fr(sx * -0.04, -0.5, 0.05)], 0.007 * kk, M.wood, { seg: 3, noOcc: true }));
     }
   }
   if (p.kind !== 'moth') {
     const t = F.frame('torso', 1, ST.WAIST, Math.PI, 0.05);
-    F.mark('free', 'cape', () => F.k.tube('cape', [t(0, 0, 0), t(0.04, -0.2, -0.04), t(-0.03, -0.38, -0.05), t(0.03, -0.55, -0.05)], [0.02 * kk, 0.018 * kk, 0.014 * kk, 0.004 * kk], C.b, { seg: 3, flatten: 0.3, noOcc: true }));
+    F.mark('free', 'cape', () => F.k.tube('cape', [t(0, 0, 0), t(0.04, -0.2, 0.04), t(-0.03, -0.38, 0.05), t(0.03, -0.55, 0.05)], [0.02 * kk, 0.018 * kk, 0.014 * kk, 0.004 * kk], C.b, { seg: 3, flatten: 0.3, noOcc: true }));
   }
 }
 
@@ -560,7 +570,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
     const { F } = x;
     const spots: [number, number][] = [[ST.CHEST, -0.4], [ST.RIBS, 0.5], [ST.WAIST, -0.9], [ST.SH, 2.4], [ST.RIBS, 3.6], [ST.WAIST + 0.2, 1.8]];
     for (const [u, a] of spots.slice(0, F.fine ? num(m.n, 6) : 3)) {
-      const fr = F.frame('torso', 1, u, a, 0.006);
+      const fr = F.frame('torso', 1, u, a, 0.014);
       F.mark('orn', 'torso', () => poly(F.k, 'body', ring2d(8, 0.028, 0.01).map(([X, Y]) => fr(X, Y, 0)), x.glow ?? M.glowStar, true));
     }
   },

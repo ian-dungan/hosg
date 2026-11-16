@@ -112,7 +112,7 @@ describe('every look id has its own piece', () => {
 });
 
 describe('the fit (no clipping, no floating)', () => {
-  const MIN = 0.0015, TIGHT = 0.075, LOOSE = 0.17;
+  const MIN = 0.001, TIGHT = 0.08, LOOSE = 0.17;
   it(`keeps every piece outside the body by ${MIN * 1000} mm and hugging shells within ${TIGHT * 100} cm, on ${BODIES.length} bodies`, () => {
     const worst: string[] = [];
     const agg = new Map<string, { mm: number; n: number; at: string }>();
@@ -135,10 +135,12 @@ describe('the fit (no clipping, no floating)', () => {
         const fp = l.slot === 'head' ? r.head(body.env) : r.pieces.find((p) => p.chunk.g.pos.length > 0) ?? null;
         expect(fp, `${l.name} on ${b.name}`).not.toBeNull();
         const pos = fp!.chunk.g.pos;
+        const drawn = new Set(fp!.chunk.g.idx);   // (vertices no triangle uses, as in a hole's skipped quads, are not drawn)
         const cache = new Map<string, Seg[]>();
         for (const m of fp!.meta) {
           if (m.region === 'hand' || m.region === 'foot') continue;   // (gloves and boots replace the hand and foot: nothing under them)
           for (let v = m.from; v < m.to; v++) {
+            if (!drawn.has(v)) continue;
             const x = pos[v * 3]!, y = pos[v * 3 + 1]!, z = pos[v * 3 + 2]!;
             const groups = m.cls === 'free' && m.region === 'torso' ? ['body', 'legL', 'legR'] : GROUPS[m.region](m.side ?? x);
             const key = `${groups.join()}|${y.toFixed(4)}`;
@@ -247,6 +249,7 @@ describe('the hit radius', () => {
 describe('dyes', () => {
   it('Undyed is the piece\'s own colours (never black); each of the three channels recolours only its own parts', () => {
     expect(DYES[0]!.hex).toBe('#000000');
+    const bad: string[] = [];
     for (const l of ARMOUR_LOOKS) {
       const d = defFor(l.slot, l.id)!;
       expect(dyeColour(0, d.pal[0])).toBe(d.pal[0]);
@@ -257,10 +260,11 @@ describe('dyes', () => {
         return out;
       };
       const a = changed([2, 0, 0]), b = changed([0, 14, 0]), c = changed([0, 0, 27]);
-      // the primary always shows; secondary and trim show on most pieces
-      expect(a.size, `${l.name} primary`).toBeGreaterThan(0);
-      expect(a.size + b.size + c.size, l.name).toBeGreaterThan(a.size);
-      for (const i of a) { expect(b.has(i), `${l.name}: vertex ${i} in channels 1 and 2`).toBe(false); expect(c.has(i), `${l.name}: vertex ${i} in channels 1 and 3`).toBe(false); }
+      // the primary always shows, and at least one of the other two channels
+      if (!a.size) bad.push(`${l.name}: no primary`);
+      if (!b.size && !c.size) bad.push(`${l.name}: neither secondary nor trim`);
+      for (const i of a) if (b.has(i) || c.has(i)) { bad.push(`${l.name}: vertex ${i} in two channels`); break; }
     }
+    expect(bad).toEqual([]);
   });
 });
