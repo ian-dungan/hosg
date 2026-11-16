@@ -127,13 +127,29 @@ function limbAt(rows: readonly LimbRow[], axis: (y: number) => number, side: num
   return [lerp(p[0], q[0], t), lerp(p[1], q[1], t), lerp(p[2], q[2], t)];
 }
 
+/** A limb's rows with two more either side of height c (body2's withCuts). */
+function cutLimb(rows: LimbRow[], c: number): LimbRow[] {
+  const out: LimbRow[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const a = rows[i]!, b = rows[i + 1];
+    out.push(a);
+    if (!b) continue;
+    const hi = Math.max(a.y, b.y), lo = Math.min(a.y, b.y);
+    if (c - 0.004 > lo && c + 0.004 < hi) for (const yy of a.y > b.y ? [c + 0.003, c - 0.003] : [c - 0.003, c + 0.003]) {
+      const t = (yy - a.y) / (b.y - a.y);
+      out.push({ y: yy, r: a.r + (b.r - a.r) * t, z: (a.z ?? 0) + ((b.z ?? 0) - (a.z ?? 0)) * t });
+    }
+  }
+  return out;
+}
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 export const unit = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
 export function surfaces(f: Frame, detail: number, bootTop = 0): Surfaces {
   const kk = f.H / 1.75;
-  const torso = torsoRows(f), arm = armRows(f, detail), leg = legRows(f, detail), neck = neckRows(f);
+  // (the legs with body2's two rows either side of the boot's top, where it paints the boot a little proud)
+  const torso = torsoRows(f), arm = armRows(f, detail), leg = cutLimb(legRows(f, detail), bootTop), neck = neckRows(f);
   const nT = torso.length;
   const torsoAt = (s: number, a: number): V3 => {
     const ss = clamp(s, 0, nT - 1), i = Math.min(nT - 2, Math.floor(ss)), t = ss - i;
@@ -169,7 +185,8 @@ export function surfaces(f: Frame, detail: number, bootTop = 0): Surfaces {
     if (Math.hypot(...pu) < 1e-6) pu = [0, 1, 0];
     let n = unit(cross(pu, pa));
     // outward: away from the section's axis
-    const c: V3 = region === 'torso' ? [0, p[1], 0] : region === 'neck' ? [0, p[1], 0] : region === 'arm' ? [side * armAxis(f, p[1]), p[1], 0] : [side * legAxis(f, p[1]), p[1], 0];
+    // (the torso's top turns in over the shoulders to the neck: there outward is up as well as out)
+    const c: V3 = region === 'torso' ? [0, p[1] - (u > torso.length - 3.5 ? 0.3 : 0), 0] : region === 'neck' ? [0, p[1], 0] : region === 'arm' ? [side * armAxis(f, p[1]), p[1], 0] : [side * legAxis(f, p[1]), p[1], 0];
     const out = sub(p, c);
     if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0) n = [-n[0], -n[1], -n[2]];
     return { p, n };

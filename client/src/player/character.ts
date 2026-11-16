@@ -1879,6 +1879,21 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
   };
 }
 
+/**
+ * The bare Look v2 body (its own clothes, no accessories, weapons or gear) as the gear on it sees it, with `cover`
+ * left out: the fit test measures pieces against it. Positions (m), groups and triangles.
+ */
+export function bareBody(look: AdventurerLook, detail: number, ov: GearBodyOverride | null, cover?: BodyCover) {
+  const groups: string[] = [];
+  const gi = (g: string) => { let i = groups.indexOf(g); if (i < 0) { groups.push(g); i = groups.length - 1; } return i; };
+  const resolve = (g: Group): [number, number, number] => { const i = gi(g); return [i, i, 1]; };
+  const geo = new Geo(resolve), glow = new Geo(resolve, 0), k = new Kit(geo, glow, 1);
+  k.detail = detail;
+  const frame = bodyFrame(look), warp = makeAttachWarp(frame), sp = adventurerSpec(look, ov);
+  const hs = buildBody2(k, { look, frame, warp, clothes: clothesOf(sp), detail, tie: P.roof, cover });
+  return { positions: Float32Array.from(geo.pos), groups: geo.grp.slice() as string[], indices: Uint32Array.from(geo.idx), hs, env: lastHairEnvelope, frame };
+}
+
 /** The geometry of a fitted gear chunk (positions in metres on the body it was fitted to; groups per vertex). */
 export type GearGeo = Geo;
 /** A fitted gear piece: built once for a body shape (gearFit.ts caches it) and appended to that body's one mesh. */

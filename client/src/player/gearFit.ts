@@ -32,21 +32,23 @@ const TAU = Math.PI * 2;
 
 /** What a vertex range of a piece is, for the fit test: tight shells hug the body, loose ones hang near it, free cloth hangs (capes, skirts), ornaments stand on it. */
 export type FitClass = 'tight' | 'loose' | 'free' | 'orn';
-export interface FitMeta { from: number; to: number; cls: FitClass; region: Region | 'head' | 'hand' | 'foot' | 'cape' }
+export interface FitMeta { from: number; to: number; cls: FitClass; region: Region | 'head' | 'hand' | 'foot' | 'cape'; /** A limb's side (−1 left, 1 right). */ side?: number }
 /** A fitted piece: its geometry, what it covers and the ranges the fit test reads. */
 export interface FittedPiece { chunk: GearChunk; cover: BodyCover; meta: FitMeta[]; layer: LayerSnapshot }
 
 /** The offsets already worn, per region and place (m), so the next piece goes over them. */
-export interface LayerSnapshot { torso: Float32Array; arm: Float32Array; leg: Float32Array; neck: Float32Array; head: number; /** The pauldrons' inner edge (|x|, m): a cape starts inside it. */ paulIn: number }
+export interface LayerSnapshot { torso: Float32Array; arm: Float32Array; leg: Float32Array; neck: Float32Array; head: number; /** The pauldrons' inner edge (|x|, m): a cape starts inside it. */ paulIn: number; /** The right pauldron's centre and radii (the left mirrors it): ornaments stand on it. */ paul: { c: V3; r: V3 } | null }
 const LAYER_N = { torso: 72, arm: 64, leg: 64, neck: 24 } as const;
 const LAYER_U = { torso: [4.5, 12.5], arm: [0, 6.4], leg: [0, 7.5], neck: [11.5, 13.6] } as const;
-export const emptyLayer = (): LayerSnapshot => ({ torso: new Float32Array(LAYER_N.torso), arm: new Float32Array(LAYER_N.arm), leg: new Float32Array(LAYER_N.leg), neck: new Float32Array(LAYER_N.neck), head: 0, paulIn: 1 });
-const copyLayer = (l: LayerSnapshot): LayerSnapshot => ({ torso: l.torso.slice(), arm: l.arm.slice(), leg: l.leg.slice(), neck: l.neck.slice(), head: l.head, paulIn: l.paulIn });
+export const emptyLayer = (): LayerSnapshot => ({ torso: new Float32Array(LAYER_N.torso), arm: new Float32Array(LAYER_N.arm), leg: new Float32Array(LAYER_N.leg), neck: new Float32Array(LAYER_N.neck), head: 0, paulIn: 1, paul: null });
+const copyLayer = (l: LayerSnapshot): LayerSnapshot => ({ torso: l.torso.slice(), arm: l.arm.slice(), leg: l.leg.slice(), neck: l.neck.slice(), head: l.head, paulIn: l.paulIn, paul: l.paul });
 const lidx = (r: Region, u: number) => { const [a, b] = LAYER_U[r]; return clamp(Math.round(((u - a) / (b - a)) * (LAYER_N[r] - 1)), 0, LAYER_N[r] - 1); };
 
 /** The body a piece is fitted to. */
 export interface FitBody { look: Look; f: Frame; hs: HeadShape; detail: number; bootTop: number; skin: Color3 }
 
+/** Rows for a shell, with the cuts (colour edges) that must stay. */
+export type RowList = number[] & { cuts?: number[] };
 export interface ShellOpts {
   region: Region;
   /** Rows in landmark coordinates (ST for the torso, legs and neck; AST for the arms), in order along the region. */
@@ -65,6 +67,8 @@ export interface ShellOpts {
   /** Leaves the body under it out (default: a full wrap does). */
   hide?: boolean;
   flat?: boolean; glow?: boolean;
+  /** Rows may be thinned where the offset leaves room (default true). */
+  prune?: boolean;
   /** Quads left out (by their first corner's row u and angle). */
   skip?: (u: number, a: number, side: number) => boolean;
   /** Limbs: which sides (default both). */
@@ -89,8 +93,8 @@ export class Fit {
   lay: LayerSnapshot = emptyLayer();
   private cover: BodyCover = {};
   private meta: FitMeta[] = [];
-  /** Small ornaments (rivets, studs, charms) at this detail; and the far build (silhouette only). */
-  readonly fine: boolean; readonly far: boolean;
+  /** Small ornaments at this detail (med and up); the smallest (rivets, studs, bells, stitches) only at high; the far build (silhouette only). */
+  readonly fine: boolean; readonly rich: boolean; readonly far: boolean;
   /** Ring segments round the torso and a limb (the body's). */
   readonly segT: number; readonly segL: number;
 
@@ -98,7 +102,7 @@ export class Fit {
     this.look = b.look; this.f = b.f; this.hs = b.hs; this.detail = b.detail; this.skin = b.skin;
     this.S = surfaces(b.f, b.detail, b.bootTop);
     this.st = stations(b.f); this.ast = armStations(b.f); this.kk = b.f.H / 1.75;
-    this.fine = b.detail >= 0.5; this.far = b.detail < 0.35;
+    this.fine = b.detail >= 0.5; this.rich = b.detail >= 0.9; this.far = b.detail < 0.35;
     const r = ringRes(b.detail); this.segT = r.torso; this.segL = r.limb;
   }
 
@@ -114,11 +118,11 @@ export class Fit {
     return { chunk, cover: this.cover, meta: this.meta, layer: copyLayer(this.lay) };
   }
   /** Records what the primitives built in `fn` are (for the fit test). */
-  mark(cls: FitClass, region: FitMeta['region'], fn: () => void): void {
+  mark(cls: FitClass, region: FitMeta['region'], fn: () => void, side?: number): void {
     const from = this.k.g.pos.length / 3;
     fn();
     const to = this.k.g.pos.length / 3;
-    if (to > from) this.meta.push({ from, to, cls, region });
+    if (to > from) this.meta.push({ from, to, cls, region, side });
   }
   coverAlso(c: BodyCover): void {
     for (const key of ['torso', 'arm', 'leg', 'neck'] as const) if (c[key]) (this.cover[key] ??= []).push(...c[key]!);
@@ -151,14 +155,38 @@ export class Fit {
    * Rows for a shell from u0 to u1 (landmark coordinates): both ends, every body row between (so the shell's
    * chords never cut inside the body's own) and any cuts (crisp colour edges), ascending.
    */
-  rowsFor(region: Region, u0: number, u1: number, cuts: number[] = []): number[] {
+  rowsFor(region: Region, u0: number, u1: number, cuts: number[] = []): RowList {
     const lo = Math.min(u0, u1), hi = Math.max(u0, u1), out = [lo, hi];
     const S = this.S, nT = S.torso.length;
     const body: number[] = region === 'torso' ? S.torso.map((r, i) => (i === nT - 1 ? ST.NECK : i === nT - 2 ? ST.SHTOP : this.uOfY(r.y)))
       : region === 'arm' ? S.arm.map((r) => this.armU(r.y)) : region === 'leg' ? S.leg.map((r) => this.uOfY(r.y)) : S.neck.map((r) => this.uOfY(r.y));
     for (const u of [...body, ...cuts]) if (u > lo + 0.02 && u < hi - 0.02) out.push(u);
     out.sort((a, b) => a - b);
-    return out.filter((u, i) => i === 0 || u - out[i - 1]! > 0.015);
+    return Object.assign(out.filter((u, i) => i === 0 || u - out[i - 1]! > 0.015), { cuts: cuts.filter((c) => c > lo && c < hi) });
+  }
+  /**
+   * Leaves out the body rows a shell `allow` m off the body does not need: a row whose bulge over the chord between
+   * its neighbours is under the room the offset leaves (the shell's straight span then still clears the body).
+   */
+  prune(region: Region, us: RowList, allow: number): number[] {
+    if (us.length <= 2 || allow <= 0) return us.slice();
+    const keep = new Set([...(us.cuts ?? [])]);
+    const out = [us[0]!];
+    const angs = [0, 0.9, 1.6, 2.3, 3.14, 3.9, 4.7, 5.4];
+    for (let i = 1; i < us.length - 1; i++) {
+      const u = us[i]!;
+      if (keep.has(u)) { out.push(u); continue; }
+      const ua = out[out.length - 1]!, ub = us[i + 1]!, t = (u - ua) / (ub - ua);
+      let bulge = -1;
+      for (const a of angs) {
+        const P = this.at(region, 1, u, a), A = this.at(region, 1, ua, a).p, B = this.at(region, 1, ub, a).p;
+        const c: V3 = [lerp(A[0], B[0], t), lerp(A[1], B[1], t), lerp(A[2], B[2], t)];
+        bulge = Math.max(bulge, (P.p[0] - c[0]) * P.n[0] + (P.p[1] - c[1]) * P.n[1] + (P.p[2] - c[2]) * P.n[2]);
+      }
+      if (bulge > allow) out.push(u);
+    }
+    out.push(us[us.length - 1]!);
+    return out;
   }
 
   /** The ring's angles: the body's own (× mult), or an arc. */
@@ -178,7 +206,17 @@ export class Fit {
     const colF = typeof o.col === 'function' ? o.col : (() => o.col as Color3);
     const lip = o.lip ?? 'both', over = o.over ?? true, kk = this.kk;
     const lipOff = (MARGIN + 0.0008) * kk;
-    const us = o.rows;
+    // (rows the offset makes unneeded are left out: the body's own rows stay wherever the body bulges past the room)
+    let minOff = Infinity;
+    for (const u of o.rows) for (const a of [0, 1.6, 3.14, 4.7]) minOff = Math.min(minOff, offF(u, a));
+    let rows0 = o.rows as RowList;
+    if (o.region === 'leg') {
+      // (a leg shell starts above the foot: on a Knollfolk the big feet reach over its low ankles)
+      const lo = this.footTopU();
+      if (rows0.some((u) => u < lo)) rows0 = Object.assign([...new Set(rows0.map((u) => Math.max(u, lo)))].sort((a, b) => a - b), { cuts: rows0.cuts });
+      if (rows0.length < 2) return;
+    }
+    const us = o.rowU || o.prune === false ? rows0 : this.prune(o.region, rows0, (Math.max(minOff, MARGIN) - MARGIN * 0.9) * kk);
     type RowSpec = { i: number; lip: boolean };
     const spec: RowSpec[] = us.map((_, i) => ({ i, lip: false }));
     if (lip === 'first' || lip === 'both') spec.unshift({ i: 0, lip: true });
@@ -205,7 +243,7 @@ export class Fit {
       this.mark(o.cls ?? 'tight', o.region, () => this.k.grid(g, P, (i, j) => colF(U[i]![j]!, angs[j]!, side), {
         wrap, flat: o.flat, glow: o.glow, noOcc: false, out: (i, j) => N[i]![j]!,
         skip: o.skip ? (i, j) => o.skip!(U[i]![j]!, angs[j]!, side) : undefined,
-      }));
+      }), sides.length > 1 ? side : undefined);
       if (o.tag) this.k.g.tagNow = 0;
     }
     // what it leaves worn, and the body it covers (a full wrap)
@@ -218,9 +256,9 @@ export class Fit {
     }
   }
 
-  /** A band round the region (a belt, a cuff, a bracer) over everything worn there. */
+  /** A band round the region (a belt, a cuff, a bracer, a lame) over everything worn there: one ring of quads. */
   band(region: Region, u: number, h: number, thick: number, col: Color3 | ((u: number, a: number, side: number) => Color3), o: Partial<ShellOpts> = {}): void {
-    this.shell({ region, rows: [u - h / 2, u + h / 2], off: (uu) => Math.max(this.under(region, uu) / this.kk, 0) + thick, col, lip: 'both', hide: false, ...o });
+    this.shell({ region, rows: [u - h / 2, u + h / 2], off: (uu) => Math.max(this.under(region, uu) / this.kk, 0) + thick, col, lip: 'none', hide: false, prune: false, ...o });
   }
 
   // ── ornaments ──
@@ -281,7 +319,7 @@ export class Fit {
   skirt(o: { top: number; hem: number | ((a: number) => number); clear?: number; flare?: number; col: (t: number, a: number) => Color3; rows?: number; arc?: [number, number]; mult?: number; flat?: boolean; lip?: boolean; tag?: number; cls?: FitClass }): void {
     const kk = this.kk, angs = this.angles('torso', o.mult ?? 1, o.arc), wrap = !o.arc;
     const hemOf = typeof o.hem === 'number' ? (() => o.hem as number) : o.hem;
-    const nR = Math.max(3, o.rows ?? (this.far ? 3 : this.fine ? 6 : 4));
+    const nR = Math.max(2, o.rows ?? (this.far ? 2 : this.rich ? 6 : this.fine ? 4 : 3));
     const clear = (o.clear ?? 0.012) * kk, flare = (o.flare ?? 0.04) * kk;
     const P: V3[][] = [], T: number[] = [];
     const yTop = stY(this.st, o.top);
@@ -289,7 +327,7 @@ export class Fit {
     for (let i = 0; i <= nR; i++) {
       const t = i / nR, row: V3[] = [];
       for (const a of angs) {
-        const yHem = stY(this.st, hemOf(a)), y = lerp(yTop, yHem, t);
+        const yHem = Math.max(stY(this.st, hemOf(a)), this.f.footH * 1.15 + 0.02 * kk), y = lerp(yTop, yHem, t);
         const sec = this.section(y);
         const ux = Math.sin(a), uz = Math.cos(a);
         let h = 0;
@@ -314,7 +352,7 @@ export class Fit {
   }
 
   /** The back's depth (min z, m) at height y near x (|x − x0| < w), with what is worn there. */
-  private backZ(y: number, x0: number, w = 0.08): number {
+  backZ(y: number, x0: number, w = 0.08): number {
     let z = 0, any = false;
     const sec = this.section(y, 20);
     for (const p of sec) if (Math.abs(p[0] - x0) < w * this.kk) { z = any ? Math.min(z, p[2]) : p[2]; any = true; }
@@ -339,7 +377,7 @@ export class Fit {
     const cols = (o.cols ?? (this.far ? 4 : this.fine ? 8 : 6));
     const rows = o.rows ?? (this.far ? 4 : this.fine ? 9 : 6);
     const spread = (o.width ?? 0.8) * 1.25, clear = (o.clear ?? 0.02) * kk;
-    const sTop = this.native('torso', o.top), wTop = this.under('torso', o.top) + LAYER_GAP * kk;
+    const sTop = this.native('torso', o.top), wTop = this.under('torso', o.top) + LAYER_GAP * kk + (o.thick ?? 0.016) * kk * 0.6;
     const tailY = this.look.fur ? f.hipY + 0.02 * kk : -1;
     const grid: V3[][] = [];
     const xs: number[] = [], zTop: number[] = [];
@@ -397,9 +435,12 @@ export class Fit {
     let prev: number[] = [];
     for (let i = 0; i <= rows; i++) {
       const t = i / rows, y = lerp(yTop, yBot, t), row: V3[] = [];
+      // the row's depth: the farthest point under its whole width (it bridges a bust or a belly, never dips between)
+      let zr = o.back ? Infinity : -Infinity;
+      for (let j = 0; j <= cols; j++) { const x = (j / cols * 2 - 1) * halfF(t) * kk; zr = o.back ? Math.min(zr, this.backZ(y, x, 0.05)) : Math.max(zr, this.frontZ(y, x, 0.05)); }
       for (let j = 0; j <= cols; j++) {
         const v = j / cols * 2 - 1, x = v * halfF(t) * kk;
-        const zb = o.back ? this.backZ(y, x, 0.04) : this.frontZ(y, x, 0.04);
+        const zb = zr;
         let z = zb + (o.back ? -1 : 1) * ((o.clear ?? 0.006) * kk + LAYER_GAP * kk);
         if (i > 0) z = o.back ? Math.min(z, prev[j]!) : Math.max(z, prev[j]! - (y < this.f.crotchY ? 0 : 1));
         prev[j] = z;
@@ -408,7 +449,9 @@ export class Fit {
       grid.push(row);
     }
     if (o.tag) { this.k.g.tagNow = o.tag; this.k.g.tagSkip = o.tagSkip ?? null; }
-    this.mark('free', 'torso', () => this.k.sheet('body', grid, (o.thick ?? 0.01) * kk, o.col(0, 0), { paint: (_w, uv) => o.col(uv[0] * 2 - 1, uv[1]) }));
+    // one-sided (it lies on the body or hangs in front of it): its outside faces away from the body
+    const sgn = o.back ? -1 : 1;
+    this.mark('free', 'torso', () => this.k.grid('body', grid, (i, j) => o.col(j / cols * 2 - 1, i / rows), { out: () => [0, 0, sgn], noOcc: true }));
     if (o.tag) { this.k.g.tagNow = 0; this.k.g.tagSkip = null; }
   }
 
@@ -445,19 +488,44 @@ export class Fit {
       const sc = (o.scale ?? 1);
       const rad: V3 = [asp[0] * lam * sc + MARGIN * kk * 1.5, asp[1] * lam * sc + MARGIN * kk * 1.5, asp[2] * lam * sc + MARGIN * kk * 1.5];
       const g: ShapeGroup = side < 0 ? 'armL' : 'armR';
-      // the dome, then its lames: each a band lower down the arm, a little wider (overlapping like a lobster's tail)
-      for (let i = 0; i <= (this.far ? 0 : o.lames ?? 0); i++) {
-        const ci: V3 = [c[0] + side * i * 0.012 * kk, c[1] - i * rad[1] * 0.42, c[2]];
-        const ri: V3 = [rad[0] * (1 + 0.06 * i), rad[1] * (i ? 0.9 : 1), rad[2] * (1 + 0.04 * i)];
-        const cutI = i ? 0.15 : cut;
+      // the dome (a lathe from its cut up to its crown: no hidden underside), then its lames: bands lower down the
+      // arm, each a little wider (overlapping like a lobster's tail)
+      const pw = o.power ?? 0.85, seg = o.seg ?? (this.fine ? 9 : 7);
+      const prof = (t0: number, t1: number, n: number): [number, number][] => Array.from({ length: n + 1 }, (_, i) => {
+        const t = t0 + ((t1 - t0) * i) / n;
+        return [t, Math.pow(Math.max(0, 1 - Math.pow(Math.abs(t), 2 / pw)), pw / 2)] as [number, number];
+      });
+      const nL = this.far ? 0 : Math.min(o.lames ?? 0, this.fine ? 3 : 1);
+      for (let i = 0; i <= nL; i++) {
+        const ci: V3 = [c[0] + side * i * 0.01 * kk, c[1] - i * rad[1] * 0.45, c[2]];
+        const ri: V3 = [rad[0] * (1 + 0.07 * i), rad[1], rad[2] * (1 + 0.05 * i)];
+        const pr = i ? prof(cut + 0.05, cut + 0.5, 2) : prof(cut, 1, this.far ? 2 : this.fine ? 4 : 3);
         const col = i ? shadeC(o.col, 1 - 0.07 * i) : o.col;
-        this.mark('orn', 'arm', () => this.k.ellip(g, ci, ri, col, { seg: o.seg ?? (this.fine ? 10 : 7), lat: this.fine ? 6 : 4, flat: o.flat, power: o.power ?? 0.85, noOcc: true,
-          deform: (l) => { if (l.y < cutI) l.y = cutI; if (l.x * side < -0.55) l.x = -0.55 * side; },
-          paint: o.paint ? (_w, _uv, l) => o.paint!(new Vector3(l.x * side, l.y, l.z)) : undefined }));
+        this.mark('orn', 'arm', () => this.k.lathe(g, ci, pr.map(([t, r]) => [t * ri[1], r * ri[0]] as [number, number]), col, { seg, sz: ri[2] / ri[0], flat: o.flat, noOcc: true, caps: false,
+          paint: o.paint ? (_w, _uv, l) => o.paint!(new Vector3(l.x / ri[0], l.y / ri[1], l.z / ri[2])) : undefined }), side);
       }
       this.lay.paulIn = Math.min(this.lay.paulIn, Math.abs(c[0]) - 0.55 * rad[0]);
+      if (side > 0) this.lay.paul = { c: [c[0], c[1], c[2]], r: rad };
     }
   }
+  /**
+   * A frame standing on the pauldron of `side` at direction d (unit, x outward, y up, z forward), `out` m off it
+   * (null: no pauldron worn). Fins, cogs, spikes and lenses on the shoulder stand here, never in the air.
+   */
+  paulFrame(side: number, d: V3, out = 0, scale = this.kk): F | null {
+    const pa = this.lay.paul;
+    if (!pa) return null;
+    const dd = unit(d), r = pa.r;
+    const p: V3 = [side * (pa.c[0] + dd[0] * r[0]), pa.c[1] + dd[1] * r[1], pa.c[2] + dd[2] * r[2]];
+    const n = unit([side * dd[0] / r[0], dd[1] / r[1], dd[2] / r[2]]);
+    let x = unit(cross([0, 1, 0], n));
+    if (Math.hypot(...x) < 0.5) x = [side, 0, 0];
+    const y = unit(cross(n, x)), o = out * this.kk;
+    const c: V3 = [p[0] + n[0] * o, p[1] + n[1] * o, p[2] + n[2] * o];
+    return (X, Y, Z) => [c[0] + (x[0] * X + y[0] * Y + n[0] * Z) * scale, c[1] + (x[1] * X + y[1] * Y + n[1] * Z) * scale, c[2] + (x[2] * X + y[2] * Y + n[2] * Z) * scale];
+  }
+  /** The foot's top (its instep, with a boot's room) as a landmark coordinate: leg shells start above it. */
+  footTopU(): number { return this.uOfY(this.f.footH * 1.12 + 0.014 * this.kk); }
   /** A height on the arm as an arm landmark coordinate (AST). */
   armU(y: number): number {
     const a = this.ast;
@@ -527,16 +595,16 @@ export class Fit {
     const l = this.look;
     if (l.people === 'brindlekin') {
       const lop = l.ears.style === 5;
-      return [-1, 1].map((sx) => ({ d: norm(lop ? [sx * 0.9, 0.35, -0.05] : [sx * 0.55, 0.75, -0.05]), r: lop ? 0.42 : 0.36 }));
+      return [-1, 1].map((sx) => ({ d: norm(lop ? [sx * 0.9, 0.35, -0.05] : [sx * 0.5, 0.82, -0.08]), r: lop ? 0.44 : 0.4 }));
     }
-    if (l.people === 'larchfolk') return [-1, 1].map((sx) => ({ d: norm([sx * 0.98, -0.1, -0.06]), r: 0.3 }));
+    if (l.people === 'larchfolk') return [-1, 1].map((sx) => ({ d: norm([sx * 0.95, 0.18, -0.2]), r: 0.5 }));
     return [];
   }
   /**
    * A shell over the skull from the crown down to its edge `thMax(ph)` (polar angle from the crown, by azimuth ph:
    * the face's opening, cheek guards, the nape), `off` m off the skull — and off the hair where it sits on hair.
    */
-  headShell(o: { thMax: (ph: number) => number; off: number | ((d: V3) => number); col: (d: V3) => Color3; overHair?: boolean; rows?: number; seg?: number; holes?: { d: V3; r: number }[]; lip?: boolean; flat?: boolean; glow?: boolean }): void {
+  headShell(o: { thMax: (ph: number) => number; off: number | ((d: V3) => number); col: (d: V3) => Color3; overHair?: boolean; rows?: number; seg?: number; holes?: { d: V3; r: number }[]; lip?: boolean; flat?: boolean; glow?: boolean; cls?: FitClass }): void {
     const kk = this.kk;
     const seg = o.seg ?? (this.far ? 8 : this.detail >= 0.9 ? 16 : this.fine ? 12 : 10), lat = o.rows ?? (this.far ? 4 : this.detail >= 0.9 ? 8 : this.fine ? 6 : 5);
     const offF = typeof o.off === 'number' ? (() => o.off as number) : o.off;
@@ -558,7 +626,7 @@ export class Fit {
     }
     const holes = o.holes ?? [];
     const inHole = (d: V3) => holes.some((h) => Math.acos(clamp(d[0] * h.d[0] + d[1] * h.d[1] + d[2] * h.d[2], -1, 1)) < h.r);
-    this.mark('tight', 'head', () => this.k.grid('head', P, (i, j) => o.col(D[i]![j]!), { wrap: true, flat: o.flat, glow: o.glow, noOcc: true, out: (i, j) => N[i]![j]!,
+    this.mark(o.cls ?? 'tight', 'head', () => this.k.grid('head', P, (i, j) => o.col(D[i]![j]!), { wrap: true, flat: o.flat, glow: o.glow, noOcc: true, out: (i, j) => N[i]![j]!,
       skip: holes.length ? (i, j) => inHole(D[i]![j]!) || inHole(D[Math.min(P.length - 1, i + 1)]![(j + 1) % seg]!) : undefined }));
     let mx = 0;
     for (const r of P) for (const p of r) mx = Math.max(mx, Math.hypot(p[0], p[1] - this.hs.cy, p[2] - this.hs.cz));

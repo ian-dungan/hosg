@@ -143,7 +143,7 @@ function cuirass(x: Ctx) {
   F.shell({ region: 'torso', rows: F.rowsFor('torso', bot, top, [bot + 0.12, top - 0.12]), arc: [-1.3, 1.3], off: (_u, a) => plate + ridge * Math.cos(a) ** 6, col: pcol(C.c), flat: true, hide: false, lip: 'both', cls: 'tight' });
   F.shell({ region: 'torso', rows: F.rowsFor('torso', bot, top, [bot + 0.12, top - 0.12]), arc: [Math.PI - 1.2, Math.PI + 1.2], off: plate * 0.85, col: pcol(sh(C.c, 0.85)), flat: true, hide: false, lip: 'both', cls: 'tight' });
   // faulds: lames round the waist and hips
-  const n = num(p.lames, 2);
+  const n = Math.min(num(p.lames, 2), F.fine ? 3 : 1);
   for (let i = 0; i < n; i++) F.band('torso', ST.WAIST - 0.3 - i * 0.32, 0.3, 0.008, (_u, a) => (Math.cos(a * 2) > 0.9 ? C.c : sh(C.a, 0.92 - i * 0.04)), { flat: true });
   if (p.gorget) F.shell({ region: 'neck', rows: [ST.NECK - 0.1, ST.NECK + 0.45], off: 0.014, col: (u) => (u > ST.NECK + 0.33 ? C.c : C.a), flat: true, hide: true });
   pauldrons(x, str(p.paul, 'round'), num(p.paulSize, 1));
@@ -202,8 +202,8 @@ function kneeCop(x: Ctx, side: number) {
   const { F, C } = x;
   const f = F.f, kk = F.kk, r = f.kneeR;
   const { p, n } = F.at('leg', side, ST.KNEE + 0.08, 0);
-  const lift = F.under('leg', ST.KNEE) + 0.004 * kk + r * 0.55 * 0.25;
-  F.mark('orn', 'leg', () => F.k.ellip(side < 0 ? 'legL' : 'legR', [p[0] + n[0] * lift, p[1], p[2] + n[2] * lift], [r * 1.05, r * 1.15, r * 0.55], C.a, { seg: F.fine ? 8 : 6, lat: 4, flat: true, power: 0.75, noOcc: true,
+  const lift = F.under('leg', ST.KNEE) + 0.012 * kk + r * 0.55 * 0.25;
+  F.mark('orn', 'leg', () => F.k.ellip(side < 0 ? 'legL' : 'legR', [p[0] + n[0] * lift, p[1], p[2] + n[2] * lift], [r * 1.0, r * 0.95, r * 0.55], C.a, { seg: F.rich ? 8 : 6, lat: F.rich ? 4 : 3, flat: true, power: 0.75, noOcc: true,
     deform: (l) => { if (l.z < -0.25) l.z = -0.25; }, paint: (_w, _uv, l) => (l.y > 0.55 || l.y < -0.6 ? C.c : undefined) }));
 }
 
@@ -252,7 +252,7 @@ function hood(x: Ctx) {
   const { F, p, C } = x;
   const th = edge(num(p.front, 1.0), 2.25, 2.55);
   const off = num(p.off, 0.03);
-  F.headShell({ thMax: th, off: (d) => off + 0.012 * Math.max(0, -d[1]), col: (d) => (Math.acos(d[1]) > th(Math.atan2(d[0], d[2])) - 0.16 && d[2] > -0.2 ? C.c : folds(C.a, Math.atan2(d[0], d[2]), 0.04, 5)), holes: holesUnder(F, th), overHair: true });
+  F.headShell({ thMax: th, off: (d) => off + 0.012 * Math.max(0, -d[1]), col: (d) => (Math.acos(d[1]) > th(Math.atan2(d[0], d[2])) - 0.16 && d[2] > -0.2 ? C.c : folds(C.a, Math.atan2(d[0], d[2]), 0.04, 5)), holes: holesUnder(F, th), overHair: true, cls: 'loose' });
   const pt = num(p.point, 0);
   if (pt > 0) {
     const kk = F.kk, top = F.headAt([0, 0.72, -0.69], off * kk + F.env([0, 0.72, -0.69]));
@@ -281,7 +281,7 @@ function helm(x: Ctx) {
   const { F, p, C } = x;
   const th = edge(num(p.front, 1.05), num(p.side, 2.0), num(p.back, 2.35));
   const off = num(p.off, 0.016), crown = num(p.crown, 0);
-  F.headShell({ thMax: th, off: (d) => off + crown * Math.max(0, d[1]) ** 2, overHair: false, flat: true, holes: holesUnder(F, th),
+  F.headShell({ thMax: th, off: (d) => off + crown * Math.max(0, d[1]) ** 2, flat: true, holes: holesUnder(F, th),
     col: (d) => { const t = Math.acos(d[1]), e = th(Math.atan2(d[0], d[2])); return t > e - 0.14 ? C.c : p.bands && Math.abs(t - 0.95) < 0.07 ? C.c : p.ribs && Math.abs(Math.sin(Math.atan2(d[0], d[2]) * 4)) < 0.12 ? sh(C.a, 0.82) : C.a; } });
   const kk = F.kk;
   if (p.nasal && !F.look.fur) {
@@ -363,7 +363,8 @@ function wings(x: Ctx) {
   const { F, p, C } = x;
   const kk = F.kk;
   for (const sx of [-1, 1]) {
-    const fr = F.frame('torso', 1, ST.CHEST, Math.PI - sx * 0.35, 0.02);
+    const fr0 = F.frame('torso', 1, ST.CHEST, Math.PI - sx * 0.35, 0.02);
+    const fr = (X: number, Y: number, Z: number) => fr0(X, Y, Z + Math.max(0, -Y) * 0.5);
     if (p.kind === 'moth') {
       F.mark('free', 'cape', () => poly(F.k, 'cape', [fr(0, 0.12, 0), fr(sx * -0.3, 0.2, -0.05), fr(sx * -0.34, -0.05, -0.06), fr(sx * -0.2, -0.24, -0.05), fr(sx * -0.02, -0.15, 0)], C.a));
       F.mark('orn', 'cape', () => poly(F.k, 'cape', [fr(sx * -0.17, 0.06, -0.035), fr(sx * -0.22, 0.02, -0.04), fr(sx * -0.17, -0.03, -0.035), fr(sx * -0.12, 0.02, -0.03)], C.c));
@@ -388,8 +389,8 @@ export const TEMPLATES: Readonly<Record<DefSlot, Readonly<Record<string, (x: Ctx
   back: { cape: capeTpl, pack, wings },
 };
 /** What a head template covers: the hair ('cap': tucked, its volume gone; 'none': a closed helm) and the round ears. */
-export const HEAD_COVER: Readonly<Record<string, { hair: 'full' | 'cap' | 'none'; ears: boolean }>> = {
-  hood: { hair: 'cap', ears: true }, cap: { hair: 'cap', ears: false }, helm: { hair: 'none', ears: true }, band: { hair: 'full', ears: false }, halo: { hair: 'full', ears: false },
+export const HEAD_COVER: Readonly<Record<string, { hair: 'full' | 'cap' | 'tuck' | 'none'; ears: boolean }>> = {
+  hood: { hair: 'tuck', ears: true }, cap: { hair: 'tuck', ears: false }, helm: { hair: 'none', ears: true }, band: { hair: 'full', ears: false }, halo: { hair: 'full', ears: false },
 };
 
 // ───────── modules: trims and ornaments ─────────
@@ -424,7 +425,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   /** Ember stitches along a band (Wickthread): small lit diamonds. */
   embers: (x, m) => {
     const { F } = x;
-    if (!F.fine) return;
+    if (!F.rich) return;
     const n = num(m.n, 10), region = str(m.region, 'torso') as 'torso' | 'arm' | 'leg', u = num(m.u, ST.HIP);
     const sides = region === 'torso' ? [1] : [-1, 1];
     for (const side of sides) for (let i = 0; i < n; i++) {
@@ -439,7 +440,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
       F.mark('orn', 'torso', () => revolve(F.k, g, fr, [0, 0, 0], 'z', [[0, r], [0.012, r]], F.fine ? 10 : 6, x.C.c));
       F.mark('orn', 'torso', () => revolve(F.k, g, fr, [0, 0, 0.013], 'z', [[0, r * 0.68], [0.004, r * 0.68]], F.fine ? 9 : 6, lit, !!x.glow));
     };
-    if (at === 'shoulder') for (const side of [-1, 1]) disk(F.frame('arm', side, 0.55, Math.PI / 2 - 0.5, 0.02), side < 0 ? 'armL' : 'armR', 0.07);
+    if (at === 'shoulder') for (const side of [-1, 1]) disk(F.frame('torso', 1, ST.SH - 0.15, side * 0.62, 0.006), 'body', 0.042);
     if (at === 'chest') disk(F.frame('torso', 1, ST.CHEST + 0.2, 0, 0.01), 'body', 0.045);
     if (at === 'brow') { const d: V3 = [0, 0.55, 0.83]; disk(F.headFrame(d, F.env(d) + 0.014 * F.kk), 'head', 0.032); }
     if (at === 'hand') for (const side of [-1, 1]) disk(F.frame('arm', side, 4.75, Math.PI / 2, 0.008), side < 0 ? 'armL' : 'armR', 0.022);
@@ -482,7 +483,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   /** Bells (Tollwind): at the belt, on a hat's side, at the boots. */
   bells: (x, m) => {
     const { F } = x;
-    if (!F.fine) return;
+    if (!F.rich) return;
     const at = str(m.at, 'belt');
     const bell = (fr: ReturnType<Fit['frame']>, g: 'body' | 'legL' | 'legR' | 'head') => F.mark('orn', 'torso', () => revolve(F.k, g, fr, [0, -0.03, 0.02], 'y', [[0.03, 0], [0.022, 0.016], [0, 0.022], [-0.008, 0.024]], 5, M.brass));
     if (at === 'belt') for (const a of [-0.7, 0.8]) bell(F.frame('torso', 1, ST.WAIST - 0.2, a, 0.01), 'body');
@@ -496,8 +497,8 @@ export const MODULES: Readonly<Record<string, Mod>> = {
       const grid: V3[][] = [];
       for (let i = 0; i <= 4; i++) {
         const t = i / 4, y = F.f.waistY - t * len * kk, sw = 0.08 * kk * t * t;
-        const z0 = F.S.torsoAt(F.S.torsoS(Math.max(F.f.crotchY, y)), Math.PI)[2] - F.under('torso', ST.HIP) - 0.012 * kk - t * 0.06 * kk;
-        grid.push([[s * 0.02 * kk + sw, y, z0], [s * (0.13 + t * 0.03) * kk + sw, y, z0 + 0.03 * kk]]);
+        const xa = s * 0.02 * kk + sw, xb = s * (0.13 + t * 0.03) * kk + sw;
+        grid.push([[xa, y, F.backZ(y, xa, 0.05) - (0.016 + t * 0.04) * kk], [xb, y, F.backZ(y, xb, 0.05) - (0.016 + t * 0.03) * kk]]);
       }
       F.mark('free', 'cape', () => F.k.sheet('cape', grid, 0.014 * kk, x.C.a, { paint: (_w, uv) => (uv[1] > 0.85 ? x.C.c : undefined) }));
     }
@@ -506,34 +507,36 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   capelet: (x, m) => {
     const { F } = x;
     F.shell({ region: 'torso', rows: F.rowsFor('torso', num(m.lo, ST.CHEST + 0.2), ST.NECK), off: 0.018, col: (u) => (u < num(m.lo, ST.CHEST + 0.2) + 0.13 ? x.C.c : x.C.b), hide: false, lip: 'first', cls: 'loose' });
-    const fr = F.frame('torso', 1, ST.SHTOP + 0.4, 0, 0.012);
+    const fr = F.frame('torso', 1, ST.SH + 0.45, 0, 0.012);
     F.mark('orn', 'torso', () => poly(F.k, 'body', [fr(0, 0.025, 0), fr(0.02, 0, 0), fr(0, -0.025, 0), fr(-0.02, 0, 0)], x.glow ?? x.C.c, !!x.glow));
   },
   /** Rivets in a row round a region at u (Brassbound). */
   rivets: (x, m) => {
     const { F } = x;
-    if (!F.fine) return;
+    if (!F.rich) return;
     const region = str(m.region, 'torso') as 'torso' | 'leg' | 'arm', u = num(m.u, ST.CHEST), n = num(m.n, 6), arc = num(m.arc, 1.1);
     const sides = region === 'torso' ? [1] : [-1, 1];
     for (const side of sides) for (let i = 0; i < n; i++) {
-      const a = -arc + (2 * arc * i) / Math.max(1, n - 1), fr = F.frame(region, side, u, a, num(m.off, 0.026));
+      const a = -arc + (2 * arc * i) / Math.max(1, n - 1), fr = F.frame(region, side, u, a, num(m.off, 0.003));   // (over the plate worn there)
       F.mark('orn', region, () => knob(F.k, F.group(region, side), fr, [0, 0, 0], 0.009, M.iron, false, 4));
     }
   },
-  /** Cog plates standing on the shoulders (Brassbound). */
+  /** Cog plates standing on the shoulders' pauldrons (Brassbound), turned half to the front. */
   cogs: (x) => {
     const { F } = x;
     for (const side of [-1, 1]) {
-      const fr = F.frame('arm', side, 0.1, Math.PI / 2 - 0.6, 0.075);
-      F.mark('orn', 'arm', () => prism(F.k, side < 0 ? 'armL' : 'armR', (X, Y, Z) => fr(X, Y + 0.02, Z), ring2d(F.fine ? 14 : 10, 0.07, 0.054), 0.022, x.C.c, { rim: sh(x.C.c, 0.8) }));
+      const fr = F.paulFrame(side, [0.55, 0.75, 0.35], 0.03);
+      if (!fr) continue;
+      F.mark('orn', 'arm', () => prism(F.k, side < 0 ? 'armL' : 'armR', (X, Y, Z) => fr(Z, X, Y + 0.05), ring2d(F.rich ? 14 : 10, 0.06, 0.047), 0.018, x.C.c, { rim: sh(x.C.c, 0.8) }), side);
     }
   },
   /** Fins rising from the pauldrons (Beaconstone T3: the shoulder line stands above the ears). */
   fins: (x) => {
     const { F } = x;
     for (const side of [-1, 1]) {
-      const fr = F.frame('arm', side, 0.0, Math.PI / 2 - 0.25, 0.09);
-      F.mark('orn', 'arm', () => prism(F.k, side < 0 ? 'armL' : 'armR', (X, Y, Z) => fr(Z, Y + 0.02, X), [[-0.11, 0], [0.11, 0], [0.06, 0.07], [-0.02, 0.1], [-0.08, 0.05]], 0.02, x.C.c));
+      const fr = F.paulFrame(side, [0.35, 0.94, 0], -0.01);
+      if (!fr) continue;
+      F.mark('orn', 'arm', () => prism(F.k, side < 0 ? 'armL' : 'armR', (X, Y, Z) => fr(Z, X, Y), [[-0.09, -0.01], [0.09, -0.01], [0.05, 0.06], [-0.02, 0.085], [-0.07, 0.04]], 0.018, x.C.c), side);
     }
   },
   /** Roots winding over plates and across the chest (Rootbound). */
@@ -546,7 +549,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   /** A crest on the chest (a lit gem in a diamond plate, or a shape: sun, star, leaf). */
   crest: (x, m) => {
     const { F } = x, kind = str(m.kind, 'diamond'), lit = !!x.glow && m.lit !== false;
-    const fr = F.frame('torso', 1, num(m.u, ST.CHEST), 0, num(m.off, 0.032));
+    const fr = F.frame('torso', 1, num(m.u, ST.CHEST), 0, num(m.off, 0.004));
     const r = num(m.r, 0.06);
     const shape: [number, number][] = kind === 'sun' ? ring2d(16, r, r * 0.62) : kind === 'star' ? ring2d(10, r, r * 0.45) : kind === 'leaf' ? [[0, r], [r * 0.45, 0], [0, -r * 1.1], [-r * 0.45, 0]] : [[0, r], [r * 0.7, 0], [0, -r * 1.2], [-r * 0.7, 0]];
     F.mark('orn', 'torso', () => prism(F.k, 'body', fr, shape, 0.01, x.C.c, { rim: sh(x.C.c, 0.8) }));
@@ -564,7 +567,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   /** Buttons down the front (a coat), or toggles. */
   buttons: (x, m) => {
     const { F } = x;
-    if (!F.fine) return;
+    if (!F.rich) return;
     const n = num(m.n, 4), toggles = !!m.toggles;
     for (let i = 0; i < n; i++) {
       const u = ST.SH - 0.2 - i * ((ST.SH - ST.HIP) / n), fr = F.frame('torso', 1, u, num(m.a, 0.18), 0.012);
@@ -575,8 +578,8 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   rays: (x, m) => {
     const { F } = x, n = F.fine ? num(m.n, 12) : 8, out = num(m.out, 0.1);
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * TAU, fr = F.frame('torso', 1, ST.SHTOP + 0.6, a, 0.01);
-      F.mark('orn', 'torso', () => poly(F.k, 'body', [fr(-0.03, 0, 0), fr(0.03, 0, 0), fr(0, -out * (i % 2 ? 0.7 : 1), 0.02)], i % 2 ? x.C.c : x.C.a));
+      const a = (i / n) * TAU, fr = F.frame('torso', 1, ST.SHTOP + 0.45, a, 0.024);
+      F.mark('orn', 'torso', () => poly(F.k, 'body', [fr(-0.03, 0, 0), fr(0.03, 0, 0), fr(0, -out * (i % 2 ? 0.7 : 1), out * 0.7)], i % 2 ? x.C.c : x.C.a));
     }
   },
   /** A soft ruff at the throat (the Moth-Silk gown). */
@@ -596,8 +599,8 @@ export const MODULES: Readonly<Record<string, Mod>> = {
   kerchief: (x) => {
     const { F } = x;
     F.shell({ region: 'neck', rows: [ST.NECK - 0.05, ST.NECK + 0.2], off: 0.01, col: P.roof, hide: true });
-    const fr = F.frame('torso', 1, ST.SHTOP + 0.6, 0, 0.012);
-    F.mark('orn', 'torso', () => poly(F.k, 'body', [fr(-0.05, 0.02, 0), fr(0.05, 0.02, 0), fr(0, -0.07, 0.01)], P.roof));
+    const fr = F.frame('torso', 1, ST.SH + 0.55, 0, 0.012);
+    F.mark('orn', 'torso', () => poly(F.k, 'body', [fr(-0.05, 0.03, 0), fr(0.05, 0.03, 0), fr(0, -0.06, 0.01)], P.roof));
   },
   /** Patches on the knees (worn trousers). */
   patches: (x) => { for (const side of [-1, 1]) { const fr = x.F.frame('leg', side, ST.KNEE + 0.1, 0.1, 0.004); x.F.mark('orn', 'leg', () => poly(x.F.k, side < 0 ? 'legL' : 'legR', [fr(-0.035, 0.04, 0), fr(0.035, 0.04, 0), fr(0.035, -0.04, 0), fr(-0.035, -0.04, 0)], sh(x.C.a, 0.8))); } },
@@ -607,8 +610,8 @@ export const MODULES: Readonly<Record<string, Mod>> = {
     const top = (d: V3, out = 0.016) => F.headFrame(d, out * kk + num(m.lift, 0) * kk);
     if (kind === 'crest' || kind === 'cog') {
       const fr = top([0, 0.98, -0.2], num(m.base, 0.03));
-      if (kind === 'cog') F.mark('orn', 'head', () => prism(F.k, 'head', (X, Y, Z) => fr(Z, Y + 0.05, X), ring2d(F.fine ? 16 : 10, 0.085, 0.065), 0.03, c, { rim: sh(c, 0.8) }));
-      else F.mark('orn', 'head', () => prism(F.k, 'head', (X, Y, Z) => fr(Z, Y, X), [[-0.14, 0], [0.12, 0], [0.08, 0.08], [-0.1, 0.06]], 0.024, c));
+      if (kind === 'cog') F.mark('orn', 'head', () => prism(F.k, 'head', (X, Y, Z) => fr(Z, X, Y + 0.06), ring2d(F.fine ? 16 : 10, 0.085, 0.065), 0.03, c, { rim: sh(c, 0.8) }));
+      else F.mark('orn', 'head', () => prism(F.k, 'head', (X, Y, Z) => fr(Z, X, Y), [[-0.14, 0], [0.12, 0], [0.08, 0.08], [-0.1, 0.06]], 0.024, c));
     }
     if (kind === 'horns') for (const sx of [-1, 1]) {
       const a = F.headAt([sx * 0.7, 0.6, -0.2], 0.03 * kk).p;
@@ -620,7 +623,7 @@ export const MODULES: Readonly<Record<string, Mod>> = {
     }
     if (kind === 'beacon') {
       const fr = top([0, 1, 0.05], 0.03);
-      F.mark('orn', 'head', () => prism(F.k, 'head', (X, Y, Z) => fr(Z, Y, X - 0.03), [[-0.17, 0], [0.15, 0], [0.1, 0.1], [-0.1, 0.08]], 0.026, c));
+      F.mark('orn', 'head', () => prism(F.k, 'head', (X, Y, Z) => fr(Z, X - 0.03, Y), [[-0.17, 0], [0.15, 0], [0.1, 0.1], [-0.1, 0.08]], 0.026, c));
       F.mark('orn', 'head', () => revolve(F.k, 'head', fr, [0, 0, 0.1], 'z', [[0, 0.045], [0.05, 0.06], [0.06, 0.045]], F.fine ? 8 : 5, c));
       F.mark('orn', 'head', () => revolve(F.k, 'head', fr, [0, 0, 0.17], 'z', [[-0.01, 0.0], [0.0, 0.04], [0.06, 0.025], [0.11, 0]], F.fine ? 7 : 5, x.glow ?? M.glowBeacon, !!x.glow));
     }
@@ -647,12 +650,12 @@ export const MODULES: Readonly<Record<string, Mod>> = {
       F.mark('orn', 'head', () => revolve(F.k, 'head', fr, [0, 0, 0.042], 'z', [[0, 0.036], [0.002, 0.036]], F.fine ? 9 : 6, M.glass));
     }
   },
-  /** Spikes standing out of a piece (spiked pauldrons, a mace-like crest). */
+  /** Spikes standing out of the pauldrons. */
   spikes: (x, m) => {
     const { F } = x, kk = F.kk, c = pick(x.C, m.col, M.iron);
-    for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
-      const fr = F.frame('arm', side, 0.2 + i * 0.25, Math.PI / 2 - 0.4 + i * 0.4, 0.07);
-      F.mark('orn', 'arm', () => cone(F.k, side < 0 ? 'armL' : 'armR', fr(0, 0, 0), fr(0, 0.02, 0.08), 0.015 * kk, c, 4));
+    for (const side of [-1, 1]) for (const d of [[0.4, 0.9, 0.2], [0.75, 0.6, -0.1], [0.3, 0.85, -0.45]] as V3[]) {
+      const fr = F.paulFrame(side, d, -0.004);
+      if (fr) F.mark('orn', 'arm', () => cone(F.k, side < 0 ? 'armL' : 'armR', fr(0, 0, 0), fr(0, 0, 0.07), 0.014 * kk, c, 4));
     }
   },
   /** A fold-down at the top of a boot or glove. */
@@ -755,10 +758,10 @@ const ROWS: Row[] = [
   [36, 'back', 'light', 2, 'cape', { len: 0.72, hem: 'tatter', collar: 'fold', width: 0.8, clasp: 'c' }, [], PAL.cinderstep],
   // ── Brassbound (heavy T2): a banded brass breastplate, lames and cog plates on the shoulders, rivets, a tall helm ──
   [37, 'head', 'heavy', 2, 'helm', { front: 1.12, side: 2.15, back: 2.4, off: 0.017, crown: 0.03, bands: true, nasal: true }, [['helmTop', { kind: 'cog' }]], PAL.brassbound],
-  [38, 'chest', 'heavy', 2, 'cuirass', { coat: 'mail', hem: 5.1, skirt: 4.2, plate: 0.026, ridge: 0.006, bands: 'yes', lames: 2, paul: 'cog', paulSize: 1.08, gorget: true }, [['cogs'], ['rivets', { u: ST.CHEST + 0.1, n: 6, off: 0.03 }], ['tabard', { w: 0.8, to: 3.8 }]], PAL.brassbound],
-  [39, 'legs', 'heavy', 2, 'trousers', { off: 0.01, mail: true, knee: 'cop', cuisse: true, greave: true }, [['rivets', { region: 'leg', u: 2.2, n: 3, arc: 0.8, off: 0.024 }]], PAL.brassbound],
+  [38, 'chest', 'heavy', 2, 'cuirass', { coat: 'mail', hem: 5.1, skirt: 4.2, plate: 0.026, ridge: 0.006, bands: 'yes', lames: 2, paul: 'cog', paulSize: 1.08, gorget: true }, [['cogs'], ['rivets', { u: ST.CHEST + 0.1, n: 6 }], ['tabard', { w: 0.8, to: 3.8 }]], PAL.brassbound],
+  [39, 'legs', 'heavy', 2, 'trousers', { off: 0.01, mail: true, knee: 'cop', cuisse: true, greave: true }, [['rivets', { region: 'leg', u: 2.2, n: 3, arc: 0.8 }]], PAL.brassbound],
   [40, 'hands', 'heavy', 2, 'gloves', { cuff: 3.6, flare: 0.016, off: 0.008, plates: true }, [['handPlates']], PAL.brassbound],
-  [41, 'feet', 'heavy', 2, 'boots', { shaft: 2.9, off: 0.01, plates: true, toe: 'square', flare: 0.008 }, [['rivets', { region: 'leg', u: 2.7, n: 3, arc: 0.7, off: 0.02 }]], PAL.brassbound],
+  [41, 'feet', 'heavy', 2, 'boots', { shaft: 2.9, off: 0.01, plates: true, toe: 'square', flare: 0.008 }, [['rivets', { region: 'leg', u: 2.7, n: 3, arc: 0.7 }]], PAL.brassbound],
   [42, 'back', 'heavy', 2, 'cape', { len: 0.85, collar: 'fold', width: 0.8, stripe: true, clasp: 'brass' }, [], PAL.brassbound],
   // ── Lenslight (cloth T3): an ankle robe, layered, bell sleeves, a standing collar, lit lenses; a hood with a lens circlet ──
   [43, 'head', 'cloth', 3, 'hood', { off: 0.032, front: 1.05, drape: true }, [['lens', { at: 'brow' }]], PAL.lenslight, M.glowLens],
@@ -776,7 +779,7 @@ const ROWS: Row[] = [
   [54, 'back', 'light', 3, 'cape', { len: 1.0, hem: 'round', collar: 'fold', width: 0.95, edge: true, flare: 0.3 }, [], PAL.tollwind],
   // ── Beaconstone (heavy T3): stone-and-brass plate, three-lame pauldrons with fins, a lit crest, a great helm with a beacon ──
   [55, 'head', 'heavy', 3, 'helm', { front: 1.2, side: 2.3, back: 2.5, off: 0.019, crown: 0.045, bands: true, visor: true }, [['helmTop', { kind: 'beacon' }]], PAL.beaconstone, M.glowBeacon],
-  [56, 'chest', 'heavy', 3, 'cuirass', { coat: 'mail', hem: 5.0, skirt: 3.9, plate: 0.03, ridge: 0.009, lames: 3, paul: 'fin', paulSize: 1.15, gorget: true, sleeve: 'long' }, [['fins'], ['crest', { kind: 'diamond', off: 0.04 }], ['tabard', { w: 0.85, to: 3.5 }]], PAL.beaconstone, M.glowBeacon],
+  [56, 'chest', 'heavy', 3, 'cuirass', { coat: 'mail', hem: 5.0, skirt: 3.9, plate: 0.03, ridge: 0.009, lames: 3, paul: 'fin', paulSize: 1.15, gorget: true, sleeve: 'long' }, [['fins'], ['crest', { kind: 'diamond' }], ['tabard', { w: 0.85, to: 3.5 }]], PAL.beaconstone, M.glowBeacon],
   [57, 'legs', 'heavy', 3, 'trousers', { off: 0.011, mail: true, knee: 'cop', cuisse: true, greave: true, tassets: 4.55 }, [], PAL.beaconstone],
   [58, 'hands', 'heavy', 3, 'gloves', { cuff: 3.4, flare: 0.022, off: 0.009, plates: true }, [['handPlates'], ['cuffBand', { region: 'arm', u: 3.55, h: 0.22, col: 'c', thick: 0.01 }]], PAL.beaconstone],
   [59, 'feet', 'heavy', 3, 'boots', { shaft: 3.05, off: 0.012, plates: true, toe: 'point', flare: 0.012 }, [['cuffBand', { region: 'leg', u: 2.9, h: 0.22, col: 'c', thick: 0.01 }]], PAL.beaconstone],
@@ -786,7 +789,7 @@ const ROWS: Row[] = [
   [214, 'legs', 'costume', 0, 'trousers', { off: 0.006, stripe: true }, [], [shade(M.soot, 1.3), shade(M.soot, 1.3), M.brass]],
   [215, 'hands', 'costume', 0, 'gloves', { cuff: 4.1, off: 0.004 }, [], [M.leather, M.leather, M.brass]],
   [216, 'feet', 'costume', 0, 'boots', { shaft: 2.2, off: 0.007, fold: true }, [], [M.leather, M.brass, shade(M.leather, 0.8)]],
-  [201, 'chest', 'costume', 0, 'garment', { hem: 5.4, skirt: 0.9, sleeve: 'bell', bell: 0.04, neck: 'square', off: 0.009, flare2: 0.07 }, [['rays', { n: 12 }], ['sash', { col: 'c' }], ['crest', { kind: 'sun', u: ST.CHEST + 0.1, off: 0.016, r: 0.04, lit: false }]], PAL.solstice],
+  [201, 'chest', 'costume', 0, 'garment', { hem: 5.4, skirt: 0.9, sleeve: 'bell', bell: 0.04, neck: 'square', off: 0.009, flare2: 0.07 }, [['rays', { n: 12 }], ['sash', { col: 'c' }], ['crest', { kind: 'sun', u: ST.CHEST + 0.1, r: 0.04, lit: false }]], PAL.solstice],
   [217, 'legs', 'costume', 0, 'trousers', { off: 0.007, loose: 0.015 }, [], [P.gold, P.gold, mix(P.cloud, P.gold, 0.3)]],
   [218, 'hands', 'costume', 0, 'gloves', { cuff: 3.6, off: 0.003 }, [], [mix(P.cloud, P.gold, 0.1), P.gold, P.gold]],
   [219, 'feet', 'costume', 0, 'boots', { shaft: 1.25, toe: 'point', off: 0.005 }, [], [P.gold, P.gold, shade(P.gold, 0.8)]],
@@ -798,7 +801,7 @@ const ROWS: Row[] = [
   [223, 'legs', 'costume', 0, 'trousers', { off: 0.01, loose: 0.01 }, [], [shade(P.skyDeep, 0.55), shade(P.skyDeep, 0.55), mix(P.gold, P.horizon, 0.2)]],
   [224, 'hands', 'costume', 0, 'gloves', { cuff: 3.8, off: 0.008, flare: 0.01, fingers: 'mitten' }, [], [mix(P.gold, P.horizon, 0.2), mix(P.gold, P.horizon, 0.2), shade(P.skyDeep, 0.55)]],
   [225, 'feet', 'costume', 0, 'boots', { shaft: 3.0, off: 0.014, flare: 0.01 }, [], [shade(M.soot, 1.2), M.soot, mix(P.gold, P.horizon, 0.2)]],
-  [204, 'chest', 'costume', 0, 'garment', { hem: 5.4, skirt: 0.9, sleeve: 'bell', bell: 0.08, neck: 'round', off: 0.008, pattern: 'stripes', flare2: 0.06 }, [['ruff'], ['crest', { kind: 'leaf', u: ST.RIBS, off: 0.012, r: 0.045, lit: false }]], PAL.mothsilk],
+  [204, 'chest', 'costume', 0, 'garment', { hem: 5.4, skirt: 0.9, sleeve: 'bell', bell: 0.08, neck: 'round', off: 0.008, pattern: 'stripes', flare2: 0.06 }, [['ruff'], ['crest', { kind: 'leaf', u: ST.RIBS, r: 0.045, lit: false }]], PAL.mothsilk],
   [226, 'legs', 'costume', 0, 'trousers', { off: 0.004 }, [], [mix(P.cloud, P.rock, 0.25), mix(P.cloud, P.rock, 0.25), mix(P.cloud, P.sky, 0.5)]],
   [227, 'hands', 'costume', 0, 'gloves', { cuff: 3.2, off: 0.002, fingers: 'full' }, [], [mix(P.cloud, P.sky, 0.5), mix(P.cloud, P.rock, 0.25), mix(P.cloud, P.sky, 0.3)]],
   [228, 'feet', 'costume', 0, 'boots', { shaft: 1.2, off: 0.004, toe: 'point' }, [], [mix(P.cloud, P.rock, 0.25), mix(P.cloud, P.rock, 0.25), mix(P.cloud, P.sky, 0.5)]],

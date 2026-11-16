@@ -99,11 +99,12 @@ function plan(g0: AnyGearLook, _look: AdventurerLook): GearPlan {
   const body: GearBodyOverride = {};
   if (any) {
     // the body under gear: an undershirt to the hips, braies, low shoes (seen only where no piece covers)
-    Object.assign(body, { top: UNDER.shirt, topTrim: UNDER.shirt, sleeveColor: UNDER.shirt, hem: 0.86, flare: 0, sleeves: 'short', vneck: null, legs: UNDER.braies, boots: UNDER.shoes, bootTop: 0.24 } satisfies GearBodyOverride);
+    Object.assign(body, { top: UNDER.shirt, topTrim: UNDER.shirt, sleeveColor: UNDER.shirt, hem: 0.86, flare: 0, sleeves: 'short', vneck: null, legs: UNDER.braies, boots: UNDER.shoes, bootTop: 0.13 } satisfies GearBodyOverride);
     if (chest || legs) { body.belt = null; body.buckle = null; body.pouch = false; }
     if (chest) body.noTabard = true;
     if (chest || back) body.scarf = false;
-    if (back) body.noCape = true;
+    // (an empty back shows the job's cape fitted over the gear: fitGear; a hidden back shows none)
+    body.noCape = true;
   }
   const w = modelInfo(g.weapon?.model ?? -1), o = modelInfo(g.offhand?.model ?? -1);
   const replaces: string[] = [];
@@ -123,6 +124,7 @@ function plan(g0: AnyGearLook, _look: AdventurerLook): GearPlan {
 }
 
 // ───────── fitting ─────────
+const JOB_CAPE_SLOT: GearLookSlotV2 = { model: ITEMS['plain_back']!.model, dye: [0, 0, 0] };
 /** The order pieces are fitted in: each goes over the ones before it. */
 export const FIT_ORDER: readonly ArmourSlot[] = ['legs', 'feet', 'chest', 'hands', 'back', 'head'];
 /** Fitted pieces kept (an LRU): about a crowd's worth of bodies × the pieces they wear. */
@@ -140,6 +142,7 @@ export function fitGear(i: FitInput, g0: AnyGearLook): { cover: BodyCover; piece
   const fk = `${frameKey(i.frame)}|${i.detail}|${i.bootTop.toFixed(4)}`;
   let layer: LayerSnapshot = emptyLayer();
   let under = '';
+  const anyArmour = ARMOUR_SLOTS.some((s) => { const v = g[s]; return !!v && !!defFor(s, v.model); });
   const pieces: FittedPiece[] = [];
   const cover: BodyCover = {};
   const merge = (c: BodyCover) => {
@@ -148,7 +151,8 @@ export function fitGear(i: FitInput, g0: AnyGearLook): { cover: BodyCover; piece
     if (c.feet) cover.feet = true;
   };
   const one = (slot: ArmourSlot, env: HairEnvelope | null, extra = ''): FittedPiece | null => {
-    const v = g[slot];
+    // an empty back (not hidden) under worn gear: the job's own cape, fitted over what is worn (the starter's)
+    const v = g[slot] ?? (slot === 'back' && !g.hidden.back && anyArmour ? JOB_CAPE_SLOT : null);
     const d = v ? defFor(slot, v.model) : null;
     if (!v || !d) return null;
     const key = `${fk}|${slot}|${v.model}|${v.dye.join('.')}|${under}|${extra}`;
@@ -215,7 +219,7 @@ export interface PieceBuild {
 /** The inputs to fit pieces to a look's body (standalone: no character). */
 export function fitInputOf(look: AdventurerLook, q: Quality | number = 'med'): FitInput {
   const frame = bodyFrame(look), warp = makeAttachWarp(frame);
-  return { look, frame, hs: headShape(frame, faceParams(look)), detail: typeof q === 'number' ? q : DETAIL[q], bootTop: legY(warp, 0.24), skin: lookColours(look).skin };
+  return { look, frame, hs: headShape(frame, faceParams(look)), detail: typeof q === 'number' ? q : DETAIL[q], bootTop: legY(warp, 0.13), skin: lookColours(look).skin };
 }
 const readChunk = (c: GearChunk) => ({
   positions: Float32Array.from(c.g.pos), colours: Float32Array.from(c.g.col), groups: c.g.grp.slice() as string[], triangles: c.g.triangles,

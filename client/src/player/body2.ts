@@ -70,8 +70,8 @@ export interface BodyCover {
   hands?: boolean; feet?: boolean;
   /** Round ears under a hood or helm (Larchfolk and Brindlekin ears always show: their pieces leave openings). */
   ears?: boolean;
-  /** 'cap': the hair's volume (the `hair` bone) is not built; 'none': no hair at all (a closed helm). */
-  hair?: 'full' | 'cap' | 'none';
+  /** 'cap': the hair's volume (the `hair` bone) is not built; 'tuck': only long hair hanging below (a hood, a cap); 'none': no hair at all (a closed helm). */
+  hair?: 'full' | 'cap' | 'tuck' | 'none';
 }
 const NO_COVER: BodyCover = {};
 const inside = (v: number, iv?: [number, number][]) => !!iv && iv.some(([a, b]) => v >= a && v <= b);
@@ -240,14 +240,15 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
     let t0 = k.g.triangles;
     // under a head piece the hair is tucked (no volume) or not built at all (a closed helm: nothing pokes through)
     const hairMode = cover.hair ?? 'full';
-    if (hairMode !== 'full') k.g.skip = k.glow.skip = new Set(hairMode === 'none' ? ['head', 'hair', 'hairB'] : ['hair']);
+    if (hairMode !== 'full') k.g.skip = k.glow.skip = new Set(hairMode === 'none' ? ['head', 'hair', 'hairB'] : hairMode === 'tuck' ? ['head', 'hair'] : ['hair']);
     const hv0 = k.g.pos.length;
     buildHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
     k.g.skip = k.glow.skip = null;
-    lastHairEnvelope = hairEnvelope(k.g.pos, hv0, hs);
+    // (the envelope: the hair and the beard as built — a hat sits on the hair, a helm's cheek guards stand off the beard)
     bodyTris.hair = k.g.triangles - t0; t0 = k.g.triangles;
     buildFacialHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
     bodyTris.facial = k.g.triangles - t0;
+    lastHairEnvelope = hairEnvelope(k.g.pos, hv0, hs);
   }
   return hs;
 }
@@ -268,7 +269,8 @@ export function hairEnvelope(pos: readonly number[], from: number, hs: HeadShape
     const x = pos[v]!, y = pos[v + 1]!, z = pos[v + 2]!;
     const d = dirFor(x, y, z), s = hs.local(...d);
     const out = Math.hypot(x, y - hs.cy, z - hs.cz) - Math.hypot(s[0], s[1], s[2]);
-    if (out <= 0) continue;
+    // (only hair on the head counts: long hair hanging down the back is not a hat's business)
+    if (out <= 0 || out > (d[1] > -0.4 ? 0.11 : 0.035) * (hs.Hh / 0.12)) continue;
     const [i, j] = binOf(d), b = i * ENV_P + j;
     if (out > bins[b]!) bins[b] = out;
   }

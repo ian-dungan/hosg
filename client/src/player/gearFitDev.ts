@@ -163,7 +163,7 @@ const cam = new ArcRotateCamera('cam', alpha, beta, radius, target, scene);
 cam.minZ = 0.1; cam.maxZ = 8000; cam.fov = 0.8;
 cam.attachControl(canvas, true);
 const camQ = qs.get('cam');
-if (camQ) { const [a, b, r, ty] = camQ.split(',').map(Number); cam.alpha = a!; cam.beta = b!; cam.radius = r!; if (Number.isFinite(ty)) cam.target.y = ty!; }
+if (camQ) { const [a, b, r, ty, tx] = camQ.split(",").map(Number); cam.alpha = a!; cam.beta = b!; cam.radius = r!; if (Number.isFinite(ty)) cam.target.y = ty!; if (Number.isFinite(tx)) cam.target.x = x0 + tx!; }
 if (world) { world.attachCamera(cam); world.setQuality(quality); }
 
 const info = document.getElementById('info')!;
