@@ -254,6 +254,18 @@ describe('gear', () => {
     const stored = await server!.store.getOrCreateAdventurer(a.accountId);
     expect(gearOf(a)).toBe(encodeGearLookV2(gearLookV2Of(stored.inventory, 'warrior', stored.jobs.jobs.warrior!.outfit)));
     expect(a.last().stats).toEqual(a.views[0]!.stats);
+    // saved outfits: save this one, change, switch back (free, anywhere out of combat)
+    const shown = gearOf(a);
+    expect(await op(a, { op: 'saveOutfit', index: 2, label: 3 })).toBe('ok');
+    expect(a.last().outfits[2]).toMatchObject({ label: 3 });
+    expect(await op(a, { op: 'hide', slot: 'head', hide: false })).toBe('ok');
+    await waitFor(() => gearOf(a) !== shown);
+    const gold = a.last().gold;
+    expect(await op(a, { op: 'wearOutfit', index: 2 })).toBe('ok');
+    await waitFor(() => gearOf(a) === shown);
+    expect(a.last().gold).toBe(gold);
+    expect(await op(a, { op: 'wearOutfit', index: 4 })).toBe('unknown');
+    expect(await op(a, { op: 'saveOutfit', index: 0, label: 'Party' })).toBe('unknown'); // no free text
   });
 
   it('wear an owned costume per job; an unowned one is refused', async () => {

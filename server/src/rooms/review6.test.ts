@@ -244,8 +244,10 @@ describe('Task 6 review round 1', () => {
     sendInv(i.room, { op: 'look', slot: 'chest', look: null });
     await sleep(150);
     sendInv(i.room, { op: 'hide', slot: 'head', hide: true });
-    await waitFor(() => refusals.length === 4);
-    expect(refusals.map((r) => r.reason)).toEqual(['combat', 'combat', 'combat', 'combat']);
+    await sleep(150);
+    sendInv(i.room, { op: 'wearOutfit', index: 0 });
+    await waitFor(() => refusals.length === 5);
+    expect(refusals.map((r) => r.reason)).toEqual(['combat', 'combat', 'combat', 'combat', 'combat']);
     i.room.send('loadout', { picks: ['bulwark', 'mend'] });
     await waitFor(() => refused.length === 1);
     expect(refused[0]).toEqual({ action: 'loadout', reason: 'in-combat' });
@@ -253,7 +255,7 @@ describe('Task 6 review round 1', () => {
     room.inst.sealed = null;
     sendInv(i.room, { op: 'unequip', slot: 'chest' });
     await sleep(300);
-    expect(refusals.slice(4).map((r) => r.reason)).not.toContain("combat");
+    expect(refusals.slice(5).map((r) => r.reason)).not.toContain("combat");
   }, 20_000);
 
   it('a store call that times out gives the owner refusal save, and the stored truth', async () => {

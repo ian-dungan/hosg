@@ -232,8 +232,8 @@ export interface ZoneRoomOptions {
   gm?: GmProcess;
 }
 
-/** Operations refused inside a sealed boss arena (ruling P5-h): gear and talents; the wardrobe's look and hide, like gear. */
-const SEALED_REFUSED: readonly InvOp['op'][] = ['equip', 'unequip', 'talent', 'respec', 'look', 'hide']; // and appearance changes, like gear
+/** Operations refused inside a sealed boss arena (ruling P5-h): gear and talents; the wardrobe's look, hide and outfit switch, like gear. */
+const SEALED_REFUSED: readonly InvOp['op'][] = ['equip', 'unequip', 'talent', 'respec', 'look', 'hide', 'wearOutfit']; // and appearance changes, like gear
 /** Refusals an operation checks once more on a fresh read before giving them (balances and room). */
 const RECHECK: readonly string[] = ['gold', 'seals', 'bag-full', 'bank-full', 'purse-full'];
 /** Loot writes that fail (the store threw) are tried again this many times, this far apart (ms), then given up (logged). */

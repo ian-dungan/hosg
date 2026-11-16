@@ -23,7 +23,8 @@ import { validTalents } from './talents';
 import { HIDEABLE_SLOTS, gearLookV1View, type GearLook, type GearLookV2, type GearLookSlotV2, type HideableSlot } from './gearLook';
 import {
   DEFAULT_SLOT_LOOK, EMPTY_COLLECTION, LOOKS, LOOK_ID_MAX, appearanceFromOutfit, cloneAppearance, collectionHas, collectionIds, collectionWith, lookFits,
-  lookIdsOf, outfitFromAppearance, ownsAnyPiece, parseAppearance, parseCollection, wholeCostumes, withSlot, type AppearanceSave, type SlotLook,
+  MAX_OUTFITS, OUTFIT_LABELS, cloneOutfits, emptyOutfits, lookIdsOf, outfitFromAppearance, ownsAnyPiece, parseAppearance, parseCollection, parseOutfits,
+  wholeCostumes, withSlot, type AppearanceSave, type OutfitList, type SlotLook,
 } from './wardrobe';
 import type { StallId } from './world/zones';
 
@@ -62,6 +63,8 @@ export interface InventorySave {
   looks: string;
   /** Per job, the per-slot appearance (wardrobe.ts SlotLook; only changed slots). A job absent here shows its pre-wardrobe outfit. */
   appearance: Partial<Record<JobId, AppearanceSave>>;
+  /** Per job, up to MAX_OUTFITS saved outfits (wardrobe.ts OutfitList; a job with none is absent). */
+  outfits: Partial<Record<JobId, OutfitList>>;
   /** The UTC day of each daily guaranteed drop. */
   lootDays: { wickhound: string | null; fallen_warden: string | null };
   recentKills: string[];
@@ -94,6 +97,10 @@ export type InvOp = WithId<
   | { op: 'hide'; slot: HideableSlot; hide: boolean }
   /** Wardrobe: one of a slot's three dye channels (primary, secondary, trim), at the Tailor, DYE_PRICE a change. */
   | { op: 'dyeSlot'; slot: GearSlot; ch: 0 | 1 | 2; dye: DyeId }
+  /** Saved outfits (per job): save the current appearance in place `index` under a label; wear one (free, anywhere out of combat); delete one. */
+  | { op: 'saveOutfit'; index: number; label: number }
+  | { op: 'wearOutfit'; index: number }
+  | { op: 'deleteOutfit'; index: number }
   | { op: 'talent'; row: 0 | 1 | 2; choice: 0 | 1 | 2 }
   | { op: 'respec' }
 >;
@@ -154,6 +161,7 @@ const STALLS: readonly StallId[] = ['smithy', 'tailor', 'barber', 'lampwright', 
 const COSTUME_SLOTS: readonly CostumeSlot[] = ['body', 'head', 'back'];
 const ch = (v: unknown): v is 0 | 1 => v === 0 || v === 1;
 const ch3 = (v: unknown): v is 0 | 1 | 2 => v === 0 || v === 1 || v === 2;
+const outfitIndex = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < MAX_OUTFITS;
 const lookIdOrNull = (v: unknown) => v === null || (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= LOOK_ID_MAX);
 const row3 = (v: unknown): v is 0 | 1 | 2 => v === 0 || v === 1 || v === 2;
 
@@ -173,6 +181,9 @@ const FIELDS: Readonly<Record<InvOpName, Readonly<Record<string, Check>>>> = {
   look: { slot: isGearSlot, look: lookIdOrNull },
   hide: { slot: v => (HIDEABLE_SLOTS as readonly unknown[]).includes(v), hide: v => typeof v === 'boolean' },
   dyeSlot: { slot: isGearSlot, ch: ch3, dye: isDyeId },
+  saveOutfit: { index: outfitIndex, label: v => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < OUTFIT_LABELS.length },
+  wearOutfit: { index: outfitIndex },
+  deleteOutfit: { index: outfitIndex },
   talent: { row: row3, choice: row3 },
   respec: {},
 };
@@ -246,7 +257,7 @@ export function newInventory(dyes: [DyeId, DyeId]): InventorySave {
   }
   return {
     v: 1, nextUid: bag.length + 1, bag, bank: [], gear, wardrobe: [], costumeDyes: {},
-    looks: collectionWith(EMPTY_COLLECTION, lookIdsOf(bag.map(i => i.item), [])), appearance: {},
+    looks: collectionWith(EMPTY_COLLECTION, lookIdsOf(bag.map(i => i.item), [])), appearance: {}, outfits: {},
     lootDays: { wickhound: null, fallen_warden: null }, recentKills: [], recentOps: [], freeRespecUsed: [],
   };
 }
@@ -357,6 +368,13 @@ export function parseInventory(v: unknown, dyes: [DyeId, DyeId] = [0, 0]): { inv
     const probe = { looks: held.looks, bag, gear } as InventorySave;
     appearance[job] = parseAppearance(rawApp[job], (slot, id) => lookAllowed(probe, job, slot, id));
   }
+  const outfits: InventorySave['outfits'] = {};
+  const rawOutfits = plain(v.outfits) ? v.outfits : {};
+  for (const job of JOB_IDS) {
+    const probe = { looks: held.looks, bag, gear } as InventorySave;
+    const l = parseOutfits(rawOutfits[job], (slot, id) => lookAllowed(probe, job, slot, id));
+    if (l) outfits[job] = l;
+  }
   const ld = plain(v.lootDays) ? v.lootDays : {};
   const day = (x: unknown) => (typeof x === 'string' && DAY.test(x) ? x : null);
   const strs = (l: unknown, ok: (s: unknown) => boolean, max: number) => (Array.isArray(l) ? l.filter((s): s is string => ok(s)).slice(-max) : []);
@@ -364,7 +382,7 @@ export function parseInventory(v: unknown, dyes: [DyeId, DyeId] = [0, 0]): { inv
   if (Array.isArray(v.freeRespecUsed)) for (const j of v.freeRespecUsed) if (isJobId(j) && !freeRespecUsed.includes(j)) freeRespecUsed.push(j);
 
   const inv: InventorySave = {
-    v: 1, nextUid, bag, bank, gear, wardrobe: held.wardrobe, costumeDyes, looks: held.looks, appearance,
+    v: 1, nextUid, bag, bank, gear, wardrobe: held.wardrobe, costumeDyes, looks: held.looks, appearance, outfits,
     lootDays: { wickhound: day(ld.wickhound), fallen_warden: day(ld.fallen_warden) },
     recentKills: strs(v.recentKills, s => typeof s === 'string' && s.length >= 1 && s.length <= KEY_MAX, RECENT_KILLS),
     recentOps: strs(v.recentOps, isOpKey, RECENT_OPS),
@@ -382,9 +400,11 @@ function cloneInv(i: InventorySave): InventorySave {
   for (const c of COSTUME_IDS) { const d = i.costumeDyes[c]; if (d) costumeDyes[c] = [d[0], d[1]]; }
   const appearance: InventorySave['appearance'] = {};
   for (const job of JOB_IDS) { const a = i.appearance?.[job]; if (a) appearance[job] = cloneAppearance(a); }
+  const outfits: InventorySave['outfits'] = {};
+  for (const job of JOB_IDS) { const o = i.outfits?.[job]; if (o) outfits[job] = cloneOutfits(o); }
   return {
     v: 1, nextUid: i.nextUid, bag: i.bag.map(inst), bank: i.bank.map(inst), gear, wardrobe: [...i.wardrobe], costumeDyes,
-    looks: parseCollection(i.looks), appearance,
+    looks: parseCollection(i.looks), appearance, outfits,
     lootDays: { ...i.lootDays }, recentKills: [...i.recentKills], recentOps: [...(i.recentOps ?? [])], freeRespecUsed: [...i.freeRespecUsed],
   };
 }
@@ -602,6 +622,39 @@ function applyRules(
       inv.costumeDyes[p.costume] = n;
       return null;
     }
+    case 'saveOutfit': {
+      const r = record();
+      const list = inv.outfits[job] ? cloneOutfits(inv.outfits[job]!) : emptyOutfits();
+      list[p.index] = { label: p.label, slots: appearanceOf(inv, job, r.outfit) };
+      inv.outfits[job] = list;
+      return null;
+    }
+    case 'wearOutfit': {
+      const o = inv.outfits[job]?.[p.index];
+      if (!o) return 'unknown';
+      // never trusted: a look that is not (or no longer) allowed shows the piece's own
+      let a: AppearanceSave = {};
+      for (const sl of GEAR_SLOTS) {
+        const l = o.slots[sl];
+        if (!l) continue;
+        a = withSlot(a, sl, x => {
+          x.look = l.look !== null && lookAllowed(inv, job, sl, l.look) ? l.look : null;
+          x.dyes = l.dyes && [l.dyes[0], l.dyes[1], l.dyes[2]];
+          x.hide = l.hide;
+        });
+      }
+      setAppearance(inv, record(), job, a);
+      return null;
+    }
+    case 'deleteOutfit': {
+      const list = inv.outfits[job];
+      if (!list?.[p.index]) return null;
+      const next = cloneOutfits(list);
+      next[p.index] = null;
+      if (next.some(x => x !== null)) inv.outfits[job] = next;
+      else delete inv.outfits[job];
+      return null;
+    }
     case 'talent': {
       const r = record();
       const level = levelForXp(r.xp);
@@ -661,6 +714,8 @@ export interface InventoryView {
   looks: number[];
   /** The current job's appearance, every slot (defaults included). */
   appearance: Record<GearSlot, SlotLook>;
+  /** The current job's saved outfits: MAX_OUTFITS places, null = empty. */
+  outfits: OutfitList;
 }
 
 /** What the client's sheets show (the server sends it on join and after every change): copies only. */
@@ -675,6 +730,7 @@ export function inventoryView(s: InvState): InventoryView {
     sets: SET_IDS.filter(id => id !== 'plain' && (counts[id] ?? 0) > 0).map(set => ({ set, pieces: counts[set]! })),
     freeRespec: !inv.freeRespecUsed.includes(job),
     looks: collectionIds(inv.looks),
+    outfits: inv.outfits[job] ? cloneOutfits(inv.outfits[job]!) : emptyOutfits(),
     appearance: (() => {
       const a = appearanceOf(inv, job, r.outfit);
       return Object.fromEntries(GEAR_SLOTS.map(sl => [sl, a[sl] ?? { ...DEFAULT_SLOT_LOOK }])) as Record<GearSlot, SlotLook>;

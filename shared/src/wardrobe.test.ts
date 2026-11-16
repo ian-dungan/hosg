@@ -17,7 +17,7 @@ import { ARMOUR_SLOTS, GEAR_SLOTS, ITEMS, ITEM_IDS, kitItems, type GearSlot, typ
 import { kitFor } from './kit';
 import { totalTo } from './progression';
 import {
-  EMPTY_COLLECTION, LOOKS, LOOK_IDS, appearanceFromOutfit, collectionHas, collectionIds, collectionWith, lookFits, outfitFromAppearance, parseCollection,
+  EMPTY_COLLECTION, LOOKS, LOOK_IDS, MAX_OUTFITS, OUTFIT_LABELS, appearanceFromOutfit, collectionHas, collectionIds, collectionWith, lookFits, outfitFromAppearance, parseCollection,
 } from './wardrobe';
 import { prng } from './world/recipe';
 
@@ -275,6 +275,56 @@ describe('per-slot looks, dyes and hiding', () => {
     expect(v.looks).toEqual(collectionIds(s.inv.looks));
     expect(v.appearance.chest).toEqual({ look: model('rootbound_chest'), dyes: null, hide: false });
     expect(v.appearance.legs).toEqual({ look: null, dyes: null, hide: false });
+  });
+});
+
+describe('saved outfits', () => {
+  it('up to six per job, each a label from a fixed list (no free text) and the per-slot looks, dyes and hides; switching is free anywhere out of combat', () => {
+    expect(MAX_OUTFITS).toBe(6);
+    expect(OUTFIT_LABELS.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(OUTFIT_LABELS).size).toBe(OUTFIT_LABELS.length);
+    let s = withItem(withItem(state(), 'rootbound_chest'), 'hedgecutter');
+    s = ok(applyInvOp(s, { op: 'look', slot: 'chest', look: model('rootbound_chest') }, CTX)).state;
+    s = ok(applyInvOp(s, { op: 'dyeSlot', slot: 'chest', ch: 2, dye: 12 }, at('tailor'))).state;
+    s = ok(applyInvOp(s, { op: 'hide', slot: 'back', hide: true }, CTX)).state;
+    const shownA = gearLookV2Of(s.inv, 'warrior', recordFor(s.jobs, 'warrior').outfit);
+    s = ok(applyInvOp(s, { op: 'saveOutfit', index: 0, label: 1 }, CTX)).state;
+    // a second look: everything back to the pieces' own, the weapon as a Hedgecutter
+    for (const op of [{ op: 'look', slot: 'chest', look: null }, { op: 'hide', slot: 'back', hide: false }, { op: 'look', slot: 'weapon', look: model('hedgecutter') }] as InvOp[]) s = ok(applyInvOp(s, op, CTX)).state;
+    s = ok(applyInvOp(s, { op: 'saveOutfit', index: 5, label: 0 }, CTX)).state;
+    const shownB = gearLookV2Of(s.inv, 'warrior', recordFor(s.jobs, 'warrior').outfit);
+    const gold = s.gold;
+    s = ok(applyInvOp(s, { op: 'wearOutfit', index: 0 }, CTX)).state;
+    expect(gearLookV2Of(s.inv, 'warrior', recordFor(s.jobs, 'warrior').outfit)).toEqual(shownA);
+    s = ok(applyInvOp(s, { op: 'wearOutfit', index: 5 }, CTX)).state;
+    expect(gearLookV2Of(s.inv, 'warrior', recordFor(s.jobs, 'warrior').outfit)).toEqual(shownB);
+    expect(s.gold).toBe(gold);
+    expect(inventoryView(s).outfits.map(o => o && o.label)).toEqual([1, null, null, null, null, 0]);
+    expect(inventoryView(s).stats).toEqual(inventoryView(state()).stats);
+    // refusals: an empty slot, out of range, a label not in the list, free text, in combat, knocked out
+    expect(refusal(applyInvOp(s, { op: 'wearOutfit', index: 2 }, CTX))).toBe('unknown');
+    expect(refusal(applyInvOp(s, { op: 'wearOutfit', index: 0 }, at(null, { inCombat: true })))).toBe('combat');
+    expect(refusal(applyInvOp(s, { op: 'wearOutfit', index: 0 }, at(null, { dead: true })))).toBe('dead');
+    for (const bad of [{ op: 'saveOutfit', index: 6, label: 0 }, { op: 'saveOutfit', index: 0, label: OUTFIT_LABELS.length }, { op: 'saveOutfit', index: 0, label: 'Party' }, { op: 'wearOutfit', index: -1 }, { op: 'deleteOutfit', index: 1.5 }]) {
+      expect(parseInvOp(bad), JSON.stringify(bad)).toBeNull();
+    }
+    // per job: the Ranger has none of the Warrior's
+    const ranger = { ...s, jobs: { ...s.jobs, current: 'ranger' as const } };
+    expect(inventoryView(ranger).outfits).toEqual([null, null, null, null, null, null]);
+    // delete; and the inventory stays canonical
+    s = ok(applyInvOp(s, { op: 'deleteOutfit', index: 0 }, CTX)).state;
+    expect(inventoryView(s).outfits[0]).toBeNull();
+    expect(parseInventory(s.inv).repaired).toBe(false);
+    expect(parseInventory(JSON.parse(JSON.stringify(s.inv))).inv).toEqual(s.inv);
+  });
+
+  it('a stored outfit that no longer reads (a bad label, a locked or ill-fitting look) is cleaned on read, never trusted', () => {
+    const s = state();
+    const raw = JSON.parse(JSON.stringify(s.inv)) as Record<string, unknown>;
+    raw.outfits = { warrior: [{ label: 99, slots: {} }, { label: 2, slots: { chest: { look: model('beaconstone_chest'), dyes: [1, 2, 3], hide: false }, legs: { look: null, dyes: null, hide: true } } }, 'x', null, null, null, null] };
+    const r = parseInventory(raw);
+    expect(r.repaired).toBe(true);
+    expect(r.inv.outfits.warrior).toEqual([null, { label: 2, slots: { chest: { look: null, dyes: [1, 2, 3], hide: false } } }, null, null, null, null]);
   });
 });
 

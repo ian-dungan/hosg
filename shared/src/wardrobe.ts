@@ -201,3 +201,34 @@ export function outfitFromAppearance(a: AppearanceSave): JobOutfit | null {
   const o: JobOutfit = { body, head, back, hideHead: a.head?.hide === true };
   return o.body === null && o.head === null && o.back === null && !o.hideHead ? null : o;
 }
+
+// ───────── saved outfits ─────────
+
+/** Saved outfits per job. */
+export const MAX_OUTFITS = 6;
+/** An outfit's name is one of these (index = value): never free text. */
+export const OUTFIT_LABELS: readonly string[] = Object.freeze([
+  'Everyday', 'Adventuring', 'Town', 'Festival', 'Travel', 'Formal', 'Hunting', 'Night', 'Rain', 'Stealth', 'Ceremony', 'Work',
+]);
+/** One saved outfit: its label (OUTFIT_LABELS index) and the per-slot looks, dyes and hides (only changed slots). */
+export interface OutfitSave { label: number; slots: AppearanceSave }
+/** A job's outfits: MAX_OUTFITS places, null = empty. */
+export type OutfitList = (OutfitSave | null)[];
+
+export const emptyOutfits = (): OutfitList => new Array<OutfitSave | null>(MAX_OUTFITS).fill(null);
+const isLabel = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < OUTFIT_LABELS.length;
+
+/** A stored outfit list, canonical (MAX_OUTFITS places; a bad entry or label is empty; looks through `keep`), or null when every place is empty. */
+export function parseOutfits(v: unknown, keep: (slot: GearSlot, id: number) => boolean): OutfitList | null {
+  if (!Array.isArray(v)) return null;
+  const out = emptyOutfits();
+  for (let i = 0; i < MAX_OUTFITS; i++) {
+    const e = v[i] as unknown;
+    if (typeof e !== 'object' || e === null || Array.isArray(e)) continue;
+    const o = e as Record<string, unknown>;
+    if (!isLabel(o.label)) continue;
+    out[i] = { label: o.label, slots: parseAppearance(o.slots, keep) };
+  }
+  return out.some(o => o !== null) ? out : null;
+}
+export const cloneOutfits = (l: OutfitList): OutfitList => l.map(o => (o ? { label: o.label, slots: cloneAppearance(o.slots) } : null));
