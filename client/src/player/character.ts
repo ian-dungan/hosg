@@ -1302,7 +1302,7 @@ function adventurerSpec(l: AdventurerLook, ov: GearBodyOverride | null = null, t
 }
 
 /** Dev pages only: `plain` draws adventurers in a plain fitted shirt and trousers (no cape, scarf or belt), to judge body shapes. */
-export const characterDev = { plain: false };
+export const characterDev: { plain: boolean; farM?: number } = { plain: false };
 
 /** The look the offline demo's hero (an adventurer with no look) is drawn with: a young man of the lanes, his hair tousled. */
 export const HERO_LOOK: AdventurerLook = (() => {
@@ -1857,9 +1857,11 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
 /** Segment scale for look-driven adventurers by quality (the default adventurer is always built as written). */
 export const DETAIL: Record<Quality, number> = { high: 1, med: 0.55, low: 0.38 };
 /** The detail of an adventurer farther than FAR_M from the camera (whatever the quality): the cheap body, no face parts. */
-export const FAR_DETAIL = 0.22;
+export const FAR_DETAIL = 0.3;
 /** Beyond this distance (m) an adventurer is rebuilt at FAR_DETAIL (back within FAR_M − 4: no flicker at the edge). */
 export const FAR_M = 27;
+/** The far switch's hysteresis (m): out beyond FAR_M + FAR_BAND_OUT, back within FAR_M − FAR_BAND_IN. */
+export const FAR_BAND_OUT = 1, FAR_BAND_IN = 5;
 let detailNow: Quality = 'high';
 /** The quality new (and rebuilt) look-driven bodies are built at. */
 export function setCharacterDetail(q: Quality): void {
@@ -1935,7 +1937,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   let look: AdventurerLook | null = kind === 'player' || kind === 'npc' ? opts.look ?? null : null;
   let gear: GearLook | null = kind === 'player' ? opts.gear ?? null : null;
   /** Far from the camera (FAR_M): built at FAR_DETAIL (look-driven bodies that follow the game's detail only). */
-  let far = false, farCheck = Math.random() * 0.5;
+  let far = (characterDev.farM ?? FAR_M) <= 0, farCheck = Math.random() * 0.5, farVotes = 0;
   const detailOf = () => (far ? Math.min(FAR_DETAIL, DETAIL[opts.detail ?? detailNow]) : DETAIL[opts.detail ?? detailNow]);
   const planOf = (): GearPlan | null => (look && gear && gearHooks ? gearHooks.plan(gear, look) : null);
   let plan = planOf();
@@ -2400,8 +2402,12 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         const c = scene.activeCamera;
         if (c) {
           const d = Vector3.Distance(c.computeWorldMatrix().getTranslation(), root.getAbsolutePosition());
-          const want = far ? d > FAR_M - 4 : d > FAR_M;
-          if (want !== far) { far = want; pending ??= { look: look ?? HERO_LOOK, gear, hero: !look }; }
+          // a wide band (out past FAR_M + FAR_BAND_OUT, back inside FAR_M − FAR_BAND_IN) and two checks in a row (a second),
+          // so a camera zooming or a player walking along the edge never swaps it back and forth
+          const fm = characterDev.farM ?? FAR_M;
+          const want = far ? d > fm - FAR_BAND_IN : d > fm + FAR_BAND_OUT;
+          farVotes = want !== far ? farVotes + 1 : 0;
+          if (farVotes >= 2) { farVotes = 0; far = want; pending ??= { look: look ?? HERO_LOOK, gear, hero: !look }; }
         }
       }
       if (pending && takeRebuild(scene)) rebuild();

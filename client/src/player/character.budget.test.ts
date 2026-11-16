@@ -5,7 +5,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { FreeCamera, NullEngine, Scene, Vector3, type Mesh } from '@babylonjs/core';
 import { ADVENTURER_RADIUS, JOBS, JOB_IDS, LOOK_PRESETS, PEOPLE_IDS, parseLook, prng, randomLook, type Look } from '@sg2/shared';
-import { BODY_CACHE_SIZE, FAR_M, capeFor, characterStats, clearBodyCache, makeCharacter, setCharacterDetail } from './character';
+import { BODY_CACHE_SIZE, FAR_BAND_IN, FAR_BAND_OUT, FAR_M, capeFor, characterStats, clearBodyCache, makeCharacter, setCharacterDetail } from './character';
 import { staffTint } from '../combat/spells';
 
 let scene: Scene;
@@ -116,6 +116,30 @@ describe('the Look v2 adventurer', () => {
     expect(farTris).toBeLessThanOrEqual(1500);
     cam.position.set(0, 1.6, -3);
     tick(); tick();
+    expect(characterStats.lastActiveTriangles).toBe(near);
+    v.dispose(); cam.dispose(); scene.activeCamera = null;
+  });
+
+  // live check: the far version popped visibly at 27 m — a wide band and a second's agreement before any swap
+  it('swaps to the far build only well past FAR_M and back only well inside it, after two checks in a row', () => {
+    const cam = new FreeCamera('bandCam', new Vector3(0, 1.6, -3), scene);
+    scene.activeCamera = cam;
+    const v = makeCharacter(scene, { kind: 'player', look: randomLook(prng(6)), weapon: 'none' });
+    v.setWeapon('none');
+    v.update(0.6);
+    const near = characterStats.lastActiveTriangles;
+    const tick = () => { scene.getEngine().endFrame(); v.update(0.6); };
+    const at = (d: number) => cam.position.set(0, 1.6, -d);
+    at(FAR_M + FAR_BAND_OUT - 0.3); tick(); tick(); tick();
+    expect(characterStats.lastActiveTriangles, 'just past FAR_M: still near').toBe(near);
+    at(FAR_M + FAR_BAND_OUT + 2); tick();
+    expect(characterStats.lastActiveTriangles, 'one check is not enough').toBe(near);
+    tick();
+    const far = characterStats.lastActiveTriangles;
+    expect(far).toBeLessThan(near);
+    at(FAR_M - FAR_BAND_IN + 1); tick(); tick(); tick();
+    expect(characterStats.lastActiveTriangles, 'inside FAR_M but in the band: still far').toBe(far);
+    at(FAR_M - FAR_BAND_IN - 1); tick(); tick();
     expect(characterStats.lastActiveTriangles).toBe(near);
     v.dispose(); cam.dispose(); scene.activeCamera = null;
   });

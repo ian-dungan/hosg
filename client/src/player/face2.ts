@@ -281,7 +281,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
       // far and low detail: a dark almond with the iris colour, lidded by the skull
       k.ellip('eyes', [c[0], c[1], c[2] - 0.002], [hs.ew * 0.95, Math.max(hs.eh * (1 - fp.lid * 0.7), hs.ew * 0.32), hs.ew * 0.35], mix(shade(iris, 0.6), INK, 0.35),
         { seg: 6, lat: 3, noOcc: true, rot: [-0.1, sx * 0.2, sx * fp.eyeTilt] });
-      if (detail >= 0.3) k.ellip('eyes', [c[0] + sx * hs.ew * 0.55, c[1] + hs.eh * 0.1, c[2] - 0.001], [hs.ew * 0.32, hs.eh * 0.45, hs.ew * 0.2], SCLERA, { seg: 4, lat: 2, noOcc: true, rot: [0, sx * 0.3, 0] });
+      if (detail >= 0.35) k.ellip('eyes', [c[0] + sx * hs.ew * 0.55, c[1] + hs.eh * 0.1, c[2] - 0.001], [hs.ew * 0.32, hs.eh * 0.45, hs.ew * 0.2], SCLERA, { seg: 4, lat: 2, noOcc: true, rot: [0, sx * 0.3, 0] });
     }
   }
 }
@@ -291,7 +291,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
 export function buildBrows(k: ShapeKit, o: FaceOpts): void {
   const { hs, fp, col, detail } = o;
   if (o.look.fur && detail < 0.5) return;
-  const N = detail >= 0.9 ? 8 : detail >= 0.5 ? 5 : 4;
+  const N = detail >= 0.9 ? 8 : detail >= 0.5 ? 5 : detail >= 0.35 ? 4 : 3;
   const thick = 0.07 * fp.browT;                     // half height in head units
   const by = hs.eyeY + 0.2 + 0.07 * fp.browY;
   const bc = o.look.fur ? mix(col.skin, col.fur2 ?? col.skin, 0.6) : col.brows;
@@ -380,7 +380,7 @@ export function buildNose(k: ShapeKit, o: FaceOpts): void {
     return au < 0.3 && i > 0 ? ridge : au > 0.6 ? wall : skin;
   }, { noOcc: true, out: (i, j) => { const u = (j / nA) * 2 - 1; return [u * 1.2, i >= nR - 2 ? -0.8 : 0.1, 1 - 0.5 * Math.abs(u)]; } });
   // the nostril wings, the opening dark underneath and inside
-  if (detail >= 0.3) {
+  if (detail >= 0.35) {
     for (const sx of [-1, 1]) {
       const s = hs.front((sx * wing.x * kh) / hs.W, wing.y, 0);
       k.ellip('head', [s[0], s[1], s[2] + 0.0035 * kh], [wing.r[0] * kh, wing.r[1] * kh, wing.r[2] * kh], shade(skin, 0.96), { seg: detail >= 0.9 ? 8 : 6, lat: 4, noOcc: true, rot: [0.25, sx * 0.25, 0],
@@ -439,8 +439,9 @@ export function buildMouth(k: ShapeKit, o: FaceOpts): void {
   const curve = (at: number) => at * at * 0.014;                 // the mouth's line curves back round the face
   if (detail < 0.5) {
     const pts: V3[] = [];
-    for (let i = 0; i <= 4; i++) { const t = (i / 4) * 2 - 1; pts.push(hs.front((t * hw) / hs.W, my + curve(Math.abs(t)), 0.0006)); }
-    k.tube('head', pts, [0.0012 * kh, upperH * 0.6, lowerH * 0.62, upperH * 0.6, 0.0012 * kh], mix(lip, INK, 0.2), { seg: 3, noOcc: true });
+    const n = detail >= 0.35 ? 4 : 2;   // (far: three points)
+    for (let i = 0; i <= n; i++) { const t = (i / n) * 2 - 1; pts.push(hs.front((t * hw) / hs.W, my + curve(Math.abs(t)), 0.0006)); }
+    k.tube('head', pts, n === 4 ? [0.0012 * kh, upperH * 0.6, lowerH * 0.62, upperH * 0.6, 0.0012 * kh] : [0.0015 * kh, (upperH + lowerH) * 0.5, 0.0015 * kh], mix(lip, INK, 0.2), { seg: 3, noOcc: true });
     return;
   }
   const N = detail >= 0.9 ? 8 : 5;

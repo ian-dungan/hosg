@@ -45,6 +45,7 @@ if (!world) {
 const instr = new SceneInstrumentation(scene);
 const quality = ((qs.get('q') as Quality) || 'high');
 characterDev.plain = qs.get('plain') === '1';
+if (qs.has('farm')) characterDev.farM = Number(qs.get('farm'));   // &farm=0: every adventurer far (the far build); &farm=999: never
 setCharacterDetail(quality);
 if (qs.get('gear') === '1') setGearBuilder(gearHooks);
 const view = qs.get('view') ?? 'bodies';
