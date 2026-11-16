@@ -4,6 +4,7 @@
 // gave, and at a talent level a button that opens Talents (or says where to go to choose).
 import type { LevelShow, LootShow } from '../core/gearViews';
 import { h } from './dom';
+import { ensureLookCss } from './showAsStyle';
 
 export class LootToasts {
   private box: HTMLElement;
@@ -13,11 +14,16 @@ export class LootToasts {
     const named = l.items.some((i) => i.named);
     const el = h('div', 'sg-lt' + (named ? ' named' : ''), this.box);
     if (l.items[0]) el.style.setProperty('--rc', l.items[0].colour);
-    for (const i of l.items) { const r = h('div', 'sg-lt-i', el, `+ ${i.name}`); r.style.setProperty('--rc', i.colour); }
+    for (const i of l.items) {
+      const r = h('div', 'sg-lt-i', el, `+ ${i.name}`);
+      r.style.setProperty('--rc', i.colour);
+      // show-as: a drop whose look was not unlocked yet (it can now be shown over any gear in its slot)
+      if (i.newLook) { ensureLookCss(); h('div', 'sg-lt-new', el, 'New look unlocked'); }
+    }
     if (l.gold > 0) { const g = h('div', 'sg-lt-g', el); h('i', 'sg-coin', g); g.append(`+${l.gold} gold`); }
     if (l.soldFor > 0) h('div', 'sg-lt-s', el, `Bag full: sold for ${l.soldFor} gold`);
     while (this.box.children.length > 3) this.box.firstElementChild?.remove();
-    const ms = named ? 6000 : l.items.length ? 3800 : 2400;
+    const ms = named ? 6000 : l.items.some((i) => i.newLook) ? 4800 : l.items.length ? 3800 : 2400;
     const a = el.animate([
       { opacity: 0, transform: 'translateY(10px) scale(.94)' }, { opacity: 1, transform: 'none', offset: 0.06 },
       { opacity: 1, transform: 'none', offset: 0.88 }, { opacity: 0, transform: 'translateY(-6px)' },

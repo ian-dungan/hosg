@@ -8,6 +8,8 @@ import type { SheetAct, SheetHandle, ShopRow, VendorView } from '../core/gearVie
 import { h } from './dom';
 import { Acts, btn, closeBtn, cardTop, cmpBlock, cmpLine, frame, markPending, money, opBtn, setNote, tile, type Frame } from './sheetKit';
 import type { SheetDeps } from './bag';
+import { newLookUi } from './appearance';
+import { drawTailorDyes, drawTailorPieces } from './tailorPieces';
 
 const STALL_COLOUR: Record<VendorView['stall'], string> = { smithy: '#EC6A4C', lampwright: '#9b7ad8', tailor: '#3FB0A6', vault: '#479AF2', barber: '#8FD16A' };
 
@@ -24,6 +26,10 @@ export function openVendor(layer: HTMLElement, first: VendorView, onAct: (a: She
   const acts = new Acts();
   const f: Frame = frame(layer, 'sg-vendor');
   const send = (op: InvOp) => { confirm = null; onAct({ kind: 'op', op }); };
+  // show-as at the Tailor: the slot being dyed and the dye being picked
+  const dyeSel = { slot: null as string | null };
+  const lookUi = newLookUi();
+  const lookSend = { one: send, many: (ops: InvOp[]) => onAct({ kind: 'ops', ops }) };
 
   const drawHead = () => {
     f.head.textContent = '';
@@ -215,7 +221,9 @@ export function openVendor(layer: HTMLElement, first: VendorView, onAct: (a: She
     drawHead();
     setNote(f, !v.here ? v.why : v.why ? v.why : null);
     f.body.textContent = '';
-    if (v.stall === 'tailor') (tab === 'dye' ? drawDye : drawCostumes)(f.body);
+    if (v.stall === 'tailor' && tab === 'dye' && v.look) drawTailorDyes(f.body, v.look, dyeSel, lookUi, acts, lookSend, draw);
+    else if (v.stall === 'tailor' && tab !== 'dye' && v.pieces) drawTailorPieces(f.body, v.greeting, v.pieces, v.here && !v.why, acts, send);
+    else if (v.stall === 'tailor') (tab === 'dye' ? drawDye : drawCostumes)(f.body);
     else if (tab === 'sell') drawSell(f.body);
     else drawShop(f.body);
     f.body.scrollTop = scroll;

@@ -18,7 +18,7 @@ import { stallOfEid } from '../world/stallIds';
 import { equipHook } from './equipHook';
 import { firstOf } from './tapOrder';
 import { InvClient, ctxFor, itemColour, levelShow, type GearCtx } from './inventory';
-import { OpQueue, lookSheetView as charSheetView, lookVendorView as vendorView, markNewLooks } from './showAs';
+import { OpQueue, lookSheetView as charSheetView, lookVendorView as vendorView, markNewLooks, withQueueKey } from './showAs';
 import { barberHook } from './looks';
 import type { Remotes } from './remotes';
 import type { ZoneRoom } from './session';
@@ -95,7 +95,7 @@ export function createGearCtl(o: GearCtlOpts): GearCtl {
 
   // several ops (show a whole set, show my equipped gear) go one at a time, each through the gate
   const queue = new OpQueue(inv, (op) => { if (disposed) return false; o.send(op); return true; });
-  const pending = () => { const k = inv.pendingKeys(); sheet?.setPending(k); vendor?.h.setPending(k); };
+  const pending = () => { const k = withQueueKey(inv.pendingKeys(), queue.busy); sheet?.setPending(k); vendor?.h.setPending(k); };
   const onAct = (a: SheetAct) => {
     if (disposed) return;
     if (a.kind === 'tab') { lastTab = a.tab; return; }
@@ -269,8 +269,9 @@ export function createGearCtl(o: GearCtlOpts): GearCtl {
       const now = performance.now();
       if (now - ctxAt > CTX_EVERY_MS) {
         ctxAt = now;
+        const wasBusy = queue.busy;
         queue.tick(now);
-        if (inv.expire(now)) pending();
+        if (inv.expire(now) || wasBusy !== queue.busy) pending();
         const jobs = o.combat.debug.jobs;
         if (inv.view && (jobs !== lastJobs || ((sheet?.open || vendor?.h.open) && keyOf(ctx()) !== ctxKey))) { lastJobs = jobs; refresh(); }
       }

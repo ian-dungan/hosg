@@ -12,6 +12,8 @@ import { JOB_COLOR } from './jobs';
 import { Acts, btn, closeBtn, cardTop, cmpBlock, cmpLine, frame, markPending, money, opBtn, setBlock, setNote, tile, type Frame } from './sheetKit';
 import { drawTalents } from './talents';
 import { drawWardrobe } from './wardrobe';
+import { drawAppearance, drawLookBar, drawPartSwitch, drawSetPicker, drawSlotRows, newLookUi, type LookSend } from './appearance';
+import { drawOutfits, newOutfitUi } from './outfits';
 
 export interface SheetDeps {
   push: (kind: string, keys: (e: KeyboardEvent) => boolean) => () => void;
@@ -25,7 +27,7 @@ const LEFT: readonly GearSlot[] = ['head', 'chest', 'legs', 'feet'];
 const RIGHT: readonly GearSlot[] = ['back', 'hands', 'weapon', 'offhand'];
 const FIGURE = '<svg viewBox="0 0 100 150" fill="currentColor"><circle cx="50" cy="20" r="13"/><path d="M30 38h40l10 6 8 40-8 3-8-30v32l4 54H62l-6-44h-12l-6 44H24l4-54V57l-8 30-8-3 8-40z"/></svg>';
 
-type Card = { kind: 'item'; uid: number } | { kind: 'slot'; slot: GearSlot } | null;
+type Card = { kind: 'item'; uid: number } | { kind: 'slot'; slot: GearSlot } | { kind: 'sets' } | null;
 
 /** Opens the character sheet on `tab`; onAct gets the ops the player asks for, onClosed runs once when it closes. */
 export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: CharTab, onAct: (a: SheetAct) => void, onClosed: () => void, d: SheetDeps): SheetHandle & { setTab(t: CharTab): void; readonly tab: CharTab } {
@@ -37,6 +39,9 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
   let talentSel: string | null = null;
   let flash: { text: string; until: number } | null = null;
   let lastEquip: { uid: number; slot: GearSlot; name: string; summary: string } | null = null;
+  // show-as: the slot card's part (Item | Appearance) and a dye being picked; the outfit being saved
+  const lookUi = newLookUi();
+  const outfitUi = newOutfitUi();
   let open = true;
   const acts = new Acts();
   const f: Frame = frame(layer, 'sg-charsheet');
@@ -48,6 +53,8 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
     confirm = null;
     onAct({ kind: 'op', op });
   };
+  const lookSend: LookSend = { one: (op) => send(op), many: (ops) => { confirm = null; onAct({ kind: 'ops', ops }); } };
+  const openSlot = (slot: string, part: 'item' | 'look') => { card = { kind: 'slot', slot: slot as GearSlot }; lookUi.part = part; lookUi.pick = null; confirm = null; draw(); };
   const findItem = (uid: number): ItemView | undefined =>
     v.bag.find((i) => i.uid === uid) ?? v.wornElsewhere.find((i) => i.uid === uid) ?? v.vault?.find((i) => i.uid === uid) ?? v.slots.find((s) => s.item?.uid === uid)?.item ?? undefined;
 
@@ -96,6 +103,18 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
     }
     const special = v.stats.find((s) => (s.key === 'focus' || s.key === 'flow' || s.key === 'guard') && s.value !== '0');
     h('div', 'sg-gs-hintln', left, special ? `${special.label}: ${special.hint.replace(/^\w+: /, '')}.` : 'Cloth gives Focus, light gives Flow, heavy gives Guard.');
+    if (v.look) {
+      // show-as: slot rows (the item and its stats, "Shown as" when another look shows) instead of the doll
+      drawLookBar(left, v.look, acts, lookSend, () => { card = { kind: 'sets' }; draw(); });
+      drawSlotRows(left, v, v.look, card?.kind === 'slot' ? card.slot : null, acts, openSlot);
+      h('div', 'sg-gs-hintln', left, 'Tap a slot for its item and what in your bag fits; Look to change how it shows.');
+    } else drawDoll(left);
+    h('div', 'sg-gs-h', right, 'Set bonuses');
+    if (v.sets.length) for (const s of v.sets) setBlock(right, s);
+    else h('div', 'sg-gs-empty', right, 'Wear three pieces of one set for its first bonus, five for its second. The Smithy sells Greenway sets; the Lampfall and the Warden drop better ones.');
+    if (v.named) { h('div', 'sg-gs-h', right, 'Named weapon'); h('div', 'sg-named', right, v.named); }
+  };
+  const drawDoll = (left: HTMLElement) => {
     const doll = h('div', 'sg-doll', left);
     const col = (slots: readonly GearSlot[]) => {
       const c = h('div', 'sg-doll-col', doll);
@@ -117,10 +136,6 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
     h('div', 'sg-doll-lv', mid, `${v.jobName} · Level ${v.level}`);
     col(RIGHT);
     h('div', 'sg-gs-hintln', left, 'Tap a slot to see what you wear and what in your bag fits there.');
-    h('div', 'sg-gs-h', right, 'Set bonuses');
-    if (v.sets.length) for (const s of v.sets) setBlock(right, s);
-    else h('div', 'sg-gs-empty', right, 'Wear three pieces of one set for its first bonus, five for its second. The Smithy sells Greenway sets; the Lampfall and the Warden drop better ones.');
-    if (v.named) { h('div', 'sg-gs-h', right, 'Named weapon'); h('div', 'sg-named', right, v.named); }
   };
 
   const sorted = (items: ItemView[]): ItemView[] => {
@@ -181,7 +196,10 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
   };
   const drawSlotCard = (box: HTMLElement, slot: GearSlot) => {
     const sv = v.slots.find((s) => s.slot === slot)!;
+    const sa = v.look?.slots.find((s) => s.slot === slot);
+    if (v.look) drawPartSwitch(box, lookUi, sa, acts, draw);
     h('div', 'sg-gs-h', box, sv.label);
+    if (v.look && sa && lookUi.part === 'look') { drawAppearance(box, sa, v.look, lookUi, acts, lookSend, draw); return; }
     if (sv.item) drawItemCardWorn(box, sv.item);
     else h('div', 'sg-gs-empty', box, sv.none ?? 'Nothing worn here.');
     if (sv.item && sv.item.icon.tier > 0 && slot !== 'weapon' && slot !== 'offhand') {
@@ -220,6 +238,7 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
     const x = closeBtn(box);
     acts.on(x, () => { card = null; confirm = null; draw(); });
     if (card.kind === 'item') drawItemCard(box, it!);
+    else if (card.kind === 'sets') { if (v.look) drawSetPicker(box, v.look, acts, lookSend); }
     else drawSlotCard(box, card.slot);
   };
 
@@ -240,6 +259,7 @@ export function openCharSheet(layer: HTMLElement, first: CharSheetView, tab0: Ch
     else if (tab === 'bag') drawBag(f.body);
     else if (tab === 'vault') drawVault(f.body);
     else if (tab === 'talents') drawTalents(f.body, v.talents, { sel: talentSel, select: (id) => { talentSel = id; draw(); } }, acts, send);
+    else if (v.look) drawOutfits(f.body, v.look, outfitUi, acts, send, draw);
     else drawWardrobe(f.body, v.wardrobe, acts, send);
     f.body.scrollTop = scroll;
     drawCard();

@@ -3,13 +3,14 @@
 // server. Not part of any build. URL: ?job=ranger&level=7&at=smithy&open=gear|bag|talents|wardrobe|vault|smithy|lampwright|
 // tailor|dye&card=<item>&slot=<slot>&kit=t1|t2|t3&loot&levelup&fight
 import {
-  JOBS, TOWN_STALLS, applyInvOp, inventoryView, isJobId, kitItems, newInventory, newJobsSave, totalTo,
+  COSTUME_PIECES, ITEMS, JOBS, TOWN_STALLS, applyInvOp, inventoryView, isJobId, kitItems, newInventory, newJobsSave, totalTo, withCollection,
   type InvCtx, type InvOp, type InvState, type JobId, type JobsView, type StallId,
 } from '@sg2/shared';
 import type { CharTab, SheetAct } from '../core/gearViews';
 import type { HudState } from '../core/contracts';
 import { ABILITY_DEFS } from '../combat/abilityDefs';
-import { InvClient, charSheetView, ctxFor, levelShow, lootShow, vendorView } from '../net/inventory';
+import { InvClient, ctxFor, levelShow, lootShow } from '../net/inventory';
+import { OpQueue, lookSheetView as charSheetView, lookVendorView as vendorView, markNewLooks, withQueueKey } from '../net/showAs';
 import { createHud } from './index';
 
 const params = new URLSearchParams(location.search);
@@ -50,6 +51,20 @@ if (kit === 't1' || kit === 't2' || kit === 't3') {
   eq('thornrunner_chest', 'chest'); eq('thornrunner_legs', 'legs'); eq('thornrunner_head', 'head');
 }
 s.inv.wardrobe = ['straw_sunhat', 'patchwork_cape', 'beacon_halo'];
+// show-as: a few costume pieces bought and, with &looks, some slots shown as other looks (one hidden)
+s = { ...s, inv: withCollection(s.inv) };
+for (const p of ['lamplighter_coat_chest', 'lamplighter_coat_legs', 'orchard_smock', 'brass_goggles_head']) run({ op: 'buyCostume', costume: p }, { stall: 'tailor' });
+s.gold = Number(params.get('gold') ?? 640);
+if (params.has('looks')) {
+  run({ op: 'look', slot: 'chest', look: COSTUME_PIECES.lamplighter_coat_chest!.model });
+  run({ op: 'look', slot: 'head', look: ITEMS.wickthread_head!.model });
+  run({ op: 'hide', slot: 'back', hide: true });
+  run({ op: 'dyeSlot', slot: 'chest', ch: 0, dye: 13 }, { stall: 'tailor' });
+  run({ op: 'saveOutfit', index: 0, label: 2 });
+  run({ op: 'look', slot: 'legs', look: COSTUME_PIECES.orchard_smock_legs!.model });
+  run({ op: 'saveOutfit', index: 3, label: 5 });
+  s.gold = Number(params.get('gold') ?? 640);
+}
 if (level >= 4) run({ op: 'talent', row: 0, choice: 1 });
 
 const jobsView = (): JobsView => {
@@ -70,25 +85,34 @@ const ctx = () => ctxFor(jobsView(), { zone: 'grove', x: pos.x, z: pos.z, inComb
 client.onInventory(inventoryView(s));
 let sheet: ReturnType<typeof hud.charSheet> | null = null;
 let stall: ReturnType<typeof hud.vendor> | null = null;
+const sent: string[] = [];
+/** The stand-in server: answers an op after a short delay, like a real one. */
+const serve = (op: InvOp) => {
+  sent.push(op.op);
+  setTimeout(() => {
+    const c = ctx();
+    const r = run(op, { stall: c.stall, jobSwitch: c.jobSwitch, townBoard: c.townBoard, inCombat: c.inCombat });
+    if (r) { hud.toast(client.onRefused({ op: op.op, reason: r, text: '' }) ?? r); queue.refused(); }
+    else { client.onInventory(inventoryView(s)); queue.answered(performance.now()); }
+    refresh();
+  }, 250);
+  return true;
+};
+const queue = new OpQueue(client, serve);
 const answer = (a: SheetAct) => {
+  if (a.kind === 'ops') { queue.push(a.ops, performance.now()); refresh(); return; }
   if (a.kind !== 'op') return;
   const op = client.begin(a.op, performance.now());
   if (!op) return;
   sheet?.setPending(client.pendingKeys()); stall?.setPending(client.pendingKeys());
-  // the stand-in server answers after a short delay, like a real one
-  setTimeout(() => {
-    const c = ctx();
-    const r = run(op, { stall: c.stall, jobSwitch: c.jobSwitch, townBoard: c.townBoard, inCombat: c.inCombat });
-    if (r) hud.toast(client.onRefused({ op: op.op, reason: r, text: '' }) ?? r);
-    else client.onInventory(inventoryView(s));
-    refresh();
-  }, 250);
+  serve(op);
 };
 const refresh = () => {
   const v = client.view!;
   sheet?.update(charSheetView(v, ctx()));
   if (stall && at && at !== 'vault' && at !== 'barber') stall.update(vendorView(at, v, ctx(), pos));
-  sheet?.setPending(client.pendingKeys()); stall?.setPending(client.pendingKeys());
+  const k = withQueueKey(client.pendingKeys(), queue.busy);
+  sheet?.setPending(k); stall?.setPending(k);
 };
 const openChar = (tab: CharTab) => { if (sheet?.open) { sheet.setTab(tab); return; } sheet = hud.charSheet(charSheetView(client.view!, ctx()), tab, answer, () => { sheet = null; }); };
 const openStall = (id: StallId) => { stall = hud.vendor(vendorView(id, client.view!, ctx(), pos), answer, () => { stall = null; }); };
@@ -128,10 +152,11 @@ paint(); addEventListener('resize', paint);
 
 const open = params.get('open');
 const dev = {
-  hud, client, openChar, openStall,
+  hud, client, openChar, openStall, sent,
   get s() { return s; },
   loot(named = false) {
-    hud.loot(lootShow({ items: [{ item: named ? 'last_bell' : 'wickthread_head', uid: 1 }], gold: 12, soldFor: 0, x: 0, z: 0 })!);
+    const m = { items: [{ item: named ? 'last_bell' : 'lenslight_head', uid: 1 }], gold: 12, soldFor: 0, x: 0, z: 0 };
+    hud.loot(markNewLooks(lootShow(m), m, client.view)!);
     setTimeout(() => hud.loot(lootShow({ items: [], gold: 3, soldFor: 40, x: 0, z: 0 })!), 300);
   },
   levelUp(lv = 7) { hud.levelUp(levelShow({ job, level: lv, talentRow: lv === 4 ? 0 : lv === 7 ? 1 : lv === 10 ? 2 : null }, ctx())!, () => openChar('talents')); },

@@ -16,6 +16,15 @@ import { OP_GATE_MS, SLOT_LABEL, opKey, TIER_COLOUR, charSheetView, itemColour, 
 /** Costume pieces have no tier: they read in the costume colour (the Tailor's). */
 export const COSTUME_COLOUR = '#ffe2a0';
 export const DYE_CHANNELS = ['Primary', 'Secondary', 'Trim'] as const;
+/** The pending key the set and clear-all buttons wait on while the op queue runs. */
+export const QUEUE_KEY = 'queue:looks';
+/** The gate's pending keys, plus QUEUE_KEY while the queue runs (a new set only then: called on events, not per frame). */
+export function withQueueKey(keys: ReadonlySet<string>, busy: boolean): ReadonlySet<string> {
+  if (!busy) return keys;
+  const out = new Set(keys);
+  out.add(QUEUE_KEY);
+  return out;
+}
 
 const DEFAULT: Readonly<SlotLook> = Object.freeze({ look: null, dyes: null, hide: false });
 /** A slot's appearance in the view (an older server sends none: every slot shows its item). */
@@ -163,9 +172,10 @@ export function showSetOptions(v: InventoryView, c: GearCtx): ShowSetOption[] {
     }
     out.push({ key, name: g.name, colour: g.colour, kind: g.kind, pieces: slots.length, of: g.all, slots: slots.map((s) => SLOT_LABEL[s]).join(', '), ops });
   }
-  // the most complete first, then the best tier, then costumes, then by name
-  const tierOf = (o: ShowSetOption) => (o.kind === 'set' ? SETS[o.key.slice(4) as keyof typeof SETS].tier : -1);
-  return out.sort((a, b) => b.pieces - a.pieces || tierOf(b) - tierOf(a) || a.name.localeCompare(b.name));
+  // the most complete first, then the best tier (costumes after sets), then by name; the starter set last
+  const tierOf = (o: ShowSetOption) => (o.kind === 'set' ? SETS[o.key.slice(4) as keyof typeof SETS].tier : 0.5);
+  const starter = (o: ShowSetOption) => (o.kind === 'set' && tierOf(o) === 0 ? 1 : 0);
+  return out.sort((a, b) => starter(a) - starter(b) || b.pieces - a.pieces || tierOf(b) - tierOf(a) || a.name.localeCompare(b.name));
 }
 
 /** The six outfit places of the current job (the server's `outfits`), with what each shows and whether it is worn now. */
