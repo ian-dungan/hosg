@@ -354,7 +354,7 @@ export function buildFacialHair(k: ShapeKit, o: HairOpts): void {
     6: (d) => (Math.abs(d[0]) > 0.72 && d[1] < 0.12 && d[1] > -0.5 && d[2] > -0.3 ? 1 : 0),          // sideburns
   };
   const vol: Record<number, number> = { 2: 0.008, 3: 0.018, 4: 0.016, 6: 0.008, 7: 0.012, 8: 0.006, 9: 0.014, 11: 0.006, 12: 0.02, 13: 0.02 };
-  const drop: Record<number, number> = { 3: 0.012, 4: 0.006, 7: 0.012, 12: 0.06, 13: 0.055 };
+  const drop: Record<number, number> = { 3: 0.014, 4: 0.006, 7: 0.014, 12: 0.11, 13: 0.1 };
   const m = masks[f];
   if (m) {
     const seg = detail >= 0.9 ? 13 : detail >= 0.5 ? 9 : 7, lat = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 4;

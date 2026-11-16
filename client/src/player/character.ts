@@ -2481,6 +2481,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         const long = LONG_HAIR.has(look.hair.style) ? 1 : 0.4;
         out['hairB.rx'] += springs.hairB.step((sp * 0.6 + runPh * 0.12 * sp - fall * 0.5 - out['head.rx'] * 0.8 - out['torso.rx'] * 0.6) * long, dt);
         out['hairB.rz'] += springs.hairBZ.step((-yawRate * 0.1 - out['head.rz'] * 0.6) * long, dt);
+        // long hair rests on the back: it does not swing round when the head turns or nods (it hangs from the nape)
+        if (long === 1) { out['hairB.ry'] -= out['head.ry'] * 0.85; out['hairB.rx'] -= out['head.rx'] * 0.5; }
         if (look.fur) {
           const cheer = emote === 'cheer';
           const wag = Math.sin(T * (cheer ? 9 : 2.2)) * (cheer ? 0.5 : 0.18);

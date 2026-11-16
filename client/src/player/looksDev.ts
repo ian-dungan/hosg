@@ -62,6 +62,7 @@ const put = (look: Look, x: number, z: number, facing: number, job: JobId | null
   const gear = job && qs.get('gear') === '1' ? kitGear(Number(qs.get('tier') ?? 0) as 0, job) : null;
   const v = makeCharacter(scene, { kind: 'player', look, gear });
   v.root.position.set(x, ground(x, z), z); v.root.rotation.y = facing;
+  v.update(0); // (it was made at the origin: placed, not moved there)
   if (job) { v.setWeapon(JOBS[job].weapon, staffTint(job)); v.setCape(capeFor(job)); }
   else v.setWeapon('none');
   world?.addShadowCaster(v.root);

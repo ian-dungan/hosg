@@ -131,7 +131,8 @@ export function buildSkull(k: ShapeKit, o: FaceOpts): void {
       const w: V3 = [p[0], hs.cy + p[1], hs.cz + p[2]];
       row.push(w);
       let c = col.skin;
-      if (fur) c = fur(new VecLike(w[0], w[1], w[2]) as never, [0, 0], new VecLike(d[0], d[1], d[2]) as never) ?? c;
+      // the fur's stripes and spots stay off the middle of the face (round the eyes and muzzle), as on real coats
+      if (fur && !(d[2] > 0.35 && Math.abs(d[0]) < 0.7 && d[1] < 0.45 && d[1] > -0.8)) c = fur(new VecLike(w[0], w[1], w[2]) as never, [0, 0], new VecLike(d[0], d[1], d[2]) as never) ?? c;
       if (furred && look.fur!.pattern === 3 && d[2] > 0.3 && Math.abs(d[1] - 0.08) < 0.22 && Math.abs(d[0]) < 0.85) c = mix(c, fur2, 0.92); // the mask
       if (!furred) {
         // a warmer flush on the cheeks, nose and ears; the blush slider deepens the cheeks
