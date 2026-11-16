@@ -21,11 +21,12 @@ import {
 } from '@babylonjs/core';
 import type { CharacterOpts, CharacterView, MakeCharacter, Pose, WeaponId, EntityKind, Quality } from '../core/contracts';
 import { PALETTE } from '../core/contracts';
-import { DYES, LOOK_PRESETS, encodeGearLook, encodeLook, parseLook, type EmoteId, type GearLook, type Look as AdventurerLook } from '@sg2/shared';
-import { bodyFrame, lookColours, makeAttachWarp, stanceParams, walkParams, type Frame, type StanceParams, type WalkParams, type Warp, type WarpRegion } from './look';
+import { DYES, LOOK_PRESETS, encodeGearLookV2, encodeLook, parseLook, upgradeGearLook, type EmoteId, type GearLook, type GearLookV2, type Look as AdventurerLook } from '@sg2/shared';
+import { bodyFrame, faceParams, lookColours, makeAttachWarp, stanceParams, walkParams, type Frame, type StanceParams, type WalkParams, type Warp, type WarpRegion } from './look';
 import { buildTail } from './faces';
 import { LONG_HAIR } from './hair';
-import { buildBody2, type Clothes } from './body2';
+import { buildBody2, lastHairEnvelope, legY, type BodyCover, type Clothes, type HairEnvelope } from './body2';
+import { headShape, type HeadShape } from './face2';
 import { EMOTE_S, emotePose } from './emotes';
 
 // ───────────────────────── colours (all derived from PALETTE) ─────────────────────────
@@ -148,7 +149,26 @@ class Geo {
   scale = 1;
   /** Groups whose primitives are dropped (the default weapons a gear model replaces: Task 9). */
   skip: ReadonlySet<string> | null = null;
+  /** Per vertex: its skinning group (a fitted gear chunk is re-skinned to the body it is appended to). */
+  grp: Group[] = [];
   constructor(private resolve: (g: Group, p: Vector3) => [number, number, number], private jitter = 0.035) {}
+
+  /** Appends another Geo's finished vertices (a cached gear chunk): re-skinned here, its primitives and occluders kept apart. */
+  append(src: Geo) {
+    const base = this.pos.length / 3, prim0 = this.primCount;
+    const p = new Vector3();
+    for (let v = 0; v < src.grp.length; v++) {
+      p.set(src.pos[v * 3]!, src.pos[v * 3 + 1]!, src.pos[v * 3 + 2]!);
+      const g = src.grp[v]!, [b0, b1, w0] = this.resolve(g, p);
+      this.pos.push(p.x, p.y, p.z); this.nrm.push(src.nrm[v * 3]!, src.nrm[v * 3 + 1]!, src.nrm[v * 3 + 2]!);
+      this.col.push(src.col[v * 4]!, src.col[v * 4 + 1]!, src.col[v * 4 + 2]!, 1);
+      this.mi.push(b0, b1, 0, 0); this.mw.push(w0, 1 - w0, 0, 0); this.prim.push(prim0 + src.prim[v]!);
+      this.tag.push(src.tag[v]!); this.aoOff.push(src.aoOff[v]!); this.grp.push(g);
+    }
+    for (const i of src.idx) this.idx.push(base + i);
+    for (const o of src.occ) this.occ.push({ c: o.c, r: o.r, prim: prim0 + o.prim });
+    this.primCount += src.primCount;
+  }
 
   /** Append a primitive. `out` gives each vertex's outward reference direction (fixes triangle winding). */
   add(P: Vector3[], out: Vector3[], tris: number[], cols: Color3[], group: Group, flat: boolean, occ: { c: Vector3; r: number }[]) {
@@ -174,7 +194,7 @@ class Geo {
       this.aoOff.push(this.aoOffNow ? 1 : 0);
       const [b0, b1, w0] = this.resolve(group, p);
       this.pos.push(p.x, p.y, p.z); this.nrm.push(n.x, n.y, n.z); this.col.push(c.r, c.g, c.b, 1);
-      this.mi.push(b0, b1, 0, 0); this.mw.push(w0, 1 - w0, 0, 0); this.prim.push(prim);
+      this.mi.push(b0, b1, 0, 0); this.mw.push(w0, 1 - w0, 0, 0); this.prim.push(prim); this.grp.push(group);
       return this.pos.length / 3 - 1;
     };
     if (flat) {
@@ -499,7 +519,7 @@ class Kit {
    * point. The outward reference of each point is `out` (a function of the grid cell) or away from its row's centre.
    * Look v2's body, face, hair and beards are built with it (body2.ts, face2.ts, hair.ts).
    */
-  grid(g: Group, P: V3[][], col: Color3 | ((i: number, j: number) => Color3), o: { wrap?: boolean; flat?: boolean; glow?: boolean; noOcc?: boolean; out?: (i: number, j: number) => V3 } = {}) {
+  grid(g: Group, P: V3[][], col: Color3 | ((i: number, j: number) => Color3), o: { wrap?: boolean; flat?: boolean; glow?: boolean; noOcc?: boolean; out?: (i: number, j: number) => V3; skip?: (i: number, j: number) => boolean } = {}) {
     const rN = P.length, cN = P[0]?.length ?? 0;
     if (rN < 2 || cN < 2) return;
     const wrap = !!o.wrap, s = this.s;
@@ -524,9 +544,11 @@ class Kit {
     const tris: number[] = [];
     const at = (i: number, j: number) => i * cN + (j % cN);
     for (let i = 0; i < rN - 1; i++) for (let j = 0; j < (wrap ? cN : cN - 1); j++) {
+      if (o.skip?.(i, j)) continue;
       const a = at(i, j), b = at(i, j + 1), c = at(i + 1, j), d = at(i + 1, j + 1);
       tris.push(a, c, d, a, d, b);
     }
+    if (!tris.length) return;
     (o.glow ? this.glow : this.g).add(W, OUT, tris, cols, g, !!o.flat, occ);
   }
 
@@ -1282,7 +1304,7 @@ function adventurerSpec(l: AdventurerLook, ov: GearBodyOverride | null = null, t
   const dye = (d: number, undyed: Color3) => (d > 0 && d < DYES.length ? hex(DYES[d]!.hex) : undyed);
   const tunic = tunicColour ? hex(tunicColour) : dye(l.outfit.dye1, P.teal), legs = dye(l.outfit.dye2, C.cream);
   const spec: HumanSpec = {
-    skin: C.skin, hair: C.chestnut, hairStyle: 'none', top: tunic, topTrim: P.gold, hem: 0.66, flare: 0.05, girth: 1,
+    skin: C.skin, hair: C.chestnut, hairStyle: 'none', top: tunic, topTrim: P.gold, hem: 0.84, flare: 0, girth: 1,
     sleeves: 'short', legs, boots: C.leather, belt: C.leather, buckle: P.gold, pouch: true,
     cape: { color: P.skyDeep, trim: P.gold, len: 0.66 }, scarf: P.roof, hat: 'none', v2: l,
   };
@@ -1832,10 +1854,14 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
   const geo = new Geo(resolve), glow = new Geo(resolve, 0);
   let s = 1;
   if (look) {
-    const w = makeAttachWarp(bodyFrame(look)), canon = humanPivots();
-    const piv = v2Pivots(bodyFrame(look), w, look);
+    const fr = bodyFrame(look), w = makeAttachWarp(fr), canon = humanPivots();
+    const piv = v2Pivots(fr, w, look);
     const wv = (g: Group, p: Vector3) => {
-      if (RIGID_ARM.has(g) || RIGID_TORSO.has(g)) { const c = canon[g as Joint], v = piv[g as Joint]; p.x += v[0] - c[0]; p.y += v[1] - c[1]; p.z += v[2] - c[2]; return; }
+      if (RIGID_ARM.has(g) || RIGID_TORSO.has(g)) {
+        const c = canon[g as Joint], v = piv[g as Joint];
+        if (WEAPON_JOINTS.has(g)) { const k = weaponScale(fr); p.x = c[0] + (p.x - c[0]) * k; p.y = c[1] + (p.y - c[1]) * k; p.z = c[2] + (p.z - c[2]) * k; }
+        p.x += v[0] - c[0]; p.y += v[1] - c[1]; p.z += v[2] - c[2]; return;
+      }
       w.apply(regionOf(g), p);
     };
     geo.warp = wv; glow.warp = wv;
@@ -1852,6 +1878,21 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
     }),
   };
 }
+
+/** The geometry of a fitted gear chunk (positions in metres on the body it was fitted to; groups per vertex). */
+export type GearGeo = Geo;
+/** A fitted gear piece: built once for a body shape (gearFit.ts caches it) and appended to that body's one mesh. */
+export interface GearChunk { readonly g: GearGeo; readonly glow: GearGeo }
+/** A kit that builds into a fresh chunk (skinned later, where it is appended). */
+export function chunkKit(detail: number): { k: ShapeKit; done(): GearChunk } {
+  const resolve = (): [number, number, number] => [0, 0, 1];
+  const g = new Geo(resolve), glow = new Geo(resolve, 0);
+  const k = new Kit(g, glow, 1);
+  k.detail = detail;
+  return { k, done: () => ({ g, glow }) };
+}
+/** Appends a chunk to a kit's geometry (re-skinned to that body's bones). */
+export function appendChunk(k: ShapeKit, c: GearChunk): void { k.g.append(c.g); k.glow.append(c.glow); }
 
 // ───────────────────────── level of detail and the rebuild queue ─────────────────────────
 /** Segment scale for look-driven adventurers by quality (the default adventurer is always built as written). */
@@ -1910,9 +1951,23 @@ export interface GearPlan {
  * see Task 8's attachment points). Called on every build that has a gear look; the look's warp fits it.
  */
 export interface GearHooks {
-  plan(gear: GearLook, look: AdventurerLook): GearPlan;
-  build(k: ShapeKit, gear: GearLook, look: AdventurerLook, plan: GearPlan): void;
+  plan(gear: GearLookV2, look: AdventurerLook): GearPlan;
+  /** Weapons and off-hands on their joints. */
+  build(k: ShapeKit, gear: GearLookV2, look: AdventurerLook, plan: GearPlan): void;
+  /**
+   * Armour and costume pieces fitted to this body (gearFit.ts), built before the body: they say what they cover
+   * (body2 leaves it out); the head piece is fitted once the hair is built (it sits on it, or the hair is tucked).
+   */
+  fit?(i: GearFitIn): GearFitOut;
 }
+export interface GearFitIn { look: AdventurerLook; frame: Frame; hs: HeadShape; detail: number; bootTop: number; skin: Color3; gear: GearLookV2 }
+export interface GearFitOut { cover: BodyCover; chunks: GearChunk[]; head(env: HairEnvelope): GearChunk[] }
+/** A gear look from either code (v1 upgraded: dyes [a, b, 0], hideHead → the hidden head). */
+const gearV2 = (g: GearLook | GearLookV2 | null | undefined): GearLookV2 | null => (!g ? null : 'hidden' in g ? g : upgradeGearLook(g));
+/** How much a body's weapons scale with it (rigid joints): with its height, a little with its hands. */
+export const weaponScale = (f: Frame): number => Math.pow(f.H / 1.75, 0.9) * Math.pow(f.handL / (0.1 * (f.H / 1.75) * (f.female ? 0.93 : 1)), 0.15);
+/** Joints that are a weapon or an off-hand (they scale with the body about their pivot). */
+const WEAPON_JOINTS = new Set<string>(['bladeHand', 'shieldArm', 'bowHand', 'gsHand', 'dagR', 'dagL', 'staffWHand', 'staffBHand', 'offHand', 'bladeHip', 'shieldBack', 'bowBack', 'gsBack', 'staffWBack', 'staffBBack', 'bladeBack', 'dagBack', 'offHip', 'offBack']);
 let gearHooks: GearHooks | null = null;
 export function setGearBuilder(h: GearHooks | null): void { gearHooks = h; }
 
@@ -1935,7 +1990,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   const mats = shared(scene);
   // (story NPCs take an authored look too: world/storyNpcs.ts)
   let look: AdventurerLook | null = kind === 'player' || kind === 'npc' ? opts.look ?? null : null;
-  let gear: GearLook | null = kind === 'player' ? opts.gear ?? null : null;
+  let gear: GearLookV2 | null = kind === 'player' ? gearV2(opts.gear) : null;
   /** Far from the camera (FAR_M): built at FAR_DETAIL (look-driven bodies that follow the game's detail only). */
   let far = (characterDev.farM ?? FAR_M) <= 0, farCheck = Math.random() * 0.5, farVotes = 0;
   const detailOf = () => (far ? Math.min(FAR_DETAIL, DETAIL[opts.detail ?? detailNow]) : DETAIL[opts.detail ?? detailNow]);
@@ -2029,6 +2084,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       const c = canon[g as Joint], w = piv[g as Joint];
       // the tail curls in a little closer to the legs (inside the hit radius on the broadest builds)
       if (g === 'tailA' || g === 'tailB') p.x = c[0] + (p.x - c[0]) * 0.7;
+      // weapons and off-hands scale with the body round their pivot (a Knollfolk's greatsword is in proportion)
+      if (frame && WEAPON_JOINTS.has(g)) { const k = weaponScale(frame); p.x = c[0] + (p.x - c[0]) * k; p.y = c[1] + (p.y - c[1]) * k; p.z = c[2] + (p.z - c[2]) * k; }
       p.x += w[0] - c[0]; p.y += w[1] - c[1]; p.z += w[2] - c[2];
       return;
     }
@@ -2054,7 +2111,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     // the cache: one key per look, gear and detail (players with a look only; a gear look only counts with the hooks set)
     let key: string | null = null;
     if (kind === 'player' && look) {
-      try { key = `${detailOf()}|${encodeLook(look)}|${gear && gearHooks ? encodeGearLook(gear) : ''}`; } catch { key = null; }
+      try { key = `${detailOf()}|${encodeLook(look)}|${gear && gearHooks ? encodeGearLookV2(gear) : ''}`; } catch { key = null; }
     } else if (kind === 'player') {
       key = `${detailOf()}|hero|${opts.color ?? ''}`;
     }
@@ -2070,7 +2127,12 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
         // Look v2: the body, face and hair in metres (no warp), then the accessories, weapons, cues and gear fitted on
         geo.warp = glowGeo.warp = null;
         const sp = des.spec;
-        buildBody2(kit, { look: sp.v2!, frame, warp, clothes: clothesOf(sp), detail: kit.detail, tie: sp.v2!.outfit.dye2 > 0 ? shade(sp.legs ?? C.cream, 0.8) : P.roof });
+        // worn armour is fitted to this body first: it says which bands of the body it covers (left out below)
+        const fitted = look && gear && gearHooks?.fit
+          ? gearHooks.fit({ look, frame, hs: headShape(frame, faceParams(look)), detail: kit.detail, bootTop: legY(warp, sp.bootTop ?? 0.38), skin: lookColours(look).skin, gear })
+          : null;
+        buildBody2(kit, { look: sp.v2!, frame, warp, clothes: clothesOf(sp), detail: kit.detail, tie: sp.v2!.outfit.dye2 > 0 ? shade(sp.legs ?? C.cream, 0.8) : P.roof, cover: fitted?.cover });
+        if (fitted) { for (const c of fitted.chunks) appendChunk(kit, c); for (const c of fitted.head(lastHairEnvelope)) appendChunk(kit, c); }
         geo.warp = glowGeo.warp = warpVertex;
         buildHuman(kit, sp, canon, true);
         if (sp.v2!.fur) { const lc = lookColours(sp.v2!); buildTail(kit, sp.v2!.fur.tail, lc.skin, lc.fur2!, sp.v2!.fur.pattern); }
@@ -2277,7 +2339,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   };
 
   // ── a new look: rebuilt at most REBUILDS_PER_FRAME a frame (queued), never mid-way through anything else ──
-  let pending: { look: AdventurerLook; gear: GearLook | null; hero?: boolean } | null = null;
+  let pending: { look: AdventurerLook; gear: GearLookV2 | null; hero?: boolean } | null = null;
   const rebuild = () => {
     if (!pending) return;
     look = pending.hero ? null : pending.look; gear = pending.gear; pending = null;
@@ -2363,7 +2425,7 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     },
     setAppearance(l, g) {
       if (kind !== 'player') return;
-      pending = { look: l, gear: g };
+      pending = { look: l, gear: gearV2(g) };
     },
     emote(e) {
       if (e === null) { emote = null; return; }

@@ -5,7 +5,7 @@
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
 import type { CharSheetHandle, CharSheetView, CharTab, LevelShow, LootShow, SheetAct, SheetHandle, VendorView } from './gearViews';
-import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, JobId, Look as AdventurerLook, QuestId, WeaponId as SharedWeaponId } from '@sg2/shared';
+import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, GearLookV2, JobId, Look as AdventurerLook, QuestId, WeaponId as SharedWeaponId } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }
@@ -87,7 +87,7 @@ export interface CharacterOpts {
   /** The adventurer's look (players only): absent, today's default adventurer (the offline demo). */
   look?: AdventurerLook;
   /** The worn gear as the model shows it (Plan 5 Task 9 builds it; null or absent: the starter look). */
-  gear?: GearLook | null;
+  gear?: GearLook | GearLookV2 | null;
   /** The level of detail of a look-driven body (default: the game's quality, setCharacterDetail). */
   detail?: Quality;
 }
@@ -121,7 +121,7 @@ export interface CharacterView {
    * Rebuilds the body for a new look and/or gear (queued: at most 2 rebuilds per frame across the scene, done in a
    * later update(); the mesh, its shadow and its outline stay the same objects). Players only.
    */
-  setAppearance(look: AdventurerLook, gear: GearLook | null): void;
+  setAppearance(look: AdventurerLook, gear: GearLook | GearLookV2 | null): void;
   /** Plays an emote over the idle pose (sit holds until a move); a move, a fight or a fall ends it; null stops it. */
   emote(id: EmoteId | null): void;
   update(dt: number): void;

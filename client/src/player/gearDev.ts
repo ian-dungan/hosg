@@ -16,13 +16,13 @@
 // window.__gear: { ready, stats(): triangles, emissive triangles and draw calls }.
 import { Engine, Scene, ArcRotateCamera, Matrix, Vector3, SceneInstrumentation, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
 import {
-  COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLES, PEOPLE_IDS, SETS, SET_IDS, greenwayLayout, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, resolveGearLook, upgradeLookV1, type GearLook, type JobId, type LookV1 as AdventurerLook, type PeopleId, type SetId,
+  COSTUMES, COSTUME_IDS, COSTUME_PIECES, COSTUME_PIECE_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLES, PEOPLE_IDS, SETS, SET_IDS, greenwayLayout, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, resolveGearLook, upgradeLookV1, type GearLook, type GearLookV2, type JobId, type LookV1 as AdventurerLook, type PeopleId, type SetId,
 } from '@sg2/shared';
 import type { CharacterView, Quality } from '../core/contracts';
 import { buildGreenway } from '../world/greenway';
 import { staffTint } from '../combat/spells';
 import { makeCharacter, characterStats, capeFor, setCharacterDetail, setGearBuilder, pieceKit } from './character';
-import { gearHooks, kitGear, modelInfo, setGear } from './gearModels';
+import { gearHooks, kitGear, mixGear, modelInfo, setGear } from './gearModels';
 import { buildWeaponIn } from './weaponModels';
 
 setGearBuilder(gearHooks);
@@ -53,7 +53,7 @@ const ofPeople = (l: AdventurerLook, p: PeopleId): AdventurerLook => {
 };
 const at10 = (l: AdventurerLook): AdventurerLook => ({ ...l, body: { height: 10, build: 10, shoulders: 10, hips: 10, legs: 10, head: 10 } });
 const baseLook = (i = 0) => { const l = at10(randomLook(prng(seed * 7919 + i * 104729))); return pinPeople ? ofPeople(l, pinPeople) : ofPeople(l, 'human'); };
-const put = (look: AdventurerLook, gear: GearLook | null, job: JobId, x: number, z: number, face = facing, name = '') => {
+const put = (look: AdventurerLook, gear: GearLook | GearLookV2 | null, job: JobId, x: number, z: number, face = facing, name = '') => {
   const v = makeCharacter(scene, { kind: 'player', look: upgradeLookV1(look), gear });
   v.root.position.set(x, ground(x, z), z); v.root.rotation.y = face;
   v.setWeapon(JOBS[job].weapon, staffTint(job)); v.setCape(capeFor(job));
@@ -100,8 +100,9 @@ if (view === 'tiers') {
   const body = qs.get('part') !== 'other';
   COSTUME_IDS.filter((c) => (COSTUMES[c].slot === 'body') === body).forEach((c, i) => {
     const job = JOB_IDS[(i + 2) % JOB_IDS.length]!, d = COSTUMES[c];
-    const slot = { model: d.model, dye: [0, 0] as [number, number] };
-    const g = resolveGearLook(kitGear(0, job), { [d.slot]: slot }, d.slot !== 'head' && !qs.has('helm'));
+    const pieces = COSTUME_PIECE_IDS.map((id) => COSTUME_PIECES[id]!).filter((p) => p.costume === c);
+    const g = mixGear(job, 0, Object.fromEntries(pieces.map((p) => [p.slot, p.model])));
+    if (d.slot !== 'head' && !qs.has('helm')) { g.head = null; g.hidden.head = true; }
     put(baseLook(i), g, job, x0 + (i - 3) * 1.25, zc, d.slot === 'back' ? (facing + Math.PI + 0.5) : facing, d.name);
   });
   target = new Vector3(x0, 1.05, zc); radius = 9.6; beta = 1.42;
@@ -117,9 +118,8 @@ if (view === 'tiers') {
   for (let i = 0; i < n; i++) {
     const a = i * 2.39996, rr = 1.2 * Math.sqrt(i + 1);
     const job = JOB_IDS[i % JOB_IDS.length]!, tier = Math.floor(r() * 4) as 0 | 1 | 2 | 3;
-    const costumes: Parameters<typeof kitGear>[3] = {};
-    if (r() < 0.25) { const c = COSTUME_IDS[Math.floor(r() * COSTUME_IDS.length)]!; costumes[COSTUMES[c].slot] = { model: COSTUMES[c].model, dye: [Math.floor(r() * 32), Math.floor(r() * 32)] }; }
-    const g = kitGear(tier, job, [Math.floor(r() * 32), Math.floor(r() * 32)], costumes);
+    const g = kitGear(tier, job, [Math.floor(r() * 32), Math.floor(r() * 32), Math.floor(r() * 32)]);
+    if (r() < 0.25) { const c = COSTUME_IDS[Math.floor(r() * COSTUME_IDS.length)]!; for (const id of COSTUME_PIECE_IDS) { const p = COSTUME_PIECES[id]!; if (p.costume === c) g[p.slot] = { model: p.model, dye: [0, 0, 0] }; } }
     put(randomLook(prng(seed * 31 + i)), g, job, x0 + Math.cos(a) * rr, zc + 6 + Math.sin(a) * rr, r() * 6.28);
   }
   target = new Vector3(x0, 1, zc + 6); radius = 30; beta = 1.0;

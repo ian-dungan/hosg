@@ -11,7 +11,7 @@ describe('LookCache', () => {
     const c = new LookCache();
     expect(c.handle({ a: [[5, encodeLook(a), gear], [9, encodeLook(b), gear]] })).toEqual([5, 9]);
     expect(c.get(5)!.look).toEqual(a);
-    expect(c.get(5)!.gear!.weapon).toEqual({ model: 3, dye: [1, 2] });
+    expect(c.get(5)!.gear!.weapon).toEqual({ model: 3, dye: [1, 2, 0] }); // (a v1 code, read as v2: trim 0)
     expect(c.ver(5)).toBe(1);
     expect(c.handle({ a: [[5, encodeLook(a), gear]] })).toEqual([]); // unchanged: no rebuild
     expect(c.handle({ a: [[5, encodeLook(b), gear]] })).toEqual([5]);
