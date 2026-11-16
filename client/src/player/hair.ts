@@ -93,7 +93,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
   const hc = col.hair, h2 = col.hair2;
   const tex = info.texture;
   const fh = 0;
-  const lo = detail < 0.5;
+  const lo = detail < 0.5, mid = detail < 0.9;   // (mid: med and below — the heaviest styles thin out to stay near the mean)
   const R = (n: number, min: number) => Math.max(min, Math.round(n * (detail >= 0.9 ? 0.7 : detail >= 0.5 ? 0.46 : detail >= 0.3 ? 0.38 : 0.3)));
   // ── building blocks ──
   /** A point on the skull in direction d, `out` m off it along the normal (model space). */
@@ -153,7 +153,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
     const span = opts.span ?? 0.6, vol = (opts.vol ?? 0.012) * kh, t = opts.t ?? tex, flare = opts.flare ?? 0;
     const amp = texAmp(t);
     const top = hs.cy + 0.15 * hs.Hh, chin = hs.cy - 0.85 * hs.Hh;
-    const rows = R(9, 5), cols = R(13, 7);
+    const rows = lo || !mid ? R(9, 5) : 4, cols = R(13, 7);
     const ringX = Math.min(frame.chestW + 0.022, frame.shX - frame.uArmR * 1.25), ringZ = frame.chestD + 0.075 * (frame.H / 1.75) + frame.bust * 0.02;
     const outer: V3[][] = [], inner: V3[][] = [];
     for (let i = 0; i <= rows; i++) {
@@ -199,7 +199,8 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
       return c;
     };
     k.grid('hairB', outer, colAt, { noOcc: true, out: (i, j) => { const p = outer[i]![j]!; return [p[0], 0, p[2] - hs.cz]; } });
-    k.grid('hairB', inner, (i, j) => shade(colAt(i, j), 0.72), { noOcc: true, out: (i, j) => { const p = inner[i]![j]!; return [-p[0], 0, -(p[2] - hs.cz)]; } });
+    // the curtain's inside: only where it can be seen up close (far off, its back faces are rarely in view)
+    if (!lo) k.grid('hairB', inner, (i, j) => shade(colAt(i, j), 0.72), { noOcc: true, out: (i, j) => { const p = inner[i]![j]!; return [-p[0], 0, -(p[2] - hs.cz)]; } });
     if (opts.front && !lo) {
       // locks over the shoulders, in front
       for (const sx of [-1, 1]) {
@@ -207,7 +208,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
         const b: V3 = [sx * (frame.headW * 1.02 + 0.01), hs.cy - 0.9 * hs.Hh, hs.cz - 0.01];
         const c: V3 = [sx * frame.shX * 0.62, frame.shTopY + 0.03, frame.chestD * 0.35];
         const d: V3 = [sx * Math.min(frame.chestW * 0.72, frame.shX * 0.6), Math.max(endY, frame.chestY - 0.06), frame.chestD + 0.025 + frame.bust * 0.035];
-        k.tube('hairB', [a, b, c, d], [0.022 * kh, 0.026 * kh, 0.028 * kh, 0.014 * kh], hc, { seg: 6, flatten: 0.5, noOcc: true, paint: h2 ? (_w, uv) => (uv[1] > 0.6 ? h2 : undefined) : undefined });
+        k.tube('hairB', [a, b, c, d], [0.022 * kh, 0.026 * kh, 0.028 * kh, 0.014 * kh], hc, { seg: mid ? 4 : 6, flatten: 0.5, noOcc: true, paint: h2 ? (_w, uv) => (uv[1] > 0.6 ? h2 : undefined) : undefined });
       }
     }
   };
@@ -246,7 +247,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
     case 13: cap(0.012, 0.01, -0.5);                                                                     // Braid hood: two braids over the crown
       for (const sx of [-1, 1]) { const pts: V3[] = []; for (let i = 0; i <= 7; i++) { const t = i / 7; pts.push(at(dirOf(0.25 + t * 1.6, sx * 1.15 - sx * t * 0.6), 0.016 * kh)); } braid(pts, 0.016, 'head'); }
       break;
-    case 14: cap(0.026, 0.02, -0.55, 'hair'); cap(0.006, 0.006, -0.5); curtain(hs.cy - 1.15 * hs.Hh, { span: 0.62, vol: 0.022, t: 'curly' }); break;  // Curls
+    case 14: cap(0.026, 0.02, -0.55, 'hair'); if (!mid) cap(0.006, 0.006, -0.5); curtain(hs.cy - 1.15 * hs.Hh, { span: 0.62, vol: 0.022, t: 'curly' }); break;  // Curls
     case 15: cap(0.008, 0.006, -0.45); cap(0.045, 0.035, -0.5, 'hair'); break;                                                // Coils
     case 16: cap(0.02, 0.0, -0.1, 'head'); break;                                                                             // Shaved sides
     case 17: for (let i = 0; i < (lo ? 4 : 7); i++) { const t = i / 6, a = 0.7 - t * 2.3;                                     // Crest
@@ -273,7 +274,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
     case 28: cap(0.016, 0.013, -0.6, 'head', 'low'); curtain(frame.shY - 0.05, { span: 0.66, t: 'wavy', vol: 0.018, front: true }); break; // Shoulder waves
     case 29: cap(0.012, 0.01, -0.6, 'head', 'low'); curtain(backY(1), { span: 0.62, front: true }); break;                    // Very long
     case 30: cap(0.016, 0.013, -0.6, 'head', 'low'); curtain(backY(0.55), { span: 0.64, t: 'wavy', vol: 0.018, front: true }); break; // Long waves
-    case 31: cap(0.03, 0.024, -0.6, 'hair', 'low'); cap(0.006, 0.006, -0.5); curtain(backY(0.5), { span: 0.66, t: 'curly', vol: 0.03, flare: 0.6 }); break; // Long curls
+    case 31: cap(0.03, 0.024, -0.6, 'hair', 'low'); curtain(backY(0.5), { span: 0.66, t: 'curly', vol: 0.03, flare: 0.6 }); break; // Long curls
     case 32: cap(0.016, 0.012, -0.5, 'head', 'low');                                                                         // Curly tail
       ball([0, -0.35, -1], 0.04, [0.05, 0.06, 0.045], 'hairB', 1); break;
     case 33: cap(0.012, 0.01, -0.5, 'head', 'low');                                                                           // Crown braid
@@ -284,14 +285,14 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
         k.tube('head', pts, 0.0055 * kh, shade(hc, i % 2 ? 0.9 : 1.05), { seg: 4, noOcc: true }); }
       break;
     case 35: cap(0.012, 0.01, -0.5, 'head', 'low');                                                                           // Box braids
-      for (let i = 0; i < (lo ? 6 : 12); i++) { const a = Math.PI * (0.45 + (i / 11) * 1.1); const st = at(dirOf(1.75, a), 0.01 * kh);
+      for (let i = 0, nb = lo ? 6 : mid ? 8 : 12; i < nb; i++) { const a = Math.PI * (0.45 + (i / (nb - 1)) * 1.1); const st = at(dirOf(1.75, a), 0.01 * kh);
         const sx = Math.sin(a), cz = Math.cos(a); const end: V3 = [sx * Math.min(frame.chestW + 0.03, frame.shX - frame.uArmR * 1.3), backY(0.5) - (i % 3) * 0.03, cz < 0 ? cz * (frame.chestD + 0.04) : cz * 0.05];
         k.tube('hairB', [st, [st[0] * 1.08, nape - 0.02, st[2] * 1.12 - 0.01], end], [0.008 * kh, 0.0075 * kh, 0.006 * kh], i % 2 ? hc : shade(hc, 0.85), { seg: 4, noOcc: true, paint: h2 ? (_w, uv) => (uv[1] > 0.7 ? h2 : undefined) : undefined }); }
       break;
     case 36: cap(0.008, 0.006, -0.45); shell('hair', (d) => (0.085 + 0.02 * d[1] - (d[2] > 0.2 ? 0.02 : 0)) * kh, coverage(look, -0.55, 'ear'), 2.2, 1.1); break; // Rounded afro
     case 37: cap(0.007, 0.006, -0.45); for (const sx of [-1, 1]) ball([sx * 0.6, 0.75, -0.1], 0.045, [0.05, 0.048, 0.05], 'hair', 1); break; // Twin puffs
     case 38: cap(0.014, 0.012, -0.5, 'head', 'low');                                                                          // Locs
-      for (let i = 0; i < (lo ? 6 : 11); i++) { const a = Math.PI * (0.4 + (i / 10) * 1.2); const st = at(dirOf(1.6, a), 0.012 * kh);
+      for (let i = 0, nl = lo ? 6 : mid ? 8 : 11; i < nl; i++) { const a = Math.PI * (0.4 + (i / (nl - 1)) * 1.2); const st = at(dirOf(1.6, a), 0.012 * kh);
         const sx = Math.sin(a), cz = Math.cos(a); const end: V3 = [sx * Math.min(frame.chestW + 0.03, frame.shX - frame.uArmR * 1.3), frame.shY - 0.08 - (i % 3) * 0.03, cz < 0 ? cz * (frame.chestD + 0.04) : cz * 0.05];
         k.tube('hairB', [st, [st[0] * 1.1, nape, st[2] * 1.12], end], [0.012 * kh, 0.011 * kh, 0.008 * kh], i % 2 ? hc : shade(hc, 0.86), { seg: 5, noOcc: true, paint: h2 ? (_w, uv) => (uv[1] > 0.7 ? h2 : undefined) : undefined }); }
       break;

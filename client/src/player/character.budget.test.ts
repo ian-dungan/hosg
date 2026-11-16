@@ -41,11 +41,13 @@ describe('the Look v2 adventurer', () => {
     // the brief's budgets (high ~7k, med ~3k, low ~1.8k) hold for typical looks; the worst case here stacks the longest
     // hair, a long beard, every mark and make-up with a sword and shield (measured: see the report)
     expect(high.mean).toBeLessThanOrEqual(7000);
-    expect(med.mean).toBeLessThanOrEqual(3150);
-    expect(low.mean).toBeLessThanOrEqual(1950);
+    expect(med.mean).toBeLessThanOrEqual(3100);
+    expect(low.mean).toBeLessThanOrEqual(1910);
+    // the worst cases (longest hair, longest beard, every mark, the Black Mage's hat and staff) stay near the means
+    // (2026-11 fix round: med and low were 20 % and 16 % over; at med and below the heaviest parts thin out)
     expect(high.worst).toBeLessThanOrEqual(7700);
-    expect(med.worst).toBeLessThanOrEqual(3800);
-    expect(low.worst).toBeLessThanOrEqual(2300);
+    expect(med.worst / med.mean).toBeLessThanOrEqual(1.12);
+    expect(low.worst / low.mean).toBeLessThanOrEqual(1.1);
   });
 
   it('is one skinned mesh (one draw call) with a pick capsule the same size for every people and body', () => {

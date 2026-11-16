@@ -70,6 +70,11 @@ export function headShape(f: Frame, fp: FaceParams): HeadShape {
     rel += (0.015 + 0.03 * fp.cheek) * fr * G(y + 0.18, 0.13) * G(ax - 0.62, 0.18);
     if (!furred) rel += 0.035 * fr * G(y + 0.56, 0.16) * G(dx, 0.32);
     rel += 0.012 * fr * G(dx, 0.12) * G(y + 0.05, 0.25);   // the nose's root rises out of the face
+    // planes that catch the light: the hollow under the cheekbone (less with weight), the jaw's angle (stronger on the
+    // heavier brow), and the chin's pad
+    rel -= 0.016 * (1 - Math.max(0, fp.fullness)) * fr * G(y + 0.36, 0.11) * G(ax - 0.52, 0.13);
+    rel += 0.014 * (0.5 + 0.5 * fp.brow) * G(y + 0.64, 0.1) * G(ax - 0.8, 0.14);
+    if (!furred) rel += 0.013 * fr * G(y + 0.86, 0.09) * G(dx, 0.22);
     const n = Math.hypot(x, yy, z) || 1;
     const k = rel * Hh * 1.3;
     x += (x / n) * k; yy += (yy / n) * k; z += (z / n) * k;
@@ -139,10 +144,17 @@ export function buildSkull(k: ShapeKit, o: FaceOpts): void {
         const cheek = G(Math.abs(d[0]) - 0.55, 0.2) * G(d[1] + 0.2, 0.16) * sm((d[2] - 0.2) / 0.3);
         c = mix(c, mix(c, ROSE, 0.55), cheek * (0.12 + 0.2 * blush));
         c = mix(c, shade(c, 0.93), sm((-d[1] - 0.55) / 0.3) * 0.5 * sm((-d[2] + 0.2) / 0.5)); // under the jaw
+        c = mix(c, shade(c, 0.88), G(d[1] + 0.71, 0.06) * G(d[0], 0.2) * sm((d[2] - 0.5) / 0.3));  // the fold under the lower lip
         if (look.people === 'larchfolk' && d[2] < 0.65 && Math.sin(d[0] * 40 + d[1] * 6) > 0.88 && d[1] < 0.45) c = shade(c, 0.86);
       }
       if (o.scalp) c = mix(c, col.hair, o.scalp(d));
       if (o.stubble) c = mix(c, col.facial, o.stubble(d));
+      // freckles below full detail: a warm speckled tint over the nose and cheeks (single dots are too small to see)
+      if (!furred && look.skin.freckles > 0 && o.detail < 0.9 && d[2] > 0.3) {
+        const zone = G(d[1] + 0.22, 0.14) * G(Math.abs(d[0]) - 0.3, 0.34);
+        const speck = 0.5 + 0.5 * Math.sin(d[0] * 61 + d[1] * 37) * Math.sin(d[1] * 53 - d[0] * 29);
+        c = mix(c, shade(c, 0.72), zone * speck * 0.12 * look.skin.freckles);
+      }
       c = paint(d, c);
       crow.push(c);
     }
@@ -212,19 +224,29 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
       k.ellip('eyes', ctr, [re, re, re], SCLERA, { seg: bs, lat: Math.round(bs * 0.6), noOcc: true });
       // the iris and pupil, looking straight ahead, on the eyeball's front
       const ir = Math.min(hs.ew * 0.56, re * 0.6), ic = onBall(0, 0, re * 0.985);
-      k.ellip('eyes', [ic[0], ic[1], ic[2]], [ir, ir, ir * 0.25], shade(iris, 0.95), { seg: detail >= 0.9 ? 8 : 6, lat: 3, noOcc: true,
+      k.ellip('eyes', [ic[0], ic[1], ic[2]], [ir, ir, ir * 0.25], shade(iris, 0.95), { seg: detail >= 0.9 ? 8 : 6, lat: detail >= 0.9 ? 3 : 2, noOcc: true,
         paint: (_w, _uv, l) => (Math.hypot(l.x, l.y) > 0.82 ? shade(iris, 0.55) : Math.hypot(l.x, l.y) < 0.5 && l.y > 0 ? shade(iris, 1.15) : undefined) });
       const pc = onBall(0, 0, re * 1.012);
-      k.ellip('eyes', pc, [ir * 0.42, ir * 0.42, ir * 0.15], INK, { seg: 6, lat: 3, noOcc: true });
+      k.ellip('eyes', pc, [ir * 0.42, ir * 0.42, ir * 0.15], INK, { seg: detail >= 0.9 ? 6 : 5, lat: detail >= 0.9 ? 3 : 2, noOcc: true });
       if (detail >= 0.9) {
         const gl = onBall(-0.25 * sx, 0.32, re * 1.03);
         k.ellip('eyes', gl, [ir * 0.2, ir * 0.2, ir * 0.08], new Color3(1, 1, 1), { seg: 4, lat: 2, noOcc: true });
       }
       // the lids: caps on a sphere just over the eyeball, the upper from its edge up, the lower from its edge down
-      const rl = re * 1.07, nA = detail >= 0.9 ? 7 : 5, nE = detail >= 0.9 ? 3 : 2;
+      const rl = re * 1.07, nA = detail >= 0.9 ? 7 : 5, nEu = detail >= 0.9 ? 4 : 3, nEl = detail >= 0.9 ? 3 : 2;
+      // the upper lid's rows: the lash line, the lid's bulge, then the crease folding in under the brow's skin
+      const lidR = (upper: boolean, i: number) => {
+        const nE = upper ? nEu : nEl;
+        if (i === 0) return 1;
+        const base = 1 + 0.06 * (i / nE);
+        if (!upper) return base;
+        if (fp.crease > 0.3 && i === nE - 1) return base - 0.04 * fp.crease;
+        return base + (i === 1 ? 0.015 : 0);
+      };
       const shadowC = col.shadow;
       const lidGrid = (upper: boolean) => {
         const P: V3[][] = [];
+        const nE = upper ? nEu : nEl;
         for (let i = 0; i <= nE; i++) {
           const row: V3[] = [];
           for (let j = 0; j <= nA; j++) {
@@ -232,7 +254,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
             const edge = Math.abs(t) > 0.8 ? 0 : upper ? upEdge(t / 0.8) : loEdge(t / 0.8);
             const lim = upper ? 1.35 : -1.25;
             const el = edge + (lim - edge) * (i / nE);
-            row.push(onBall(az, el, rl * (i === 0 ? 1 : 1 + 0.06 * (i / nE))));
+            row.push(onBall(az, el, rl * lidR(upper, i)));
           }
           P.push(row);
         }
@@ -240,7 +262,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
           if (!upper) return i === 0 ? shade(lidSkin, 0.92) : lidSkin;
           if (i === 0) return lash;
           if (shadowC) return mix(lidSkin, shadowC, i <= nE - 1 ? 0.8 : 0.3);
-          if (fp.crease > 0.3 && i === nE - 1) return shade(lidSkin, 0.86);
+          if (fp.crease > 0.3 && i === nE - 1) return shade(lidSkin, 0.8);
           return lidSkin;
         }, { noOcc: true, out: (i, j) => sub(P[i]![j]!, ctr) });
       };
@@ -269,7 +291,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
 export function buildBrows(k: ShapeKit, o: FaceOpts): void {
   const { hs, fp, col, detail } = o;
   if (o.look.fur && detail < 0.5) return;
-  const N = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 4;
+  const N = detail >= 0.9 ? 8 : detail >= 0.5 ? 5 : 4;
   const thick = 0.07 * fp.browT;                     // half height in head units
   const by = hs.eyeY + 0.2 + 0.07 * fp.browY;
   const bc = o.look.fur ? mix(col.skin, col.fur2 ?? col.skin, 0.6) : col.brows;
@@ -285,58 +307,88 @@ export function buildBrows(k: ShapeKit, o: FaceOpts): void {
       const sCurve = fp.browS * (t < 0.3 ? -0.03 * Math.sin((t / 0.3) * Math.PI) : 0);
       const y = by + rise + sCurve + fp.browTilt * (t - 0.4) * 0.3 - 0.04 * t * t;
       const h = thick * (t < 0.15 ? 0.75 + t * 1.6 : 1 - fp.browTaper * Math.max(0, t - 0.4) / 0.6) * (1 - 0.3 * (t < 0.08 ? 1 - t / 0.08 : 0));
-      const lo = hs.front(sx * x, y - h, 0.0012), mid = hs.front(sx * x, y, 0.0012 + h * hs.Hh * 0.12), hi = hs.front(sx * x, y + h * 0.9, 0.0012);
-      P.push([lo, mid, hi]);
+      // a body of hair, not paint: lifted off the brow bone (thicker brows stand further out), feathered at the top
+      const lift = 0.0012 + Math.min(0.004, h * hs.Hh * 0.3);
+      P.push(detail >= 0.9 ? [hs.front(sx * x, y - h, 0.001), hs.front(sx * x, y - h * 0.35, lift), hs.front(sx * x, y + h * 0.4, lift * 0.85), hs.front(sx * x, y + h * 0.95, 0.0008)]
+        : [hs.front(sx * x, y - h, 0.001), hs.front(sx * x, y, lift), hs.front(sx * x, y + h * 0.95, 0.0008)]);
     }
     if (sx < 0) P.reverse();
-    k.grid('head', P, (i, j) => (j === 1 ? bc : shade(bc, 1.08)), { noOcc: true, out: (i, j) => hs.normal(...norm([sx * (hs.eyeX - 0.24 + (sx < 0 ? N - i : i) / N * 0.52), by, 0.8])) });
+    const feather = mix(bc, col.skin, 0.3);
+    const nb = P[0]!.length;
+    k.grid('head', P, (i, j) => (j === 0 ? shade(bc, 0.85) : j === nb - 1 ? feather : j === 2 ? shade(bc, 1.06) : bc), { noOcc: true, out: (i, j) => hs.normal(...norm([sx * (hs.eyeX - 0.24 + (sx < 0 ? N - i : i) / N * 0.52), by, 0.8])) });
   }
 }
 
 // ───────── the nose ─────────
-/** The nose swept from the bridge to the tip and under it, with the nostril wings (human, Larchfolk, Knollfolk). */
+/** One station of the nose, root to base: height (head units), projection off the face (m), half width at the face (m), and
+ *  the section's roundness (1: a sharp ridge with flat side walls, 2: round, as the tip). */
+export interface NoseStation { y: number; proj: number; hw: number; round: number }
+/**
+ * The nose's stations (pure, unit-tested: each slider moves its part of the nose by a stated amount, in profile and
+ * from the front): the root between the eyes, the nasion, the bridge (rhinion), the supratip, the tip, the columella
+ * under it and the base over the lip. length: the tip lower and further out; width: the bridge, tip and wings wider;
+ * bridge: the ridge higher and narrower (a hump at the rhinion); tip: up (shorter, the underside showing) or down
+ * (drooping, longer). Wings (alae) sit either side of the tip and columella.
+ */
+export function noseStations(fp: Pick<FaceParams, 'noseLen' | 'noseW' | 'bridge' | 'tip'>, eyeY: number, knoll = 1): { st: NoseStation[]; wing: { y: number; x: number; r: [number, number, number] } } {
+  const L = 1 + 0.28 * fp.noseLen, Lp = 1 + 0.18 * fp.noseLen, W = 1 + 0.45 * fp.noseW, B = fp.bridge, T = fp.tip;
+  const narrow = 1 - 0.14 * B;                       // a high bridge reads narrower from the front
+  const st: NoseStation[] = [
+    { y: eyeY + 0.03, proj: 0.001, hw: 0.0125, round: 1.1 },
+    { y: eyeY - 0.06 * L, proj: 0.0056 + 0.0032 * B, hw: 0.0108 * narrow, round: 1.15 },
+    { y: eyeY - 0.19 * L, proj: (0.0135 + 0.0065 * B) * Lp, hw: 0.0102 * narrow * (0.92 + 0.08 * W), round: 1.2 + 0.15 * Math.max(0, -B) },
+    { y: eyeY - 0.29 * L, proj: (0.019 + 0.0022 * B) * Lp - 0.0015 * T, hw: 0.0118 * W, round: 1.55 },
+    { y: eyeY - (0.355 - 0.04 * T) * L, proj: 0.0255 * Lp * knoll - 0.002 * T, hw: 0.0142 * W * knoll, round: 2.2 },
+    { y: eyeY - (0.405 - 0.018 * T) * L, proj: (0.0172 - 0.0032 * T) * knoll, hw: 0.0108 * W * knoll, round: 1.9 },
+    { y: eyeY - 0.43 * L, proj: 0.0016, hw: 0.0092 * W, round: 1.5 },
+  ];
+  const t = st[4]!, u = st[5]!;
+  const wr = 0.0062 * W * knoll;
+  return { st, wing: { y: (t.y * 0.35 + u.y * 0.65) + 0.004, x: t.hw * 0.86 + wr * 0.35, r: [wr, 0.0066 * Math.sqrt(L), 0.0092 * Math.sqrt(Lp)] } };
+}
+
+/** The nose: a lofted bridge-to-base form (sharp ridge and side walls up top, a rounded tip, the columella under it), the
+ *  nostril wings with their openings, shaded so its length, width, bridge and tip read from the front as in profile. */
 export function buildNose(k: ShapeKit, o: FaceOpts): void {
   const { hs, fp, col, detail } = o;
   if (o.look.fur) return buildMuzzle(k, o);
   const kh = hs.Hh / 0.12;
-  const len = 1 + 0.24 * fp.noseLen, wid = 1 + 0.42 * fp.noseW, br = 1 + 0.6 * fp.bridge, tip = fp.tip;
   const knoll = o.look.people === 'knollfolk' ? 1.25 : 1;
+  const { st, wing } = noseStations(fp, hs.eyeY, knoll);
   const skin = shade(col.skin, 0.99);
-  // stations: [y (head units), projection (m), half width (m)] from the root between the eyes to the base over the lip
-  const st: [number, number, number][] = [
-    [hs.eyeY + 0.01, 0.0004, 0.012],
-    [hs.eyeY - 0.1 * len, 0.0055 * br, 0.0085],
-    [hs.eyeY - 0.24 * len, (0.0105 + 0.003 * fp.bridge) * len, 0.0095 * wid],
-    [hs.eyeY - (0.35 - 0.025 * tip) * len, (0.0175 + 0.002 * fp.noseLen) * knoll, 0.0125 * wid * knoll],
-    [hs.eyeY - (0.4 - 0.01 * tip) * len, (0.012 - 0.004 * tip) * knoll, 0.0135 * wid * knoll],
-    [hs.eyeY - 0.43 * len, 0.0015, 0.0095 * wid],
-  ];
-  const nA = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 3;
+  const ridge = mix(skin, new Color3(1, 0.97, 0.93), 0.1 + 0.06 * fp.bridge), wall = shade(skin, 0.93), under = shade(skin, 0.8);
+  const nA = detail >= 0.9 ? 8 : detail >= 0.5 ? 5 : 4;
+  const rows = detail >= 0.9 ? st : detail >= 0.5 ? [st[0]!, st[1]!, st[2]!, st[4]!, st[5]!, st[6]!] : [st[0]!, st[2]!, st[4]!, st[5]!, st[6]!];
   const P: V3[][] = [];
-  for (const [y, proj, hw] of st) {
+  for (const r of rows) {
     const row: V3[] = [];
+    const base = hs.front(0, r.y, 0);
     for (let j = 0; j <= nA; j++) {
-      const a = -Math.PI / 2 + (Math.PI * j) / nA;
-      const base = hs.front(0, y, 0);
-      const x = Math.sin(a) * hw * kh;
-      const s = hs.front(x / hs.W, y, 0);           // the face's surface under this point
-      const zz = s[2] + Math.cos(a) * proj * kh * (Math.abs(Math.sin(a)) < 0.99 ? 1 : 0) - 0.0015;
-      row.push([x, base[1], Math.max(zz, s[2] - 0.002)]);
+      const u = (j / nA) * 2 - 1, au = Math.abs(u);
+      const x = u * r.hw * kh;
+      const s = hs.front(x / hs.W, r.y, 0);
+      const zz = s[2] + r.proj * kh * Math.pow(Math.max(0, 1 - Math.pow(au, r.round)), 1 / r.round) - 0.0012;
+      row.push([x, base[1], Math.max(zz, s[2] - 0.0015)]);
     }
     P.push(row);
   }
-  k.grid('head', P, (i, j) => (i === P.length - 2 && (j === 0 || j === nA) ? shade(skin, 0.9) : i === 3 ? mix(skin, ROSE, 0.06) : skin), { noOcc: true,
-    out: (i, j) => { const a = -Math.PI / 2 + (Math.PI * j) / nA; return [Math.sin(a), i >= 4 ? -0.6 : 0.1, Math.cos(a)]; } });
-  // the nostril wings
+  const nR = rows.length;
+  k.grid('head', P, (i, j) => {
+    const au = Math.abs((j / nA) * 2 - 1);
+    if (i >= nR - 2) return i === nR - 1 ? under : au > 0.5 ? under : shade(skin, 0.88);   // the columella and the base
+    if (i === nR - 3) return au < 0.5 ? mix(skin, ROSE, 0.08) : wall;                       // the tip
+    return au < 0.3 && i > 0 ? ridge : au > 0.6 ? wall : skin;
+  }, { noOcc: true, out: (i, j) => { const u = (j / nA) * 2 - 1; return [u * 1.2, i >= nR - 2 ? -0.8 : 0.1, 1 - 0.5 * Math.abs(u)]; } });
+  // the nostril wings, the opening dark underneath and inside
   if (detail >= 0.3) {
-    const [y, , hw] = st[4]!;
     for (const sx of [-1, 1]) {
-      const s = hs.front((sx * hw * kh * 1.02) / hs.W, y + 0.02, 0);
-      k.ellip('head', [s[0], s[1], s[2] + 0.004 * kh], [0.0055 * kh * wid, 0.0058 * kh, 0.0072 * kh], shade(skin, 0.97), { seg: 6, lat: 4, noOcc: true,
-        paint: (_w, _uv, l) => (l.y < -0.55 && l.x * sx < 0.2 ? shade(skin, 0.55) : undefined) });
+      const s = hs.front((sx * wing.x * kh) / hs.W, wing.y, 0);
+      k.ellip('head', [s[0], s[1], s[2] + 0.0035 * kh], [wing.r[0] * kh, wing.r[1] * kh, wing.r[2] * kh], shade(skin, 0.96), { seg: detail >= 0.9 ? 8 : 6, lat: 4, noOcc: true, rot: [0.25, sx * 0.25, 0],
+        paint: (_w, _uv, l) => (l.y < -0.45 && l.x * sx < 0.35 && l.z > -0.3 ? INK_SOFT : l.x * sx > 0.6 ? shade(skin, 0.86) : undefined) });
     }
   }
 }
+const INK_SOFT = new Color3(0.2, 0.11, 0.1);
 
 /** The Brindlekin's muzzle (fur.muzzle 0..7: snub to grand), the nose pad and the mouth. */
 function buildMuzzle(k: ShapeKit, o: FaceOpts): void {
@@ -359,40 +411,74 @@ function buildMuzzle(k: ShapeKit, o: FaceOpts): void {
 }
 
 // ───────── the mouth ─────────
-/** The two lips (natural or the lip colour), the line between them, on the `head` bone. */
+/** The lips' measures (m, before the head's scale; pure, unit-tested): half width, the upper and lower lip's heights and
+ *  how far each pushes out, the cupid's bow's peaks, and where the mouth line sits (head units). */
+export interface LipShape { hw: number; upperH: number; lowerH: number; upperProj: number; lowerProj: number; bow: number; y: number }
+export function lipShape(fp: Pick<FaceParams, 'mouthW' | 'upper' | 'lower2' | 'mouthY' | 'lipFull'>): LipShape {
+  const full = fp.lipFull;
+  return {
+    hw: 0.0235 + 0.0078 * fp.mouthW,
+    upperH: (0.0066 + 0.0032 * fp.upper) * full, lowerH: (0.0084 + 0.0038 * fp.lower2) * full,
+    upperProj: (0.0034 + 0.0019 * fp.upper) * full, lowerProj: (0.004 + 0.0022 * fp.lower2) * full,
+    bow: 0.2 + 0.08 * fp.upper, y: -0.565 + 0.05 * fp.mouthY,
+  };
+}
+
+/** The two lips (natural or the lip colour): each a lofted form (the line, the pout, the vermilion border) blending into
+ *  the skin, the cupid's bow, tucked corners, and a dark mouth line between them; on the `head` bone. */
 export function buildMouth(k: ShapeKit, o: FaceOpts): void {
   const { hs, fp, col, detail } = o;
   if (o.look.fur) return;
   const kh = hs.Hh / 0.12;
-  const my = -0.565 + 0.05 * fp.mouthY;
-  const hw = (0.022 + 0.0075 * fp.mouthW) * kh;             // half width (m)
-  const natural = mix(shade(col.skin, 0.84), ROSE, 0.32);
+  const L = lipShape(fp);
+  const my = L.y, hw = L.hw * kh;
+  const natural = mix(shade(col.skin, 0.84), ROSE, 0.34);
   const lip = col.lips ?? natural;
-  const upperH = (0.0046 + 0.0018 * fp.upper) * kh, lowerH = (0.0058 + 0.0024 * fp.lower2) * kh;
+  const lineC = mix(lip, INK, 0.62);
+  const upperH = L.upperH * kh, lowerH = L.lowerH * kh;
+  const curve = (at: number) => at * at * 0.014;                 // the mouth's line curves back round the face
   if (detail < 0.5) {
     const pts: V3[] = [];
-    for (let i = 0; i <= 4; i++) { const t = (i / 4) * 2 - 1; pts.push(hs.front((t * hw) / hs.W, my + Math.abs(t) * 0.01, 0.0004)); }
-    k.tube('head', pts, [0.0015 * kh, upperH * 0.55, lowerH * 0.6, upperH * 0.55, 0.0015 * kh], mix(lip, INK, 0.25), { seg: 3, noOcc: true });
+    for (let i = 0; i <= 4; i++) { const t = (i / 4) * 2 - 1; pts.push(hs.front((t * hw) / hs.W, my + curve(Math.abs(t)), 0.0006)); }
+    k.tube('head', pts, [0.0012 * kh, upperH * 0.6, lowerH * 0.62, upperH * 0.6, 0.0012 * kh], mix(lip, INK, 0.2), { seg: 3, noOcc: true });
     return;
   }
-  const N = detail >= 0.9 ? 8 : 6;
+  const N = detail >= 0.9 ? 8 : 5;
   const lipGrid = (upper: boolean) => {
     const P: V3[][] = [];
+    const proj = (upper ? L.upperProj : L.lowerProj) * kh;
     for (let i = 0; i <= N; i++) {
       const t = (i / N) * 2 - 1, at = Math.abs(t);
-      const prof = Math.pow(Math.max(0, 1 - at * at), 0.55);
-      const h = (upper ? upperH * (1 - 0.18 * G(t, 0.12)) : lowerH) * prof;   // the cupid's bow: a dip in the middle of the upper lip
-      const lx = (t * hw) / hs.W;
-      const line = hs.front(lx, my + at * at * 0.012, -0.0008);
-      const sgn = upper ? 1 : -1;
-      const edge = hs.front(lx, my + sgn * (h / hs.Hh) + at * at * 0.012, 0.0004);
-      const mid = hs.front(lx, my + sgn * (h * 0.5 / hs.Hh) + at * at * 0.012, 0.0004 + h * (upper ? 0.42 : 0.62) * prof);
-      P.push([line, mid, edge]);
+      const prof = Math.pow(Math.max(0, 1 - at * at), 0.5);
+      // the cupid's bow: a dip in the middle of the upper lip, peaks either side; the lower lip fullest in the middle
+      const h = (upper ? upperH * (1 - 0.24 * G(t, 0.1) + 0.1 * G(at - L.bow, 0.1)) : lowerH * (0.88 + 0.12 * G(t, 0.5))) * Math.max(0.08, prof);
+      const lx = (t * hw) / hs.W, c = curve(at), sg = upper ? 1 : -1;
+      const pout = proj * Math.pow(prof, 0.7);
+      const tuck = -0.0012 * kh * sm((at - 0.75) / 0.25);           // the corners turn in
+      const rowsAt: [number, number][] = upper
+        ? [[0, -0.0004 + tuck], [0.32, pout * 0.95 + tuck], [0.72, pout * 0.82], [1, pout * 0.42], [1.35, 0.0003]]
+        : [[0, -0.0004 + tuck], [0.4, pout + tuck], [0.8, pout * 0.7], [1, pout * 0.3], [1.3, -0.0002]];
+      P.push((detail >= 0.9 ? rowsAt : [rowsAt[0]!, rowsAt[1]!, rowsAt[3]!, rowsAt[4]!]).map(([f, lift]) => hs.front(lx, my + sg * (h * f / hs.Hh) + c, lift)));
     }
-    k.grid('head', P, (_i, j) => (j === 0 ? mix(lip, INK, 0.55) : j === 1 ? lip : mix(lip, shade(col.skin, 0.92), 0.35)), { noOcc: true,
-      out: (i) => { const t = (i / N) * 2 - 1; return hs.normal(...norm([(t * hw) / hs.W, my, 0.9])); } });
+    const skinLip = mix(lip, col.skin, 0.55);
+    const nr = P[0]!.length;
+    k.grid('head', P, (i, j0) => {
+      const at = Math.abs((i / N) * 2 - 1);
+      const j = nr === 5 ? j0 : [0, 1, 3, 4][j0]!;
+      if (j === 0) return lineC;
+      if (j === 4) return upper ? shade(col.skin, 0.97) : shade(col.skin, 0.88);   // the lower lip's shadow under it
+      if (j === 3) return skinLip;
+      const c = j === 1 ? (upper ? shade(lip, 0.88) : shade(lip, 1.06)) : lip;
+      return at > 0.85 ? mix(c, lineC, 0.4) : c;
+    }, { noOcc: true, out: (i, j) => { const t = (i / N) * 2 - 1; const n = hs.normal(...norm([(t * hw) / hs.W, my, 0.9])); return [n[0], n[1] + (upper ? 0.3 : -0.3) * (j / (nr - 1)), n[2]]; } });
   };
   lipGrid(true); lipGrid(false);
+  if (detail >= 0.9) {
+    // the mouth line: a thin dark crease from corner to corner, deeper at the corners
+    const pts: V3[] = [], rad: number[] = [];
+    for (let i = 0; i <= 6; i++) { const t = (i / 6) * 2 - 1, at = Math.abs(t); pts.push(hs.front((t * hw * 1.04) / hs.W, my + curve(at) - 0.002, 0.0002)); rad.push((0.0007 + 0.0004 * at) * kh); }
+    k.tube('head', pts, rad, mix(lineC, INK, 0.4), { seg: 3, noOcc: true });
+  }
 }
 
 // ───────── ears ─────────
@@ -401,7 +487,7 @@ export function buildEars(k: ShapeKit, o: FaceOpts): void {
   const { hs, fp, col, look, detail } = o;
   const kh = hs.Hh / 0.12;
   const sz = 1 + 0.22 * fp.earSize, out = 0.28 + 0.32 * fp.earAngle;
-  const skin = shade(col.skin, 0.97), inner = mix(col.skin, ROSE, 0.3);
+  const skin = shade(col.skin, 0.97), inner = mix(col.skin, ROSE, 0.3), bowl = shade(mix(col.skin, ROSE, 0.25), 0.72);
   const seg = detail >= 0.5 ? 8 : 6;
   if (look.people === 'brindlekin') return animalEars(k, o, sz);
   for (const sx of [-1, 1]) {
@@ -414,8 +500,18 @@ export function buildEars(k: ShapeKit, o: FaceOpts): void {
       k.tube('head', [a, b, c, d], [0.016 * kh, 0.014 * kh, 0.009 * kh, 0.0015], skin, { seg: 6, flatten: 0.4, noOcc: true });
     } else {
       const e = [0.85, 1, 1.12, 1.25][fp.earStyle]! * sz * (look.people === 'knollfolk' ? 1.2 : 1);
-      k.ellip('head', [side[0] + sx * 0.004 * kh, side[1], side[2]], [0.0075 * kh * e, 0.03 * kh * e, 0.018 * kh * e], skin,
-        { seg, lat: 5, rot: [0.1, sx * out, sx * -0.12], noOcc: true, paint: (_w, _uv, l) => (l.x * sx < -0.2 && Math.abs(l.y) < 0.55 && l.z > -0.2 ? inner : undefined) });
+      const ec: V3 = [side[0] + sx * 0.004 * kh, side[1], side[2]];
+      k.ellip('head', ec, [0.0075 * kh * e, 0.03 * kh * e, 0.018 * kh * e], skin,
+        { seg, lat: 5, rot: [0.1, sx * out, sx * -0.12], noOcc: true, paint: (_w, _uv, l) => (l.x * sx > 0.2 && Math.abs(l.y) < 0.6 && l.z > -0.45 && l.z < 0.6 ? bowl : undefined) });
+      if (detail >= 0.9) {
+        // the helix: a rolled rim from the top front, over the back, down to the lobe
+        const pts: V3[] = [];
+        for (let i = 0; i <= 5; i++) {
+          const th = (70 + (i / 5) * 200) * (Math.PI / 180), cz = Math.cos(th), sy = Math.sin(th);
+          pts.push([ec[0] + sx * (0.0072 * kh * e + Math.max(0, -cz) * 0.018 * kh * e * Math.sin(out)), ec[1] + 0.028 * kh * e * sy, ec[2] + 0.0165 * kh * e * cz]);
+        }
+        k.tube('head', pts, [0.0012 * kh, 0.0024 * kh * e, 0.0026 * kh * e, 0.0026 * kh * e, 0.0028 * kh * e, 0.003 * kh * e], skin, { seg: 4, noOcc: true });
+      }
     }
     void root;
   }
@@ -459,12 +555,13 @@ export function buildMarks(k: ShapeKit, o: FaceOpts): void {
     k.tube('head', P, P.map((_, i) => (i === 0 || i === P.length - 1 ? r * 0.35 : r)), c, { seg: 3, noOcc: true });
   };
   const age = fp.age;
+  const full = detail >= 0.9;   // at med only the lines that read at that size (smile lines, the forehead's)
   if (age > 0 && !look.fur) {
     const lc = shade(col.skin, 0.8 - 0.03 * age), r = (0.0006 + 0.00025 * age) * kh;
     // smile lines from the nostril wings past the mouth's corners
     for (const sx of [-1, 1]) line([[sx * 0.2, -0.33], [sx * 0.29, -0.47], [sx * 0.31, -0.6]], r, lc);
     if (age >= 2) {
-      for (const sx of [-1, 1]) { // crow's feet
+      if (full) for (const sx of [-1, 1]) { // crow's feet
         line([[sx * (hs.eyeX + 0.24), hs.eyeY + 0.05], [sx * (hs.eyeX + 0.33), hs.eyeY + 0.09]], r * 0.8, lc);
         line([[sx * (hs.eyeX + 0.24), hs.eyeY - 0.02], [sx * (hs.eyeX + 0.33), hs.eyeY - 0.06]], r * 0.8, lc);
       }
@@ -472,14 +569,14 @@ export function buildMarks(k: ShapeKit, o: FaceOpts): void {
     }
     if (age >= 3) {
       line([[-0.26, 0.7], [0, 0.73], [0.26, 0.7]], r * 0.9, lc);
-      for (const sx of [-1, 1]) line([[sx * (hs.eyeX - 0.15), hs.eyeY - 0.13], [sx * hs.eyeX, hs.eyeY - 0.17], [sx * (hs.eyeX + 0.14), hs.eyeY - 0.13]], r * 0.8, lc); // under the eyes
+      if (full) for (const sx of [-1, 1]) line([[sx * (hs.eyeX - 0.15), hs.eyeY - 0.13], [sx * hs.eyeX, hs.eyeY - 0.17], [sx * (hs.eyeX + 0.14), hs.eyeY - 0.13]], r * 0.8, lc); // under the eyes
     }
-    if (age >= 4) for (const sx of [-1, 1]) line([[sx * 0.32, -0.66], [sx * 0.36, -0.8]], r, lc); // the jowls
+    if (age >= 4 && full) for (const sx of [-1, 1]) line([[sx * 0.32, -0.66], [sx * 0.36, -0.8]], r, lc); // the jowls
   }
   // freckles: dots over the nose and cheeks, more with the slider (a fixed scatter, so they never crawl)
   const fr = look.skin.freckles;
   if (fr > 0) {
-    const n = Math.round([0, 9, 16, 26, 38][fr]! * (detail >= 0.9 ? 1 : 0.4));
+    const n = full ? [0, 8, 13, 19, 25][fr]! : 0;   // (med: painted on the skull instead)
     const fc = mix(col.skin, shade(col.skin, 0.55), 0.85);
     for (let i = 0; i < n; i++) {
       const a = Math.sin(i * 12.9898) * 43758.5453, b = Math.sin(i * 78.233) * 12543.123;
@@ -493,7 +590,7 @@ export function buildMarks(k: ShapeKit, o: FaceOpts): void {
   for (let i = 0; i < MOLE_SPOTS.length; i++) {
     if (!(look.skin.moles & (1 << i))) continue;
     const s = MOLE_SPOTS[i]!;
-    k.ellip('head', hs.front(-s.x * 0.85, s.y * 0.78, 0.0006), [0.0026 * kh, 0.0026 * kh, 0.0016 * kh], shade(mix(col.skin, new Color3(0.25, 0.15, 0.1), 0.75), 0.9), { seg: 5, lat: 3, noOcc: true });
+    k.ellip('head', hs.front(-s.x * 0.85, s.y * 0.78, 0.0006), [0.0026 * kh, 0.0026 * kh, 0.0016 * kh], shade(mix(col.skin, new Color3(0.25, 0.15, 0.1), 0.75), 0.9), { seg: full ? 5 : 3, lat: full ? 3 : 2, noOcc: true });
   }
   // scars: a raised pale line (SCARS: left cheek, right cheek, brow nick, lip nick, nose bridge, jaw line, eye slash)
   const sc = mix(col.skin, new Color3(0.93, 0.78, 0.76), 0.55), sr = 0.0016 * kh;

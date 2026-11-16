@@ -174,6 +174,8 @@ export interface FaceParams {
   noseLen: number; noseW: number; bridge: number; tip: number;
   // mouth
   mouthW: number; upper: number; lower2: number; mouthY: number;
+  /** The lips' fullness by body (female a little fuller; the sliders reach either way). */
+  lipFull: number;
   // ears
   earSize: number; earAngle: number; earStyle: number;
   /** Age 0..4: lines' strength. */
@@ -229,7 +231,7 @@ export function faceParams(l: Look): FaceParams {
     browArch: bs.arch, browPeak: bs.peak, browT: bs.t * (1 + 0.45 * u10(b.thickness)) * (fem ? 0.85 : 1.1), browTaper: bs.taper, browS: bs.s,
     browY: u10(b.height), browTilt: 0.2 * u10(b.tilt), browAngle: bs.angle,
     noseLen: u10(n.length), noseW: u10(n.width), bridge: u10(n.bridge), tip: u10(n.tip),
-    mouthW: u10(m.width), upper: u10(m.upperLip), lower2: u10(m.lowerLip), mouthY: u10(m.height),
+    mouthW: u10(m.width), upper: u10(m.upperLip), lower2: u10(m.lowerLip), mouthY: u10(m.height), lipFull: fem ? 1.14 : 1,
     earSize: u10(l.ears.size), earAngle: u10(l.ears.angle), earStyle: l.ears.style,
     age: l.face.age, muzzle: l.fur ? l.fur.muzzle : -1,
   };
