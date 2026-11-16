@@ -140,7 +140,9 @@ import {
   levelForXp,
   lootTable,
   parseInvOp,
+  mergeLookV1,
   parseLook,
+  parseLookV1,
   purseFullText,
   stallAt,
   type EmoteId,
@@ -1384,19 +1386,24 @@ export class ZoneRoom extends Room<{ state: ZoneState }> {
 
   /**
    * `look`: the Barber, within reach of its stall, alive, out of combat and not busy. parseLook first (the
-   * server never throws on a bad look); barberCost gold, or nothing on the free visit; an unchanged look
+   * server never throws on a bad look; a v1 look from the pre-v2 creator is merged onto the current look,
+   * mergeLookV1, keeping its body and v2-only details); barberCost gold, or nothing on the free visit; an unchanged look
    * costs nothing and changes nothing.
    */
   private onLook(client: Client, message: unknown) {
     const session = this.sessions.get(client.sessionId);
     if (!session) return;
     if (!session.invBucket.take(this.wallMs())) return this.refuseInv(session, 'look', 'rate');
-    const look = parseLook((message as { look?: unknown } | null)?.look);
-    if (!look) return this.refuseInv(session, 'look', 'unknown');
+    const sent = (message as { look?: unknown } | null)?.look;
+    const v2 = parseLook(sent);
+    // a v1 look (the pre-v2 creator) is checked here and merged onto the current look in the queue (mergeLookV1)
+    if (!v2 && !parseLookV1(sent)) return this.refuseInv(session, 'look', 'unknown');
     void session.queue.push<boolean>({
       retries: 1,
       recheck: RECHECK,
       run: (s, jobs) => {
+        const look = v2 ?? mergeLookV1(s.look, sent);
+        if (!look) return { kind: 'refuse', reason: 'unknown' };
         const ctx = this.invCtx(session);
         if (ctx.dead) return { kind: 'refuse', reason: 'dead' };
         if (ctx.inCombat) return { kind: 'refuse', reason: 'combat' };

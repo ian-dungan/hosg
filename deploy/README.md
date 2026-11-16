@@ -276,6 +276,20 @@ inventory, in the same write as the reward it pays. So:
    recorded, and the progress made before comes back into use when you update again. Rewards already paid
    (xp, gold, items, the title) are kept either way.
 
+**The update that brings Look v2 (the detailed character builder) has no database migration.** Each
+adventurer's stored look is left exactly as it is. The new server reads an old (v1) look and shows it as the
+closest new look, so nobody's adventurer changes on its own. Every adventurer whose stored look is still an old
+one gets **one free visit to the new creator** (at the Barber, or the creator at sign-in): the server reads the
+free visit as "the stored flag, or an old look is stored". Once a new look is saved, that adventurer's visit is
+used up for good. Adventurers who never used the creator already have their free visit. Running the new server
+again, or restarting it, changes nothing. So:
+
+1. A backup first is still good practice (see "Back up the database" below), but no special steps are
+   needed: `git pull` and `docker compose up -d --build` as usual.
+2. Going back to an older version afterwards works, but an adventurer who saved a new look shows their
+   default look on the older version (it cannot read the new kind), and the older server does not give the
+   free visit back. The saved new look is kept, and comes back when you update again.
+
 ### Back up the database
 
 ```

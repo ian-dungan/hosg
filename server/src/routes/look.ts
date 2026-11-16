@@ -1,14 +1,14 @@
 // The character creator's route (bearer auth, the auth rate limit):
 // - GET /api/look → { look: Look | null, free: boolean, name: string | null, guest: boolean };
 // - POST /api/look { look, name? }: the one free creator visit. The look goes through parseLook (a bad one is
-//   a 400 and changes nothing). The name, when given and the adventurer has none, goes through Plan 1's
+//   a 400 and changes nothing; a v1 look from the pre-v2 creator is merged onto the current look, mergeLookV1). The name, when given and the adventurer has none, goes through Plan 1's
 //   validateAdventurerName and nameAdventurer first (a bad name 400, a taken one 409; an adventurer that
 //   already has a name keeps it: names are permanent). Then useFreeLook; while the inventory is untouched
 //   (nextUid 17: only the starter kit) the starter kit takes the look's two outfit dyes. Not free any more:
 //   409 { error: 'Visit the Barber in Shady Grove to change your look' }.
 import express from 'express';
 import type { ErrorRequestHandler } from 'express';
-import { parseLook, validateAdventurerName, type Look } from '@sg2/shared';
+import { defaultLook, mergeLookV1, parseLook, validateAdventurerName, type Look } from '@sg2/shared';
 import { rateLimit } from '../auth/rateLimit';
 import { verifyToken } from '../auth/tokens';
 import { AlreadyNamedError, NameTakenError, type Account, type Store } from '../store/types';
@@ -52,9 +52,10 @@ export function lookRouter(store: Store, secret: string, opts: { ratePerMinute?:
       const account = await bearer(req);
       if (!account) return void res.status(401).json({ error: 'Please sign in again' });
       const body = (req.body ?? {}) as { look?: unknown; name?: unknown };
-      const look: Look | null = parseLook(body.look);
-      if (!look) return void res.status(400).json({ error: 'That look is not possible' });
       let a = await store.getOrCreateAdventurer(account.id);
+      // v2, or a v1 look from the pre-v2 creator merged onto the current look (mergeLookV1)
+      const look: Look | null = parseLook(body.look) ?? mergeLookV1(a.look ?? defaultLook(account.id), body.look);
+      if (!look) return void res.status(400).json({ error: 'That look is not possible' });
       if (!a.lookFree) return void res.status(409).json({ error: LOOK_NOT_FREE });
       if (body.name !== undefined && a.name === null) {
         const invalid = validateAdventurerName(body.name);

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import {
-  GOLD_MAX, JOB_IDS, MAX_HP, SPAWN, defaultLook, isJobsSave, levelForXp, newInventory, newJobsSave, newQuestSave, parseJobsSave, starterItems, totalTo, type JobsSave,
+  GOLD_MAX, JOB_IDS, MAX_HP, SPAWN, defaultLook, defaultLookV1, isJobsSave, prng, randomLook, upgradeLookV1, levelForXp, newInventory, newJobsSave, newQuestSave, parseJobsSave, starterItems, totalTo, type JobsSave,
   type QuestSave,
 } from '@sg2/shared';
 import { NameTakenError, checkedSave, type Adventurer, type InvWrite, type Store } from './types';
@@ -484,6 +484,32 @@ function storeSuite(label: string, open: (opts?: { start?: StartSpot }) => Promi
       expect(await store.useFreeLook('00000000-0000-4000-8000-000000000000', look)).toBe(false);
     });
 
+    it('Look v2: a stored v1 look reads upgraded with one free visit to the new creator (until a v2 look is saved); a v2 look keeps its flag', async () => {
+      const l1 = defaultLookV1('a Plan 5 look');
+      const v2 = randomLook(prng(81));
+      const { store: legacy, accountIds } = await seedLegacy([
+        { loadout: PLAN3_DEFAULT, jobs: newJobsSave(), look: l1, lookFree: false },
+        { loadout: PLAN3_DEFAULT, jobs: newJobsSave(), look: v2, lookFree: false },
+        { loadout: PLAN3_DEFAULT, jobs: newJobsSave(), look: l1, lookFree: false },
+      ]);
+      try {
+        const [old, chose, viaBarber] = accountIds as [string, string, string];
+        for (let i = 0; i < 2; i++) expect(await legacy.getOrCreateAdventurer(old)).toMatchObject({ look: upgradeLookV1(l1), lookFree: true }); // idempotent reads
+        expect(await legacy.getOrCreateAdventurer(chose)).toMatchObject({ look: v2, lookFree: false });
+        expect(await legacy.useFreeLook(chose, v2)).toBe(false);
+        const picked = randomLook(prng(82));
+        expect(await legacy.useFreeLook(old, picked)).toBe(true);
+        expect(await legacy.getOrCreateAdventurer(old)).toMatchObject({ look: picked, lookFree: false });
+        expect(await legacy.useFreeLook(old, picked)).toBe(false);
+        // the Barber's free visit: the room writes the v2 look with lookFree false
+        const a = await legacy.getOrCreateAdventurer(viaBarber);
+        expect(await legacy.writeInventory(a.id, a.invVersion, { inventory: a.inventory, dGold: 0, dSeals: 0, look: picked, lookFree: false })).not.toBeNull();
+        expect(await legacy.getOrCreateAdventurer(viaBarber)).toMatchObject({ look: picked, lookFree: false });
+      } finally {
+        if (legacy !== store) await legacy.close();
+      }
+    });
+
     it('logGm rows', async () => {
       const tag = uniqueName('cmd');
       await store.logGm({ gmAccount: null, command: 'role', target: tag, args: { on: true }, ok: true, result: 'granted' });
@@ -725,9 +751,9 @@ if (databaseUrl) {
         const account = await store.createAccount({ username: uniqueName('Legacy'), passwordHash: 'h', isGuest: false });
         const { id } = await store.getOrCreateAdventurer(account.id);
         // The jobs column is NOT NULL after 004: a row it missed is stood in for by a JSON null.
-        await db.query('UPDATE adventurers SET loadout = $2::jsonb, jobs = $3::jsonb, inventory = $4::jsonb, quests = $5::jsonb WHERE id = $1', [
+        await db.query('UPDATE adventurers SET loadout = $2::jsonb, jobs = $3::jsonb, inventory = $4::jsonb, quests = $5::jsonb, look = $6::jsonb, look_free = $7 WHERE id = $1', [
           id, JSON.stringify(r.loadout), r.jobs === undefined ? 'null' : JSON.stringify(r.jobs), r.inventory === undefined ? null : JSON.stringify(r.inventory),
-          r.quests === undefined ? null : JSON.stringify(r.quests),
+          r.quests === undefined ? null : JSON.stringify(r.quests), r.look === undefined ? null : JSON.stringify(r.look), r.lookFree ?? true,
         ]);
         accountIds.push(account.id);
       }
@@ -1148,7 +1174,7 @@ if (databaseUrl) {
       }
     });
 
-    it('migration 008 is safe to run twice, and a Plan 5 row reads with its inventory, Seals and look intact', async () => {
+    it('migration 008 is safe to run twice, and a Plan 5 row reads with its inventory and Seals intact and its v1 look upgraded (with a free visit)', async () => {
       const dbName = `sg2_migrate_${Math.floor(Math.random() * 1e9)}`;
       const admin = new pg.Client({ connectionString: databaseUrl });
       await admin.connect();
@@ -1157,7 +1183,7 @@ if (databaseUrl) {
       url.pathname = `/${dbName}`;
       const sql = async (file: string) => readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
       const files = ['001_init.sql', '002_adventurer_names.sql', '003_combat.sql', '004_jobs.sql', '005_parties_and_warden.sql', '006_progression_gear_looks.sql', '007_gm_audit_append_only.sql'];
-      const look = defaultLook('a Plan 5 look');
+      const look = defaultLookV1('a Plan 5 look');
       const jobs = { curve: 2, current: 'warrior', jobs: { warrior: rec(totalTo(6), ['mend', 'bulwark']) } };
       const inv = { ...newInventory([look.outfit.dye1, look.outfit.dye2]), recentKills: ['grove:12:3'] };
       let id = '';
@@ -1181,7 +1207,7 @@ if (databaseUrl) {
         const store = await createPgStore(url.href); // applies 008
         try {
           const a = await store.getOrCreateAdventurer(id);
-          expect(a).toMatchObject({ seals: 3, sealDay: '2026-11-11', titles: ['Lampbreaker'], gold: 120, hp: 70, zone: 'greenway', look, lookFree: false, invVersion: 9, inventory: inv });
+          expect(a).toMatchObject({ seals: 3, sealDay: '2026-11-11', titles: ['Lampbreaker'], gold: 120, hp: 70, zone: 'greenway', look: upgradeLookV1(look), lookFree: true, invVersion: 9, inventory: inv });
           expect(a.inventoryRepaired).toBeUndefined();
           expect(a.quests).toEqual(newQuestSave(new Date().toISOString().slice(0, 10)));
           expect(a.questsRepaired).toBeUndefined();

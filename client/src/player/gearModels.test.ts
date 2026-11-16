@@ -5,9 +5,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { NullEngine, Scene, type Mesh } from '@babylonjs/core';
 import {
-  ADVENTURER_RADIUS, COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLE_IDS, PEOPLES, SETS, SET_IDS,
-  decodeGearLook, encodeGearLook, parseLook, prng, randomLook, resolveGearLook,
-  type GearLook, type JobId, type Look, type PeopleId,
+  ADVENTURER_RADIUS, COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLE_IDS, PEOPLES, SETS, SET_IDS, decodeGearLook, encodeGearLook, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, resolveGearLook, type GearLook, type JobId, type LookV1 as Look, type PeopleId,
 } from '@sg2/shared';
 import { characterStats, capeFor, makeCharacter, setCharacterDetail, setGearBuilder } from './character';
 import { buildPiece, dyeColour, gearHooks, gearTriangles, kitGear, modelInfo, setGear, OWN } from './gearModels';

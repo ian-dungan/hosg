@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOOK_LIMITS, PEOPLES, defaultLook, parseLook, prng, randomLook, validateAdventurerName, type Look } from '@sg2/shared';
+import { LOOK_LIMITS_V1 as LOOK_LIMITS, PEOPLES, defaultLookV1 as defaultLook, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, validateAdventurerName, type LookV1 as Look } from '@sg2/shared';
 import { CreatorState, UNDO_DEPTH, controlsFor, getPath, swatchesFrom, type CreatorStateOpts } from './creatorState';
 import { creatorLayout } from './creatorLayout';
 

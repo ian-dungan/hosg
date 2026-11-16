@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Room } from '@colyseus/sdk';
 import {
-  BARBER_PEOPLE_PRICE, BARBER_PRICE, INTEREST_RADIUS, TOWN_STALLS, defaultLook, encodeLook, randomLook, prng, worldOf,
+  BARBER_BODY_PRICE, BARBER_PEOPLE_PRICE, BARBER_PRICE, HAIR_STYLES, INTEREST_RADIUS, TOWN_STALLS, defaultLook, encodeLook, lookV1View, mergeLookV1, randomLook, prng, worldOf,
   type CampSpawn, type Look, type Surface, type ZoneDef,
 } from '@sg2/shared';
 import { createMemoryStore } from '../store/memory';
@@ -83,7 +83,7 @@ describe('looks', () => {
     const id = (await server.store.getOrCreateAdventurer(a.accountId)).id;
     const s = TOWN_STALLS.barber, d = Math.hypot(s.x, s.z);
     const current: Look = defaultLook(a.accountId);
-    const other: Look = { ...current, hair: { ...current.hair, style: (current.hair.style + 1) % 20 } };
+    const other: Look = { ...current, hair: { ...current.hair, style: (current.hair.style + 1) % HAIR_STYLES.length } };
     // away from the stall
     a.room.send('look', { look: other });
     await waitFor(() => a.refusals.length > 0);
@@ -116,6 +116,22 @@ describe('looks', () => {
     await waitFor(() => a.views.at(-1).gold === 500 - BARBER_PRICE - BARBER_PEOPLE_PRICE);
     expect(await server.store.getOrCreateAdventurer(a.accountId)).toMatchObject({ gold: 500 - BARBER_PRICE - BARBER_PEOPLE_PRICE });
     expect(encodeLook((await server.store.getOrCreateAdventurer(a.accountId)).look!)).toBe(encodeLook(otherPeople));
+    // Look v2: a new body costs what a new people does
+    const otherBody: Look = { ...otherPeople, body: otherPeople.body === 'male' ? 'female' : 'male' };
+    await sleep(150);
+    a.room.send('look', { look: otherBody });
+    await waitFor(() => a.look() === encodeLook(otherBody));
+    await waitFor(() => a.views.at(-1).gold === 500 - BARBER_PRICE - BARBER_PEOPLE_PRICE - BARBER_BODY_PRICE);
+    // a v1 look from the pre-v2 creator: merged onto the current look (only the changed hair style), 40
+    const view = lookV1View(otherBody);
+    const v1Edit = { ...view, hair: { ...view.hair, style: (view.hair.style + 1) % 20 } };
+    const merged = mergeLookV1(otherBody, v1Edit)!;
+    expect(merged.body).toBe(otherBody.body);
+    await sleep(150);
+    a.room.send('look', { look: v1Edit });
+    await waitFor(() => a.look() === encodeLook(merged));
+    await waitFor(() => a.views.at(-1).gold === 500 - 2 * BARBER_PRICE - BARBER_PEOPLE_PRICE - BARBER_BODY_PRICE);
+    expect((await server.store.getOrCreateAdventurer(a.accountId)).look).toEqual(merged); // stored as v2
     // not enough gold (taken down behind the session's back: the refusal is checked on a fresh read)
     const now = await server.store.getOrCreateAdventurer(a.accountId);
     await server.store.writeInventory(now.id, now.invVersion, { inventory: now.inventory, jobs: now.jobs, dGold: 10 - now.gold, dSeals: 0 });
@@ -125,7 +141,7 @@ describe('looks', () => {
     expect(a.refusals.at(-1)).toMatchObject({ reason: 'gold' });
     // bad looks: refused, never thrown on (an out-of-range slider, fur on a Human, junk)
     const human = { ...current, people: 'human', fur: { pattern: 0, colour: 0, tail: 0 } };
-    for (const bad of [{ ...current, body: { ...current.body, height: 99 } }, human, 'x', null, { v: 1 }]) {
+    for (const bad of [{ ...current, build: { ...current.build, height: 99 } }, { ...current, body: 'other' }, { ...lookV1View(current), v: 1, body: 7 }, human, 'x', null, { v: 1 }, { v: 2 }]) {
       await sleep(150);
       const r = a.refusals.length;
       a.room.send('look', { look: bad });

@@ -3,7 +3,7 @@
 // not re-sent on a view re-entry, so the client keeps them by engine id for the whole room. Engine ids belong to one
 // room: the cache is cleared on every room change (a travel, a relog, a reconnect into a new room).
 // Also: the free creator visit (`lookFree`) and the Barber's refusals (`invRefused` with op 'look'). Pure: unit-tested.
-import { decodeGearLook, decodeLook, type GearLook, type Look, type S2C } from '@sg2/shared';
+import { decodeGearLook, decodeLook, lookV1View, type GearLook, type LookV1 as Look, type S2C } from '@sg2/shared';
 import type { CreatorOpts } from '../core/contracts';
 
 export interface LookEntry {
@@ -32,7 +32,9 @@ export class LookCache {
       if (typeof eid !== 'number' || !Number.isInteger(eid) || eid < 0 || typeof code !== 'string' || typeof gearCode !== 'string') { this.rejected++; continue; }
       const prev = this.byEid.get(eid);
       if (prev && prev.code === code && prev.gearCode === gearCode) continue;
-      const look = decodeLook(code);
+      // v1 and v2 codes decode to a v2 look; this client still draws the v1 model (lookV1View) until it is rebuilt.
+      const v2 = decodeLook(code);
+      const look = v2 && lookV1View(v2);
       if (!look) { this.rejected++; continue; }
       const gear = decodeGearLook(gearCode);
       this.byEid.set(eid, { code, gearCode, look, gear, ver: (prev?.ver ?? 0) + 1 });

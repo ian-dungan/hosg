@@ -13,8 +13,7 @@
 // window.__looks: { step(dt, n) advances every adventurer n steps; stats(): triangles and draw calls; ready }.
 import { Engine, Scene, ArcRotateCamera, Matrix, Vector3, SceneInstrumentation } from '@babylonjs/core';
 import {
-  EMOTES, JOBS, JOB_IDS, LOOK_LIMITS, PEOPLES, PEOPLE_IDS, defaultLook, greenwayLayout, parseLook, randomLook, prng,
-  type EmoteId, type Look as AdventurerLook, type PeopleId,
+  EMOTES, JOBS, JOB_IDS, LOOK_LIMITS_V1 as LOOK_LIMITS, PEOPLES, PEOPLE_IDS, defaultLookV1 as defaultLook, greenwayLayout, parseLookV1 as parseLook, randomLookV1 as randomLook, prng, type EmoteId, type LookV1 as AdventurerLook, type PeopleId,
 } from '@sg2/shared';
 import type { CharacterView, Quality } from '../core/contracts';
 import { buildGreenway } from '../world/greenway';

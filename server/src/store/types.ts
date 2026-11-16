@@ -1,6 +1,6 @@
 // What the server keeps between sessions: accounts and their adventurers.
 import {
-  GOLD_MAX, JOB_IDS, defaultLook, newJobsSave, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook,
+  GOLD_MAX, JOB_IDS, defaultLook, newJobsSave, isJobsSave, isQuestSave, isSaveZoneId, kitItems, levelForXp, newInventory, parseInventory, parseJobsSave, parseLook, readLook, storedLookIsV1,
   parseQuests, type DyeId, type GearSlot, type InventorySave, type JobsSave, type Look, type QuestSave, type ZoneId,
 } from '@sg2/shared';
 
@@ -135,12 +135,18 @@ export function checkedGmLog(e: GmLogEntry): GmLogEntry {
 }
 
 /**
- * A stored row's inventory and look as both stores read them: the look with parseLook (anything else is null:
- * the default look), the inventory with parseInventory, a fallback starter kit dyed with the look's outfit
+ * The free creator visit as both stores read it: the stored flag, or a stored v1 look (Look v2: every adventurer
+ * whose look predates v2 gets one free visit to the new creator, until a v2 look is saved; no migration).
+ */
+export const lookFreeOf = (storedFlag: boolean, storedLook: unknown): boolean => storedFlag || storedLookIsV1(storedLook);
+
+/**
+ * A stored row's inventory and look as both stores read them: the look with readLook (v2, or v1 upgraded on the
+ * fly; anything else is null: the default look), the inventory with parseInventory, a fallback starter kit dyed with the look's outfit
  * dyes (or the default look's, from the account id).
  */
 export function readInvLook(inventory: unknown, look: unknown, accountId: string): Pick<Adventurer, 'inventory' | 'look' | 'inventoryRepaired'> {
-  const l = parseLook(look);
+  const l = readLook(look);
   const outfit = (l ?? defaultLook(accountId)).outfit;
   const read = parseInventory(inventory, [outfit.dye1, outfit.dye2]);
   return { inventory: read.inv, look: l, ...(read.repaired ? { inventoryRepaired: true as const } : {}) };

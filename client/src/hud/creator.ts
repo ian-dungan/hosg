@@ -4,7 +4,7 @@
 // suggested swatches, a hue strip and a lightness strip, and a preview chip), "Surprise me", Undo (the last 20 changes)
 // and Done (the Barber shows its price, or "free" on the free visit). The state is creatorState.ts; where things go
 // on the screen is creatorLayout.ts; the 3D preview is injected (setCreatorPreview: player/creatorPreview.ts).
-import { EMOTES, PEOPLES, PEOPLE_IDS, randomLook, type EmoteId, type Look } from '@sg2/shared';
+import { EMOTES, PEOPLES, PEOPLE_IDS, randomLookV1 as randomLook, type EmoteId, type LookV1 as Look } from '@sg2/shared';
 import type { CreatorOpts } from '../core/contracts';
 import { h } from './dom';
 import { CreatorState, TAB_LABEL, controlsFor, dyeHex, dyeName, getPath, type Control, type CreatorTab } from './creatorState';

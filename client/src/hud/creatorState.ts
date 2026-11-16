@@ -2,8 +2,7 @@
 // parseLook (an impossible look never exists), Undo over the last 20 changes, "Surprise me", the name's live check,
 // and what Done says and costs (the Barber: barberCost, or free on the free visit).
 import {
-  BRINDLE_EARS, DYES, FACE_MARKS, FACE_SHAPES, FACIAL_HAIR, FUR_PATTERNS, HAIR_STYLES, LOOK_LIMITS, PEOPLES, PEOPLE_IDS, STANCES, TAILS, WALKS,
-  barberCost, parseLook, type Look, type PeopleId,
+  BRINDLE_EARS, DYES, FACE_MARKS_V1 as FACE_MARKS, FACE_SHAPES_V1 as FACE_SHAPES, FACIAL_HAIR_V1 as FACIAL_HAIR, FUR_PATTERNS, HAIR_STYLES_V1 as HAIR_STYLES, LOOK_LIMITS_V1 as LOOK_LIMITS, PEOPLES, PEOPLE_IDS, STANCES, TAILS, WALKS, barberCostV1 as barberCost, parseLookV1 as parseLook, type LookV1 as Look, type PeopleId,
 } from '@sg2/shared';
 
 export type CreatorTab = 'people' | 'body' | 'face' | 'hair' | 'colours' | 'style' | 'outfit' | 'name';

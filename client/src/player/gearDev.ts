@@ -16,8 +16,7 @@
 // window.__gear: { ready, stats(): triangles, emissive triangles and draw calls }.
 import { Engine, Scene, ArcRotateCamera, Matrix, Vector3, SceneInstrumentation, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
 import {
-  COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLES, PEOPLE_IDS, SETS, SET_IDS, greenwayLayout, parseLook, prng, randomLook, resolveGearLook,
-  type GearLook, type JobId, type Look as AdventurerLook, type PeopleId, type SetId,
+  COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLES, PEOPLE_IDS, SETS, SET_IDS, greenwayLayout, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, resolveGearLook, type GearLook, type JobId, type LookV1 as AdventurerLook, type PeopleId, type SetId,
 } from '@sg2/shared';
 import type { CharacterView, Quality } from '../core/contracts';
 import { buildGreenway } from '../world/greenway';

@@ -1,8 +1,7 @@
 // The pure parts of the story world: entity ids, which marker shows over whom, the NPC looks and the prop budgets.
 import { describe, expect, it } from 'vitest';
 import {
-  NPC_IDS, PROP_IDS, PEOPLES, QUESTS, newQuestSave, parseLook, questsView,
-  type NpcId, type PropId, type QuestId, type QuestSave, type QuestsView,
+  NPC_IDS, PROP_IDS, PEOPLES, QUESTS, newQuestSave, parseLookV1 as parseLook, questsView, type NpcId, type PropId, type QuestId, type QuestSave, type QuestsView,
 } from '@sg2/shared';
 import { GUILD_BOARD_EID } from './guildBoard';
 import {

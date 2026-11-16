@@ -1,154 +1,210 @@
-// Peoples and looks: the strict parser, the compact codes, the varied defaults and the Barber's price.
+// Look v2: the tables, the strict parser, the v2 code and the v1 upgrade, presets, random and default looks,
+// the Barber's price, the v1 view for the pre-v2 client, and that no rule outside looks reads a look.
 import { describe, expect, it } from 'vitest';
 import {
-  BRINDLE_EARS, EMOTES, FACE_MARKS, FACE_SHAPES, FACIAL_HAIR, FUR_PATTERNS, GEAR_LOOK_SLOTS, HAIR_STYLES, LOOK_COMBINATIONS,
-  LOOK_LIMITS, PEOPLE_IDS, PEOPLES, STANCES, TAILS, WALKS, barberCost, decodeGearLook, decodeLook, defaultLook, encodeGearLook,
-  encodeLook, parseLook, randomLook, resolveGearLook, type GearLook, type Look,
+  BARBER_BODY_PRICE, BARBER_PEOPLE_PRICE, BARBER_PRICE, BODY_TYPES, BROW_SHAPES, EYE_COLOURS, EYE_SHAPES, FACE_PAINTS, FACE_SHAPE_PRESETS,
+  FACIAL_HAIR, HAIRLINES, HAIR_COLOURS, HAIR_STYLES, HAIR_STYLE_INFO, LINER_COLOURS, LIP_COLOURS, LOOK_CODE_BYTES, LOOK_CODE_CHARS,
+  LOOK_COMBINATIONS, LOOK_LIMITS, LOOK_OPTIONAL_COLOURS, LOOK_PRESETS, LUMA_MAX, LUMA_MIN, MOLE_SPOTS, MOUTH_PRESETS, NOSE_PRESETS, SCARS,
+  SHADOW_COLOURS, SKIN_TONES, barberCost, clampLookColour, decodeLook, defaultLook, encodeLook, lookLuma, lookV1View, parseLook, randomLook,
+  mergeLookV1, readLook, storedLookIsV1, upgradeLookV1, type Look,
 } from './look';
-import { seededRng } from './rng';
+import { PEOPLE_IDS, PEOPLES } from './lookCommon';
+import { FACIAL_HAIR_V1, HAIR_STYLES_V1, defaultLookV1, encodeLookV1, parseLookV1, randomLookV1, type LookV1 } from './lookV1';
 import { prng } from './world/recipe';
 
 const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-/** encodeLook(defaultLook('account-1')) before the generator moved out of world/recipe: defaults are unchanged. */
-const DEFAULT_LOOK_1 = 'Ar8yr9nUliHwoAAAAC8cE7dPJyAYFIiUnCUiKw';
-
-/** Reads or writes a dotted path ('face.eyes') of a look. */
 function setPath(l: Look, path: string, value: unknown): Look {
   const out = clone(l) as unknown as Record<string, Record<string, unknown>>;
   const [group, key] = path.split('.') as [string, string];
   out[group]![key] = value;
   return out as unknown as Look;
 }
+const getPath = (l: Look, path: string): unknown => {
+  const [g, k] = path.split('.') as [string, string];
+  return (l as unknown as Record<string, Record<string, unknown> | null>)[g]?.[k];
+};
+const presetOf = (people: Look['people']): Look => LOOK_PRESETS.find((p) => p.look.people === people)!.look;
 
-const human = (): Look => ({ ...defaultLookFor('human') });
-const brindle = (): Look => ({ ...defaultLookFor('brindlekin') });
-function defaultLookFor(people: Look['people']): Look {
-  for (let i = 0; ; i++) {
-    const l = defaultLook(`seed-${people}-${i}`);
-    if (l.people === people) return l;
-  }
-}
-
-describe('peoples', () => {
-  it('four peoples with their heights and spans, fur only on the Brindlekin, and colour ranges', () => {
-    expect(PEOPLE_IDS).toEqual(['human', 'larchfolk', 'knollfolk', 'brindlekin']);
-    expect(PEOPLE_IDS.map((p) => [PEOPLES[p].name, PEOPLES[p].heightM, PEOPLES[p].span])).toEqual([
-      ['Humans', 1.75, 0.1], ['Larchfolk', 1.98, 0.08], ['Knollfolk', 1.3, 0.08], ['Brindlekin', 1.7, 0.1],
-    ]);
-    expect(PEOPLE_IDS.filter((p) => PEOPLES[p].furred)).toEqual(['brindlekin']);
-    expect(PEOPLE_IDS.map((p) => PEOPLES[p].earsMax)).toEqual([3, 3, 3, 5]);
-    for (const p of PEOPLE_IDS) {
-      expect(PEOPLES[p].id).toBe(p);
-      expect(PEOPLES[p].blurb.length).toBeGreaterThan(20);
-      for (const [a, b] of [...PEOPLES[p].skinRange, ...PEOPLES[p].hairRange]) {
-        expect(a).toMatch(/^#[0-9a-f]{6}$/);
-        expect(b).toMatch(/^#[0-9a-f]{6}$/);
-      }
-      expect(PEOPLES[p].skinRange.length).toBeGreaterThanOrEqual(3);
-      expect(PEOPLES[p].hairRange.length).toBeGreaterThanOrEqual(3);
+describe('tables', () => {
+  it('two bodies; wide, even skin tones from very light to very dark; palettes; frozen', () => {
+    expect(BODY_TYPES).toEqual(['male', 'female']);
+    expect(SKIN_TONES.length).toBeGreaterThanOrEqual(24);
+    const lumas = SKIN_TONES.map((t) => lookLuma(t.colour));
+    for (let i = 1; i < lumas.length; i++) expect(lumas[i]!, SKIN_TONES[i]!.name).toBeLessThan(lumas[i - 1]!);
+    expect(lumas[0]).toBeGreaterThan(220);
+    expect(lumas[lumas.length - 1]).toBeLessThan(40);
+    // Even: no gap between neighbours wider than 16 luma steps.
+    for (let i = 1; i < lumas.length; i++) expect(lumas[i - 1]! - lumas[i]!).toBeLessThanOrEqual(16);
+    expect(new Set(SKIN_TONES.map((t) => t.undertone))).toEqual(new Set(['warm', 'neutral', 'cool', 'olive']));
+    for (const list of [SKIN_TONES, HAIR_COLOURS, EYE_COLOURS, LIP_COLOURS, SHADOW_COLOURS, LINER_COLOURS]) {
+      expect(new Set(list.map((c) => c.name)).size).toBe(list.length);
+      for (const c of list) expect(clampLookColour(c.colour), c.name).toBe(c.colour);
     }
-    expect(Object.isFrozen(PEOPLES) && Object.isFrozen(PEOPLES.human) && Object.isFrozen(LOOK_LIMITS)).toBe(true);
+    expect(HAIR_COLOURS.length).toBeGreaterThanOrEqual(20);
+    expect(EYE_COLOURS.length).toBeGreaterThanOrEqual(14);
+    for (const t of [SKIN_TONES, HAIR_STYLES, HAIR_STYLE_INFO, LOOK_PRESETS, LOOK_LIMITS, FACE_SHAPE_PRESETS]) expect(Object.isFrozen(t)).toBe(true);
+    expect(Object.isFrozen(LOOK_PRESETS[0]!.look) && Object.isFrozen(LOOK_PRESETS[0]!.look.build)).toBe(true);
   });
 
-  it('names every choice the creator offers, one per value', () => {
-    expect(EMOTES).toEqual(['wave', 'bow', 'cheer', 'laugh', 'sit', 'point']);
-    expect(STANCES.length).toBe(LOOK_LIMITS['style.stance']![1] + 1);
-    expect(WALKS.length).toBe(LOOK_LIMITS['style.walk']![1] + 1);
-    expect(FACE_SHAPES.length).toBe(LOOK_LIMITS['face.shape']![1] + 1);
-    expect(FACE_MARKS.length).toBe(LOOK_LIMITS['face.marks']![1] + 1);
-    expect(HAIR_STYLES.length).toBe(20);
+  it('at least 40 hair styles over every length and texture, v1 styles first; at least 12 facial hair; one name per value', () => {
+    expect(HAIR_STYLES.length).toBeGreaterThanOrEqual(40);
+    expect(HAIR_STYLES.slice(0, 20)).toEqual(HAIR_STYLES_V1);
+    expect(FACIAL_HAIR.length).toBeGreaterThanOrEqual(12);
+    expect(FACIAL_HAIR.slice(0, 8)).toEqual(FACIAL_HAIR_V1);
+    expect(HAIR_STYLE_INFO.map((h) => h.name)).toEqual(HAIR_STYLES);
+    const has = (f: (h: (typeof HAIR_STYLE_INFO)[number]) => boolean) => HAIR_STYLE_INFO.filter(f).length;
+    for (const len of ['bald', 'shaved', 'short', 'medium', 'long'] as const) expect(has((h) => h.length === len), len).toBeGreaterThan(0);
+    for (const tex of ['straight', 'wavy', 'curly', 'coiled'] as const) expect(has((h) => h.texture === tex), tex).toBeGreaterThanOrEqual(3);
+    expect(has((h) => h.form === 'tied')).toBeGreaterThanOrEqual(5);
+    expect(has((h) => h.form === 'braided')).toBeGreaterThanOrEqual(5);
+    for (const h of HAIR_STYLE_INFO) expect(h.v1).toBeLessThan(20);
+    HAIR_STYLE_INFO.slice(0, 20).forEach((h, i) => expect(h.v1).toBe(i));
+    const lists: readonly (readonly string[])[] = [HAIR_STYLES, FACIAL_HAIR, EYE_SHAPES, BROW_SHAPES, SCARS, MOLE_SPOTS.map((m) => m.name), FACE_PAINTS, HAIRLINES];
+    for (const list of lists) expect(new Set(list).size).toBe(list.length);
+    expect(HAIR_STYLES.length).toBe(LOOK_LIMITS['hair.style']![1] + 1);
     expect(FACIAL_HAIR.length).toBe(LOOK_LIMITS['hair.facial']![1] + 1);
-    expect(FUR_PATTERNS.length).toBe(LOOK_LIMITS['fur.pattern']![1] + 1);
-    expect(TAILS.length).toBe(LOOK_LIMITS['fur.tail']![1] + 1);
-    expect(BRINDLE_EARS.length).toBe(PEOPLES.brindlekin.earsMax + 1);
-    for (const list of [STANCES, WALKS, FACE_SHAPES, FACE_MARKS, HAIR_STYLES, FACIAL_HAIR, FUR_PATTERNS, TAILS, BRINDLE_EARS]) {
-      expect(new Set(list).size).toBe(list.length);
+    expect(EYE_SHAPES.length).toBe(LOOK_LIMITS['eyes.shape']![1] + 1);
+    expect(BROW_SHAPES.length).toBe(LOOK_LIMITS['brows.shape']![1] + 1);
+    expect(SCARS.length).toBe(LOOK_LIMITS['skin.scar']![1] + 1);
+    expect(FACE_PAINTS.length).toBe(LOOK_LIMITS['paint.style']![1] + 1);
+    expect(HAIRLINES.length).toBe(LOOK_LIMITS['hair.hairline']![1] + 1);
+    expect(LOOK_LIMITS['skin.moles']![1]).toBe(2 ** MOLE_SPOTS.length - 1);
+    expect(LIP_COLOURS.length).toBe(LOOK_LIMITS['makeup.lips']![1]);
+    expect(SHADOW_COLOURS.length).toBe(LOOK_LIMITS['makeup.shadow']![1]);
+    expect(LINER_COLOURS.length).toBe(LOOK_LIMITS['makeup.liner']![1]);
+    expect(LOOK_LIMITS['face.age']).toEqual([0, 4]);
+    expect([FACE_SHAPE_PRESETS.length, NOSE_PRESETS.length, MOUTH_PRESETS.length]).toEqual([6, 8, 6]);
+  });
+
+  it('at least 24 named presets, all valid, over both bodies, every people, every age and light to dark skin', () => {
+    expect(LOOK_PRESETS.length).toBeGreaterThanOrEqual(24);
+    expect(new Set(LOOK_PRESETS.map((p) => p.id)).size).toBe(LOOK_PRESETS.length);
+    expect(new Set(LOOK_PRESETS.map((p) => p.name)).size).toBe(LOOK_PRESETS.length);
+    for (const p of LOOK_PRESETS) expect(parseLook(p.look), p.id).toEqual(p.look);
+    for (const b of BODY_TYPES) expect(LOOK_PRESETS.filter((p) => p.look.body === b).length).toBeGreaterThanOrEqual(10);
+    for (const people of PEOPLE_IDS) {
+      expect(LOOK_PRESETS.filter((p) => p.look.people === people).length, people).toBeGreaterThanOrEqual(5);
+      expect(new Set(LOOK_PRESETS.filter((p) => p.look.people === people).map((p) => p.look.body)).size, people).toBe(2);
     }
+    expect(new Set(LOOK_PRESETS.map((p) => p.look.face.age))).toEqual(new Set([0, 1, 2, 3, 4]));
+    const humanLumas = LOOK_PRESETS.filter((p) => p.look.people === 'human').map((p) => lookLuma(p.look.skin.colour));
+    expect(Math.max(...humanLumas)).toBeGreaterThan(200);
+    expect(Math.min(...humanLumas)).toBeLessThan(60);
+  });
+});
+
+describe('colours', () => {
+  it('clampLookColour keeps luma within [LUMA_MIN, LUMA_MAX], moves nothing already inside, and is idempotent', () => {
+    expect([LUMA_MIN, LUMA_MAX]).toEqual([16, 250]);
+    expect(lookLuma(0)).toBe(0);
+    expect(lookLuma(0xffffff)).toBe(255);
+    const rng = prng(4);
+    for (let i = 0; i < 3000; i++) {
+      const c = Math.floor(rng() * 0x1000000);
+      const k = clampLookColour(c);
+      expect(lookLuma(k)).toBeGreaterThanOrEqual(LUMA_MIN);
+      expect(lookLuma(k)).toBeLessThanOrEqual(LUMA_MAX);
+      if (lookLuma(c) >= LUMA_MIN && lookLuma(c) <= LUMA_MAX) expect(k).toBe(c);
+      expect(clampLookColour(k)).toBe(k);
+    }
+    for (const c of [0, 0xffffff, 0x0000ff, 0xffff00]) expect(clampLookColour(clampLookColour(c))).toBe(clampLookColour(c));
   });
 });
 
 describe('parseLook', () => {
-  it('parseLook accepts the limits and refuses one-off values, wrong keys, fur on a Human and no fur on Brindlekin', () => {
-    const h = human();
-    const b = brindle();
-    expect(parseLook(h)).toEqual(h);
-    expect(parseLook(b)).toEqual(b);
+  const h = presetOf('human');
+  const b = presetOf('brindlekin');
+
+  it('accepts every limit and refuses one past, fractions, NaN, Infinity, strings, null where not optional, booleans', () => {
     let checked = 0;
     for (const [path, [lo, hi]] of Object.entries(LOOK_LIMITS)) {
-      const base = path.startsWith('fur.') || path === 'face.ears' ? b : h;
-      expect(parseLook(setPath(base, path, lo)), `${path} = ${lo}`).not.toBeNull();
-      expect(parseLook(setPath(base, path, hi)), `${path} = ${hi}`).not.toBeNull();
-      for (const bad of [lo - 1, hi + 1, lo + 0.5, Number.NaN, Infinity, String(lo), null, undefined, true]) {
-        expect(parseLook(setPath(base, path, bad)), `${path} = ${String(bad)}`).toBeNull();
-      }
+      const base = path.startsWith('fur.') || path === 'ears.style' ? b : h;
+      const colour = hi === 0xffffff;
+      const okLo = colour ? clampLookColour(lo) : lo;
+      const okHi = colour ? clampLookColour(hi) : hi;
+      expect(parseLook(setPath(base, path, okLo)), `${path} = ${okLo}`).not.toBeNull();
+      expect(parseLook(setPath(base, path, okHi)), `${path} = ${okHi}`).not.toBeNull();
+      const bad: unknown[] = [lo - 1, hi + 1, lo + 0.5, Number.NaN, Infinity, -Infinity, String(lo), undefined, true, [lo], { v: lo }];
+      if (!LOOK_OPTIONAL_COLOURS.includes(path)) bad.push(null);
+      else expect(parseLook(setPath(base, path, null)), `${path} = null`).not.toBeNull();
+      if (colour) bad.push(0, 0xffffff, 0x000008);
+      for (const v of bad) expect(parseLook(setPath(base, path, v)), `${path} = ${String(v)}`).toBeNull();
       checked++;
     }
     expect(checked).toBe(Object.keys(LOOK_LIMITS).length);
-    expect(checked).toBe(27);
-    // Ears: up to 3 for most peoples, up to 5 for the Brindlekin.
-    expect(parseLook(setPath(h, 'face.ears', 3))).not.toBeNull();
-    expect(parseLook(setPath(h, 'face.ears', 4))).toBeNull();
-    expect(parseLook(setPath(b, 'face.ears', 5))).not.toBeNull();
-    // Fur exactly for the Brindlekin.
-    expect(parseLook({ ...h, fur: { pattern: 0, colour: 0, tail: 0 } })).toBeNull();
-    expect(parseLook({ ...b, fur: null })).toBeNull();
-    expect(parseLook({ ...b, people: 'human' })).toBeNull();
-    expect(parseLook({ ...h, people: 'brindlekin' })).toBeNull();
-    // Keys exactly.
-    expect(parseLook({ ...h, extra: 1 })).toBeNull();
-    expect(parseLook({ ...h, body: { ...h.body, wings: 3 } })).toBeNull();
-    const { mouth: _, ...noMouth } = h.face;
-    expect(parseLook({ ...h, face: noMouth })).toBeNull();
-    const { style: __, ...noStyle } = h;
-    expect(parseLook(noStyle)).toBeNull();
-    expect(parseLook({ ...h, v: 2 })).toBeNull();
-    expect(parseLook({ ...h, people: 'skyfolk' })).toBeNull();
-    expect(parseLook({ ...h, people: 'toString' })).toBeNull();
-    for (const junk of [null, undefined, 0, 'look', [], [h], { ...h, body: [] }, { ...h, colours: null }]) expect(parseLook(junk)).toBeNull();
-    // A fresh copy, not the input.
-    const parsed = parseLook(h)!;
-    expect(parsed).not.toBe(h);
-    expect(parsed.body).not.toBe(h.body);
+    expect(checked).toBeGreaterThanOrEqual(60);
+  });
+
+  it('refuses unknown ids, wrong versions, extra or missing keys, oversize strings, fur rules and ears per people; never throws', () => {
+    expect(parseLook(h)).toEqual(h);
+    expect(parseLook(h)).not.toBe(h);
+    expect(parseLook(setPath(h, 'ears.style', PEOPLES.human.earsMax + 1))).toBeNull();
+    expect(parseLook(setPath(b, 'ears.style', PEOPLES.brindlekin.earsMax))).not.toBeNull();
+    const table: [string, unknown][] = [
+      ['v 1', { ...h, v: 1 }], ['v 3', { ...h, v: 3 }], ['v "2"', { ...h, v: '2' }],
+      ['body other', { ...h, body: 'other' }], ['body Male', { ...h, body: 'Male' }], ['body null', { ...h, body: null }], ['body long', { ...h, body: 'male'.repeat(5000) }],
+      ['people skyfolk', { ...h, people: 'skyfolk' }], ['people toString', { ...h, people: 'toString' }], ['people long', { ...h, people: 'x'.repeat(100000) }],
+      ['extra top key', { ...h, name: 'Bob' }], ['extra group key', { ...h, eyes: { ...h.eyes, glow: 1 } }],
+      ['missing group', (() => { const { mouth: _, ...r } = h; return r; })()],
+      ['missing key', { ...h, nose: { length: 5, width: 5, bridge: 5 } }],
+      ['fur on a human', { ...h, fur: { pattern: 0, colour: 0x808080, tail: 0, muzzle: 0 } }], ['no fur on Brindlekin', { ...b, fur: null }],
+      ['group array', { ...h, build: [] }], ['group null', { ...h, skin: null }], ['proto key', JSON.parse(`{"__proto__":1,${JSON.stringify(h).slice(1)}`)],
+    ];
+    for (const [name, v] of table) expect(parseLook(v), name).toBeNull();
+    for (const junk of [null, undefined, 0, 'look', [], [h], new Date(), () => h]) expect(parseLook(junk)).toBeNull();
+    const trap = { ...h };
+    Object.defineProperty(trap, 'eyes', { enumerable: true, get() { throw new Error('boom'); } });
+    expect(() => parseLook(trap)).not.toThrow();
+    expect(parseLook(trap)).toBeNull();
+    const proxy = new Proxy(h, { ownKeys() { throw new Error('boom'); } });
+    expect(parseLook(proxy)).toBeNull();
   });
 });
 
-describe('look codes', () => {
-  it('encodeLook ↔ decodeLook round-trips 1000 random looks; at most 38 characters', () => {
-    const rng = prng(7);
-    for (let i = 0; i < 1000; i++) {
+describe('look codes v2', () => {
+  it(`round-trips 5000 random looks; ${'≤'} 64 bytes and ${'≤'} 88 characters, base64url`, () => {
+    expect(LOOK_CODE_BYTES).toBeLessThanOrEqual(64);
+    expect(LOOK_CODE_CHARS).toBe(Math.ceil((LOOK_CODE_BYTES * 8) / 6));
+    expect(LOOK_CODE_CHARS).toBeLessThanOrEqual(88);
+    const rng = prng(21);
+    for (let i = 0; i < 5000; i++) {
       const l = randomLook(rng);
-      expect(parseLook(l), `look ${i}`).not.toBeNull();
+      expect(parseLook(l), `look ${i}`).toEqual(l);
       const code = encodeLook(l);
-      expect(code.length).toBeLessThanOrEqual(38);
+      expect(code.length).toBe(LOOK_CODE_CHARS);
       expect(code).toMatch(/^[A-Za-z0-9_-]+$/);
       expect(decodeLook(code)).toEqual(l);
     }
-    // The extremes of every field round-trip too.
-    for (const people of PEOPLE_IDS) {
-      const fur = PEOPLES[people].furred;
-      const corner = (pick: 0 | 1): Look => {
-        let l = setPath(defaultLookFor(people), 'face.ears', pick ? PEOPLES[people].earsMax : 0);
-        for (const [path, range] of Object.entries(LOOK_LIMITS)) {
-          if (path === 'face.ears' || (path.startsWith('fur.') && !fur)) continue;
-          l = setPath(l, path, range[pick]);
-        }
-        return l;
-      };
-      for (const l of [corner(0), corner(1)]) {
-        expect(parseLook(l)).not.toBeNull();
-        expect(decodeLook(encodeLook(l))).toEqual(l);
-      }
-    }
-    expect(() => encodeLook({ ...human(), people: 'skyfolk' } as unknown as Look)).toThrow();
+    for (const p of LOOK_PRESETS) expect(decodeLook(encodeLook(p.look))).toEqual(p.look);
+    expect(() => encodeLook({ ...presetOf('human'), people: 'skyfolk' } as unknown as Look)).toThrow();
   });
 
-  it('decodeLook is strict: one character changed either decodes to a look that encodes to it, or is refused', () => {
-    const rng = prng(11);
+  it('every field at both ends round-trips, per people', () => {
+    for (const people of PEOPLE_IDS) {
+      for (const pick of [0, 1] as const) {
+        let l = presetOf(people);
+        for (const [path, range] of Object.entries(LOOK_LIMITS)) {
+          if (path.startsWith('fur.') && !PEOPLES[people].furred) continue;
+          let v = path === 'ears.style' && pick ? PEOPLES[people].earsMax : range[pick];
+          if (range[1] === 0xffffff) v = clampLookColour(v);
+          l = setPath(l, path, v);
+        }
+        expect(parseLook(l), `${people} ${pick}`).not.toBeNull();
+        expect(decodeLook(encodeLook(l))).toEqual(l);
+        const nulls = LOOK_OPTIONAL_COLOURS.reduce((x, p) => setPath(x, p, null), l);
+        expect(decodeLook(encodeLook(nulls))).toEqual(nulls);
+        for (const body of BODY_TYPES) expect(decodeLook(encodeLook({ ...l, body }))!.body).toBe(body);
+      }
+    }
+  });
+
+  it('decodeLook is strict: one character changed decodes to a look that encodes to it, or is refused', () => {
+    const rng = prng(12);
     let refused = 0;
     let accepted = 0;
-    for (let n = 0; n < 6; n++) {
+    for (let n = 0; n < 3; n++) {
       const code = encodeLook(randomLook(rng));
       for (let i = 0; i < code.length; i++) {
         for (const c of BASE64URL) {
@@ -164,178 +220,172 @@ describe('look codes', () => {
         }
       }
     }
-    expect(refused).toBeGreaterThan(100);
-    expect(accepted).toBeGreaterThan(100);
-    const code = encodeLook(human());
-    for (const bad of ['', code.slice(1), code + 'A', code.replace(/.$/, '='), code.replace(/^./, '+'), '_'.repeat(38), 'A'.repeat(38)]) {
-      expect(decodeLook(bad), bad).toBeNull();
+    expect(refused).toBeGreaterThan(50);
+    expect(accepted).toBeGreaterThan(50);
+    const code = encodeLook(presetOf('human'));
+    for (const bad of ['', code.slice(1), code + 'A', code.replace(/.$/, '='), '_'.repeat(LOOK_CODE_CHARS), 'A'.repeat(LOOK_CODE_CHARS), 'A'.repeat(38), '_'.repeat(38), 'x'.repeat(5000)]) {
+      expect(decodeLook(bad), bad.slice(0, 20)).toBeNull();
     }
-    expect(decodeLook(42 as unknown as string)).toBeNull();
+    for (const junk of [42, null, undefined, {}, ['a']]) expect(decodeLook(junk as unknown as string)).toBeNull();
   });
 
-  it('counts the combinations: well over a billion discrete looks per people before free colours', () => {
-    for (const p of PEOPLE_IDS) expect(LOOK_COMBINATIONS.discrete[p]).toBeGreaterThan(1e15);
-    expect(LOOK_COMBINATIONS.withColours).toBeGreaterThan(1e60);
-  });
-});
-
-describe('gear codes', () => {
-  const plain = (model: number, d1 = 0, d2 = 0) => ({ model, dye: [d1, d2] as [number, number] });
-  const worn = {
-    head: plain(10, 3, 4), chest: plain(11, 31, 0), legs: plain(12), hands: plain(13, 1, 2), feet: plain(14, 5, 6), back: plain(15, 7, 8),
-    weapon: plain(40, 9, 10), offhand: plain(60, 11, 12),
-  };
-
-  it('encodeGearLook ↔ decodeGearLook round-trips; costumes replace their slots; hideHead clears the head; at most 40 characters', () => {
-    const bare = resolveGearLook(worn, {}, false);
-    expect(bare).toEqual({ ...worn, hideHead: false });
-    const body = resolveGearLook(worn, { body: plain(201, 2, 3) }, false);
-    expect([body.chest, body.legs, body.hands, body.feet]).toEqual([plain(201, 2, 3), null, null, null]);
-    expect([body.head, body.back, body.weapon, body.offhand]).toEqual([worn.head, worn.back, worn.weapon, worn.offhand]);
-    const head = resolveGearLook(worn, { head: plain(220, 1, 1), back: plain(240, 4, 4) }, false);
-    expect([head.head, head.back, head.chest]).toEqual([plain(220, 1, 1), plain(240, 4, 4), worn.chest]);
-    const hidden = resolveGearLook(worn, { head: plain(220) }, true);
-    expect(hidden.head).toBeNull();
-    expect(hidden.hideHead).toBe(true);
-    expect(resolveGearLook(worn, {}, true).head).toBeNull();
-    const twoHanded = resolveGearLook({ ...worn, offhand: undefined }, {}, false);
-    expect(twoHanded.offhand).toBeNull();
-
-    const all = resolveGearLook(worn, { body: plain(255, 31, 31), head: plain(200, 31, 31), back: plain(254, 31, 31) }, false);
-    const looks: GearLook[] = [bare, body, head, hidden, twoHanded, all, { ...bare, weapon: plain(255 - 56, 31, 31) }];
-    const rng = prng(3);
-    for (let i = 0; i < 300; i++) {
-      const pick = () => plain(Math.floor(rng() * 200), Math.floor(rng() * 32), Math.floor(rng() * 32));
-      const w = Object.fromEntries(GEAR_LOOK_SLOTS.map((s) => [s, rng() < 0.1 ? undefined : pick()]));
-      const costume = () => (rng() < 0.4 ? plain(200 + Math.floor(rng() * 56), Math.floor(rng() * 32), Math.floor(rng() * 32)) : null);
-      looks.push(resolveGearLook(w, { body: costume(), head: costume(), back: costume() }, rng() < 0.2));
-    }
-    for (const g of looks) {
-      const code = encodeGearLook(g);
-      expect(code.length).toBeLessThanOrEqual(40);
-      expect(code).toMatch(/^[A-Za-z0-9_-]+$/);
-      expect(decodeGearLook(code)).toEqual(g);
-    }
-    // Refused: a costume model in an item slot, an item under a body costume, a head shown while hidden, junk.
-    expect(() => encodeGearLook({ ...bare, legs: plain(210) })).toThrow();
-    expect(() => encodeGearLook({ ...body, legs: plain(12) })).toThrow();
-    expect(() => encodeGearLook({ ...bare, hideHead: true })).toThrow();
-    expect(() => encodeGearLook({ ...bare, weapon: plain(256) })).toThrow();
-    expect(() => encodeGearLook({ ...bare, weapon: plain(3, 32, 0) })).toThrow();
-    for (const bad of ['', 'A', '_'.repeat(40), encodeGearLook(bare) + 'A', encodeGearLook(bare).slice(0, -1), 'AAA=']) {
-      expect(decodeGearLook(bad), bad).toBeNull();
-    }
-    // Every one-character change decodes to what it encodes, or is refused.
-    const code = encodeGearLook(all);
-    for (let i = 0; i < code.length; i++) {
-      for (const c of BASE64URL) {
-        const s = code.slice(0, i) + c + code.slice(i + 1);
-        const g = decodeGearLook(s);
-        if (g !== null) expect(encodeGearLook(g)).toBe(s);
-      }
-    }
+  it('counts the combinations: well over 1e40 discrete looks per people before free colours', () => {
+    for (const p of PEOPLE_IDS) expect(LOOK_COMBINATIONS.discrete[p], p).toBeGreaterThan(1e40);
+    expect(LOOK_COMBINATIONS.withColours).toBeGreaterThan(1e100);
+    expect(LOOK_COMBINATIONS.withColours).toBeLessThan(2 ** (LOOK_CODE_BYTES * 8));
   });
 });
 
-describe('resolveGearLook with bad models', () => {
-  const plain = (model: number, d1 = 0, d2 = 0) => ({ model, dye: [d1, d2] as [number, number] });
-  const worn = {
-    head: plain(10), chest: plain(11), legs: plain(12), hands: plain(13), feet: plain(14), back: plain(15), weapon: plain(40), offhand: plain(60),
-  };
+describe('the v1 upgrade', () => {
+  /** A v1 look with its free colours clamped as the upgrade clamps them. */
+  const clampedV1 = (l: LookV1): LookV1 => ({
+    ...l,
+    colours: {
+      skin: clampLookColour(l.colours.skin), hair: clampLookColour(l.colours.hair), facial: clampLookColour(l.colours.facial),
+      eyes: clampLookColour(l.colours.eyes), marks: clampLookColour(l.colours.marks),
+    },
+    fur: l.fur && { ...l.fur, colour: clampLookColour(l.fur.colour) },
+  });
 
-  it('drops a worn piece with a costume-range or invalid model, ignores a costume with an item-range model, and never throws', () => {
-    const g = resolveGearLook({ ...worn, legs: plain(200), weapon: plain(256), feet: plain(-1), hands: plain(13, 32, 0) }, {}, false);
-    expect([g.legs, g.weapon, g.feet, g.hands]).toEqual([null, null, null, null]);
-    expect(g.chest).toEqual(worn.chest);
-    const c = resolveGearLook(worn, { body: plain(150), head: plain(12), back: plain(256) }, false);
-    expect(c).toEqual({ ...worn, hideHead: false });
-    expect(() => encodeGearLook(c)).not.toThrow();
-    // Junk of every kind still gives a gear look that encodes and decodes.
-    const rng = prng(5);
-    const junk = (): unknown => {
-      const r = rng();
-      if (r < 0.1) return null;
-      if (r < 0.2) return 'x';
-      if (r < 0.3) return { model: Number.NaN, dye: [0, 0] };
-      if (r < 0.4) return { model: 3, dye: [1] };
-      return plain(Math.floor(rng() * 300) - 20, Math.floor(rng() * 40) - 4, Math.floor(rng() * 40) - 4);
-    };
+  it('5000 random v1 looks: v1 codes decode to their upgrade, which is valid, stable when re-encoded, and draws as the v1 look', () => {
+    const rng = prng(31);
+    let female = 0;
+    for (let i = 0; i < 5000; i++) {
+      const l1 = randomLookV1(rng);
+      const up = upgradeLookV1(l1);
+      expect(parseLook(up), `look ${i}`).toEqual(up);
+      expect(decodeLook(encodeLookV1(l1))).toEqual(up);
+      const code = encodeLook(up);
+      expect(decodeLook(code)).toEqual(up);
+      expect(encodeLook(decodeLook(code)!)).toBe(code);
+      expect(lookV1View(up)).toEqual(clampedV1(l1));
+      expect(readLook(clone(l1))).toEqual(up);
+      expect(up.people).toBe(l1.people);
+      expect([up.build.height, up.build.shoulders, up.build.hips, up.build.legs, up.build.head]).toEqual([l1.body.height, l1.body.shoulders, l1.body.hips, l1.body.legs, l1.body.head]);
+      expect(up.hair.style).toBe(l1.hair.style);
+      expect(up.hair.facial).toBe(l1.hair.facial);
+      expect(up.face.age).toBe(0);
+      if (up.body === 'female') female++;
+    }
+    // 'male' unless the v1 body implies otherwise: no facial hair and hips at least 4 steps wider than shoulders.
+    expect(female).toBeGreaterThan(200);
+    expect(female).toBeLessThan(2500);
+  });
+
+  it('the body rule, exactly', () => {
+    const base = defaultLookV1('rule');
+    const withBody = (hips: number, shoulders: number, facial: number) =>
+      upgradeLookV1({ ...base, body: { ...base.body, hips, shoulders }, hair: { ...base.hair, facial } }).body;
+    expect(withBody(14, 10, 0)).toBe('female');
+    expect(withBody(13, 10, 0)).toBe('male');
+    expect(withBody(20, 0, 1)).toBe('male');
+  });
+
+  it('lookV1View gives a valid v1 look for any v2 look (the pre-v2 client draws from it)', () => {
+    const rng = prng(41);
+    for (let i = 0; i < 5000; i++) {
+      const v = lookV1View(randomLook(rng));
+      expect(parseLookV1(v)).toEqual(v);
+    }
+    for (const p of LOOK_PRESETS) expect(parseLookV1(lookV1View(p.look))).not.toBeNull();
+  });
+
+  it('readLook reads v2 or v1 (upgraded) JSON and nothing else; storedLookIsV1 spots a stored v1 look', () => {
+    const l = presetOf('knollfolk');
+    expect(readLook(clone(l))).toEqual(l);
+    expect(readLook({ ...l, v: 1 })).toBeNull();
+    expect(readLook(null)).toBeNull();
+    expect(readLook('x')).toBeNull();
+    const l1 = defaultLookV1('stored');
+    expect(storedLookIsV1(l1)).toBe(true);
+    expect(storedLookIsV1(l)).toBe(false);
+    expect(storedLookIsV1({ v: 1 })).toBe(true); // by its version alone, as the SQL reads it (it reads as no look)
+    expect(storedLookIsV1({ v: '1' })).toBe(false);
+    expect(storedLookIsV1(null)).toBe(false);
+  });
+});
+
+describe('mergeLookV1 (a look sent by the pre-v2 creator)', () => {
+  it('changes only what the v1 edit changed, keeps the body and every v2-only detail', () => {
+    const rng = prng(51);
     for (let i = 0; i < 500; i++) {
-      const w = Object.fromEntries(GEAR_LOOK_SLOTS.map((s) => [s, junk()])) as Parameters<typeof resolveGearLook>[0];
-      const cs = { body: junk(), head: junk(), back: junk() } as Parameters<typeof resolveGearLook>[1];
-      const out = resolveGearLook(w, cs, rng() < 0.3);
-      expect(decodeGearLook(encodeGearLook(out))).toEqual(out);
+      const cur = randomLook(rng);
+      const view = lookV1View(cur);
+      expect(mergeLookV1(cur, view), `look ${i}`).toEqual(cur);
+      const styled = mergeLookV1(cur, { ...view, hair: { ...view.hair, style: (view.hair.style + 1) % 20 } });
+      expect(styled).toEqual({ ...cur, hair: { ...cur.hair, style: (view.hair.style + 1) % 20 } });
+      const taller = mergeLookV1(cur, { ...view, body: { ...view.body, height: (view.body.height + 3) % 21, hips: 20, shoulders: 0 } })!;
+      expect(taller.body).toBe(cur.body);
+      expect(taller.build).toEqual({ ...cur.build, height: (view.body.height + 3) % 21, hips: 20, shoulders: 0 });
+      expect(taller.face).toEqual(cur.face);
+      const other = PEOPLE_IDS[(PEOPLE_IDS.indexOf(cur.people) + 1) % 4]!;
+      const l1 = randomLookV1(rng);
+      const moved = mergeLookV1(cur, { ...l1, people: other, fur: PEOPLES[other].furred ? l1.fur ?? { pattern: 0, colour: 0x806040, tail: 0 } : null, face: { ...l1.face, ears: 0 } })!;
+      expect(parseLook(moved)).toEqual(moved);
+      expect([moved.people, moved.body]).toEqual([other, cur.body]);
     }
-    expect(() => resolveGearLook(null as never, null as never, 'yes' as never)).not.toThrow();
+    expect(mergeLookV1(presetOf('human'), { v: 1 } as unknown as LookV1)).toBeNull();
   });
 });
 
-describe('defaultLook and randomLook', () => {
-  it('defaultLook spreads peoples and features: 1000 seeds, each people ≥ 150, at most one identical pair', () => {
-    const looks = Array.from({ length: 1000 }, (_, i) => defaultLook(`account-${i}`));
-    expect(defaultLook('account-7')).toEqual(looks[7]);
-    for (const l of looks) expect(parseLook(l)).toEqual(l);
-    for (const p of PEOPLE_IDS) expect(looks.filter((l) => l.people === p).length, p).toBeGreaterThanOrEqual(150);
-    const codes = looks.map(encodeLook);
-    expect(1000 - new Set(codes).size).toBeLessThanOrEqual(1);
-    // Ignoring free colours too, almost no two adventurers share every choice.
-    const shapes = looks.map((l) => JSON.stringify({ ...l, colours: null, fur: l.fur && { ...l.fur, colour: 0 } }));
-    expect(1000 - new Set(shapes).size).toBeLessThanOrEqual(1);
-    // Every value of every field turns up.
-    for (const [path, [lo, hi]] of Object.entries(LOOK_LIMITS)) {
-      if (hi > 31) continue; // colours
-      const [g, k] = path.split('.') as [string, string];
-      const seen = new Set(looks.map((l) => (l as unknown as Record<string, Record<string, number> | null>)[g]?.[k]).filter((v) => v !== undefined));
-      expect(seen.size, path).toBe(hi - lo + 1);
-    }
-    // Skin is drawn from the people's own ranges.
-    for (const l of looks) {
-      const inRange = PEOPLES[l.people].skinRange.some(([a, b]) => between(l.colours.skin, a, b));
-      expect(inRange, encodeLook(l)).toBe(true);
-    }
-  });
-
-  it('randomLook is deterministic for a seeded generator and always valid', () => {
-    const a = prng(99);
-    const b = prng(99);
-    for (let i = 0; i < 200; i++) {
+describe('randomLook and defaultLook', () => {
+  it('randomLook is deterministic, always valid, varied and plausible (around the presets, not noise)', () => {
+    const [a, b] = [prng(99), prng(99)];
+    const looks: Look[] = [];
+    for (let i = 0; i < 1000; i++) {
       const l = randomLook(a);
       expect(randomLook(b)).toEqual(l);
-      expect(parseLook(l)).toEqual(l);
+      looks.push(l);
     }
+    for (const p of PEOPLE_IDS) expect(looks.filter((l) => l.people === p).length, p).toBeGreaterThanOrEqual(150);
+    for (const body of BODY_TYPES) expect(looks.filter((l) => l.body === body).length, body).toBeGreaterThanOrEqual(350);
+    expect(new Set(looks.map(encodeLook)).size).toBe(1000);
+    // Every value of every small field turns up.
+    for (const [path, [lo, hi]] of Object.entries(LOOK_LIMITS)) {
+      if (hi >= 63) continue;
+      const seen = new Set(looks.map((l) => getPath(l, path)).filter((v) => v !== undefined));
+      expect(seen.size, path).toBe(hi - lo + 1);
+    }
+    // Plausible: most female bodies have no facial hair; most sliders sit near the middle; human skin is a palette tone.
+    const fem = looks.filter((l) => l.body === 'female');
+    expect(fem.filter((l) => l.hair.facial !== 0).length / fem.length).toBeLessThan(0.08);
+    const heights = looks.map((l) => l.build.height);
+    expect(heights.filter((h) => h >= 6 && h <= 14).length / heights.length).toBeGreaterThan(0.7);
+    const tones = new Set(SKIN_TONES.map((t) => t.colour));
+    const humans = looks.filter((l) => l.people === 'human');
+    expect(humans.filter((l) => tones.has(l.skin.colour)).length / humans.length).toBeGreaterThan(0.6);
   });
-});
 
-describe('imports', () => {
-  it('look.ts uses its own small generator (no world generation), with the same numbers as prng', async () => {
-    const fs: { readFileSync(p: string, enc: 'utf8'): string } = await import('node:fs' as string);
-    const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
-    const src = fs.readFileSync(here + 'look.ts', 'utf8');
-    expect([...src.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1])).toEqual(['./hash', './rng']);
-    for (const seed of [0, 1, 0x100c, 0xffffffff, 123456789]) {
-      const [a, b] = [seededRng(seed), prng(seed)];
-      for (let i = 0; i < 50; i++) expect(a()).toBe(b());
-    }
-    expect(encodeLook(defaultLook('account-1'))).toBe(DEFAULT_LOOK_1);
+  it('defaultLook is the upgraded Plan 5 default, so an adventurer who never used the creator keeps their look', () => {
+    for (let i = 0; i < 200; i++) expect(defaultLook(`account-${i}`)).toEqual(upgradeLookV1(defaultLookV1(`account-${i}`)));
   });
 });
 
 describe('barberCost', () => {
-  it('barberCost: 0, 40, 200', () => {
-    const h = human();
+  it('0 unchanged, 40 within a people and body, 200 for a new people or a new body', () => {
+    const h = presetOf('human');
+    expect([BARBER_PRICE, BARBER_PEOPLE_PRICE, BARBER_BODY_PRICE]).toEqual([40, 200, 200]);
     expect(barberCost(h, clone(h))).toBe(0);
-    expect(barberCost(h, setPath(h, 'hair.style', (h.hair.style + 1) % 20))).toBe(40);
-    expect(barberCost(h, setPath(h, 'colours.eyes', (h.colours.eyes + 1) % 0x1000000))).toBe(40);
-    expect(barberCost(h, brindle())).toBe(200);
+    expect(barberCost(h, setPath(h, 'hair.style', (h.hair.style + 1) % HAIR_STYLES.length))).toBe(40);
+    expect(barberCost(h, setPath(h, 'nose.tip', (h.nose.tip + 1) % 11))).toBe(40);
+    expect(barberCost(h, { ...h, body: h.body === 'male' ? 'female' : 'male' })).toBe(200);
+    expect(barberCost(h, presetOf('brindlekin'))).toBe(200);
   });
 });
 
-/** Whether colour `c` lies channel by channel between the two hex colours. */
-function between(c: number, a: string, b: string): boolean {
-  const x = parseInt(a.slice(1), 16);
-  const y = parseInt(b.slice(1), 16);
-  return [16, 8, 0].every((s) => {
-    const [v, p, q] = [(c >> s) & 255, (x >> s) & 255, (y >> s) & 255];
-    return v >= Math.min(p, q) && v <= Math.max(p, q);
+describe('imports', () => {
+  it('no cycles among the look modules, and nothing in combat, movement, kit or progression reads a look', async () => {
+    const fs: { readFileSync(p: string, enc: 'utf8'): string; readdirSync(p: string): string[] } = await import('node:fs' as string);
+    const here = expect.getState().testPath!.replace(/[^/\\]+$/, '');
+    const imports = (f: string) => [...fs.readFileSync(here + f, 'utf8').matchAll(/^import\s+[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+    expect(imports('look.ts').sort()).toEqual(['./hash', './lookCommon', './lookV1', './rng']);
+    expect(imports('lookV1.ts').sort()).toEqual(['./hash', './lookCommon', './rng']);
+    expect(imports('lookCommon.ts')).toEqual([]);
+    expect(imports('gearLook.ts')).toEqual(['./lookCommon']);
+    const rules = ['movement.ts', 'body.ts', 'kit.ts', 'progression.ts', 'talents.ts', 'items.ts', ...fs.readdirSync(here + 'combat').filter((f) => f.endsWith('.ts') && !f.includes('.test.')).map((f) => `combat/${f}`)];
+    for (const f of rules) {
+      for (const i of imports(f)) expect(i, f).not.toMatch(/\/look(V1|Common)?$/);
+      expect(fs.readFileSync(here + f, 'utf8'), f).not.toMatch(/\bLook\b|\bparseLook\b/);
+    }
   });
-}
+});

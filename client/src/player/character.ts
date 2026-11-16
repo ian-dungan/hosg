@@ -21,7 +21,7 @@ import {
 } from '@babylonjs/core';
 import type { CharacterOpts, CharacterView, MakeCharacter, Pose, WeaponId, EntityKind, Quality } from '../core/contracts';
 import { PALETTE } from '../core/contracts';
-import { DYES, encodeGearLook, encodeLook, type EmoteId, type GearLook, type Look as AdventurerLook } from '@sg2/shared';
+import { DYES, encodeGearLook, encodeLookV1 as encodeLook, type EmoteId, type GearLook, type LookV1 as AdventurerLook } from '@sg2/shared';
 import { bodyParams, faceParams, lookColours, makeWarp, stanceParams, walkParams, type BodyParams, type StanceParams, type WalkParams, type Warp, type WarpRegion } from './look';
 import { buildHead, buildTail, furPaint, pawPaint } from './faces';
 import { buildFacialHair, buildHair, LONG_HAIR } from './hair';

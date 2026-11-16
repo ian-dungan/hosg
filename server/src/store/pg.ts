@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { GOLD_MAX, MAX_HP, SPAWN, ZONE_IDS, isZoneId, parseJobsSave, parseLook } from '@sg2/shared';
 import {
-  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, readInvLook, readQuests,
+  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, highestLevel, isUtcDay, jobsNeedRepair, lookFreeOf, readInvLook, readQuests,
   newAdventurerJobs, testKitInventory, type Account, type Adventurer, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
 import { grantByCas, type GrantStore } from '../gm/grant';
@@ -116,7 +116,7 @@ function toAdventurer(r: AdventurerRow): Adventurer {
     titles: Array.isArray(r.titles) ? r.titles.filter((t): t is string => typeof t === 'string') : [],
     ...readInvLook(r.inventory, r.look, r.account_id),
     invVersion: r.inv_version ?? 0,
-    lookFree: r.look_free ?? true,
+    lookFree: lookFreeOf(r.look_free ?? true, r.look),
     ...readQuests(r.quests),
   };
 }
@@ -305,7 +305,7 @@ export async function createPgStore(databaseUrl: string, opts: { start?: StartSp
       if (!l) throw new TypeError('useFreeLook: not a look');
       if (!UUID_RE.test(accountId)) return false;
       const { rowCount } = await pool.query(
-        `UPDATE adventurers SET look = $2::jsonb, look_free = false, inv_version = inv_version + 1, updated_at = now() WHERE account_id = $1 AND look_free`,
+        `UPDATE adventurers SET look = $2::jsonb, look_free = false, inv_version = inv_version + 1, updated_at = now() WHERE account_id = $1 AND (look_free OR look->>'v' = '1')` /* lookFreeOf */,
         [accountId, JSON.stringify(l)],
       );
       return (rowCount ?? 0) > 0;

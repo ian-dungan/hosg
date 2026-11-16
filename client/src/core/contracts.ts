@@ -5,7 +5,7 @@
 // "facing" is a yaw angle: 0 faces +Z, positive turns toward +X.
 import type { Scene, Vector3, TransformNode, ArcRotateCamera } from '@babylonjs/core';
 import type { CharSheetHandle, CharSheetView, CharTab, LevelShow, LootShow, SheetAct, SheetHandle, VendorView } from './gearViews';
-import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, JobId, Look as AdventurerLook, QuestId, WeaponId as SharedWeaponId } from '@sg2/shared';
+import type { Body, Displacement, ElementId, EmoteId, FutureJobId, GearLook, JobId, LookV1 as AdventurerLook, QuestId, WeaponId as SharedWeaponId } from '@sg2/shared';
 
 // ───────────────────────── shared data ─────────────────────────
 export interface Vec2 { x: number; z: number }

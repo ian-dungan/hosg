@@ -8,7 +8,7 @@ import { kitFor } from './kit';
 import { JOB_IDS, newJobsSave, type JobId, type JobsSave } from './combat/jobs';
 import { STARTER_STATS } from './combat/stats';
 import { totalTo } from './progression';
-import { decodeGearLook, encodeGearLook } from './look';
+import { decodeGearLook, encodeGearLook } from './gearLook';
 import { deepFreeze } from './combat/freeze';
 import { prng } from './world/recipe';
 

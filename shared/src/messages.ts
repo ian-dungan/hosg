@@ -4,7 +4,7 @@ import type { AbilityId } from './combat/abilities';
 import type { JobId, JobOutfit } from './combat/jobs';
 import type { InvOp, InvRefusal, InventoryView } from './inventory';
 import type { ItemId } from './items';
-import type { EmoteId, Look } from './look';
+import type { EmoteId, Look, LookV1 } from './look';
 import type { Displacement } from './combat/displace';
 import type { Refusal, SelfView } from './combat/engine';
 import type { EnemyKindId } from './combat/enemies';
@@ -90,8 +90,8 @@ export type C2S = {
    * op id (12–40 of A–Z a–z 0–9 _ -, random per operation); at most INV_OPS_PER_S a second.
    */
   inv: InvOp;
-  /** The Barber (within reach of its stall): a new look, for barberCost gold (the free creator visit: 0). */
-  look: { look: Look };
+  /** The Barber (within reach of its stall): a new look, for barberCost gold (the free creator visit: 0). A v1 look (the pre-v2 creator) is merged onto the current one (mergeLookV1). */
+  look: { look: Look | LookV1 };
   /** An emote (EMOTES): alive and out of combat, at most one every EMOTE_MIN_S; a move cancels it on clients. */
   emote: { emote: EmoteId };
   /**

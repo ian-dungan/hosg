@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOOK_LIMITS, PEOPLES, PEOPLE_IDS, defaultLook, parseLook, randomLook, type Look } from '@sg2/shared';
+import { LOOK_LIMITS_V1 as LOOK_LIMITS, PEOPLES, PEOPLE_IDS, defaultLookV1 as defaultLook, parseLookV1 as parseLook, randomLookV1 as randomLook, type LookV1 as Look } from '@sg2/shared';
 import { CANON, LIGHTNESS, MAX_HALF_WIDTH, bodyParams, faceParams, halfWidth, lookColours, makeWarp, modelParams, renderColour } from './look';
 
 const base = (people: Look['people']): Look => {

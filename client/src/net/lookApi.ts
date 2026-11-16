@@ -1,6 +1,6 @@
 // The character creator's HTTP route (server/src/routes/look.ts): GET /api/look says whether the one free creator visit
 // is still unused (new and existing adventurers alike) and gives the stored look and name; POST /api/look spends it.
-import { defaultLook, parseLook, type Look } from '@sg2/shared';
+import { defaultLookV1 as defaultLook, lookV1View, readLook, type LookV1 as Look } from '@sg2/shared';
 import { UNREACHABLE, withTimeout } from './session';
 
 export interface LookInfo { look: Look | null; free: boolean; name: string | null; guest: boolean }
@@ -13,8 +13,14 @@ export function lookInfoResult(status: number, body: unknown): LookInfoResult {
   if (status === 401) return { kind: 'signIn', error: error ?? 'Please sign in again' };
   if (status < 200 || status >= 300 || !b || typeof b.free !== 'boolean') return { kind: 'error', error: error ?? `The server could not load your look (${status})` };
   const name = typeof b.name === 'string' ? b.name : null;
-  return { kind: 'ok', info: { look: parseLook(b.look), free: b.free, name, guest: b.guest === true } };
+  return { kind: 'ok', info: { look: lookV1ViewOf(b.look), free: b.free, name, guest: b.guest === true } };
 }
+
+/** A stored look (v1 or v2) as the v1 look this client still draws and edits (lookV1View), or null. */
+const lookV1ViewOf = (v: unknown): Look | null => {
+  const l = readLook(v);
+  return l && lookV1View(l);
+};
 
 export type SaveLookResult =
   | { kind: 'saved'; info: LookInfo }

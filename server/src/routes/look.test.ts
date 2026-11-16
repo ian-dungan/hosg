@@ -1,6 +1,6 @@
 // GET and POST /api/look: the creator's free visit (with the name, for an adventurer that has none), then the Barber only.
 import { afterEach, describe, expect, it } from 'vitest';
-import { defaultLook, encodeLook, randomLook, prng } from '@sg2/shared';
+import { LOOK_PRESETS, defaultLook, encodeLook, lookV1View, mergeLookV1, randomLook, prng } from '@sg2/shared';
 import { signToken } from '../auth/tokens';
 import { createMemoryStore } from '../store/memory';
 import { SECRET, startServer, type TestServer } from '../rooms/testHelpers';
@@ -51,12 +51,20 @@ describe('/api/look', () => {
     await store.nameAdventurer(guest.id, 'Guest-000042');
     const gt = signToken(guest.id, SECRET);
     expect(await call(url, 'GET', gt)).toEqual({ status: 200, body: { look: null, free: true, name: 'Guest-000042', guest: true } });
-    expect((await call(url, 'POST', gt, { look })).status).toBe(200);
-    expect((await store.getOrCreateAdventurer(guest.id))).toMatchObject({ name: 'Guest-000042', lookFree: false });
+    // the pre-v2 creator sends a v1 look: merged onto the current (default) look and stored as v2
+    const view = lookV1View(defaultLook(guest.id));
+    const v1Edit = { ...view, hair: { ...view.hair, style: (view.hair.style + 3) % 20 } };
+    const merged = mergeLookV1(defaultLook(guest.id), v1Edit)!;
+    expect(await call(url, 'POST', gt, { look: v1Edit })).toEqual({ status: 200, body: { look: merged, free: false, name: 'Guest-000042', guest: true } });
+    expect((await store.getOrCreateAdventurer(guest.id))).toMatchObject({ name: 'Guest-000042', lookFree: false, look: merged });
     // a name that is taken: 409, and the free visit is not spent
     const third = await store.createAccount({ username: 'Third', passwordHash: 'h', isGuest: false });
     const tt = signToken(third.id, SECRET);
     expect(await call(url, 'POST', tt, { look, name: 'hazelwick' })).toEqual({ status: 409, body: { error: 'That name is taken' } });
     expect((await store.getOrCreateAdventurer(third.id)).lookFree).toBe(true);
+    // the largest v2 look fits the route's 2 kB body limit with room to spare
+    const big = { ...LOOK_PRESETS[0]!.look, eyes: { ...LOOK_PRESETS[0]!.look.eyes, colour2: 0xabcdef }, brows: { ...LOOK_PRESETS[0]!.look.brows, colour: 0xabcdef } };
+    expect(JSON.stringify({ look: big, name: 'A'.repeat(24) }).length).toBeLessThan(1400);
+    expect((await call(url, 'POST', tt, { look: big, name: 'Thirdling' })).status).toBe(200);
   });
 });

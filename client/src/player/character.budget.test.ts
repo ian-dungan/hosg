@@ -2,7 +2,7 @@
 // body, one draw call (one skinned mesh, no emissive mesh), the fixed pick capsule, and a queued rebuild on a new look.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { NullEngine, Scene, type Mesh } from '@babylonjs/core';
-import { PEOPLE_IDS, prng, randomLook } from '@sg2/shared';
+import { PEOPLE_IDS, prng, randomLookV1 as randomLook } from '@sg2/shared';
 import { capeFor, characterStats, makeCharacter, setCharacterDetail } from './character';
 
 let scene: Scene;

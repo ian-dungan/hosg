@@ -9,7 +9,7 @@
 // rig (and every animation) is shared by all four peoples. Then one uniform scale makes the skull's top the
 // look's height. (`client/src/world/look.ts` is the render settings; this one is the adventurer's appearance.)
 import { Color3 } from '@babylonjs/core';
-import { ADVENTURER_RADIUS, PEOPLES, type Look as AdventurerLook, type PeopleId } from '@sg2/shared';
+import { ADVENTURER_RADIUS, PEOPLES, type LookV1 as AdventurerLook, type PeopleId } from '@sg2/shared';
 
 // ───────── the canonical humanoid (character.ts humanPivots) ─────────
 /** Hip, neck, shoulder joint and wrist heights, the shoulder's half width and the skull's top, in m. */

@@ -20,7 +20,7 @@ import {
 import { kitFor, setCounts } from './kit';
 import { levelForXp, TALENT_LEVELS } from './progression';
 import { validTalents } from './talents';
-import { resolveGearLook, type GearLook, type GearLookSlot } from './look';
+import { resolveGearLook, type GearLook, type GearLookSlot } from './gearLook';
 import type { StallId } from './world/zones';
 
 /** Unworn items the bag holds. */

@@ -10,8 +10,7 @@ import {
   Color3, Mesh, MeshBuilder, StandardMaterial, TransformNode, VertexBuffer, VertexData, Vector3, type Scene,
 } from '@babylonjs/core';
 import {
-  NPC_IDS, PROP_IDS, QUESTS, STORY_NPCS, STORY_PROPS, isQuestId, objectiveTarget,
-  type Look, type NpcId, type Objective, type PropId, type QuestsView, type ZoneId,
+  NPC_IDS, PROP_IDS, QUESTS, STORY_NPCS, STORY_PROPS, isQuestId, objectiveTarget, type LookV1 as Look, type NpcId, type Objective, type PropId, type QuestsView, type ZoneId,
 } from '@sg2/shared';
 import type { CharacterView, Quality, TapInfo, WorldApi, ZoneId as ClientZoneId } from '../core/contracts';
 import { makeCharacter } from '../player/character';

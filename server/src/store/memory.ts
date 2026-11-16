@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_HP, SPAWN, isZoneId, parseJobsSave, parseLook } from '@sg2/shared';
 import {
-  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, readInvLook, readQuests,
+  AlreadyNamedError, NameTakenError, checkedGmLog, checkedInvWrite, checkedKill, checkedSave, goldAfter, highestLevel, isUtcDay, jobsNeedRepair, lookFreeOf, readInvLook, readQuests,
   newAdventurerJobs, testKitInventory, type Account, type Adventurer, type BossKill, type GmAuditRow, type NewAdventurerOpts, type StartSpot, type Store,
 } from './types';
 import { grantByCas } from '../gm/grant';
@@ -16,7 +16,7 @@ type Row = Omit<Adventurer, 'jobs' | 'inventory' | 'look' | 'inventoryRepaired' 
 };
 
 /** Test-only: an adventurer stored by Plan 3 (its old loadout; jobs absent when the migration missed it), or with any stored inventory, look or quests. */
-export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown; inventory?: unknown; look?: unknown; quests?: unknown }
+export interface LegacyRow { accountId: string; jobs?: unknown; loadout?: unknown; inventory?: unknown; look?: unknown; lookFree?: boolean; quests?: unknown }
 
 const json = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
 const unjson = (s: string | null): unknown => (s === null ? null : JSON.parse(s));
@@ -25,6 +25,7 @@ const unjson = (s: string | null): unknown => (s === null ? null : JSON.parse(s)
 const copy = ({ legacyLoadout, jobs, titles, inventory, look, quests, ...a }: Row, fresh?: NewAdventurerOpts['quests']): Adventurer => ({
   ...a, titles: [...titles], jobs: parseJobsSave(jobs, legacyLoadout), ...(jobsNeedRepair(jobs) ? { jobsRepaired: true as const } : {}),
   ...readInvLook(unjson(inventory), unjson(look), a.accountId),
+  lookFree: lookFreeOf(a.lookFree, unjson(look)),
   ...readQuests(unjson(quests), Date.now(), fresh),
 });
 
@@ -81,6 +82,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
     row.legacyLoadout = r.loadout;
     if (r.inventory !== undefined) row.inventory = json(r.inventory);
     if (r.look !== undefined) row.look = json(r.look);
+    if (r.lookFree !== undefined) row.lookFree = r.lookFree;
     if (r.quests !== undefined) row.quests = json(r.quests);
   }
   const read = (row: Row) => copy(row, opts.newAdventurer?.quests);
@@ -151,7 +153,7 @@ export function createMemoryStore(opts: { start?: StartSpot; legacyRows?: readon
       const l = parseLook(look);
       if (!l) throw new TypeError('useFreeLook: not a look');
       const adventurer = adventurersByAccount.get(accountId);
-      if (!adventurer || !adventurer.lookFree) return false;
+      if (!adventurer || !lookFreeOf(adventurer.lookFree, unjson(adventurer.look))) return false;
       adventurer.look = json(l);
       adventurer.lookFree = false;
       adventurer.invVersion += 1;
