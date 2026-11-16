@@ -94,7 +94,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
   const tex = info.texture;
   const fh = 0;
   const lo = detail < 0.5;
-  const R = (n: number, min: number) => Math.max(min, Math.round(n * (detail >= 0.9 ? 1 : detail >= 0.5 ? 0.72 : 0.5)));
+  const R = (n: number, min: number) => Math.max(min, Math.round(n * (detail >= 0.9 ? 0.7 : detail >= 0.5 ? 0.46 : detail >= 0.3 ? 0.38 : 0.3)));
   // ── building blocks ──
   /** A point on the skull in direction d, `out` m off it along the normal (model space). */
   const at = (d: V3, out: number): V3 => { const dd = norm(d), p = hs.local(...dd), n = hs.normal(...dd); return [p[0] + n[0] * out, hs.cy + p[1] + n[1] * out, hs.cz + p[2] + n[2] * out]; };
@@ -140,7 +140,8 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
     const n = pts.length;
     for (let i = 0; i < n; i++) {
       const t = i / Math.max(1, n - 1), rr = r * kh * (1 - t * 0.35);
-      k.ellip(j, pts[i]!, [rr, rr * 1.2, rr * 0.9], i % 2 ? shade(hc, 0.84) : h2 && t > 0.6 ? h2 : hc, { seg: lo ? 5 : 7, lat: lo ? 3 : 5, noOcc: true });
+      if (lo && i % 2 === 1 && i < n - 1) continue; // half the plaits far off: the braid still reads
+      k.ellip(j, pts[i]!, [rr, rr * (lo ? 1.6 : 1.2), rr * 0.9], i % 2 ? shade(hc, 0.84) : h2 && t > 0.6 ? h2 : hc, { seg: lo ? 4 : 6, lat: lo ? 2 : 3, noOcc: true });
     }
     const end = pts[n - 1]!;
     k.ellip(j, [end[0], end[1] - r * kh, end[2]], [r * 0.45 * kh, r * 0.45 * kh, r * 0.45 * kh], o.tie, { seg: 5, lat: 3, noOcc: true });
@@ -356,7 +357,7 @@ export function buildFacialHair(k: ShapeKit, o: HairOpts): void {
   const drop: Record<number, number> = { 3: 0.012, 4: 0.006, 7: 0.012, 12: 0.06, 13: 0.055 };
   const m = masks[f];
   if (m) {
-    const seg = lo ? 10 : 16, lat = lo ? 6 : 10;
+    const seg = detail >= 0.9 ? 13 : detail >= 0.5 ? 9 : 7, lat = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 4;
     const P: V3[][] = [];
     for (let i = 0; i <= lat; i++) {
       const th = 1.55 + (Math.PI - 1.55) * (i / lat) * 0.985, row: V3[] = [];

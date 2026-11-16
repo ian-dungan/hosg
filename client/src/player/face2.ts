@@ -103,7 +103,7 @@ export const norm = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1
 export const dirOf = (th: number, ph: number): V3 => [Math.sin(th) * Math.sin(ph), Math.cos(th), Math.sin(th) * Math.cos(ph)];
 
 /** Grid sizes of the skull by detail. */
-const skullRes = (detail: number): [number, number] => (detail >= 0.9 ? [30, 20] : detail >= 0.5 ? [20, 14] : detail >= 0.3 ? [14, 10] : [10, 7]);
+const skullRes = (detail: number): [number, number] => (detail >= 0.9 ? [22, 15] : detail >= 0.5 ? [14, 10] : detail >= 0.3 ? [11, 7] : [8, 6]);
 
 export interface FaceOpts {
   look: Look; frame: Frame; fp: FaceParams; col: LookColours; hs: HeadShape; detail: number;
@@ -207,11 +207,11 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
     const loEdge = (t: number) => -Eu * (0.75 - fp.lower * 1.2) * Math.pow(Math.max(0, 1 - t * t), 0.8);
     if (detail >= 0.5) {
       // the eyeball (white), set into the socket
-      const bs = detail >= 0.9 ? 10 : 8;
-      k.ellip('eyes', ctr, [re, re, re], SCLERA, { seg: bs, lat: Math.round(bs * 0.7), noOcc: true });
+      const bs = detail >= 0.9 ? 8 : 6;
+      k.ellip('eyes', ctr, [re, re, re], SCLERA, { seg: bs, lat: Math.round(bs * 0.6), noOcc: true });
       // the iris and pupil, looking straight ahead, on the eyeball's front
       const ir = Math.min(hs.ew * 0.56, re * 0.6), ic = onBall(0, 0, re * 0.985);
-      k.ellip('eyes', [ic[0], ic[1], ic[2]], [ir, ir, ir * 0.25], shade(iris, 0.95), { seg: detail >= 0.9 ? 10 : 7, lat: 3, noOcc: true,
+      k.ellip('eyes', [ic[0], ic[1], ic[2]], [ir, ir, ir * 0.25], shade(iris, 0.95), { seg: detail >= 0.9 ? 8 : 6, lat: 3, noOcc: true,
         paint: (_w, _uv, l) => (Math.hypot(l.x, l.y) > 0.82 ? shade(iris, 0.55) : Math.hypot(l.x, l.y) < 0.5 && l.y > 0 ? shade(iris, 1.15) : undefined) });
       const pc = onBall(0, 0, re * 1.012);
       k.ellip('eyes', pc, [ir * 0.42, ir * 0.42, ir * 0.15], INK, { seg: 6, lat: 3, noOcc: true });
@@ -220,7 +220,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
         k.ellip('eyes', gl, [ir * 0.2, ir * 0.2, ir * 0.08], new Color3(1, 1, 1), { seg: 4, lat: 2, noOcc: true });
       }
       // the lids: caps on a sphere just over the eyeball, the upper from its edge up, the lower from its edge down
-      const rl = re * 1.07, nA = detail >= 0.9 ? 8 : 6, nE = detail >= 0.9 ? 4 : 3;
+      const rl = re * 1.07, nA = detail >= 0.9 ? 7 : 5, nE = detail >= 0.9 ? 3 : 2;
       const shadowC = col.shadow;
       const lidGrid = (upper: boolean) => {
         const P: V3[][] = [];
@@ -310,7 +310,7 @@ export function buildNose(k: ShapeKit, o: FaceOpts): void {
     [hs.eyeY - (0.4 - 0.01 * tip) * len, (0.012 - 0.004 * tip) * knoll, 0.0135 * wid * knoll],
     [hs.eyeY - 0.43 * len, 0.0015, 0.0095 * wid],
   ];
-  const nA = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 4;
+  const nA = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 3;
   const P: V3[][] = [];
   for (const [y, proj, hw] of st) {
     const row: V3[] = [];
@@ -478,14 +478,14 @@ export function buildMarks(k: ShapeKit, o: FaceOpts): void {
   // freckles: dots over the nose and cheeks, more with the slider (a fixed scatter, so they never crawl)
   const fr = look.skin.freckles;
   if (fr > 0) {
-    const n = [0, 9, 16, 26, 38][fr]!;
+    const n = Math.round([0, 9, 16, 26, 38][fr]! * (detail >= 0.9 ? 1 : 0.4));
     const fc = mix(col.skin, shade(col.skin, 0.55), 0.85);
     for (let i = 0; i < n; i++) {
       const a = Math.sin(i * 12.9898) * 43758.5453, b = Math.sin(i * 78.233) * 12543.123;
       const u = a - Math.floor(a), v = b - Math.floor(b);
       const x = (u * 2 - 1) * 0.62, y = -0.12 - v * 0.26 + Math.abs(x) * 0.12;
       if (Math.abs(x) < 0.07 && y < -0.2) continue;
-      k.ellip('head', hs.front(x, y, 0.0004), [0.0016 * kh, 0.0016 * kh, 0.0006 * kh], fc, { seg: 4, lat: 2, flat: true, noOcc: true });
+      k.ellip('head', hs.front(x, y, 0.0004), [0.0017 * kh, 0.0017 * kh, 0.0006 * kh], fc, { seg: 3, lat: 2, flat: true, noOcc: true });
     }
   }
   // moles at MOLE_SPOTS (spot x +1 is the adventurer's left, which is −x here)
@@ -513,15 +513,12 @@ export function buildMarks(k: ShapeKit, o: FaceOpts): void {
   }
 }
 
+/** Triangles of the last face built, by part (budgets and dev pages). */
+export const faceTris: Record<string, number> = {};
 /** The whole face: skull, eyes, brows, nose or muzzle, mouth, ears and marks. */
 export function buildFace(k: ShapeKit, o: FaceOpts): void {
   // the head keeps its own colours (no baked occlusion: the shoulders and the skull would darken the face's parts unevenly)
   k.g.aoOffNow = true;
-  buildSkull(k, o);
-  buildEyes(k, o);
-  buildBrows(k, o);
-  buildNose(k, o);
-  buildMouth(k, o);
-  buildEars(k, o);
-  buildMarks(k, o);
+  const parts = [['skull', buildSkull], ['eyes', buildEyes], ['brows', buildBrows], ['nose', buildNose], ['mouth', buildMouth], ['ears', buildEars], ['marks', buildMarks]] as const;
+  for (const [name, fn] of parts) { const t0 = k.g.triangles; fn(k, o); faceTris[name] = k.g.triangles - t0; }
 }

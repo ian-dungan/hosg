@@ -675,7 +675,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots, acc = false) {
     k.lathe('body', [0, 0, 0], [[0.9, W * 0.95 + 0.012], [0.94, W * 0.95 + 0.016], [0.98, W * 0.95 + 0.012]], sp.belt, { seg: 16, sz: 0.8 + belly * 0.2 });
     if (sp.buckle) k.ellip('body', [0, 0.94, (W * 0.95 + 0.016) * (0.8 + belly * 0.2) + 0.008], [0.04, 0.032, 0.012], sp.buckle, { seg: 8, lat: 4, power: 0.5, flat: true });
   }
-  if (sp.pouch) {
+  if (sp.pouch && !(acc && k.detail < 0.75)) {
     k.ellip('body', [0.15, 0.88, 0.07], [0.05, 0.055, 0.035], C.leatherLight, { seg: 8, lat: 5, power: 0.75 });
     k.ellip('body', [0.08, 0.86, -0.14], [0.06, 0.05, 0.035], C.leather, { seg: 8, lat: 5, power: 0.75 });
   }
@@ -912,8 +912,8 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots, acc = false) {
     }
     k.g.tagNow = 1; k.g.tagSkip = cp.trim;   // the cloth takes the job's colour (setCape); the gold trim stays
     k.sheet('cape', grid, 0.022, cp.color, { paint: (w, uv) => (w.y < 1.31 - 0.93 * cp.len ? cp.trim : shade(cp.color, 0.96 + 0.04 * Math.cos(uv[0] * Math.PI * 6))) });
-    // hood folded over the shoulders
-    k.lathe('torso', [0, 0, -0.015], [[1.22, 0.2], [1.27, 0.215], [1.33, 0.17], [1.37, 0.12]], cp.color, { seg: 16, sz: 0.88, arc: [Math.PI * 0.42, Math.PI * 1.58],
+    // hood folded over the shoulders (not far off: the cape and the job's tabard carry it)
+    if (!(acc && k.detail < 0.5)) k.lathe('torso', [0, 0, -0.015], [[1.22, 0.2], [1.27, 0.215], [1.33, 0.17], [1.37, 0.12]], cp.color, { seg: 16, sz: 0.88, arc: [Math.PI * 0.42, Math.PI * 1.58],
       paint: (w) => (w.y < 1.235 ? cp.trim : undefined) });
     }
     k.g.tagNow = 1; k.g.tagSkip = cp.trim;
@@ -938,7 +938,7 @@ function buildHuman(k: Kit, sp: HumanSpec, pv: Pivots, acc = false) {
       k.sheet('body', tg, 0.012, cp.color, { paint: (w, uv) => (uv[0] < 0.08 || uv[0] > 0.92 || w.y < botY + 0.04 ? cp.trim : undefined) });
     }
     k.g.tagNow = 0; k.g.tagSkip = null;
-    if (sp.noCape) return;
+    if (sp.noCape || (acc && k.detail < 0.75)) return;
     // shield strap across the chest
     k.tube('body', [[0.13, 1.3, 0.04], [0.06, 1.2, 0.155], [-0.06, 1.06, 0.165], [-0.16, 0.95, 0.13], [-0.2, 0.93, 0.0]], 0.018, C.leather, { seg: 4, noOcc: true, flatten: 0.45 });
     k.tube('body', [[0.13, 1.3, 0.04], [0.15, 1.28, -0.1], [0.06, 1.15, -0.18], [-0.12, 0.98, -0.16], [-0.2, 0.93, 0.0]], 0.018, C.leather, { seg: 4, noOcc: true, flatten: 0.45 });
@@ -1831,6 +1831,10 @@ export function pieceKit(detail = 1, look: AdventurerLook | null = null) {
 // ───────────────────────── level of detail and the rebuild queue ─────────────────────────
 /** Segment scale for look-driven adventurers by quality (the default adventurer is always built as written). */
 export const DETAIL: Record<Quality, number> = { high: 1, med: 0.55, low: 0.38 };
+/** The detail of an adventurer farther than FAR_M from the camera (whatever the quality): the cheap body, no face parts. */
+export const FAR_DETAIL = 0.22;
+/** Beyond this distance (m) an adventurer is rebuilt at FAR_DETAIL (back within FAR_M − 4: no flicker at the edge). */
+export const FAR_M = 27;
 let detailNow: Quality = 'high';
 /** The quality new (and rebuilt) look-driven bodies are built at. */
 export function setCharacterDetail(q: Quality): void {
@@ -1888,7 +1892,9 @@ export function setGearBuilder(h: GearHooks | null): void { gearHooks = h; }
 // ───────────────────────── factory ─────────────────────────
 let charCounter = 0;
 /** lastTriangles: everything a character was built with; lastActiveTriangles: what the last weapon or job change left in its index buffer. */
-export const characterStats = { lastTriangles: 0, lastActiveTriangles: 0, lastGlowTriangles: 0, lastBuildMs: 0, rebuilds: 0, cacheHits: 0 };
+export const characterStats = { lastTriangles: 0, lastActiveTriangles: 0, lastGlowTriangles: 0, lastBuildMs: 0, rebuilds: 0, cacheHits: 0,
+  /** Bodies held by the look-and-gear cache (never over BODY_CACHE_SIZE). */
+  get cacheSize() { return bodyCache.size; } };
 /** The pick capsule every adventurer carries: one size for all peoples and builds (the gameplay hit size is fixed). */
 const PICK_H = 1.88 * 0.95, PICK_D = 0.7;
 const HIDEABLE = new Set<Joint>(['bladeHand', 'shieldArm', 'bladeHip', 'bladeBack', 'shieldBack', 'bowHand', 'bowBack', 'gsHand', 'gsBack',
@@ -1903,7 +1909,9 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
   // (story NPCs take an authored look too: world/storyNpcs.ts)
   let look: AdventurerLook | null = kind === 'player' || kind === 'npc' ? opts.look ?? null : null;
   let gear: GearLook | null = kind === 'player' ? opts.gear ?? null : null;
-  const detailOf = () => DETAIL[opts.detail ?? detailNow];
+  /** Far from the camera (FAR_M): built at FAR_DETAIL (look-driven bodies that follow the game's detail only). */
+  let far = false, farCheck = Math.random() * 0.5;
+  const detailOf = () => (far ? Math.min(FAR_DETAIL, DETAIL[opts.detail ?? detailNow]) : DETAIL[opts.detail ?? detailNow]);
   const planOf = (): GearPlan | null => (look && gear && gearHooks ? gearHooks.plan(gear, look) : null);
   let plan = planOf();
   let des = design(kind, opts.color, look, plan?.body ?? null);
@@ -1992,6 +2000,8 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
     if (!warp) return;
     if (RIGID_ARM.has(g) || RIGID_TORSO.has(g)) {
       const c = canon[g as Joint], w = piv[g as Joint];
+      // the tail curls in a little closer to the legs (inside the hit radius on the broadest builds)
+      if (g === 'tailA' || g === 'tailB') p.x = c[0] + (p.x - c[0]) * 0.7;
       p.x += w[0] - c[0]; p.y += w[1] - c[1]; p.z += w[2] - c[2];
       return;
     }
@@ -2358,6 +2368,17 @@ export const makeCharacter: MakeCharacter = (scene: Scene, opts: CharacterOpts):
       if (ring) ring.setEnabled(on);
     },
     update(rawDt: number) {
+      // far adventurers are rebuilt cheap (checked twice a second; queued and throttled like any rebuild)
+      farCheck -= rawDt;
+      if (farCheck <= 0 && des.spec?.v2 && opts.detail === undefined) {
+        farCheck = 0.5;
+        const c = scene.activeCamera;
+        if (c) {
+          const d = Vector3.Distance(c.computeWorldMatrix().getTranslation(), root.getAbsolutePosition());
+          const want = far ? d > FAR_M - 4 : d > FAR_M;
+          if (want !== far) { far = want; pending ??= { look: look ?? HERO_LOOK, gear, hero: !look }; }
+        }
+      }
       if (pending && takeRebuild(scene)) rebuild();
       const dt = Math.min(0.1, Math.max(0, rawDt));
       T += dt; poseT += dt;

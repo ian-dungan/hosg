@@ -58,7 +58,10 @@ export interface Body2Opts {
 }
 
 /** Ring sizes by detail: around the torso, the limbs. */
-const res = (d: number) => (d >= 0.9 ? { torso: 20, limb: 10, rows: 1 } : d >= 0.5 ? { torso: 14, limb: 8, rows: 1 } : d >= 0.3 ? { torso: 10, limb: 6, rows: 0 } : { torso: 8, limb: 5, rows: 0 });
+const res = (d: number) => (d >= 0.9 ? { torso: 16, limb: 8 } : d >= 0.5 ? { torso: 10, limb: 6 } : d >= 0.3 ? { torso: 8, limb: 4 } : { torso: 6, limb: 4 });
+
+/** Triangles of the last body built, by part (budgets and dev pages). */
+export const bodyTris: Record<string, number> = {};
 
 /** Builds the look's body, face, hair and facial hair. Returns the head's shape (the hair, gear and dev pages use it). */
 export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
@@ -68,6 +71,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   const hs = headShape(f, fp);
   const R = res(detail);
   const kk = f.H / 1.75;
+  const tStart = k.g.triangles;
   const fur = look.fur;
   const fur2 = col.fur2 ?? shade(col.skin, 0.6);
   const skinPaint: Paint | null = fur ? furPaint(col.skin, fur2, fur.pattern)
@@ -187,7 +191,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       { y: f.wristY + 0.012 * kk, r: f.wristR },
       { y: f.wristY - 0.012 * kk, r: f.wristR * 0.92 },
     ];
-    const aRows = withCuts(aRows0, [cuffY, ...(cl.sleeves === 'rolled' ? [cuffY - 0.03 * kk] : cl.sleeves === 'long' && trim ? [cuffY + 0.02 * kk] : [])]);
+    const aRows = withCuts(detail < 0.5 ? aRows0.filter((_, i) => i !== 3 && i !== 6) : aRows0, [cuffY, ...(cl.sleeves === 'rolled' ? [cuffY - 0.03 * kk] : cl.sleeves === 'long' && trim ? [cuffY + 0.02 * kk] : [])]);
     const AP: V3[][] = aRows.map((r) => {
       const row: V3[] = [];
       for (let j = 0; j < ls; j++) {
@@ -205,10 +209,10 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
     // the hand: palm side towards the thigh, the thumb forward, mitten fingers
     const hp = fur ? pawPaint(col.skin, fur2, fur.pattern, sx) : skinPaint ?? undefined;
     const hx = axX(f.wristY), hy = f.wristY, hl = f.handL, hw = f.handW;
-    const hseg = detail >= 0.5 ? 8 : 6;
-    k.ellip(g, [hx, hy - hl * 0.27, 0.003 * kk], [hw * 0.28, hl * 0.28, hw * 0.5], col.skin, { seg: hseg, lat: 5, power: 0.8, paint: hp });
-    k.ellip(g, [hx - sx * hw * 0.05, hy - hl * 0.7, 0.006 * kk], [hw * 0.23, hl * 0.26, hw * 0.47], shade(col.skin, 0.98), { seg: hseg, lat: 5, power: 0.85, rot: [0.18, 0, sx * 0.08], noOcc: true, paint: hp });
-    k.tube(g, [[hx - sx * hw * 0.1, hy - hl * 0.14, hw * 0.34], [hx - sx * hw * 0.2, hy - hl * 0.34, hw * 0.52], [hx - sx * hw * 0.22, hy - hl * 0.5, hw * 0.5]],
+    const hseg = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 5, hlat = detail >= 0.5 ? 5 : 3;
+    k.ellip(g, [hx, hy - hl * 0.27, 0.003 * kk], [hw * 0.28, hl * 0.28, hw * 0.5], col.skin, { seg: hseg, lat: hlat, power: 0.8, paint: hp });
+    k.ellip(g, [hx - sx * hw * 0.05, hy - hl * 0.7, 0.006 * kk], [hw * 0.23, hl * 0.26, hw * 0.47], shade(col.skin, 0.98), { seg: hseg, lat: hlat, power: 0.85, rot: [0.18, 0, sx * 0.08], noOcc: true, paint: hp });
+    if (detail >= 0.5) k.tube(g, [[hx - sx * hw * 0.1, hy - hl * 0.14, hw * 0.34], [hx - sx * hw * 0.2, hy - hl * 0.34, hw * 0.52], [hx - sx * hw * 0.22, hy - hl * 0.5, hw * 0.5]],
       [hw * 0.17, hw * 0.15, hw * 0.1], col.skin, { seg: detail >= 0.5 ? 6 : 4, noOcc: true, paint: hp });
   }
 
@@ -226,7 +230,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       { y: lerp(f.ankleY, f.kneeY, 0.25), r: f.ankleR * 1.35 },
       { y: f.ankleY + 0.02 * kk, r: f.ankleR * 1.08 },
     ];
-    const lRows = withCuts(lRows0, [bootTop]);
+    const lRows = withCuts(detail < 0.5 ? lRows0.filter((_, i) => i !== 2 && i !== 5 && i !== 7) : lRows0, [bootTop]);
     const bootR = (y: number) => (y < bootTop ? 0.006 * kk : 0);
     const LP: V3[][] = lRows.map((r) => {
       const row: V3[] = [];
@@ -237,25 +241,29 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       return row;
     });
     k.grid(g, LP, (_i, j) => { void j; const y = LP[_i]![0]![1]; return y < bootTop ? cl.boots : legsC; }, { wrap: true });
-    if (detail >= 0.3 && bootTop > f.ankleY + 0.05) {
+    if (detail >= 0.5 && bootTop > f.ankleY + 0.05) {
       // the boot's cuff
       const cy = bootTop, rr = lerp(f.ankleR * 1.35, f.calfR, Math.min(1, (cy - f.ankleY) / (f.kneeY - f.ankleY) * 2)) + 0.012 * kk;
       k.lathe(g, [axX(cy), 0, 0], [[cy - 0.02 * kk, rr], [cy + 0.012 * kk, rr]], shade(cl.boots, 1.08), { seg: ls, caps: false });
     }
     const fx = axX(f.ankleY);
-    k.ellip(g, [fx, f.footH * 0.5, f.footL * 0.24 - 0.02 * kk], [f.footW, f.footH * 0.52, f.footL * 0.5], cl.boots, { seg: detail >= 0.5 ? 10 : 7, lat: detail >= 0.5 ? 6 : 4, power: 0.72,
+    k.ellip(g, [fx, f.footH * 0.5, f.footL * 0.24 - 0.02 * kk], [f.footW, f.footH * 0.52, f.footL * 0.5], cl.boots, { seg: detail >= 0.9 ? 9 : detail >= 0.5 ? 7 : 5, lat: detail >= 0.5 ? 5 : 3, power: 0.72,
       paint: (w) => (w.y < 0.016 * kk ? shade(cl.boots, 0.55) : undefined),
       deform: (l) => { if (l.z < 0 && l.y > 0) l.y *= 1 + 0.4 * -l.z; if (l.z > 0.3) l.y *= 1 - 0.35 * (l.z - 0.3); } });
   }
 
+  bodyTris.body = k.g.triangles - tStart;
   // ── the head ──
   if (o.head !== false) {
     const info = look.hair.style;
     void info;
     buildFace(k, { look, frame: f, fp, col, hs, detail, scalp: scalpPaint(look), stubble: stubblePaint(look) });
     k.g.aoOffNow = false;
+    let t0 = k.g.triangles;
     buildHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
+    bodyTris.hair = k.g.triangles - t0; t0 = k.g.triangles;
     buildFacialHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
+    bodyTris.facial = k.g.triangles - t0;
   }
   return hs;
 }
