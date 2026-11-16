@@ -255,6 +255,7 @@ export function markNewLooks(l: LootShow | null, m: unknown, v: InventoryView | 
 export class OpQueue {
   private q: InvOp[] = [];
   private inFlight = false;
+  private flightKey = '';
   private at = 0;
   constructor(private inv: InvClient, private send: (op: InvOp) => boolean) {}
   /** Waiting or in flight: the set buttons show a wait. */
@@ -262,7 +263,7 @@ export class OpQueue {
   get left(): number { return this.q.length + (this.inFlight ? 1 : 0); }
   push(ops: readonly InvOp[], now: number): void {
     // a second tap of the same batch adds nothing: only ops not already waiting join the queue
-    for (const op of ops) { const k = opKey(op); if (!this.q.some((x) => opKey(x) === k)) this.q.push(op); }
+    for (const op of ops) { const k = opKey(op); if (!(this.inFlight && k === this.flightKey) && !this.q.some((x) => opKey(x) === k)) this.q.push(op); }
     this.pump(now);
   }
   /** The server answered (an `inventory`): the next op goes. */
@@ -276,7 +277,7 @@ export class OpQueue {
     if (this.inFlight) return;
     while (this.q.length) {
       const op = this.q.shift()!;
-      if (sendGated(this.inv, op, this.send, now)) { this.inFlight = true; this.at = now; return; }
+      if (sendGated(this.inv, op, this.send, now)) { this.inFlight = true; this.flightKey = opKey(op); this.at = now; return; }
       // the same op is already with the server (or no room): skip it
     }
   }
