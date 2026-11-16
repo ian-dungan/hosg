@@ -1,5 +1,5 @@
 // Dev page for the character creator and the Barber screen (dev/creator.html, under `npm run dev`; not in any build).
-// URL: ?mode=create|barber  &free=0|1  &gold=120  &name=1 (a name is needed)  &tab=people|body|face|hair|colours|style|outfit|name
+// URL: ?mode=create|barber  &free=0|1  &gold=120  &name=1 (a name is needed)  &tab=start|body|head|eyes|brows|nose|mouth|ears|skin|hair|facial|marks|style|name
 //      &seed=3 (the starting look: defaultLook('dev-<seed>'))  &nopreview=1 (no 3D preview)
 // window.__creatorDev: { ready, state(), result } and the open handle.
 import { defaultLook, validateAdventurerName } from '@sg2/shared';
@@ -22,5 +22,5 @@ const handle = openCreator(document.body, {
 const dev = { ready: true, handle, result: null as unknown };
 (window as unknown as Record<string, unknown>).__creatorDev = dev;
 const tab = qs.get('tab');
-if (tab) (document.querySelector(`.sg-cr-tab[data-tab="${tab}"]`) as HTMLElement | null)?.click();
+if (tab) handle.showTab(tab as Parameters<typeof handle.showTab>[0]);
 void handle.done.then((r) => { dev.result = r; });

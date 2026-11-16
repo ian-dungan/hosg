@@ -187,7 +187,7 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
     const c = hs.front(sx * hs.eyeX, hs.eyeY, 0);
     const n = hs.normal(...norm([sx * hs.eyeX, hs.eyeY, 0.9]));
     const re = hs.ew * 1.12;                                         // the eyeball's radius
-    const ctr: V3 = [c[0] - n[0] * re * 0.62, c[1] - n[1] * re * 0.4, c[2] - n[2] * re * 0.62];
+    const ctr: V3 = [c[0] - n[0] * re * 0.78, c[1] - n[1] * re * 0.5, c[2] - n[2] * re * 0.78];
     const tilt = sx * fp.eyeTilt;                                    // + lifts the outer corner (x away from the nose)
     // the frame of the eye: forward (a little outward), right, up (tilted)
     const yaw = sx * 0.12;
@@ -227,9 +227,9 @@ export function buildEyes(k: ShapeKit, o: FaceOpts): void {
         for (let i = 0; i <= nE; i++) {
           const row: V3[] = [];
           for (let j = 0; j <= nA; j++) {
-            const t = (j / nA) * 2 - 1, az = t * (A * 1.25);
+            const t = (j / nA) * 2 - 1, az = t * (A * 1.55);
             const edge = Math.abs(t) > 0.8 ? 0 : upper ? upEdge(t / 0.8) : loEdge(t / 0.8);
-            const lim = upper ? 1.25 : -1.05;
+            const lim = upper ? 1.35 : -1.25;
             const el = edge + (lim - edge) * (i / nE);
             row.push(onBall(az, el, rl * (i === 0 ? 1 : 1 + 0.06 * (i / nE))));
           }

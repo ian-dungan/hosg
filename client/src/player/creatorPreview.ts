@@ -34,13 +34,13 @@ export function createCreatorPreview(): CreatorPreview {
   view.root.rotation.y = Math.PI; // facing the camera
   let height = view.height;
   const cam = new ArcRotateCamera('crCam', -Math.PI / 2, 1.38, 3.4, new Vector3(0, 0.95, 0), scene);
-  cam.minZ = 0.05; cam.fov = 0.62; cam.lowerRadiusLimit = 0.6; cam.upperRadiusLimit = 5.5;
-  let focus: 'body' | 'face' = 'body', zoomK = 1, walking = false;
+  cam.minZ = 0.02; cam.fov = 0.62; cam.lowerRadiusLimit = 0.25; cam.upperRadiusLimit = 5.5;
+  let focus: 'face' | 'body' | 'full' = 'full', zoomK = 1, walking = false;
   const frame = () => {
     const h = height;
-    const face = focus === 'face';
-    const r = (face ? 0.95 + h * 0.22 : 1.3 + h * 1.1) * zoomK;
-    const ty = face ? h * 0.84 : h * 0.5;
+    // the face fills the view; the body from the waist up; the whole adventurer
+    const r = (focus === 'face' ? 0.38 + h * 0.12 : focus === 'body' ? 0.9 + h * 0.5 : 1.3 + h * 1.1) * zoomK;
+    const ty = focus === 'face' ? h * 0.91 : focus === 'body' ? h * 0.7 : h * 0.5;
     cam.radius += (r - cam.radius) * 0.18;
     cam.target.y += (ty - cam.target.y) * 0.18;
   };
@@ -58,7 +58,7 @@ export function createCreatorPreview(): CreatorPreview {
     setFocus(f) { focus = f; zoomK = 1; },
     setWalking(on) { if (on === walking) return; walking = on; view.setPose(on ? 'run' : 'idle'); },
     turn(d) { view.root.rotation.y += d; },
-    zoom(f) { zoomK = Math.max(0.45, Math.min(1.8, zoomK * f)); },
+    zoom(f) { zoomK = Math.max(0.4, Math.min(2.2, zoomK * f)); },
     resize: onResize,
     dispose() {
       engine.stopRenderLoop();

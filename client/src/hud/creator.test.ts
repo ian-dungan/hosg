@@ -118,7 +118,7 @@ describe('creatorLayout', () => {
       expect(L.panel.x + L.panel.w).toBeLessThanOrEqual(w);
       expect(L.panel.y + L.panel.h).toBeLessThanOrEqual(h);
       if (w >= 1000) expect(L.panel.w).toBe(420);
-      if (h > w) expect(L.preview.h).toBeCloseTo(h * 0.45, 0);
+      if (h > w) expect(L.preview.h).toBeCloseTo(h * 0.4, 0);
     });
   }
 });

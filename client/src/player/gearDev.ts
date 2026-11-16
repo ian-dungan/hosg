@@ -16,7 +16,7 @@
 // window.__gear: { ready, stats(): triangles, emissive triangles and draw calls }.
 import { Engine, Scene, ArcRotateCamera, Matrix, Vector3, SceneInstrumentation, Mesh, VertexData, StandardMaterial, Color3 } from '@babylonjs/core';
 import {
-  COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLES, PEOPLE_IDS, SETS, SET_IDS, greenwayLayout, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, resolveGearLook, type GearLook, type JobId, type LookV1 as AdventurerLook, type PeopleId, type SetId,
+  COSTUMES, COSTUME_IDS, DYES, ITEMS, ITEM_IDS, JOBS, JOB_IDS, PEOPLES, PEOPLE_IDS, SETS, SET_IDS, greenwayLayout, parseLookV1 as parseLook, prng, randomLookV1 as randomLook, resolveGearLook, upgradeLookV1, type GearLook, type JobId, type LookV1 as AdventurerLook, type PeopleId, type SetId,
 } from '@sg2/shared';
 import type { CharacterView, Quality } from '../core/contracts';
 import { buildGreenway } from '../world/greenway';
@@ -54,7 +54,7 @@ const ofPeople = (l: AdventurerLook, p: PeopleId): AdventurerLook => {
 const at10 = (l: AdventurerLook): AdventurerLook => ({ ...l, body: { height: 10, build: 10, shoulders: 10, hips: 10, legs: 10, head: 10 } });
 const baseLook = (i = 0) => { const l = at10(randomLook(prng(seed * 7919 + i * 104729))); return pinPeople ? ofPeople(l, pinPeople) : ofPeople(l, 'human'); };
 const put = (look: AdventurerLook, gear: GearLook | null, job: JobId, x: number, z: number, face = facing, name = '') => {
-  const v = makeCharacter(scene, { kind: 'player', look, gear });
+  const v = makeCharacter(scene, { kind: 'player', look: upgradeLookV1(look), gear });
   v.root.position.set(x, ground(x, z), z); v.root.rotation.y = face;
   v.setWeapon(JOBS[job].weapon, staffTint(job)); v.setCape(capeFor(job));
   if (drawnWeapons) v.setPose('attack');

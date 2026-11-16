@@ -1,115 +1,138 @@
-// The character creator's state, without any DOM (unit-tested): the tabs and their controls, every change through
-// parseLook (an impossible look never exists), Undo over the last 20 changes, "Surprise me", the name's live check,
-// and what Done says and costs (the Barber: barberCost, or free on the free visit).
+// The Look v2 character creator's state, without any DOM (unit-tested): its tabs and their controls (every field of
+// a look has one), every change through parseLook (an impossible look never exists), reset per control and per tab,
+// Undo and Redo, compare-with-before, presets, "Surprise me", the look code to copy and paste, the name's live check,
+// and what Done says and costs (the Barber: barberCost — a new people or body costs more — or free on the free visit).
 import {
-  BRINDLE_EARS, DYES, FACE_MARKS_V1 as FACE_MARKS, FACE_SHAPES_V1 as FACE_SHAPES, FACIAL_HAIR_V1 as FACIAL_HAIR, FUR_PATTERNS, HAIR_STYLES_V1 as HAIR_STYLES, LOOK_LIMITS_V1 as LOOK_LIMITS, PEOPLES, PEOPLE_IDS, STANCES, TAILS, WALKS, barberCostV1 as barberCost, parseLookV1 as parseLook, type LookV1 as Look, type PeopleId,
+  BRINDLE_EARS, BROW_SHAPES, DYES, EYE_COLOURS, EYE_SHAPES, FACE_PAINTS, FACIAL_HAIR, FUR_PATTERNS, HAIRLINES, HAIR_COLOURS,
+  HAIR_STYLES, LINER_COLOURS, LIP_COLOURS, LOOK_LIMITS, LOOK_PRESETS, MOLE_SPOTS, PAINT_COLOURS, PEOPLES, PEOPLE_IDS, SCARS,
+  SHADOW_COLOURS, SKIN_TONES, STANCES, TAILS, WALKS, barberCost, clampLookColour, decodeLook, encodeLook, parseLook,
+  type BodyType, type Look, type NamedColour, type PeopleId,
 } from '@sg2/shared';
 
-export type CreatorTab = 'people' | 'body' | 'face' | 'hair' | 'colours' | 'style' | 'outfit' | 'name';
+export type CreatorTab = 'start' | 'body' | 'head' | 'eyes' | 'brows' | 'nose' | 'mouth' | 'ears' | 'skin' | 'hair' | 'facial' | 'marks' | 'style' | 'name';
 export const TAB_LABEL: Readonly<Record<CreatorTab, string>> = Object.freeze({
-  people: 'People', body: 'Body', face: 'Face', hair: 'Hair', colours: 'Colours', style: 'Style', outfit: 'Outfit', name: 'Name',
+  start: 'Start', body: 'Body', head: 'Head', eyes: 'Eyes', brows: 'Brows', nose: 'Nose', mouth: 'Mouth', ears: 'Ears',
+  skin: 'Skin', hair: 'Hair', facial: 'Facial hair', marks: 'Marks', style: 'Style', name: 'Name',
+});
+/** Where the preview's camera goes on each tab. */
+export const TAB_CAMERA: Readonly<Record<CreatorTab, 'face' | 'body' | 'full'>> = Object.freeze({
+  start: 'full', body: 'full', head: 'face', eyes: 'face', brows: 'face', nose: 'face', mouth: 'face', ears: 'face',
+  skin: 'face', hair: 'face', facial: 'face', marks: 'face', style: 'full', name: 'full',
 });
 /** How many changes Undo remembers. */
-export const UNDO_DEPTH = 20;
+export const UNDO_DEPTH = 50;
 
 export type Control =
-  | { kind: 'people' }
-  | { kind: 'slider'; path: string; label: string; min: number; max: number; ends: [string, string] }
+  | { kind: 'start' }
+  | { kind: 'slider'; path: string; label: string; min: number; max: number; ends: [string, string]; neutral: number }
   | { kind: 'picker'; path: string; label: string; options: readonly string[] }
-  | { kind: 'colour'; path: string; label: string; swatches: readonly number[] }
+  | { kind: 'colour'; path: string; label: string; swatches: readonly NamedColour[]; none?: string }
+  | { kind: 'palette'; path: string; label: string; swatches: readonly NamedColour[] }
+  | { kind: 'bits'; path: string; label: string; options: readonly string[] }
   | { kind: 'dye'; path: string; label: string }
   | { kind: 'name' };
 
+const lim = (path: string) => LOOK_LIMITS[path]!;
+const slider = (path: string, label: string, ends: [string, string]): Control => {
+  const [min, max] = lim(path);
+  return { kind: 'slider', path, label, min, max, ends, neutral: path === 'face.age' ? 0 : Math.round((min + max) / 2) };
+};
+const picker = (path: string, label: string, options: readonly string[]): Control => ({ kind: 'picker', path, label, options });
 const hex = (s: string) => parseInt(s.slice(1), 16);
-function lerp(a: number, b: number, t: number): number {
-  let out = 0;
-  for (const sh of [16, 8, 0]) {
-    const p = (a >> sh) & 255, q = (b >> sh) & 255;
-    out |= Math.round(p + (q - p) * t) << sh;
-  }
-  return out;
-}
-/** Twelve suggested colours from a people's ranges (spread evenly over every range). */
-export function swatchesFrom(ranges: readonly (readonly [string, string])[]): number[] {
-  const out: number[] = [];
+/** Twelve suggested colours from a people's ranges (spread evenly over every range), lightness-clamped. */
+export function swatchesFrom(ranges: readonly (readonly [string, string])[], name = ''): NamedColour[] {
+  const out: NamedColour[] = [];
   for (let i = 0; i < 12; i++) {
     const at = (i / 12) * ranges.length, r = ranges[Math.min(ranges.length - 1, Math.floor(at))]!;
-    out.push(lerp(hex(r[0]), hex(r[1]), at - Math.floor(at)));
+    const a = hex(r[0]), b = hex(r[1]), t = at - Math.floor(at);
+    let c = 0;
+    for (const sh of [16, 8, 0]) c |= Math.round(((a >> sh) & 255) + ((((b >> sh) & 255) - ((a >> sh) & 255)) * t)) << sh;
+    out.push({ name: `${name} ${i + 1}`.trim(), colour: clampLookColour(c) });
   }
   return out;
 }
-const EYE_SWATCHES = [0x3b2416, 0x6e4527, 0x7a5a2e, 0xa3863f, 0x4f6b3a, 0x7f9a55, 0x5f6b73, 0x9aa6ad, 0x2f5d8a, 0x6d9ccc, 0xb07a1c, 0xe0a93a];
-const MARK_SWATCHES = [0xc98d86, 0xe3b1a8, 0x8e2a22, 0xc2412f, 0x28456e, 0x3f6aa3, 0x1d1b22, 0x3a3542, 0xb98a2c, 0xdcb04a, 0xe8e2d4, 0x2e5a44];
+const named = (s: readonly string[]) => s;
 
-const n = (path: string) => LOOK_LIMITS[path]!;
-const slider = (path: string, label: string, ends: [string, string]): Control => ({ kind: 'slider', path, label, min: n(path)[0], max: n(path)[1], ends });
-const count = (k: number) => Array.from({ length: k }, (_, i) => String(i + 1));
-const EYES = ['Round', 'Bright', 'Hooded', 'Almond', 'Sleepy', 'Wide', 'Narrow', 'Heavy-lidded'];
-const BROWS = ['None', 'Fine', 'Straight', 'Arched', 'Stern', 'High arch', 'Bold', 'Heavy'];
-const NOSES = ['Button', 'Small', 'Straight', 'Broad', 'Long', 'Round', 'Hooked', 'Grand'];
-const MUZZLES = ['Snub', 'Short', 'Neat', 'Broad', 'Long', 'Round', 'Keen', 'Grand'];
-const MOUTHS = ['Smile', 'Wide', 'Small', 'Grin', 'Stern', 'Full'];
-const EARS_ROUND = ['Small', 'Neat', 'Large', 'Grand'];
-const EARS_LONG = ['Long', 'Longer', 'Very long', 'Sweeping'];
-
-/** The controls of a tab for this look (the Brindlekin get muzzles, animal ears, fur and a tail). */
+/** The controls of a tab for this look (the Brindlekin get a muzzle, animal ears, fur and a tail). */
 export function controlsFor(tab: CreatorTab, l: Look): Control[] {
-  const furred = PEOPLES[l.people].furred;
+  const p = PEOPLES[l.people], furred = p.furred;
   switch (tab) {
-    case 'people': return [{ kind: 'people' }];
+    case 'start': return [{ kind: 'start' }];
     case 'body': return [
-      slider('body.height', 'Height', ['Short', 'Tall']), slider('body.build', 'Build', ['Slight', 'Stout']),
-      slider('body.shoulders', 'Shoulders', ['Narrow', 'Broad']), slider('body.hips', 'Hips', ['Narrow', 'Wide']),
-      slider('body.legs', 'Legs', ['Short', 'Long']), slider('body.head', 'Head', ['Small', 'Large']),
+      slider('build.height', 'Height', ['Short', 'Tall']), slider('build.weight', 'Weight', ['Slight', 'Heavy']), slider('build.muscle', 'Muscle', ['Soft', 'Built']),
+      slider('build.shoulders', 'Shoulders', ['Narrow', 'Broad']), slider('build.chest', 'Chest', ['Flat', 'Full']), slider('build.waist', 'Waist', ['Narrow', 'Wide']),
+      slider('build.hips', 'Hips', ['Narrow', 'Wide']), slider('build.arms', 'Arms', ['Short', 'Long']), slider('build.legs', 'Legs', ['Short', 'Long']),
+      slider('build.neck', 'Neck', ['Slim', 'Thick']), slider('build.head', 'Head size', ['Small', 'Large']),
     ];
-    case 'face': return [
-      { kind: 'picker', path: 'face.shape', label: 'Face', options: FACE_SHAPES },
-      { kind: 'picker', path: 'face.eyes', label: 'Eyes', options: EYES },
-      { kind: 'picker', path: 'face.brows', label: 'Brows', options: BROWS },
-      { kind: 'picker', path: 'face.nose', label: furred ? 'Muzzle' : 'Nose', options: furred ? MUZZLES : NOSES },
-      { kind: 'picker', path: 'face.mouth', label: 'Mouth', options: MOUTHS },
-      { kind: 'picker', path: 'face.ears', label: 'Ears', options: furred ? BRINDLE_EARS : l.people === 'larchfolk' ? EARS_LONG : EARS_ROUND },
-      { kind: 'picker', path: 'face.marks', label: 'Marks', options: FACE_MARKS },
+    case 'head': return [
+      slider('face.width', 'Face width', ['Narrow', 'Wide']), slider('face.length', 'Face length', ['Short', 'Long']), slider('face.forehead', 'Forehead', ['Low', 'High']),
+      slider('face.cheekbones', 'Cheekbones', ['Soft', 'High']), slider('face.jawWidth', 'Jaw', ['Narrow', 'Wide']), slider('face.chinLength', 'Chin length', ['Short', 'Long']),
+      slider('face.chinWidth', 'Chin width', ['Pointed', 'Broad']), slider('face.age', 'Age lines', ['None', 'Deep']),
     ];
-    case 'hair': return [
-      { kind: 'picker', path: 'hair.style', label: 'Hair', options: HAIR_STYLES },
-      { kind: 'picker', path: 'hair.facial', label: 'Facial hair', options: FACIAL_HAIR },
+    case 'eyes': return [
+      picker('eyes.shape', 'Eye shape', EYE_SHAPES), slider('eyes.size', 'Size', ['Small', 'Large']), slider('eyes.spacing', 'Spacing', ['Close', 'Wide']),
+      slider('eyes.height', 'Height', ['Low', 'High']), slider('eyes.tilt', 'Tilt', ['Down', 'Up']), slider('eyes.openness', 'Openness', ['Narrow', 'Wide open']),
+      { kind: 'colour', path: 'eyes.colour', label: 'Eye colour', swatches: EYE_COLOURS },
+      { kind: 'colour', path: 'eyes.colour2', label: 'Other eye', swatches: EYE_COLOURS, none: 'Same' },
     ];
-    case 'colours': {
-      const p = PEOPLES[l.people];
+    case 'brows': return [
+      picker('brows.shape', 'Brow shape', BROW_SHAPES), slider('brows.thickness', 'Thickness', ['Fine', 'Heavy']), slider('brows.height', 'Height', ['Low', 'High']),
+      slider('brows.tilt', 'Tilt', ['Down', 'Up']), { kind: 'colour', path: 'brows.colour', label: 'Brow colour', swatches: HAIR_COLOURS, none: 'As hair' },
+    ];
+    case 'nose': return furred
+      ? [picker('fur.muzzle', 'Muzzle', named(['Snub', 'Short', 'Neat', 'Broad', 'Long', 'Round', 'Keen', 'Grand'])), slider('nose.length', 'Muzzle length', ['Short', 'Long']),
+        slider('nose.width', 'Width', ['Narrow', 'Wide']), slider('nose.bridge', 'Bridge', ['Flat', 'High']), slider('nose.tip', 'Nose tilt', ['Down', 'Up'])]
+      : [slider('nose.length', 'Length', ['Short', 'Long']), slider('nose.width', 'Width', ['Narrow', 'Wide']), slider('nose.bridge', 'Bridge', ['Low', 'High']), slider('nose.tip', 'Tip', ['Down', 'Upturned'])];
+    case 'mouth': return [
+      slider('mouth.width', 'Width', ['Narrow', 'Wide']), slider('mouth.upperLip', 'Upper lip', ['Thin', 'Full']), slider('mouth.lowerLip', 'Lower lip', ['Thin', 'Full']),
+      slider('mouth.height', 'Height', ['Low', 'High']), { kind: 'palette', path: 'makeup.lips', label: 'Lip colour', swatches: LIP_COLOURS },
+    ];
+    case 'ears': return [
+      picker('ears.style', 'Ears', furred ? BRINDLE_EARS : l.people === 'larchfolk' ? ['Long', 'Longer', 'Very long', 'Sweeping'] : ['Small', 'Neat', 'Large', 'Grand']),
+      slider('ears.size', 'Size', ['Small', 'Large']), slider('ears.angle', 'Angle', ['Flat', 'Out']),
+    ];
+    case 'skin': {
       const out: Control[] = [
-        { kind: 'colour', path: 'colours.skin', label: furred ? 'Fur' : 'Skin', swatches: swatchesFrom(p.skinRange) },
-        { kind: 'colour', path: 'colours.hair', label: 'Hair', swatches: swatchesFrom(p.hairRange) },
-        { kind: 'colour', path: 'colours.facial', label: 'Facial hair and brows', swatches: swatchesFrom(p.hairRange) },
-        { kind: 'colour', path: 'colours.eyes', label: 'Eyes', swatches: EYE_SWATCHES },
-        { kind: 'colour', path: 'colours.marks', label: 'Marks', swatches: MARK_SWATCHES },
+        { kind: 'colour', path: 'skin.colour', label: furred ? 'Fur' : 'Skin', swatches: furred || l.people !== 'human' ? swatchesFrom(p.skinRange, furred ? 'Fur' : 'Skin').concat(SKIN_TONES.filter((_, i) => i % 3 === 0)) : SKIN_TONES },
+        slider('skin.blush', 'Blush', ['None', 'Rosy']),
       ];
       if (furred) {
-        out.push({ kind: 'colour', path: 'fur.colour', label: 'Fur pattern', swatches: swatchesFrom(p.hairRange.concat(p.skinRange)) });
-        out.push({ kind: 'picker', path: 'fur.pattern', label: 'Pattern', options: FUR_PATTERNS });
-        out.push({ kind: 'picker', path: 'fur.tail', label: 'Tail', options: TAILS });
+        out.push(picker('fur.pattern', 'Pattern', FUR_PATTERNS), { kind: 'colour', path: 'fur.colour', label: 'Pattern colour', swatches: swatchesFrom(p.hairRange.concat(p.skinRange), 'Fur') }, picker('fur.tail', 'Tail', TAILS));
       }
+      out.push({ kind: 'palette', path: 'makeup.shadow', label: 'Eye shadow', swatches: SHADOW_COLOURS }, { kind: 'palette', path: 'makeup.liner', label: 'Eyeliner', swatches: LINER_COLOURS });
       return out;
     }
-    case 'style': return [
-      { kind: 'picker', path: 'style.stance', label: 'Stance', options: STANCES },
-      { kind: 'picker', path: 'style.walk', label: 'Walk', options: WALKS },
+    case 'hair': return [
+      picker('hair.style', 'Hair style', HAIR_STYLES), picker('hair.hairline', 'Hairline', HAIRLINES),
+      { kind: 'colour', path: 'hair.colour', label: 'Hair colour', swatches: HAIR_COLOURS },
+      { kind: 'colour', path: 'hair.colour2', label: 'Tips and streaks', swatches: HAIR_COLOURS, none: 'None' },
+      slider('hair.grey', 'Grey', ['None', 'White']),
     ];
-    case 'outfit': return [{ kind: 'dye', path: 'outfit.dye1', label: 'Tunic' }, { kind: 'dye', path: 'outfit.dye2', label: 'Trousers and ties' }];
+    case 'facial': return [picker('hair.facial', 'Facial hair', FACIAL_HAIR), { kind: 'colour', path: 'hair.facialColour', label: 'Colour', swatches: HAIR_COLOURS }];
+    case 'marks': return [
+      slider('skin.freckles', 'Freckles', ['None', 'Many']), { kind: 'bits', path: 'skin.moles', label: 'Moles', options: MOLE_SPOTS.map((m) => m.name) },
+      picker('skin.scar', 'Scar', SCARS), picker('paint.style', 'Face paint', FACE_PAINTS), { kind: 'colour', path: 'paint.colour', label: 'Paint colour', swatches: PAINT_COLOURS },
+    ];
+    case 'style': return [picker('style.stance', 'Stance', STANCES), picker('style.walk', 'Walk', WALKS), { kind: 'dye', path: 'outfit.dye1', label: 'Tunic' }, { kind: 'dye', path: 'outfit.dye2', label: 'Trousers and ties' }];
     case 'name': return [{ kind: 'name' }];
   }
 }
-export { count as optionNumbers };
 
-/** A field's value by path ('body.height', 'fur.tail', ...); null when the group is absent (fur on a non-furred people). */
-export function getPath(l: Look, path: string): number | null {
+/** A field's value by path ('build.height', 'fur.tail', ...); undefined when the group is absent (fur on a non-furred people). */
+export function getPath(l: Look, path: string): number | null | undefined {
   const [g, k] = path.split('.') as [keyof Look, string];
-  const grp = l[g] as Record<string, number> | null;
-  return grp && typeof grp === 'object' ? grp[k] ?? null : null;
+  const grp = l[g] as Record<string, number | null> | null;
+  return grp && typeof grp === 'object' ? grp[k] : undefined;
 }
+const withPath = (l: Look, path: string, v: number | null): Look | null => {
+  const [g, k] = path.split('.') as [keyof Look, string];
+  const grp = l[g];
+  if (!grp || typeof grp !== 'object') return null;
+  return parseLook({ ...l, [g]: { ...(grp as Record<string, number>), [k]: v } });
+};
 
-/** A people's fresh fur (the Brindlekin): a pattern colour from its ranges, the first tail. */
-const furFor = (p: PeopleId): Look['fur'] => (PEOPLES[p].furred ? { pattern: 1, colour: swatchesFrom(PEOPLES[p].hairRange)[3]!, tail: 1 } : null);
+/** A people's fresh fur (the Brindlekin). */
+const furFor = (p: PeopleId): Look['fur'] => (PEOPLES[p].furred ? { pattern: 1, colour: swatchesFrom(PEOPLES[p].hairRange)[3]!.colour, tail: 1, muzzle: 3 } : null);
 
 export interface CreatorStateOpts {
   look: Look; mode: 'create' | 'barber'; needsName: boolean; gold: number; free: boolean;
@@ -119,25 +142,29 @@ export interface CreatorStateOpts {
 }
 
 export class CreatorState {
-  look: Look;
+  private cur: Look;
   readonly original: Look;
   name = '';
+  /** Showing the look as it was when the creator opened (Compare); edits are paused meanwhile. */
+  comparing = false;
   private undoStack: Look[] = [];
+  private redoStack: Look[] = [];
   private readonly originalName: string;
   constructor(readonly o: CreatorStateOpts) {
-    this.look = parseLook(o.look) ?? o.look;
-    this.original = this.look;
+    this.cur = parseLook(o.look) ?? o.look;
+    this.original = this.cur;
     this.name = o.name ?? '';
     this.originalName = this.name;
   }
+  /** The look being edited. */
+  get look(): Look { return this.cur; }
+  /** The look the preview shows (the original while comparing). */
+  get shown(): Look { return this.comparing ? this.original : this.cur; }
   /** The tab to open on: the Name tab when the creator opened again over a name (a notice) and a name is asked for. */
   startTab(notice: string | undefined): CreatorTab {
-    return notice && this.o.needsName ? 'name' : 'people';
+    return notice && this.o.needsName ? 'name' : 'start';
   }
-  /**
-   * The line over the buttons on `tab`: the notice (why the creator opened again: a taken name, ...) until the look or
-   * the name changes; else what stops Done (on the Name tab the field shows the name's own line); else nothing.
-   */
+  /** The line over the buttons: the notice until the look or the name changes; else what stops Done; else nothing. */
   noteLine(tab: CreatorTab, notice: string | undefined): string {
     if (notice && this.unchanged && this.name === this.originalName) return notice;
     const block = this.blocker;
@@ -145,64 +172,117 @@ export class CreatorState {
     return '';
   }
   get tabs(): CreatorTab[] {
-    const t: CreatorTab[] = ['people', 'body', 'face', 'hair', 'colours', 'style', 'outfit'];
+    const t: CreatorTab[] = ['start', 'body', 'head', 'eyes', 'brows', 'nose', 'mouth', 'ears', 'skin', 'hair', 'facial', 'marks', 'style'];
     if (this.o.needsName) t.push('name');
     return t;
   }
   get canUndo(): boolean { return this.undoStack.length > 0; }
+  get canRedo(): boolean { return this.redoStack.length > 0; }
   get undoDepth(): number { return this.undoStack.length; }
   private commit(next: Look | null): boolean {
-    if (!next || JSON.stringify(next) === JSON.stringify(this.look)) return false;
-    this.undoStack.push(this.look);
+    if (!next || JSON.stringify(next) === JSON.stringify(this.cur)) return false;
+    this.comparing = false;
+    this.undoStack.push(this.cur);
     if (this.undoStack.length > UNDO_DEPTH) this.undoStack.shift();
-    this.look = next;
+    this.redoStack = [];
+    this.cur = next;
     return true;
   }
-  /** Sets one field (clamped into its range); false when nothing changed. */
-  set(path: string, value: number): boolean {
-    const [g, k] = path.split('.') as [keyof Look, string];
-    const grp = this.look[g];
-    if (!grp || typeof grp !== 'object') return false;
-    const lim = LOOK_LIMITS[path];
-    if (!lim || !Number.isFinite(value)) return false;
-    let hi = lim[1];
-    if (path === 'face.ears') hi = PEOPLES[this.look.people].earsMax;
-    const v = Math.max(lim[0], Math.min(hi, Math.round(value)));
-    return this.commit(parseLook({ ...this.look, [g]: { ...(grp as Record<string, number>), [k]: v } }));
+  /** Sets one field (a number clamped into its range, or a colour lightness-clamped; null only where allowed); false when nothing changed. */
+  set(path: string, value: number | null): boolean {
+    const r = lim(path);
+    if (!r) return false;
+    let v: number | null;
+    if (value === null) v = null;
+    else if (!Number.isFinite(value)) return false;
+    else if (path.endsWith('olour') || path.endsWith('olour2')) v = clampLookColour(Math.max(0, Math.min(0xffffff, Math.round(value))));
+    else {
+      const hi = path === 'ears.style' ? PEOPLES[this.cur.people].earsMax : r[1];
+      v = Math.max(r[0], Math.min(hi, Math.round(value)));
+    }
+    return this.commit(withPath(this.cur, path, v));
   }
   /** Steps a picker by ±1, wrapping round. */
   step(path: string, by: number): boolean {
-    const cur = getPath(this.look, path);
-    if (cur === null) return false;
-    const lim = LOOK_LIMITS[path]!;
-    const hi = path === 'face.ears' ? PEOPLES[this.look.people].earsMax : lim[1];
-    const span = hi - lim[0] + 1;
-    return this.set(path, lim[0] + ((((cur - lim[0] + by) % span) + span) % span));
+    const cur = getPath(this.cur, path);
+    if (typeof cur !== 'number') return false;
+    const r = lim(path)!;
+    const hi = path === 'ears.style' ? PEOPLES[this.cur.people].earsMax : r[1];
+    const span = hi - r[0] + 1;
+    return this.set(path, r[0] + ((((cur - r[0] + by) % span) + span) % span));
   }
-  /** Another people: fur appears or goes, ears are kept within the people's, skin and hair move to its suggested colours. */
+  /** Toggles bit `i` of a bit set (moles). */
+  toggleBit(path: string, i: number): boolean {
+    const cur = getPath(this.cur, path);
+    return typeof cur === 'number' && this.set(path, cur ^ (1 << i));
+  }
+  /** One control back to its neutral (sliders: the middle; anything else: as the creator opened). */
+  reset(c: Control): boolean {
+    if (!('path' in c)) return false;
+    if (c.kind === 'slider') return this.set(c.path, c.neutral);
+    const was = getPath(this.original, c.path);
+    return was !== undefined && this.commit(withPath(this.cur, c.path, was));
+  }
+  /** Every control of a tab back (one Undo step). */
+  resetTab(tab: CreatorTab): boolean {
+    let l: Look = this.cur;
+    for (const c of controlsFor(tab, l)) {
+      if (!('path' in c)) continue;
+      const v = c.kind === 'slider' ? c.neutral : getPath(this.original, c.path);
+      if (v === undefined) continue;
+      l = withPath(l, c.path, v) ?? l;
+    }
+    return this.commit(l);
+  }
+  /** Another people: fur appears or goes, ears are kept within the people's, the skin moves to its suggested colours. */
   setPeople(p: PeopleId): boolean {
-    if (p === this.look.people || !PEOPLE_IDS.includes(p)) return false;
+    if (p === this.cur.people || !PEOPLE_IDS.includes(p)) return false;
     const d = PEOPLES[p];
-    const skin = swatchesFrom(d.skinRange)[Math.min(11, Math.floor(((this.look.colours.skin & 255) / 256) * 12))]!;
-    return this.commit(parseLook({
-      ...this.look, people: p, fur: furFor(p),
-      face: { ...this.look.face, ears: Math.min(this.look.face.ears, d.earsMax) },
-      colours: { ...this.look.colours, skin },
-    }));
+    const human = p === 'human' && !PEOPLES[this.cur.people].furred;
+    const skin = human ? this.cur.skin.colour : swatchesFrom(d.skinRange)[Math.min(11, Math.floor(((this.cur.skin.colour & 255) / 256) * 12))]!.colour;
+    return this.commit(parseLook({ ...this.cur, people: p, fur: furFor(p), ears: { ...this.cur.ears, style: Math.min(this.cur.ears.style, d.earsMax) }, skin: { ...this.cur.skin, colour: skin } }));
   }
-  /** "Surprise me": a random look of the same people (a new people is one tap away on its tab). */
+  setBody(b: BodyType): boolean {
+    return this.commit(parseLook({ ...this.cur, body: b }));
+  }
+  /** A named preset (its people and body too); the outfit's dyes stay. */
+  applyPreset(id: string): boolean {
+    const p = LOOK_PRESETS.find((x) => x.id === id);
+    return !!p && this.commit(parseLook({ ...p.look, outfit: this.cur.outfit }));
+  }
+  /** "Surprise me": a random look of the same people and body (the Start tab changes those). */
   randomise(random: (rng: () => number) => Look, rng: () => number): boolean {
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
       const r = random(rng);
-      if (r.people === this.look.people) return this.commit(r);
+      if (r.people === this.cur.people && r.body === this.cur.body) return this.commit(r);
     }
     return this.commit(random(rng));
   }
   undo(): boolean {
     const prev = this.undoStack.pop();
     if (!prev) return false;
-    this.look = prev;
+    this.redoStack.push(this.cur);
+    this.cur = prev;
+    this.comparing = false;
     return true;
+  }
+  redo(): boolean {
+    const next = this.redoStack.pop();
+    if (!next) return false;
+    this.undoStack.push(this.cur);
+    this.cur = next;
+    this.comparing = false;
+    return true;
+  }
+  /** The look's code to share (72 characters). */
+  get code(): string { return encodeLook(this.cur); }
+  /** Takes a pasted look code; the line to show when it is not one. */
+  pasteCode(text: string): { ok: true } | { ok: false; error: string } {
+    const t = text.trim();
+    const l = decodeLook(t);
+    if (!l) return { ok: false, error: t ? 'That is not a look code' : 'Paste a look code first' };
+    this.commit(parseLook({ ...l, outfit: this.cur.outfit }));
+    return { ok: true };
   }
   /** The name's problem as a line to show, or null (only when a name is needed). */
   get nameError(): string | null {
@@ -213,9 +293,9 @@ export class CreatorState {
   /** Gold the Barber asks (0 on the free visit and in the creator). */
   get cost(): number {
     if (this.o.mode === 'create' || this.o.free) return 0;
-    return barberCost(this.original, this.look);
+    return barberCost(this.original, this.cur);
   }
-  get unchanged(): boolean { return JSON.stringify(this.look) === JSON.stringify(this.original); }
+  get unchanged(): boolean { return JSON.stringify(this.cur) === JSON.stringify(this.original); }
   /** What the Done button says. */
   get doneLabel(): string {
     if (this.o.mode === 'create') return 'Done';
@@ -230,7 +310,7 @@ export class CreatorState {
     return null;
   }
   result(): { look: Look; name?: string } {
-    return this.o.needsName ? { look: this.look, name: this.name.trim() } : { look: this.look };
+    return this.o.needsName ? { look: this.cur, name: this.name.trim() } : { look: this.cur };
   }
 }
 
