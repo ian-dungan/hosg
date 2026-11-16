@@ -10,7 +10,7 @@
 // never black; every dye's lightness is clamped (look.ts renderColour) so nothing vanishes.
 import type { Color3 } from '@babylonjs/core';
 import {
-  ARMOUR_SLOTS, COSTUME_PIECES, COSTUME_PIECE_IDS, DYES, GEAR_LOOK_SLOTS, ITEMS, LOOK_PRESETS, SETS, SET_IDS, JOBS, OFFHAND_FOR, encodeLook, kitItems, resolveGearLook, starterFor, upgradeGearLook,
+  ARMOUR_SLOTS, COSTUME_PIECES, COSTUME_PIECE_IDS, DYES, GEAR_LOOK_SLOTS, ITEMS, LOOKS, LOOK_PRESETS, SETS, SET_IDS, JOBS, OFFHAND_FOR, encodeLook, kitItems, resolveGearLook, starterFor, upgradeGearLook,
   type ArmourSlot, type ArmourType, type CostumeId, type CostumePieceSlot, type GearLook, type GearLookSlotV2, type GearLookV2, type GearSlot, type JobId, type Look as AdventurerLook, type OffhandKind, type SetId, type WeaponId,
 } from '@sg2/shared';
 import type { Quality } from '../core/contracts';
@@ -118,7 +118,9 @@ function plan(g0: AnyGearLook, _look: AdventurerLook): GearPlan {
     headCue: !g.hidden.head && !g.cueHidden && (!head || head.cls === 'plain'),
     shoulderCue: !chest || chest.cls === 'plain',
     hair: !head || HEAD_COVER[head.tpl]!.hair === 'full',
-    headAccent: setPiece(head),
+    // the job's head cue goes over a set's cap, hat or circlet; a hood is its own (the cue would cover it exactly) and a
+    // heavy helm hides it (shared LOOKS[id].hidesCue)
+    headAccent: setPiece(head) && head!.tpl !== 'hood' && !LOOKS[g.head!.model]?.hidesCue,
     shoulderAccent: setPiece(chest),
   };
 }

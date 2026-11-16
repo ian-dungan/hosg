@@ -327,8 +327,10 @@ export class Fit {
     const P: V3[][] = [], T: number[] = [];
     const yTop = stY(this.st, o.top);
     let maxDrop = 0;
-    for (let i = 0; i <= nR; i++) {
-      const t = i / nR, row: V3[] = [];
+    const ts = Array.from({ length: nR + 1 }, (_, i) => i / nR);
+    ts.splice(ts.length - 1, 0, 0.9);   // (the hem's band starts at a row of its own: a crisp edge)
+    for (const t of ts.sort((a, b) => a - b)) {
+      const i = Math.round(t * nR), row: V3[] = [];
       for (const a of angs) {
         const yHem = Math.max(stY(this.st, hemOf(a)), this.f.footH * 1.15 + 0.02 * kk), y = lerp(yTop, yHem, t);
         const sec = this.section(y);
@@ -380,24 +382,29 @@ export class Fit {
     const cols = (o.cols ?? (this.far ? 4 : this.fine ? 8 : 6));
     const rows = o.rows ?? (this.far ? 4 : this.fine ? 9 : 6);
     const spread = (o.width ?? 0.8) * 1.25, clear = (o.clear ?? 0.02) * kk;
-    const sTop = this.native('torso', o.top), wTop = this.under('torso', o.top) + LAYER_GAP * kk + (o.thick ?? 0.016) * kk * 0.6;
+    // under pauldrons the cape hangs from below them (full width, its top tucked under their back edge)
+    let top = o.top;
+    const pa = this.lay.paul;
+    if (pa) top = Math.min(top, this.uOfY(pa.c[1] - pa.r[1] * 0.75));
+    const len0 = o.len * kk - Math.max(0, stY(this.st, o.top) - stY(this.st, top));
+    const sTop = this.native('torso', top), wTop = this.under('torso', top) + LAYER_GAP * kk + (o.thick ?? 0.016) * kk * 0.6;
     const tailY = this.look.fur ? f.hipY + 0.02 * kk : -1;
     const grid: V3[][] = [];
     const xs: number[] = [], zTop: number[] = [];
     for (let j = 0; j <= cols; j++) {
       const v = j / cols * 2 - 1, a = Math.PI + v * spread;
       const { p, n } = this.S.at('torso', 1, sTop, a);
-      // (inside the pauldrons' inner edge: the cape hangs between them, not through them)
-      const xMax = this.lay.paulIn - 0.012 * kk;
-      xs.push(clamp(p[0] + n[0] * wTop, -xMax, xMax)); zTop.push(p[2] + n[2] * wTop);
+      xs.push(p[0] + n[0] * wTop); zTop.push(p[2] + n[2] * wTop);
     }
     const yTop = this.S.torsoAt(sTop, Math.PI)[1];
     const prevZ = zTop.slice();
-    for (let i = 0; i <= rows; i++) {
-      const t = i / rows, row: V3[] = [];
+    const cts = Array.from({ length: rows + 1 }, (_, i) => i / rows);
+    cts.splice(cts.length - 1, 0, 0.9);
+    for (const [i, t] of cts.sort((a, b) => a - b).entries()) {
+      const row: V3[] = [];
       for (let j = 0; j <= cols; j++) {
         const v = j / cols * 2 - 1;
-        const len = o.len * kk * (1 + (o.hem ? o.hem(v) : 0));
+        const len = len0 * (1 + (o.hem ? o.hem(v) : 0));
         const y = yTop - t * len;
         const x = xs[j]! * (1 + (o.flare ?? 0.25) * t);
         let z = zTop[j]!;
@@ -413,17 +420,19 @@ export class Fit {
     if (tailY > 0 && grid.some((r) => r[0]![1] < tailY)) {
       // the tail's slit: the cape parts below the small of the back
       const cut = grid.findIndex((r) => r[0]![1] < tailY);
-      const mid = Math.floor(cols / 2);
+      // (a narrow slit: the middle column is pulled apart by the tail's width)
+      const mid = Math.floor(cols / 2), gap = 0.035 * kk;
       const upper = grid.slice(0, Math.max(2, cut + 1));
       if (upper.length >= 2) sheet(upper);
       const lower = grid.slice(Math.max(0, cut));
       if (lower.length >= 2) {
-        sheet(lower.map((r) => r.slice(0, mid)));
-        sheet(lower.map((r) => r.slice(mid + 1)));
+        const left = lower.map((r) => [...r.slice(0, mid), [r[mid]![0] - gap, r[mid]![1], r[mid]![2]] as V3]);
+        const right = lower.map((r) => [[r[mid]![0] + gap, r[mid]![1], r[mid]![2]] as V3, ...r.slice(mid + 1)]);
+        sheet(left); sheet(right);
       }
     } else sheet(grid);
     if (o.tag) { this.k.g.tagNow = 0; this.k.g.tagSkip = null; }
-    this.wear('torso', o.top - 2.5, o.top, wTop + (o.thick ?? 0.016) * kk);
+    this.wear('torso', top - 2.5, top, wTop + (o.thick ?? 0.016) * kk);
   }
 
   /**

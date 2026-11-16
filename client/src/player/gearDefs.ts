@@ -793,7 +793,7 @@ const ROWS: Row[] = [
   [57, 'legs', 'heavy', 3, 'trousers', { off: 0.011, mail: true, knee: 'cop', cuisse: true, greave: true, tassets: 4.55 }, [], PAL.beaconstone],
   [58, 'hands', 'heavy', 3, 'gloves', { cuff: 3.4, flare: 0.022, off: 0.009, plates: true }, [['handPlates'], ['cuffBand', { region: 'arm', u: 3.55, h: 0.22, col: 'c', thick: 0.01 }]], PAL.beaconstone],
   [59, 'feet', 'heavy', 3, 'boots', { shaft: 3.05, off: 0.012, plates: true, toe: 'point', flare: 0.012 }, [['cuffBand', { region: 'leg', u: 2.9, h: 0.22, col: 'c', thick: 0.01 }]], PAL.beaconstone],
-  [60, 'back', 'heavy', 3, 'cape', { len: 1.1, collar: 'mantle', width: 1.0, edge: true, flare: 0.3, clasp: 'glow' }, [], PAL.beaconstone, M.glowBeacon],
+  [60, 'back', 'heavy', 3, 'cape', { len: 1.1, collar: 'fold', width: 1.0, edge: true, flare: 0.3, clasp: 'glow' }, [], PAL.beaconstone, M.glowBeacon],
   // ── costumes: body pieces (chest 200..205, 212; legs, hands, feet 214..234), heads (206..208, 213), backs (209..211) ──
   [200, 'chest', 'costume', 0, 'garment', { hem: 5.4, skirt: 3.0, open: 0.35, sleeve: 'long', neck: 'high', off: 0.01, pattern: 'plain' }, [['buttons', { n: 4, a: 0.42 }], ['belt', { col: 'leather', buckle: 'c' }], ['lamp']], PAL.lamplighter],
   [214, 'legs', 'costume', 0, 'trousers', { off: 0.006, stripe: true }, [], [shade(M.soot, 1.3), shade(M.soot, 1.3), M.brass]],

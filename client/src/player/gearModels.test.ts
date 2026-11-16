@@ -69,7 +69,7 @@ describe('the plan', () => {
       const p = gearHooks.plan(kitGear(tier, job), look);
       expect(p.headCue, `${job} T${tier}`).toBe(tier === 0);
       expect(p.shoulderCue, `${job} T${tier}`).toBe(tier === 0);
-      expect(p.headAccent && p.shoulderAccent, `${job} T${tier}`).toBe(tier > 0);
+      expect(p.shoulderAccent, `${job} T${tier}`).toBe(tier > 0);
       expect(p.replaces.length).toBeGreaterThan(0);
       expect(p.body?.noTabard, 'a chest piece brings its own tabard').toBe(true);
     }
