@@ -72,7 +72,7 @@ export function drawSlotRows(body: HTMLElement, v: CharSheetView, a: AppearanceV
     if (sa.line) {
       const l = h('div', 'sg-lrow-as' + (sa.hidden ? ' hid' : ''), mid);
       l.insertAdjacentHTML('afterbegin', HANGER);
-      if (sa.shown) { l.append('Shown as: '); const b = h('b', '', l, sa.shown.name); b.style.setProperty('--rc', sa.shown.colour); }
+      if (sa.shown && !sa.hidden) { l.append('Shown as: '); const b = h('b', '', l, sa.shown.name); b.style.setProperty('--rc', sa.shown.colour); }
       else l.append(sa.line);
     }
     if (sa.worn) {

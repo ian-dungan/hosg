@@ -48,7 +48,7 @@ export function drawOutfits(body: HTMLElement, a: AppearanceView, ui: OutfitUi, 
     if (label === null) btn(go, 'Pick a name first', 'off');
     else {
       const op: InvOp = { op: 'saveOutfit', index: o.index, label };
-      opBtn(acts, go, o.label === null ? `Save as ${a.labels[label]}` : `Yes, overwrite as ${a.labels[label]}`, op, (x) => { ui.edit = null; ui.label = null; send(x); }, o.label === null ? 'gold' : 'warn');
+      opBtn(acts, go, o.label === null ? `Save as ${a.labels[label]}` : `Overwrite as ${a.labels[label]}`, op, (x) => { ui.edit = null; ui.label = null; send(x); }, o.label === null ? 'gold' : 'warn');
     }
     acts.on(btn(go, 'Cancel'), () => { ui.edit = null; ui.label = null; redraw(); });
   }

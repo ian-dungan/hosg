@@ -16,7 +16,7 @@ export const LOOK_CSS = /* css */ `
 .sg-lrow-mid .sg-row-name{white-space:nowrap}
 .sg-lrow-stats{font-size:14px;line-height:1.3;opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sg-lrow-as{margin-top:2px;font-size:14px;font-weight:600;line-height:1.3;color:#bff3ec}
-.sg-lrow-as svg{width:16px;height:16px;vertical-align:-3px;margin-right:4px}
+.sg-lrow-as svg{display:inline-block;width:16px;height:16px;vertical-align:-3px;margin-right:4px}
 .sg-lrow-as b{color:var(--rc,#fff6e6)}
 .sg-lrow-as.hid{color:#ffd9a8}
 .sg-lrow-look{flex:none;flex-direction:column;gap:0;min-width:56px;min-height:56px;padding:4px 6px;border-radius:14px;font-size:14px;line-height:1.1}
@@ -55,6 +55,7 @@ export const LOOK_CSS = /* css */ `
 .sg-orow-top .sg-row-mid{flex:1 1 150px;cursor:default}
 .sg-orow-acts{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .sg-oedit{margin-top:6px}
+.sg-oedit .sg-gs-btn{white-space:normal;line-height:1.2;min-width:0}
 .sg-olabels{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .sg-olabels .sg-filter{flex:1 1 96px;min-width:0}
 
