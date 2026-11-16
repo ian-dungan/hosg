@@ -26,6 +26,7 @@ export const LOOK_CSS = /* css */ `
 .sg-lparts{display:flex;gap:4px;margin:0 52px 10px 0;padding:3px;border-radius:16px;background:rgba(10,12,32,.5)}
 .sg-lpart{flex:1;min-height:48px;border-radius:13px;box-shadow:none;background:none}
 .sg-lpart.on{color:#3a2508;text-shadow:none;background:linear-gradient(180deg,#ffe49a,#F2B742)}
+.sg-card .sg-wrow .sg-wopt{flex:1 1 120px;min-width:0;white-space:normal;line-height:1.2;padding:4px 10px}
 .sg-lworn{font-size:14px;line-height:1.35;opacity:.9;margin:2px 2px 8px}
 .sg-lworn b{color:var(--rc)}
 .sg-lgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:6px;max-height:min(316px,46vh);overflow-y:auto;touch-action:pan-y;overscroll-behavior:contain;
