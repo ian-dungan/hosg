@@ -114,6 +114,8 @@ export interface FaceOpts {
   look: Look; frame: Frame; fp: FaceParams; col: LookColours; hs: HeadShape; detail: number;
   /** Stubble or a shaved scalp painted on the skin (hair.ts decides). */
   scalp: ((d: V3) => number) | null; stubble: ((d: V3) => number) | null;
+  /** Round ears are under a hood or helm: not built. */
+  noEars?: boolean;
 }
 
 /** The skull with its painted skin (blush, fur, bark, scalp, stubble, face paint, eye shadow), on the `head` bone. */
@@ -619,5 +621,5 @@ export function buildFace(k: ShapeKit, o: FaceOpts): void {
   // the head keeps its own colours (no baked occlusion: the shoulders and the skull would darken the face's parts unevenly)
   k.g.aoOffNow = true;
   const parts = [['skull', buildSkull], ['eyes', buildEyes], ['brows', buildBrows], ['nose', buildNose], ['mouth', buildMouth], ['ears', buildEars], ['marks', buildMarks]] as const;
-  for (const [name, fn] of parts) { const t0 = k.g.triangles; fn(k, o); faceTris[name] = k.g.triangles - t0; }
+  for (const [name, fn] of parts) { if (name === 'ears' && o.noEars) { faceTris.ears = 0; continue; } const t0 = k.g.triangles; fn(k, o); faceTris[name] = k.g.triangles - t0; }
 }

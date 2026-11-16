@@ -34,6 +34,7 @@ function withCuts<T extends { y: number; r: number; z?: number }>(rows: T[], cut
   return out;
 }
 import { buildFace, headShape, type HeadShape } from './face2';
+import { armRows, legRows, mixRow, neckRows, ringRes, torsoPoint, torsoRows, type TorsoRow } from './bodySurface';
 import { buildFacialHair, buildHair, scalpPaint, stubblePaint } from './hair';
 import { furPaint, pawPaint } from './faces';
 
@@ -55,10 +56,41 @@ export interface Body2Opts {
   tie: Color3;
   /** Draw the head, hair and face (false: a headless mannequin for gear dev pages). */
   head?: boolean;
+  /** What worn gear covers (gearFit.ts): those bands are not built (no skin under a piece), hair and ears per head piece. */
+  cover?: BodyCover;
+}
+
+/**
+ * The parts of the body a worn piece covers. Bands are intervals: torso in row parameter s (bodySurface torsoRows
+ * index), arms, legs and neck in heights (m). A band between two rows is left out only when both rows lie inside
+ * one interval, so the piece always overlaps what is drawn (never a hole).
+ */
+export interface BodyCover {
+  torso?: [number, number][]; arm?: [number, number][]; leg?: [number, number][]; neck?: [number, number][];
+  hands?: boolean; feet?: boolean;
+  /** Round ears under a hood or helm (Larchfolk and Brindlekin ears always show: their pieces leave openings). */
+  ears?: boolean;
+  /** 'cap': the hair's volume (the `hair` bone) is not built; 'none': no hair at all (a closed helm). */
+  hair?: 'full' | 'cap' | 'none';
+}
+const NO_COVER: BodyCover = {};
+const inside = (v: number, iv?: [number, number][]) => !!iv && iv.some(([a, b]) => v >= a && v <= b);
+/** Runs of rows [first, last] to build: every band whose two rows both lie inside a covered interval is left out. */
+export function shownRuns(vals: readonly number[], iv?: [number, number][]): [number, number][] {
+  if (!iv || !iv.length) return [[0, vals.length - 1]];
+  const out: [number, number][] = [];
+  let start = -1;
+  for (let i = 0; i < vals.length - 1; i++) {
+    const hidden = iv.some(([a, b]) => vals[i]! >= a && vals[i]! <= b && vals[i + 1]! >= a && vals[i + 1]! <= b);
+    if (!hidden) { if (start < 0) start = i; }
+    else if (start >= 0) { out.push([start, i]); start = -1; }
+  }
+  if (start >= 0) out.push([start, vals.length - 1]);
+  return out;
 }
 
 /** Ring sizes by detail: around the torso, the limbs. */
-const res = (d: number) => (d >= 0.9 ? { torso: 16, limb: 8 } : d >= 0.5 ? { torso: 10, limb: 6 } : d >= 0.3 ? { torso: 8, limb: 4 } : { torso: 6, limb: 4 });
+const res = ringRes;
 
 /** Triangles of the last body built, by part (budgets and dev pages). */
 export const bodyTris: Record<string, number> = {};
@@ -66,6 +98,7 @@ export const bodyTris: Record<string, number> = {};
 /** Builds the look's body, face, hair and facial hair. Returns the head's shape (the hair, gear and dev pages use it). */
 export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   const { look, frame: f, warp, clothes: cl, detail } = o;
+  const cover = o.cover ?? NO_COVER;
   const col = lookColours(look);
   const fp = faceParams(look);
   const hs = headShape(f, fp);
@@ -83,50 +116,18 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   const bootTop = legY(warp, cl.bootTop ?? 0.38);
   const cuffY = cl.sleeves === 'long' ? f.wristY + 0.012 * kk : cl.sleeves === 'rolled' ? f.elbowY - 0.03 * kk : f.shY - (f.shY - f.elbowY) * 0.45;
 
-  // ── the torso: rows of superellipse sections with the bust, belly, seat and pectorals shaped in ──
-  type Row = { y: number; w: number; d: number; zc: number; bust: number; belly: number; glute: number; pec: number };
-  const rows: Row[] = [];
-  const add = (y: number, w: number, d: number, extra: Partial<Row> = {}) => rows.push({ y, w, d, zc: 0, bust: 0, belly: 0, glute: 0, pec: 0, ...extra });
-  const ribsY = lerp(f.waistY, f.chestY, 0.5), upY = lerp(f.chestY, f.shY, 0.55);
-  add(f.crotchY - 0.01 * kk, f.hipW * 0.5, f.hipD * 0.55);
-  add(lerp(f.crotchY, f.hipY, 0.5), f.hipW * 0.94, f.hipD * 0.95, { glute: 1 });
-  add(f.hipY, f.hipW, f.hipD, { glute: 0.7, belly: 0.25 });
-  add(lerp(f.hipY, f.waistY, 0.5), lerp(f.hipW, f.waistW, 0.6), lerp(f.hipD, f.waistD, 0.5), { belly: 0.7 });
-  add(f.waistY, f.waistW, f.waistD, { belly: 1 });
-  add(ribsY, lerp(f.waistW, f.chestW, 0.62), lerp(f.waistD, f.chestD, 0.6), { belly: 0.45, bust: 0.45 });
-  add(f.chestY, f.chestW, f.chestD, { bust: 1, pec: 1 });
-  add(upY, f.chestW * 1.02, f.chestD * 0.94, { bust: 0.35, pec: 0.7 });
-  // the shoulder's slope (trapezius) rounds over into the arm: no square corner at the top
-  add(f.shY - 0.008 * kk, f.shX * 0.88, f.chestD * 0.84);
-  add(f.shTopY, f.shX * 0.6, f.chestD * 0.62);
-  add(f.neckBaseY + 0.012 * kk, f.neckR * 1.3, f.neckR * 1.2);
+  // ── the torso: rows of superellipse sections with the bust, belly, seat and pectorals shaped in (bodySurface.ts) ──
+  type Row = TorsoRow & { s: number };
+  const rows: Row[] = torsoRows(f).map((r, i) => ({ ...r, s: i }));
   // a short top's hem: two rows either side, so the shirt meets the trousers in a clean line
   if (hemY > f.crotchY + 0.01 && hemY < f.waistY) {
     for (const yy of [hemY + 0.003, hemY - 0.003]) {
       const i = rows.findIndex((r) => r.y > yy), a = rows[i - 1]!, b = rows[i]!, t = (yy - a.y) / (b.y - a.y);
-      const mixRow: Row = { y: yy, w: lerp(a.w, b.w, t), d: lerp(a.d, b.d, t), zc: 0, bust: lerp(a.bust, b.bust, t), belly: lerp(a.belly, b.belly, t), glute: lerp(a.glute, b.glute, t), pec: lerp(a.pec, b.pec, t) };
-      rows.splice(i, 0, mixRow);
+      rows.splice(i, 0, { ...mixRow(a, b, t), s: a.s + (b.s - a.s) * t });
     }
   }
   const seg = R.torso;
-  const P: V3[][] = [];
-  for (const r of rows) {
-    const row: V3[] = [];
-    for (let j = 0; j < seg; j++) {
-      const a = (Math.PI * 2 * j) / seg;
-      const sa = Math.sin(a), ca = Math.cos(a);
-      const px = Math.sign(sa) * Math.pow(Math.abs(sa), 0.82), pz = Math.sign(ca) * Math.pow(Math.abs(ca), 0.9);
-      let x = px * r.w, z = pz * r.d + r.zc;
-      const front = Math.max(0, ca), back = Math.max(0, -ca);
-      z += r.bust * f.bust * 0.045 * kk * G(Math.abs(x) - r.w * 0.46, r.w * 0.36) * front;
-      z += r.pec * f.muscle * 0.014 * kk * G(Math.abs(x) - r.w * 0.42, r.w * 0.45) * front * (f.female ? 0.3 : 1);
-      z += r.belly * f.belly * 0.065 * kk * front * front;
-      z -= r.glute * f.glute * 0.03 * kk * G(Math.abs(x) - r.w * 0.45, r.w * 0.4) * back;
-      x *= 1 + r.belly * f.belly * 0.08 * Math.abs(sa);
-      row.push([x, r.y, z]);
-    }
-    P.push(row);
-  }
+  const P: V3[][] = rows.map((r) => Array.from({ length: seg }, (_, j) => torsoPoint(f, r, (Math.PI * 2 * j) / seg)));
   const torsoCol = (i: number, j: number) => {
     const [x, y, z] = P[i]![j]!;
     if (y < hemY && hemY > f.crotchY) return legsC;                      // a short top: trousers below its hem
@@ -135,7 +136,8 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
     if (i >= rows.length - 1) return skinAt(x, y, z);
     return top;
   };
-  k.grid('body', P, torsoCol, { wrap: true });
+  // (worn gear covers bands of it: those are left out, so no skin is drawn under a piece)
+  for (const [i0, i1] of shownRuns(rows.map((r) => r.s), cover.torso)) k.grid('body', P.slice(i0, i1 + 1), (i, j) => torsoCol(i + i0, j), { wrap: true });
 
   // ── a skirt (a tunic's, a robe's or a dress's) from the hips to the hem ──
   if (hemY < f.crotchY - 0.02 * kk) {
@@ -162,38 +164,18 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
 
   // ── the neck ──
   {
-    const nRows: V3[][] = [];
-    const ys = [f.neckBaseY - 0.03 * kk, f.neckBaseY + 0.02 * kk, lerp(f.neckBaseY, f.chinY, 0.6), f.chinY + 0.02 * kk];
+    const nr = neckRows(f);
     const ns = Math.max(6, Math.round(R.limb * 1.1));
-    for (let i = 0; i < ys.length; i++) {
-      const y = ys[i]!, row: V3[] = [];
-      const r = f.neckR * (i === 0 ? 1.2 : i === 1 ? 1.05 : 1);
-      for (let j = 0; j < ns; j++) {
-        const a = (Math.PI * 2 * j) / ns;
-        row.push([Math.sin(a) * r, y, Math.cos(a) * r * 1.02 - 0.006 * kk + (i >= 2 ? f.headZ * 0.6 : 0)]);
-      }
-      nRows.push(row);
-    }
-    k.grid('neck', nRows, (i, j) => { const p = nRows[i]![j]!; return shade(skinAt(p[0], p[1], p[2]), 0.94); }, { wrap: true });
+    const nRows: V3[][] = nr.map((r) => Array.from({ length: ns }, (_, j) => { const a = (Math.PI * 2 * j) / ns; return [Math.sin(a) * r.r, r.y, Math.cos(a) * r.r * 1.02 + r.dz] as V3; }));
+    for (const [i0, i1] of shownRuns(nr.map((r) => r.y), cover.neck)) k.grid('neck', nRows.slice(i0, i1 + 1), (i, j) => { const p = nRows[i + i0]![j]!; return shade(skinAt(p[0], p[1], p[2]), 0.94); }, { wrap: true });
   }
 
   // ── arms and hands ──
   const ls = R.limb;
   for (const [g, sx] of [['armL', -1], ['armR', 1]] as const) {
     const axX = (y: number) => sx * armAxis(f, y);
-    const aRows0: { y: number; r: number; z?: number }[] = [
-      // a soft shoulder cap (the deltoid), rounding into the torso's slope rather than a puff on top
-      { y: f.shY + f.uArmR * 0.5, r: f.uArmR * 0.4 },
-      { y: f.shY + f.uArmR * 0.15, r: f.uArmR * 0.92 },
-      { y: f.shY - f.uArmR * 0.45, r: f.uArmR * (1.12 + 0.14 * f.muscle) },
-      { y: lerp(f.shY, f.elbowY, 0.5), r: f.uArmR * (1.02 + 0.12 * f.muscle), z: 0.003 * kk },
-      { y: f.elbowY + 0.035 * kk, r: f.fArmR * 1.02 },
-      { y: f.elbowY, r: f.fArmR * 0.96 },
-      { y: lerp(f.elbowY, f.wristY, 0.3), r: f.fArmR * (1.08 + 0.08 * f.muscle), z: 0.002 * kk },
-      { y: f.wristY + 0.012 * kk, r: f.wristR },
-      { y: f.wristY - 0.012 * kk, r: f.wristR * 0.92 },
-    ];
-    const aRows = withCuts(detail < 0.5 ? aRows0.filter((_, i) => i !== 3 && i !== 6) : aRows0, [cuffY, ...(cl.sleeves === 'rolled' ? [cuffY - 0.03 * kk] : cl.sleeves === 'long' && trim ? [cuffY + 0.02 * kk] : [])]);
+    // a soft shoulder cap (the deltoid) rounding into the torso's slope, the elbow, the forearm (bodySurface.ts)
+    const aRows = withCuts(armRows(f, detail),[cuffY, ...(cl.sleeves === 'rolled' ? [cuffY - 0.03 * kk] : cl.sleeves === 'long' && trim ? [cuffY + 0.02 * kk] : [])]);
     const AP: V3[][] = aRows.map((r) => {
       const row: V3[] = [];
       for (let j = 0; j < ls; j++) {
@@ -202,12 +184,14 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       }
       return row;
     });
-    k.grid(g, AP, (i, j) => {
+    const armCol = (i: number, j: number) => {
       const p = AP[i]![j]!;
       if (p[1] > cuffY) return cl.sleeves === 'long' && p[1] < cuffY + 0.02 * kk && trim ? trim : i === 0 ? shade(sleeve, 0.95) : sleeve;
       if (cl.sleeves === 'rolled' && p[1] > cuffY - 0.03 * kk) return shade(sleeve, 1.06);
       return skinAt(p[0], p[1], p[2]);
-    }, { wrap: true });
+    };
+    for (const [i0, i1] of shownRuns(aRows.map((r) => r.y), cover.arm)) k.grid(g, AP.slice(i0, i1 + 1), (i, j) => armCol(i + i0, j), { wrap: true });
+    if (cover.hands) continue;
     // the hand: palm side towards the thigh, the thumb forward, mitten fingers
     const hp = fur ? pawPaint(col.skin, fur2, fur.pattern, sx) : skinPaint ?? undefined;
     const hx = axX(f.wristY), hy = f.wristY, hl = f.handL, hw = f.handW;
@@ -222,18 +206,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   for (const [g, sx] of [['legL', -1], ['legR', 1]] as const) {
     // knees and ankles come in by the frame's kneeIn (the female base stands knees in, feet closer)
     const axX = (y: number) => sx * legAxis(f, y);
-    const lRows0: { y: number; r: number; z?: number }[] = [
-      { y: f.hipY + 0.03 * kk, r: f.thighR * 0.92 },
-      { y: f.crotchY, r: f.thighR },
-      { y: lerp(f.kneeY, f.crotchY, 0.55), r: f.thighR * 0.86, z: 0.004 * kk },
-      { y: f.kneeY + 0.06 * kk, r: f.kneeR * 1.14 },
-      { y: f.kneeY, r: f.kneeR, z: 0.006 * kk },
-      { y: f.kneeY - 0.05 * kk, r: f.calfR * 0.96 },
-      { y: lerp(f.kneeY, f.ankleY, 0.3), r: f.calfR * (1.04 + 0.1 * f.muscle), z: -0.012 * kk },
-      { y: lerp(f.ankleY, f.kneeY, 0.25), r: f.ankleR * 1.35 },
-      { y: f.ankleY + 0.02 * kk, r: f.ankleR * 1.08 },
-    ];
-    const lRows = withCuts(detail < 0.5 ? lRows0.filter((_, i) => i !== 2 && i !== 5 && i !== 7) : lRows0, [bootTop]);
+    const lRows = withCuts(legRows(f, detail), [bootTop]);
     const bootR = (y: number) => (y < bootTop ? 0.006 * kk : 0);
     const LP: V3[][] = lRows.map((r) => {
       const row: V3[] = [];
@@ -243,8 +216,9 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       }
       return row;
     });
-    k.grid(g, LP, (_i, j) => { void j; const y = LP[_i]![0]![1]; return y < bootTop ? cl.boots : legsC; }, { wrap: true });
-    if (detail >= 0.5 && bootTop > f.ankleY + 0.05) {
+    for (const [i0, i1] of shownRuns(lRows.map((r) => r.y), cover.leg)) k.grid(g, LP.slice(i0, i1 + 1), (i) => (LP[i + i0]![0]![1] < bootTop ? cl.boots : legsC), { wrap: true });
+    if (cover.feet) continue;
+    if (detail >= 0.5 && bootTop > f.ankleY + 0.05 && !inside(bootTop, cover.leg)) {
       // the boot's cuff
       const cy = bootTop, rr = lerp(f.ankleR * 1.35, f.calfR, Math.min(1, (cy - f.ankleY) / (f.kneeY - f.ankleY) * 2)) + 0.012 * kk;
       k.lathe(g, [axX(cy), 0, 0], [[cy - 0.02 * kk, rr], [cy + 0.012 * kk, rr]], shade(cl.boots, 1.08), { seg: ls, caps: false });
@@ -260,16 +234,56 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   if (o.head !== false) {
     const info = look.hair.style;
     void info;
-    buildFace(k, { look, frame: f, fp, col, hs, detail, scalp: scalpPaint(look), stubble: stubblePaint(look) });
+    const noEars = cover.ears === true && look.people !== 'larchfolk' && look.people !== 'brindlekin';
+    buildFace(k, { look, frame: f, fp, col, hs, detail, scalp: scalpPaint(look), stubble: stubblePaint(look), noEars });
     k.g.aoOffNow = false;
     let t0 = k.g.triangles;
+    // under a head piece the hair is tucked (no volume) or not built at all (a closed helm: nothing pokes through)
+    const hairMode = cover.hair ?? 'full';
+    if (hairMode !== 'full') k.g.skip = k.glow.skip = new Set(hairMode === 'none' ? ['head', 'hair', 'hairB'] : ['hair']);
+    const hv0 = k.g.pos.length;
     buildHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
+    k.g.skip = k.glow.skip = null;
+    lastHairEnvelope = hairEnvelope(k.g.pos, hv0, hs);
     bodyTris.hair = k.g.triangles - t0; t0 = k.g.triangles;
     buildFacialHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
     bodyTris.facial = k.g.triangles - t0;
   }
   return hs;
 }
+
+/** How far the built hair stands off the skull (m), by direction: hats and circlets sit on it (gearFit.ts). */
+export type HairEnvelope = (d: V3) => number;
+const ENV_T = 8, ENV_P = 12;
+/** The hair envelope of the vertices pos[from..] (the hair just built) round the skull `hs`. */
+export function hairEnvelope(pos: readonly number[], from: number, hs: HeadShape): HairEnvelope {
+  const bins = new Float32Array(ENV_T * ENV_P);
+  const binOf = (d: V3) => {
+    const th = Math.acos(Math.max(-1, Math.min(1, d[1]))), ph = Math.atan2(d[0], d[2]);
+    const i = Math.min(ENV_T - 1, Math.floor((th / Math.PI) * ENV_T)), j = ((Math.floor(((ph + Math.PI) / (Math.PI * 2)) * ENV_P) % ENV_P) + ENV_P) % ENV_P;
+    return [i, j] as const;
+  };
+  const dirFor = (x: number, y: number, z: number): V3 => { const v: V3 = [x / hs.W, (y - hs.cy) / hs.Hh, (z - hs.cz) / hs.D]; const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  for (let v = from; v < pos.length; v += 3) {
+    const x = pos[v]!, y = pos[v + 1]!, z = pos[v + 2]!;
+    const d = dirFor(x, y, z), s = hs.local(...d);
+    const out = Math.hypot(x, y - hs.cy, z - hs.cz) - Math.hypot(s[0], s[1], s[2]);
+    if (out <= 0) continue;
+    const [i, j] = binOf(d), b = i * ENV_P + j;
+    if (out > bins[b]!) bins[b] = out;
+  }
+  return (d) => {
+    const [i, j] = binOf(d);
+    let m = 0;
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+      const ii = i + di; if (ii < 0 || ii >= ENV_T) continue;
+      m = Math.max(m, bins[ii * ENV_P + ((j + dj + ENV_P) % ENV_P)]!);
+    }
+    return m;
+  };
+}
+/** The envelope of the hair of the last body built (character.ts hands it to the head piece). */
+export let lastHairEnvelope: HairEnvelope = () => 0;
 
 /** A canonical leg height (character.ts humanPivots) on this body. */
 export function legY(w: Warp, y: number): number {
