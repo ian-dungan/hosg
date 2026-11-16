@@ -72,8 +72,8 @@ export function bodyFrame(l: Look): Frame {
   const muscle = Math.max(0, Math.min(1, (fem ? 0.32 : 0.5) + 0.5 * mu));
   const fat = (x: number) => 1 + x * (we > 0 ? 1 : 0.55) * we;  // weight: more out than in
   // head
-  const headH = (H / S.heads) * (1 + 0.11 * u20(b.head)) * (1 + 0.07 * u10(l.face.length));
-  const headW = headH * (fem ? 0.37 : 0.385) * (1 + 0.1 * u10(l.face.width)) * fat(0.06);
+  const headH = (H / S.heads) * (1 + 0.11 * u20(b.head)) * (1 + 0.1 * u10(l.face.length));
+  const headW = headH * (fem ? 0.37 : 0.385) * (1 + 0.14 * u10(l.face.width)) * fat(0.06);
   const headD = headH * 0.43 * (1 + 0.03 * u10(l.face.width));
   const chinY = H - headH;
   const headY = H - headH * 0.5;
@@ -81,7 +81,7 @@ export function bodyFrame(l: Look): Frame {
   const neckLen = headH * 0.36 * (1 + 0.22 * u20(b.neck));
   const shTopY = chinY - neckLen * 0.62;
   const shY = shTopY - 0.03 * k;
-  const neckR = (fem ? 0.047 : 0.057) * ws * (1 + 0.16 * u20(b.neck)) * (1 + 0.15 * mu) * fat(0.12);
+  const neckR = (fem ? 0.047 : 0.057) * ws * (1 + 0.24 * u20(b.neck)) * (1 + 0.15 * mu) * fat(0.12);
   // legs
   const hipY = H * S.leg * (fem ? 0.995 : 1) * (1 + 0.07 * u20(b.legs));
   const kneeY = hipY * 0.53, ankleY = hipY * 0.085;
@@ -92,7 +92,7 @@ export function bodyFrame(l: Look): Frame {
   const chestY = hipY + span * 0.74;
   // widths
   const shX = (fem ? 0.163 : 0.188) * ws * (1 + 0.16 * u20(b.shoulders)) * (1 + 0.05 * mu) * fat(0.04);
-  const chestW = (fem ? 0.138 : 0.158) * ws * (1 + 0.1 * u20(b.chest)) * (1 + 0.05 * mu) * fat(0.14);
+  const chestW = (fem ? 0.138 : 0.158) * ws * (1 + 0.14 * u20(b.chest)) * (1 + 0.05 * mu) * fat(0.14);
   const chestD = (fem ? 0.1 : 0.112) * ws * (1 + 0.16 * u20(b.chest)) * (1 + 0.1 * mu) * fat(0.16);
   const bust = fem ? Math.max(0, 0.5 + 0.48 * u20(b.chest)) * fat(0.25) : Math.max(0, 0.08 * mu);
   const waistW = (fem ? 0.112 : 0.135) * ws * (1 + 0.2 * u20(b.waist)) * fat(0.34);
@@ -105,7 +105,7 @@ export function bodyFrame(l: Look): Frame {
   // limbs (radii), arms length
   const L = ws * S.limb;
   const limb = (x: number) => x * L * (1 + 0.17 * mu) * fat(0.22);
-  const armK = 1 + 0.07 * u20(b.arms);
+  const armK = 1 + 0.1 * u20(b.arms);
   const wristY = shY - (shY - H * 0.485) * armK;
   const elbowY = shY - (shY - wristY) * 0.54;
   const armMul = 1 + 0.06 * u20(b.arms);
@@ -191,10 +191,10 @@ export function faceParams(l: Look): FaceParams {
   const f = l.face, e = l.eyes, b = l.brows, n = l.nose, m = l.mouth;
   const es = EYE_PRESETS[e.shape] ?? EYE_PRESETS[0]!, bs = BROW_PRESETS[b.shape] ?? BROW_PRESETS[0]!;
   const fem = l.body === 'female';
-  const size = 1 + 0.2 * u10(e.size);
+  const size = 1 + 0.26 * u10(e.size);
   const open = u10(e.openness);
   return {
-    forehead: u10(f.forehead), cheek: u10(f.cheekbones), jaw: (fem ? 0.84 : 0.95) * (1 + 0.16 * u10(f.jawWidth)),
+    forehead: u10(f.forehead), cheek: u10(f.cheekbones), jaw: (fem ? 0.84 : 0.95) * (1 + 0.22 * u10(f.jawWidth)),
     chinLen: u10(f.chinLength), chinW: (fem ? 0.9 : 1) * (1 + 0.3 * u10(f.chinWidth)), fullness: u20(l.build.weight), brow: fem ? 0.25 : 0.7,
     eyeW: es.w * size, eyeH: es.h * size * (1 + 0.22 * open), eyeTilt: es.tilt + 0.16 * u10(e.tilt),
     lid: Math.max(0, Math.min(0.85, es.lid - 0.26 * open)), lower: es.lower, crease: es.crease, depth: es.depth,
@@ -223,6 +223,8 @@ function pw(xs: readonly number[], ys: readonly number[], x: number): number {
   const t = (x - xs[i]!) / (xs[i + 1]! - xs[i]!);
   return ys[i]! + (ys[i + 1]! - ys[i]!) * t;
 }
+/** As pw, held flat beyond both ends. */
+const pwc = (xs: readonly number[], ys: readonly number[], x: number) => pw(xs, ys, Math.max(xs[0]!, Math.min(xs[xs.length - 1]!, x)));
 /** The old torso's half width and depth by canonical height (character.ts buildHuman's tunic profile, sz 0.78). */
 const OLD_T_Y = [0.62, 0.86, 0.95, 1.04, 1.12, 1.22, 1.28, 1.32, 1.36];
 const OLD_T_W = [0.21, 0.205, 0.175, 0.19, 0.196, 0.194, 0.163, 0.11, 0.065];
@@ -234,12 +236,12 @@ const OLD_T_W = [0.21, 0.205, 0.175, 0.19, 0.196, 0.194, 0.163, 0.11, 0.065];
  */
 export function makeAttachWarp(f: Frame): Warp {
   const C = CANON;
-  const ty = [0, C.ankle, C.knee, 0.66, C.hip, 1.04, 1.12, C.shoulderY, C.neck, C.headY];
-  const ny = [0, f.ankleY, f.kneeY, lerp(f.kneeY, f.hipY, 0.45), f.hipY, f.waistY, f.chestY, f.shY, f.neckBaseY + 0.02, f.headY];
+  const ty = [0, C.ankle, C.knee, 0.66, C.hip, 1.04, 1.12, C.shoulderY, 1.3, C.neck, C.headY];
+  const ny = [0, f.ankleY, f.kneeY, lerp(f.kneeY, f.hipY, 0.45), f.hipY, f.waistY, f.chestY, f.shY, f.shTopY, f.neckBaseY + 0.045 * (f.H / 1.75), f.headY];
   const Y = (y: number) => pw(ty, ny, y);
-  const newW = (y: number) => pw([f.crotchY, f.hipY, f.waistY, f.chestY, f.shY, f.shTopY, f.neckBaseY + 0.03], [f.hipW, f.hipW * 0.98, f.waistW, f.chestW, f.chestW * 0.98, f.shX * 0.72, f.neckR], y);
-  const newD = (y: number) => pw([f.crotchY, f.hipY, f.waistY, f.chestY, f.shY, f.shTopY], [f.hipD, f.hipD, f.waistD + f.belly * 0.03, f.chestD + f.bust * 0.025, f.chestD * 0.85, f.neckR * 1.4], y);
-  const oldD = (y: number) => pw(OLD_T_Y, OLD_T_W, y) * 0.78;
+  const newW = (y: number) => pwc([f.crotchY, f.hipY, f.waistY, f.chestY, f.shY, f.shTopY, f.neckBaseY + 0.03], [f.hipW, f.hipW * 0.98, f.waistW, f.chestW, f.chestW * 0.98, f.shX * 0.72, f.neckR], y);
+  const newD = (y: number) => pwc([f.crotchY, f.hipY, f.waistY, f.chestY, f.shY, f.shTopY], [f.hipD, f.hipD, f.waistD + f.belly * 0.03, f.chestD + f.bust * 0.025, f.chestD * 0.85, f.neckR * 1.4], y);
+  const oldD = (y: number) => pwc(OLD_T_Y, OLD_T_W, y) * 0.78;
   const hr = C.headR;
   const hx = f.headW / hr[0], hy = (f.headH * 0.5) / hr[1], hz = f.headD / hr[2];
   const armY = (y: number) => pw([C.wrist - 0.12, C.wrist, C.elbow, C.shoulderY, C.shoulderY + 0.1], [f.wristY - 0.12 * (f.handL / 0.1), f.wristY, f.elbowY, f.shY, f.shY + 0.1 * (f.uArmR / C.armR)], y);
@@ -261,7 +263,7 @@ export function makeAttachWarp(f: Frame): Warp {
         }
         case 'torso': case 'shoulder': {
           const yy = Math.min(p.y, C.neck + 0.03);
-          const wx = region === 'shoulder' ? (f.shX + f.uArmR * 0.6) / (C.shoulderX + 0.02) : newW(Y(yy)) / pw(OLD_T_Y, OLD_T_W, yy);
+          const wx = region === 'shoulder' ? (f.shX + f.uArmR * 0.6) / (C.shoulderX + 0.02) : newW(Y(yy)) / pwc(OLD_T_Y, OLD_T_W, yy);
           const wz = region === 'shoulder' ? Math.max(f.chestD, f.uArmR * 2.2) / 0.15 : newD(Y(yy)) / oldD(yy);
           p.x *= wx; p.z *= wz; p.y = Y(p.y);
           return;

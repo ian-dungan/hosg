@@ -137,6 +137,9 @@ class Geo {
   /** While set, vertices added are tagged, except those painted exactly `tagSkip` (the cape's trim). */
   tagNow = 0;
   tagSkip: Color3 | null = null;
+  /** Per vertex: 1 when added while `aoOffNow` (small face details: lids, lips, brows, marks), which keep their colour. */
+  aoOff: number[] = [];
+  aoOffNow = false;
   occ: Occ[] = [];
   primCount = 0;
   heightScale = 1;
@@ -168,6 +171,7 @@ class Geo {
     }
     const pushV = (p: Vector3, n: Vector3, c: Color3, src?: Color3) => {
       this.tag.push(this.tagNow && src !== this.tagSkip ? this.tagNow : 0);
+      this.aoOff.push(this.aoOffNow ? 1 : 0);
       const [b0, b1, w0] = this.resolve(group, p);
       this.pos.push(p.x, p.y, p.z); this.nrm.push(n.x, n.y, n.z); this.col.push(c.r, c.g, c.b, 1);
       this.mi.push(b0, b1, 0, 0); this.mw.push(w0, 1 - w0, 0, 0); this.prim.push(prim);
@@ -203,7 +207,7 @@ class Geo {
       p.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
       nm.set(this.nrm[i * 3], this.nrm[i * 3 + 1], this.nrm[i * 3 + 2]);
       let occ = 0;
-      for (const o of this.occ) {
+      if (!this.aoOff[i]) for (const o of this.occ) {
         if (o.prim === this.prim[i]) continue;
         o.c.subtractToRef(p, d);
         const dist = d.length();
@@ -1279,6 +1283,7 @@ function adventurerSpec(l: AdventurerLook, ov: GearBodyOverride | null = null, t
     sleeves: 'short', legs, boots: C.leather, belt: C.leather, buckle: P.gold, pouch: true,
     cape: { color: P.skyDeep, trim: P.gold, len: 0.66 }, scarf: P.roof, hat: 'none', v2: l,
   };
+  if (characterDev.plain) Object.assign(spec, { cape: undefined, scarf: undefined, pouch: false, belt: undefined, buckle: undefined, hem: 0.95, flare: 0, sleeves: 'short', top: hex('#7a8a9a'), topTrim: undefined, legs: hex('#5a5048') });
   if (!ov) return spec;
   // worn gear (Task 9): its cut and colours over the default clothes
   for (const key of ['top', 'topTrim', 'hem', 'flare', 'girth', 'sleeves', 'sleeveColor', 'legs', 'boots', 'bootTop'] as const) {
@@ -1292,6 +1297,9 @@ function adventurerSpec(l: AdventurerLook, ov: GearBodyOverride | null = null, t
   spec.noCape = ov.noCape; spec.noTabard = ov.noTabard; spec.tabard = ov.tabard;
   return spec;
 }
+
+/** Dev pages only: `plain` draws adventurers in a plain fitted shirt and trousers (no cape, scarf or belt), to judge body shapes. */
+export const characterDev = { plain: false };
 
 /** The look the offline demo's hero (an adventurer with no look) is drawn with: a young man of the lanes, his hair tousled. */
 export const HERO_LOOK: AdventurerLook = (() => {

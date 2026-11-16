@@ -153,7 +153,7 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
     const amp = texAmp(t);
     const top = hs.cy + 0.15 * hs.Hh, chin = hs.cy - 0.85 * hs.Hh;
     const rows = R(9, 5), cols = R(13, 7);
-    const ringX = Math.min(frame.chestW + 0.022, frame.shX - frame.uArmR * 1.25), ringZ = frame.chestD + 0.03 + frame.bust * 0.02;
+    const ringX = Math.min(frame.chestW + 0.022, frame.shX - frame.uArmR * 1.25), ringZ = frame.chestD + 0.075 * (frame.H / 1.75) + frame.bust * 0.02;
     const outer: V3[][] = [], inner: V3[][] = [];
     for (let i = 0; i <= rows; i++) {
       const tt = i / rows;
@@ -202,10 +202,11 @@ export function buildHair(k: ShapeKit, o: HairOpts): void {
     if (opts.front && !lo) {
       // locks over the shoulders, in front
       for (const sx of [-1, 1]) {
-        const a = at([sx * 0.8, -0.2, 0.2], 0.008 * kh);
-        const b: V3 = [sx * (frame.headW * 0.95), hs.cy - 0.95 * hs.Hh, hs.cz + 0.02];
-        const c: V3 = [sx * Math.min(frame.chestW * 0.75, frame.shX * 0.7), Math.max(endY, frame.chestY - 0.05), frame.chestD + 0.03 + frame.bust * 0.03];
-        k.tube('hairB', [a, b, c], [0.018 * kh, 0.02 * kh, 0.006 * kh], hc, { seg: 5, noOcc: true, paint: h2 ? (_w, uv) => (uv[1] > 0.6 ? h2 : undefined) : undefined });
+        const a = at([sx * 0.85, 0.05, 0.15], 0.012 * kh);
+        const b: V3 = [sx * (frame.headW * 1.02 + 0.01), hs.cy - 0.9 * hs.Hh, hs.cz - 0.01];
+        const c: V3 = [sx * frame.shX * 0.62, frame.shTopY + 0.03, frame.chestD * 0.35];
+        const d: V3 = [sx * Math.min(frame.chestW * 0.72, frame.shX * 0.6), Math.max(endY, frame.chestY - 0.06), frame.chestD + 0.025 + frame.bust * 0.035];
+        k.tube('hairB', [a, b, c, d], [0.022 * kh, 0.026 * kh, 0.028 * kh, 0.014 * kh], hc, { seg: 6, flatten: 0.5, noOcc: true, paint: h2 ? (_w, uv) => (uv[1] > 0.6 ? h2 : undefined) : undefined });
       }
     }
   };
@@ -336,7 +337,8 @@ export function buildFacialHair(k: ShapeKit, o: HairOpts): void {
   const kh = hs.Hh / 0.12, fc = col.facial, lo = detail < 0.5;
   const at = (d: V3, out: number): V3 => { const dd = norm(d), p = hs.local(...dd), n = hs.normal(...dd); return [p[0] + n[0] * out, hs.cy + p[1] + n[1] * out, hs.cz + p[2] + n[2] * out]; };
   const lips = (d: V3) => Math.abs(d[0]) < 0.3 && d[1] > -0.68 && d[1] < -0.47 && d[2] > 0.5;
-  const jawBand = (d: V3) => d[1] < -0.12 && d[2] > -0.3;
+  /** Under the beard line: from the sideburn (y −0.1 by the ear) down the cheek to the mouth's corners. */
+  const jawBand = (d: V3) => d[2] > -0.3 && d[1] < -0.1 - 0.36 * Math.max(0, 1 - Math.abs(d[0]) / 0.85);
   type Mask = (d: V3) => number;
   const masks: Record<number, Mask> = {
     2: (d) => (jawBand(d) && !lips(d) ? 1 : 0),                                                     // short beard
@@ -361,9 +363,11 @@ export function buildFacialHair(k: ShapeKit, o: HairOpts): void {
       for (let j = 0; j <= seg; j++) {
         const ph = -1.95 + (3.9 * j) / seg;
         const d = dirOf(th, ph);
-        const c = m(d);
-        const v = (vol[f] ?? 0.01) * kh;
-        let p = at(d, c > 0 ? v * (0.55 + 0.45 * Math.min(1, (-d[1] - 0.12) / 0.3)) : -0.004 * kh);
+        // the mask blurred over its neighbours: the beard's edge thins out instead of stepping
+        let c = 0;
+        for (const [ex, ey] of [[0, 0], [0.06, 0], [-0.06, 0], [0, 0.05], [0, -0.05]] as const) c += m([d[0] + ex, d[1] + ey, d[2]]) / 5;
+        const v = (vol[f] ?? 0.01) * kh * Math.min(1, c * 1.4);
+        let p = at(d, c > 0.15 ? Math.max(0.0025 * kh, v * (0.55 + 0.45 * Math.min(1, (-d[1] - 0.12) / 0.3))) : -0.004 * kh);
         // long beards fall from the chin
         const dr = (drop[f] ?? 0) * kh;
         if (c > 0 && dr > 0 && d[1] < -0.55) {

@@ -11,6 +11,28 @@ import { Color3 } from '@babylonjs/core';
 import type { Look } from '@sg2/shared';
 import type { Paint, ShapeKit, V3 } from './character';
 import { faceParams, lookColours, type Frame, type LookColours, type Warp } from './look';
+
+/** Rows (by height) with two rows added close either side of each cut, so painted edges (cuffs, boot tops, hems) are crisp. */
+function withCuts<T extends { y: number; r: number; z?: number }>(rows: T[], cuts: number[]): T[] {
+  let out = rows.slice();
+  for (const c of cuts) {
+    const next: T[] = [];
+    for (let i = 0; i < out.length; i++) {
+      const a = out[i]!, b = out[i + 1];
+      next.push(a);
+      if (!b) continue;
+      const hi = Math.max(a.y, b.y), lo = Math.min(a.y, b.y);
+      if (c - 0.004 > lo && c + 0.004 < hi) {
+        for (const yy of a.y > b.y ? [c + 0.003, c - 0.003] : [c - 0.003, c + 0.003]) {
+          const t = (yy - a.y) / (b.y - a.y);
+          next.push({ ...a, y: yy, r: a.r + (b.r - a.r) * t, z: (a.z ?? 0) + ((b.z ?? 0) - (a.z ?? 0)) * t });
+        }
+      }
+    }
+    out = next;
+  }
+  return out;
+}
 import { buildFace, headShape, type HeadShape } from './face2';
 import { buildFacialHair, buildHair, scalpPaint, stubblePaint } from './hair';
 import { furPaint, pawPaint } from './faces';
@@ -70,9 +92,17 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   add(ribsY, lerp(f.waistW, f.chestW, 0.62), lerp(f.waistD, f.chestD, 0.6), { belly: 0.45, bust: 0.45 });
   add(f.chestY, f.chestW, f.chestD, { bust: 1, pec: 1 });
   add(upY, f.chestW * 1.02, f.chestD * 0.94, { bust: 0.35, pec: 0.7 });
-  add(f.shY, f.shX * 0.88, f.chestD * 0.82);
+  add(f.shY, f.shX * 0.92, f.chestD * 0.84);
   add(f.shTopY, f.shX * 0.55, f.chestD * 0.6);
   add(f.neckBaseY + 0.012 * kk, f.neckR * 1.3, f.neckR * 1.2);
+  // a short top's hem: two rows either side, so the shirt meets the trousers in a clean line
+  if (hemY > f.crotchY + 0.01 && hemY < f.waistY) {
+    for (const yy of [hemY + 0.003, hemY - 0.003]) {
+      const i = rows.findIndex((r) => r.y > yy), a = rows[i - 1]!, b = rows[i]!, t = (yy - a.y) / (b.y - a.y);
+      const mixRow: Row = { y: yy, w: lerp(a.w, b.w, t), d: lerp(a.d, b.d, t), zc: 0, bust: lerp(a.bust, b.bust, t), belly: lerp(a.belly, b.belly, t), glute: lerp(a.glute, b.glute, t), pec: lerp(a.pec, b.pec, t) };
+      rows.splice(i, 0, mixRow);
+    }
+  }
   const seg = R.torso;
   const P: V3[][] = [];
   for (const r of rows) {
@@ -107,8 +137,11 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
     const sRows: V3[][] = [];
     const n = Math.max(3, Math.round((f.hipY - hemY) / (0.12 * kk)) + 2);
     const clear = f.legX + f.thighR + 0.012 * kk;
-    for (let i = 0; i <= n; i++) {
-      const t = i / n, y = lerp(f.hipY + 0.02 * kk, hemY, t);
+    // rows to just over the hem, then the trim band (two rows): its edge stays crisp
+    const band = trim ? 0.024 * kk : 0;
+    const ts = [...Array.from({ length: n }, (_, i) => i / (n - 1)), 1, 1];
+    for (let i = 0; i < ts.length; i++) {
+      const t = ts[i]!, y = i === ts.length - 1 ? hemY : i === ts.length - 2 ? hemY + band : lerp(f.hipY + 0.02 * kk, hemY + band + 0.004 * kk, t);
       const w = Math.max(lerp(f.hipW * 1.04, f.hipW * 1.04 + cl.flare * 1.7 * kk + 0.02 * kk, t), i > 0 ? clear : 0);
       const d = Math.max(lerp(f.hipD * 1.06 + f.glute * 0.02 * kk, f.hipD + cl.flare * 1.4 * kk + 0.03 * kk, t), i > 0 ? f.thighR * 1.25 : 0);
       const row: V3[] = [];
@@ -119,7 +152,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       }
       sRows.push(row);
     }
-    k.grid('body', sRows, (i, j) => (i === n && trim ? trim : shade(top, 0.93 + 0.07 * Math.cos(((j / seg) * Math.PI * 2) * 6))), { wrap: true });
+    k.grid('body', sRows, (i, j) => (i >= sRows.length - 2 && trim ? trim : shade(top, 0.93 + 0.07 * Math.cos(((j / seg) * Math.PI * 2) * 6))), { wrap: true });
   }
 
   // ── the neck ──
@@ -143,8 +176,9 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   const ls = R.limb;
   for (const [g, sx] of [['armL', -1], ['armR', 1]] as const) {
     const axX = (y: number) => sx * (f.shX + (f.shY - y) * 0.04);
-    const aRows: { y: number; r: number; z?: number }[] = [
-      { y: f.shY + f.uArmR * 0.8, r: f.uArmR * 0.85 },
+    const aRows0: { y: number; r: number; z?: number }[] = [
+      { y: f.shY + f.uArmR * 0.62, r: f.uArmR * 0.25 },
+      { y: f.shY + f.uArmR * 0.35, r: f.uArmR * 0.85 },
       { y: f.shY - f.uArmR * 0.35, r: f.uArmR * (1.22 + 0.15 * f.muscle) },
       { y: lerp(f.shY, f.elbowY, 0.5), r: f.uArmR * (1.02 + 0.12 * f.muscle), z: 0.003 * kk },
       { y: f.elbowY + 0.035 * kk, r: f.fArmR * 1.02 },
@@ -153,6 +187,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       { y: f.wristY + 0.012 * kk, r: f.wristR },
       { y: f.wristY - 0.012 * kk, r: f.wristR * 0.92 },
     ];
+    const aRows = withCuts(aRows0, [cuffY, ...(cl.sleeves === 'rolled' ? [cuffY - 0.03 * kk] : cl.sleeves === 'long' && trim ? [cuffY + 0.02 * kk] : [])]);
     const AP: V3[][] = aRows.map((r) => {
       const row: V3[] = [];
       for (let j = 0; j < ls; j++) {
@@ -180,7 +215,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
   // ── legs and feet ──
   for (const [g, sx] of [['legL', -1], ['legR', 1]] as const) {
     const axX = (y: number) => sx * (y > f.kneeY ? lerp(f.legX * 0.84, f.legX, (y - f.kneeY) / (f.hipY - f.kneeY)) : lerp(f.legX * 0.8, f.legX * 0.84, (y - f.ankleY) / (f.kneeY - f.ankleY)));
-    const lRows: { y: number; r: number; z?: number }[] = [
+    const lRows0: { y: number; r: number; z?: number }[] = [
       { y: f.hipY + 0.03 * kk, r: f.thighR * 0.92 },
       { y: f.crotchY, r: f.thighR },
       { y: lerp(f.kneeY, f.crotchY, 0.55), r: f.thighR * 0.86, z: 0.004 * kk },
@@ -191,6 +226,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
       { y: lerp(f.ankleY, f.kneeY, 0.25), r: f.ankleR * 1.35 },
       { y: f.ankleY + 0.02 * kk, r: f.ankleR * 1.08 },
     ];
+    const lRows = withCuts(lRows0, [bootTop]);
     const bootR = (y: number) => (y < bootTop ? 0.006 * kk : 0);
     const LP: V3[][] = lRows.map((r) => {
       const row: V3[] = [];
@@ -217,6 +253,7 @@ export function buildBody2(k: ShapeKit, o: Body2Opts): HeadShape {
     const info = look.hair.style;
     void info;
     buildFace(k, { look, frame: f, fp, col, hs, detail, scalp: scalpPaint(look), stubble: stubblePaint(look) });
+    k.g.aoOffNow = false;
     buildHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
     buildFacialHair(k, { look, frame: f, col, hs, detail, tie: o.tie });
   }

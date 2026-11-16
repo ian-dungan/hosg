@@ -37,7 +37,7 @@ export function headShape(f: Frame, fp: FaceParams): HeadShape {
   const W = f.headW, Hh = f.headH * 0.5, D = f.headD, cy = f.headY, cz = f.headZ;
   const kh = f.headH / 0.24;
   const eyeX = 0.4 * fp.eyeGap, eyeY = 0.02 + 0.06 * fp.eyeY;
-  const ew = 0.0155 * kh * fp.eyeW, eh = 0.0155 * kh * fp.eyeH;
+  const ew = 0.0172 * kh * fp.eyeW, eh = 0.0172 * kh * fp.eyeH;
   const furred = fp.muzzle >= 0;
   const local = (dx: number, dy: number, dz: number): V3 => {
     const fr = sm((dz + 0.1) / 0.6);                  // 0 at the sides and back, 1 on the face
@@ -298,17 +298,17 @@ export function buildNose(k: ShapeKit, o: FaceOpts): void {
   const { hs, fp, col, detail } = o;
   if (o.look.fur) return buildMuzzle(k, o);
   const kh = hs.Hh / 0.12;
-  const len = 1 + 0.18 * fp.noseLen, wid = 1 + 0.32 * fp.noseW, br = 1 + 0.6 * fp.bridge, tip = fp.tip;
+  const len = 1 + 0.24 * fp.noseLen, wid = 1 + 0.42 * fp.noseW, br = 1 + 0.6 * fp.bridge, tip = fp.tip;
   const knoll = o.look.people === 'knollfolk' ? 1.25 : 1;
   const skin = shade(col.skin, 0.99);
   // stations: [y (head units), projection (m), half width (m)] from the root between the eyes to the base over the lip
   const st: [number, number, number][] = [
-    [hs.eyeY + 0.06, 0.003 * br, 0.008],
-    [hs.eyeY - 0.12 * len, 0.0075 * br, 0.0072],
-    [hs.eyeY - 0.26 * len, (0.012 + 0.003 * fp.bridge) * len, 0.0085 * wid],
-    [hs.eyeY - (0.36 - 0.025 * tip) * len, (0.019 + 0.002 * fp.noseLen) * knoll, 0.0105 * wid * knoll],
-    [hs.eyeY - (0.405 - 0.01 * tip) * len, (0.013 - 0.004 * tip) * knoll, 0.0115 * wid * knoll],
-    [hs.eyeY - 0.43 * len, 0.002, 0.008 * wid],
+    [hs.eyeY + 0.01, 0.0004, 0.012],
+    [hs.eyeY - 0.1 * len, 0.0055 * br, 0.0085],
+    [hs.eyeY - 0.24 * len, (0.0105 + 0.003 * fp.bridge) * len, 0.0095 * wid],
+    [hs.eyeY - (0.35 - 0.025 * tip) * len, (0.0175 + 0.002 * fp.noseLen) * knoll, 0.0125 * wid * knoll],
+    [hs.eyeY - (0.4 - 0.01 * tip) * len, (0.012 - 0.004 * tip) * knoll, 0.0135 * wid * knoll],
+    [hs.eyeY - 0.43 * len, 0.0015, 0.0095 * wid],
   ];
   const nA = detail >= 0.9 ? 8 : detail >= 0.5 ? 6 : 4;
   const P: V3[][] = [];
@@ -364,7 +364,7 @@ export function buildMouth(k: ShapeKit, o: FaceOpts): void {
   if (o.look.fur) return;
   const kh = hs.Hh / 0.12;
   const my = -0.565 + 0.05 * fp.mouthY;
-  const hw = (0.022 + 0.0055 * fp.mouthW) * kh;             // half width (m)
+  const hw = (0.022 + 0.0075 * fp.mouthW) * kh;             // half width (m)
   const natural = mix(shade(col.skin, 0.84), ROSE, 0.32);
   const lip = col.lips ?? natural;
   const upperH = (0.0046 + 0.0018 * fp.upper) * kh, lowerH = (0.0058 + 0.0024 * fp.lower2) * kh;
@@ -515,6 +515,8 @@ export function buildMarks(k: ShapeKit, o: FaceOpts): void {
 
 /** The whole face: skull, eyes, brows, nose or muzzle, mouth, ears and marks. */
 export function buildFace(k: ShapeKit, o: FaceOpts): void {
+  // the head keeps its own colours (no baked occlusion: the shoulders and the skull would darken the face's parts unevenly)
+  k.g.aoOffNow = true;
   buildSkull(k, o);
   buildEyes(k, o);
   buildBrows(k, o);

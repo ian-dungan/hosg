@@ -22,7 +22,7 @@ import {
 import type { CharacterView, Pose, Quality } from '../core/contracts';
 import { buildGreenway } from '../world/greenway';
 import { staffTint } from '../combat/spells';
-import { makeCharacter, characterStats, capeFor, setCharacterDetail, setGearBuilder } from './character';
+import { makeCharacter, characterStats, capeFor, characterDev, setCharacterDetail, setGearBuilder } from './character';
 import { gearHooks, kitGear } from './gearModels';
 
 const qs = new URLSearchParams(location.search);
@@ -44,6 +44,7 @@ if (!world) {
 }
 const instr = new SceneInstrumentation(scene);
 const quality = ((qs.get('q') as Quality) || 'high');
+characterDev.plain = qs.get('plain') === '1';
 setCharacterDetail(quality);
 if (qs.get('gear') === '1') setGearBuilder(gearHooks);
 const view = qs.get('view') ?? 'bodies';
@@ -98,6 +99,8 @@ const tweak = (l: Look, o: Record<string, Record<string, unknown> | string>): Lo
 const preset = (id: string) => LOOK_PRESETS.find((p) => p.id === id)!.look;
 const front = qs.has('back') ? 0 : qs.has('side') ? Math.PI / 2 : Math.PI;   // the camera looks from −z: Math.PI faces it
 let target = new Vector3(x0, 1, zc), alpha = -Math.PI / 2, beta = 1.45, radius = 9;
+/** When set, the camera's distance frames this width and height (m) round the target. */
+let fitW = 0, fitH = 0;
 const close = qs.get('close') === '1';
 
 /** The five likeness test people (the brief's: built only from presets and sliders). */
@@ -162,24 +165,22 @@ if (view === 'bodies') {
   const presetBase = pinBody === 'female' ? preset('reading_room') : preset('harbour_pilot');
   let base = ofPeople(mid(field.startsWith('hair.style') || field.startsWith('hair.hairline') ? tweak(presetBase, { hair: { facial: 0 } }) : presetBase), p, pinBody ?? undefined);
   if (field === 'hair.facial') base = tweak(base, { hair: { style: 1 } });
+  if (close && !field.startsWith('hair')) base = tweak(base, { hair: { facial: 0, style: 1 }, skin: { colour: 0xd9ab87 } });
   if (field.startsWith('makeup') || field.startsWith('skin.')) base = tweak(base, { skin: { freckles: 0, moles: 0, scar: 0 }, makeup: { lips: 0, shadow: 0, liner: 0 } });
-  const gap = close ? 0.5 : 0.95;
+  const gap = close ? 0.34 : 0.95;
   shown.forEach((v, i) => {
     const l = set(base, field, v) ?? base;
     put(l, x0 + (i - (shown.length - 1) / 2) * gap, zc, front, null, close ? '' : String(v));
   });
-  if (close) { target = new Vector3(x0, base ? 1.6 : 1.6, zc); radius = 0.9 + shown.length * 0.32; beta = 1.52; }
-  else { target = new Vector3(x0, 0.95, zc); radius = 3 + shown.length * 0.62; beta = 1.48; }
-  if (close) {
-    // aim at the faces' height
-    const h = views[0]!.height;
-    target.y = h * 0.9;
-  }
+  beta = 1.5;
+  if (close) { const h = views[0]!.height; target = new Vector3(x0, h * 0.9, zc); fitW = shown.length * gap; fitH = 0.36; }
+  else { target = new Vector3(x0, 0.95, zc); fitW = shown.length * gap + 0.3; fitH = 2.1; }
   label(field + (view === 'slider' ? `: ${shown.join(' · ')}` : ''), new Vector3(x0, close ? target.y - 0.32 : -0.25, zc));
 } else if (view === 'lineup') {
   LINEUP.forEach((p, i) => put(p.look, x0 + (i - 2) * (close ? 0.5 : 1.05), zc, front, null, close ? '' : p.name));
-  if (close) { target = new Vector3(x0, 1.6, zc); radius = 2.6; beta = 1.53; }
-  else { target = new Vector3(x0, 0.95, zc); radius = 6.4; beta = 1.5; }
+  beta = 1.52;
+  if (close) { target = new Vector3(x0, views[2]!.height * 0.88, zc); fitW = 2.5; fitH = 0.75; }
+  else { target = new Vector3(x0, 1.0, zc); fitW = 5.4; fitH = 2.3; }
 } else if (view === 'presets') {
   const from = Number(qs.get('from') ?? 0), to = Number(qs.get('to') ?? 12);
   const ps = LOOK_PRESETS.slice(from, to + 1);
@@ -213,6 +214,10 @@ if (view === 'bodies') {
 const cam = new ArcRotateCamera('lookscam', alpha, beta, radius, target, scene);
 cam.minZ = 0.05; cam.maxZ = 8000; cam.fov = close ? 0.5 : 0.7; cam.wheelPrecision = 20;
 cam.attachControl(canvas, true);
+if (fitW > 0) {
+  const asp = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight()), t = Math.tan(cam.fov / 2);
+  cam.radius = 1.08 * Math.max(fitW / 2 / (t * asp), fitH / 2 / t);
+}
 const camQ = qs.get('cam');
 if (camQ) { const [a, b, r] = camQ.split(',').map(Number); cam.alpha = a!; cam.beta = b!; cam.radius = r!; }
 world?.attachCamera(cam);
