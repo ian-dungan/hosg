@@ -85,7 +85,7 @@ export function ctxFor(jobs: JobsView | null, w: { zone: ZoneId; x: number; z: n
   };
 }
 /** Why nothing can change now (in the order the server checks), or null. */
-function stateBlock(c: GearCtx): string | null {
+export function stateBlock(c: GearCtx): string | null {
   if (c.dead) return 'Not while knocked out';
   if (c.sealed) return 'Not inside a sealed boss arena';
   if (c.inCombat) return 'Not while fighting';
@@ -455,7 +455,9 @@ export function opKey(op: InvOp): string {
   return `${op.op}:${Object.keys(o).filter((k) => k !== 'op' && k !== 'id').sort().map((k) => String(o[k])).join(':')}`;
 }
 
-const STALL_OPS = new Set(['buy', 'sell', 'bank', 'unbank', 'buyCostume', 'dye', 'dyeCostume']);
+const STALL_OPS = new Set(['buy', 'sell', 'bank', 'unbank', 'buyCostume', 'dye', 'dyeCostume', 'dyeSlot']);
+/** Ops refused in a sealed boss arena with the reason `combat` (the server's SEALED_REFUSED). */
+const SEALED_OPS = new Set(['equip', 'unequip', 'talent', 'respec', 'look', 'hide', 'wearOutfit']);
 /** A refusal as the player should read it: where to go or what to do, else the server's own line. */
 export function refusalLine(op: unknown, reason: unknown, text: unknown): string {
   const t = typeof text === 'string' && text ? text : typeof reason === 'string' && reason in INV_TEXT ? INV_TEXT[reason as keyof typeof INV_TEXT] : 'That did not work';
@@ -465,8 +467,9 @@ export function refusalLine(op: unknown, reason: unknown, text: unknown): string
     if (op === 'talent') return 'Choose talents in a town or sanctuary';
     if (op === 'respec') return 'Retrain at the Guild Board in Shady Grove';
   }
-  if (reason === 'combat' && (op === 'equip' || op === 'unequip' || op === 'talent' || op === 'respec')) return 'Not while fighting, or inside a sealed boss arena';
+  if (reason === 'combat' && typeof op === 'string' && SEALED_OPS.has(op)) return 'Not while fighting, or inside a sealed boss arena';
   if (reason === 'fit' && op === 'equip') return "That doesn't fit your current job";
+  if (reason === 'fit' && op === 'look') return "That look doesn't fit what you wear in that slot";
   if (reason === 'bag-full') return 'Your bag is full: sell or bank something first';
   if (reason === 'level') return 'Your job level is too low for that talent row';
   return t;

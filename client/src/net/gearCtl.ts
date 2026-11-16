@@ -17,7 +17,8 @@ import type { Stalls } from '../world/stalls';
 import { stallOfEid } from '../world/stallIds';
 import { equipHook } from './equipHook';
 import { firstOf } from './tapOrder';
-import { InvClient, charSheetView, ctxFor, itemColour, levelShow, vendorView, type GearCtx } from './inventory';
+import { InvClient, ctxFor, itemColour, levelShow, type GearCtx } from './inventory';
+import { OpQueue, lookSheetView as charSheetView, lookVendorView as vendorView, markNewLooks } from './showAs';
 import { barberHook } from './looks';
 import type { Remotes } from './remotes';
 import type { ZoneRoom } from './session';
@@ -92,11 +93,14 @@ export function createGearCtl(o: GearCtlOpts): GearCtl {
   };
   const keyOf = (c: GearCtx) => `${c.job}|${c.level}|${c.stall}|${c.jobSwitch}|${c.townBoard}|${c.inCombat}|${c.dead}|${c.busy}|${c.sealed}|${c.talents.join()}|${c.picks.join()}|${c.outfit ? JSON.stringify(c.outfit) : ''}`;
 
+  // several ops (show a whole set, show my equipped gear) go one at a time, each through the gate
+  const queue = new OpQueue(inv, (op) => { if (disposed) return false; o.send(op); return true; });
   const pending = () => { const k = inv.pendingKeys(); sheet?.setPending(k); vendor?.h.setPending(k); };
   const onAct = (a: SheetAct) => {
     if (disposed) return;
     if (a.kind === 'tab') { lastTab = a.tab; return; }
     if (a.kind === 'barber') { void barberHook.open?.(); return; }
+    if (a.kind === 'ops') { queue.push(a.ops, performance.now()); pending(); return; }
     const op = inv.begin(a.op, performance.now());
     if (!op) return; // the same op is already with the server (a double tap)
     o.send(op);
@@ -221,15 +225,17 @@ export function createGearCtl(o: GearCtlOpts): GearCtl {
     },
     inventory() {
       if (disposed) return;
+      queue.answered(performance.now());
       refresh();
     },
     refused(m) {
       const line = inv.onRefused(m);
+      queue.refused();
       if (line) hud.toast(line);
       pending();
     },
     loot(m) {
-      const l = inv.onLoot(m);
+      const l = markNewLooks(inv.onLoot(m), m, inv.view);
       if (!l || disposed) return;
       hud.loot(l);
       const mm = m as { x?: unknown; z?: unknown; items?: { item?: unknown }[] };
@@ -263,6 +269,7 @@ export function createGearCtl(o: GearCtlOpts): GearCtl {
       const now = performance.now();
       if (now - ctxAt > CTX_EVERY_MS) {
         ctxAt = now;
+        queue.tick(now);
         if (inv.expire(now)) pending();
         const jobs = o.combat.debug.jobs;
         if (inv.view && (jobs !== lastJobs || ((sheet?.open || vendor?.h.open) && keyOf(ctx()) !== ctxKey))) { lastJobs = jobs; refresh(); }
@@ -272,6 +279,7 @@ export function createGearCtl(o: GearCtlOpts): GearCtl {
     dispose() {
       if (disposed) return;
       disposed = true;
+      queue.clear();
       if (equipHook.open === openGear) equipHook.open = null;
       sheet?.close(); vendor?.h.close();
       sheet = null; vendor = null;

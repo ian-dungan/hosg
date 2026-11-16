@@ -3,6 +3,7 @@
 // dye and talent data; the HUD (hud/bag.ts, vendor.ts, talents.ts, wardrobe.ts, loot.ts) only draws them and answers
 // with what the player asked for. Nothing here is a price or a number of its own: all of it comes from shared data.
 import type { CostumeSlot, GearSlot, InvOp, JobId } from '@sg2/shared';
+import type { AppearanceView, TailorCostume } from './lookViews';
 
 /** How an item's icon is drawn (hud/itemIcon.ts): its slot's silhouette, its armour type's shape and its tier colour. */
 export interface IconSpec {
@@ -136,6 +137,8 @@ export interface CharSheetView {
   openRows: number;
   /** Where the adventurer stands, for the sheet's notes ("At the Grove Vault"). */
   at: string | null;
+  /** Show-as: the looks per slot, show a set, dyes and outfits (net/showAs.ts lookSheetView); absent: the old sheet. */
+  look?: AppearanceView;
 }
 
 /** A stall's list row (the Smithy, the Lampwright). */
@@ -170,11 +173,16 @@ export interface VendorView {
   dyeTargets: { key: string; label: string; short: string; colour: string; kind: 'item' | 'costume'; uid: number | null; costume: string | null; dye: [number, number] }[];
   dyes: { id: number; name: string; hex: string | null }[];
   dyePrice: number;
+  /** Show-as, the Tailor only: costume pieces per slot and the slot dyes (net/showAs.ts lookVendorView). */
+  pieces?: TailorCostume[];
+  look?: AppearanceView;
 }
 
 /** What a sheet answers with. */
 export type SheetAct =
   | { kind: 'op'; op: InvOp }
+  /** Several ops, sent one at a time through the gate (show a whole set, show my equipped gear). */
+  | { kind: 'ops'; ops: InvOp[] }
   | { kind: 'barber' }
   | { kind: 'tab'; tab: CharTab };
 
@@ -191,7 +199,7 @@ export interface CharSheetHandle extends SheetHandle { setTab(t: CharTab): void;
 
 /** One loot toast. */
 export interface LootShow {
-  items: { name: string; colour: string; named: boolean }[];
+  items: { name: string; colour: string; named: boolean; newLook?: boolean }[];
   gold: number;
   soldFor: number;
 }
